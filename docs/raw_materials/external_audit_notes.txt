@@ -1,0 +1,626 @@
+下面这版是我重新综合后的最终版分析。我把你这次给的所有资料都核了一遍：会议记录、Google Drive 截图、class_checkpoint_map.xlsx、Another version of ShapeKit.docx、ShapeKit-main.zip、TotalSegmentator.zip、VISTA3D-Inference-Pipeline.zip、LabelCritic.zip、ePAI.zip、RadThinking.pdf、r_super_pseudo_masks.py。需要先说明一点：截图里的 CADS_series / MOOSE_series / nnUNet_private / UNEST / VSmTrans 这些 Google Drive 文件夹我只能根据截图和 class_checkpoint_map.xlsx 判断用途；如果你还没把这些文件夹本体下载上传，我不能直接检查里面每个 checkpoint 的真实文件结构。
+________________________________________
+一、老师第二次任务的核心目标
+老师这次真正想要的不是“继续做一个 CLI demo”，而是让你把项目推进成一个可运行、可扩展、能真正改善医学 CT annotation 质量的 multi-model medical agent workflow。
+你现在项目的最终定位应该是：
+用统一 CLI 封装多个医学分割模型和医学工具，在 50 个有 tumor annotation 的 PanTS/PAINTS case 上，生成多个候选 organ/tumor masks；再用 ShapeKit 做 anatomy-aware post-processing，用 DICE 自动筛低质量结果，用 LabelCritic/VLM 比较候选 mask，用少量 ITK-SNAP 人工检查确认，最后更新 annotation，并生成 RadThinking-style reasoning traces，形成一个可以扩展到 500/5000/10000 case 的 EM-style medical annotation refinement pipeline。
+老师会议里明确认可你已经完成了 medical agent workflow 的基本工程框架，包括 CLI 入口、模型推理、post-processing、annotation verification、version management 和 reasoning trace generation，但他进一步要求你把模型工具、输入输出、日志、中间结果组织成可复现、可审计的 workflow，而不是单次模型调用。
+________________________________________
+二、老师明确提出的任务清单
+任务 1：批量封装多个模型，而不是只封装 TotalSegmentator
+老师问你“把模型变成 CLI 简单吗”，然后明确说如果这件事不难，他会给你内部模型，并且可能有几十个模型；仅 segmentation 就可能有十几个，其他还包括报告生成模型、分类模型、标注数据集模型和大语言模型。
+所以你不能只继续封装一个 TotalSegmentator。你现在要做的是：
+建立统一模型注册表 model_registry
+→ 每个模型都有统一 wrapper
+→ 所有模型都能通过同一套 CLI 调用
+→ 所有输出都标准化成相同格式
+最终应该支持类似：
+python medai_cli.py infer \
+  --model totalsegmentator \
+  --input data/case_001/ct.nii.gz \
+  --output outputs/case_001/totalseg \
+  --json
+python medai_cli.py infer \
+  --model epai_20250421 \
+  --input data/case_001/ct.nii.gz \
+  --output outputs/case_001/epai \
+  --json
+python medai_cli.py infer \
+  --model vista3d \
+  --input data/case_001/ct.nii.gz \
+  --output outputs/case_001/vista3d \
+  --json
+老师想要的是：不同模型原本各有不同 test script，但你要把它们统一封装起来，否则后面会很乱。
+________________________________________
+任务 2：使用 50 个有 tumor annotation 的 PanTS/PAINTS case 做 debug
+老师明确说：先用 50 个 case，因为 50 个方便 debug、结果快；不要一开始上 500、5000。等流程靠谱后，再扩展到更大规模。老师还强调，这 50 个 case 最好有肿瘤标注，因为如果都是健康人，reasoning trace 没有什么可写，只能说“没病”。
+这里要注意：老师不是让你重点修 tumor mask。老师说 tumor mask 是人工标的，真正需要提高质量的是 organ masks，因为这些器官 mask 很多是 AI 打出来的，需要提高质量。
+所以你这一步的目标是：
+从 PanTS/PAINTS 里选 50 个有 tumor annotation 的 case
+→ 保留 tumor mask 作为上下文
+→ 重点改善 pancreas、liver、spleen、kidney、colon、duodenum、stomach、aorta、postcava 等 organ masks
+________________________________________
+任务 3：用 DICE 作为第一层自动质量筛查
+老师明确说，如果数据集有 ground truth，就可以算 prediction 和 ground truth 的 DICE；如果 DICE 小于 50%，就挑出来放到 VLM 里比较哪个更好。
+所以你的 verifier 应该这样设计：
+DICE >= 0.80：直接接受
+0.50 <= DICE < 0.80：标记为 uncertain，可选送 VLM
+DICE < 0.50：必须进入 LabelCritic / VLM review
+DICE = 0：严重错误，必须进入 review/update
+你最终要展示的不是一个 case 的 DICE，而是 loop 后低质量 mask 数量是否减少。例如：
+Loop	Checked masks	DICE < 0.5	VLM reviewed	Updated masks	Remaining uncertain
+Loop 1	1000	180	120	95	60
+Loop 2	1000	75	50	32	20
+Loop 3	1000	25	15	8	5
+老师想看到的是：经过几轮 loop，mask 质量变好，需要人工介入的数量越来越少。
+________________________________________
+任务 4：LabelCritic 必须读，并且要替换你现在简单的 3D-to-2D projection
+老师明确指出你现在的 VLM label expert 只是把 3D CT/mask 简单压成 2D，这太粗糙。他让你去看 LabelCritic 的代码，因为里面已经写好了更合理的 projection，尤其是骨骼和软组织要分开处理，这样骨骼会更清楚。
+我检查了 LabelCritic-main.zip，它的核心文件是：
+CompareOrgan.py
+ProjectDatasetFlex.py
+ProjectDatasetFlex_single.py
+RunAPI.py
+RunAPI_single.py
+ErrorDetector.py
+projection.py
+CalculateDice.py
+它的 README 说明 LabelCritic 是一个用 LVLM 自动检查 AI-generated labels 的工具，可以在多个 annotation 候选之间选择更好的结果；医学 CT organ segmentation 场景中，它报告可以达到 96.5% 的 per-scan/per-class 高质量 annotation 选择准确率。
+它的实际运行逻辑是：
+CT + mask1 + mask2
+→ ProjectDatasetFlex_single.py 生成 2D projection / overlay
+→ RunAPI_single.py 调用 VLM
+→ VLM 输出 mask1 / mask2 / uncertain
+→ CompareOrgan.py 写入 comparison_summary.log
+它给的命令格式是：
+python CompareOrgan.py \
+  --ct Dataset/BDMAP_A0000001/ct.nii.gz \
+  --mask1 Dataset/BDMAP_A0000001/predictions1 \
+  --mask2 Dataset/BDMAP_A0000001/predictions2 \
+  --organ pancreas \
+  --port 8000 \
+  --log_file ./comparison_summary.log \
+  --base_url "http://vllm_server_host"
+所以你要做的不是重新发明一个 VLM reviewer，而是把 LabelCritic 封装成你项目里的一个 CLI tool：
+python medai_cli.py critic \
+  --ct case_001/ct.nii.gz \
+  --mask-a outputs/case_001/totalseg/segmentations \
+  --mask-b outputs/case_001/epai/segmentations \
+  --organ pancreas \
+  --output outputs/case_001/critic/pancreas_decision.json \
+  --json
+________________________________________
+任务 5：ShapeKit 不能只是 optional，而应该作为核心 post-processing 模块
+老师在会议里问你为什么 ShapeKit 是 optional。老师的意思很明确：ShapeKit 本质上是一个 tool call，但理想情况下它应该能对所有 organ 做 post-processing，用来解决 AI 模型分割不了或分割不稳的问题。
+我检查了 ShapeKit-main.zip，它的 README 明确说 ShapeKit 是一个 plug-and-play post-processing toolkit，用来在不重新训练模型的情况下修正 AI-predicted segmentations 中的 anatomical errors。它要求数据组织成：
+case_001/
+  combined_labels.nii.gz  # optional
+  segmentations/
+    liver.nii.gz
+    pancreas.nii.gz
+    ...
+config.yaml 里支持的 target organs 包括：
+adrenal_gland
+aorta
+bladder
+colon
+duodenum
+femur
+intestine
+kidney
+liver
+lung
+pancreas
+postcava
+prostate
+spleen
+stomach
+vertebrae
+它还有 organ_adjacency_map，比如：
+liver: [kidney_right, pancreas]
+pancreas: [liver, stomach, colon, intestine]
+stomach: [pancreas, intestine, colon]
+aorta: [postcava]
+postcava: [aorta]
+colon: [intestine, lung_left, lung_right]
+这正好对应老师说的：AI 可能把相邻器官边界分错，ShapeKit 用解剖邻接关系和规则做后处理。
+所以你的 workflow 应该是：
+model inference
+→ normalize output to segmentations/*.nii.gz
+→ ShapeKit post-processing
+→ DICE before/after
+→ LabelCritic if still low-quality
+→ annotation update
+不是：
+model inference
+→ optional ShapeKit
+________________________________________
+任务 6：M-step 不能永远是 stub，否则不是真正的 EM loop
+这是老师对你当前项目最核心的提醒之一。你说目前 M-step 还是 retraining stub，只是输出 report，老师马上指出：如果不训练模型，loop 跑不起来。因为数据变好了以后，下一步应该让模型也变好，然后再进入下一轮 inference；否则第一步 inference 永远是同一个模型，loop 不成立。
+所以你至少要做两层：
+短期版本：
+实现 M-step interface
+保存 updated_annotations/
+保存 training_manifest.json
+保存 mstep_config.yaml
+明确下一步可以接 nnUNet / ePAI / private model fine-tuning
+更好版本：
+用 50 case 做一个小规模 retraining / fine-tuning smoke test
+但必须说明 50 case 只是 debug，不能作为正式训练结果，因为容易 overfit
+老师其实已经提醒：50 个 case 反训练模型会 overfit，所以 50 个主要用于测试流程，流程靠谱后再扩大到 500 或 5000。
+________________________________________
+任务 7：用 ITK-SNAP 做少量人工 sanity check
+老师让你下载 ITK-SNAP，把 CT 和 mask 拖进去看渲染效果，检查 mask 质量。这个不是让你人工标全量数据，而是当 DICE 和 VLM 过滤后只剩少量不确定 case 时，再人工看一下。
+正确用法是：
+DICE 筛出低质量 mask
+→ VLM/LabelCritic 处理大部分
+→ 剩下 2-3 个 uncertain cases
+→ ITK-SNAP 人工检查
+最终汇报时可以展示一两个 ITK-SNAP screenshot，证明你确实能打开 CT + mask 并判断基本质量。
+________________________________________
+任务 8：把 mini annotation tool 和 RadThinking-style thinking pipeline 合成一个数据集
+老师明确说：你现在有一个 mini annotation tool，又有一个 thinking pipeline，这两个东西可以合起来，变成一个更好的数据集。这个数据集不只是有 annotation/mask，还要有 reasoning 标注，也就是医生一步一步怎么看图像的过程。
+RadThinking.pdf 也正好支撑这个方向。它把 cancer screening 作为 VQA reasoning task，强调 radiologist 会观察 findings、比较 prior scans、整合 clinical context，最后得到 diagnostic conclusion。它的数据结构包含三层 VQA：foundation VQA、single-step reasoning VQA、compositional VQA；每个 compositional VQA 都带有 foundation VQA chain。
+RadThinking 的 per-scan trace 字段包括：
+step1_observations
+step2_temporal
+step3_clinical_context
+step4_conclusion
+reasoning_complexity
+并且它明确把 observations、temporal comparison、clinical context、conclusion 作为结构化 reasoning chain。
+所以你的最终数据样本应该长这样：
+{
+  "case_id": "PanTS_00000001",
+  "ct_path": "ct.nii.gz",
+  "organ": "pancreas",
+  "original_mask": "original/segmentations/pancreas.nii.gz",
+  "candidate_masks": {
+    "TotalSegmentator": "totalseg/segmentations/pancreas.nii.gz",
+    "ePAI": "epai/segmentations/pancreas.nii.gz",
+    "VISTA3D": "vista3d/segmentations/pancreas.nii.gz"
+  },
+  "dice_scores": {
+    "TotalSegmentator": 0.62,
+    "ePAI": 0.74,
+    "ShapeKit_after_ePAI": 0.79
+  },
+  "vlm_decision": {
+    "selected": "ShapeKit_after_ePAI",
+    "reason": "The refined mask better follows the pancreatic boundary."
+  },
+  "final_annotation": "updated_annotations/pancreas.nii.gz",
+  "reasoning_trace": {
+    "step1_observations": "...",
+    "step2_temporal": "...",
+    "step3_clinical_context": "...",
+    "step4_conclusion": "...",
+    "reasoning_complexity": "PERCEPTUAL/TEMPORAL/INTEGRATIVE/AMBIGUOUS"
+  }
+}
+老师想要的不是普通解释文本，而是可训练的数据结构，未来可以用于 VQA、mid-training 或 RL。
+________________________________________
+三、每份资料的用途和应该怎么接入
+1. Google Drive checkpoints 文件夹
+截图里有：
+CADS_series
+MOOSE_series
+nnUNet_private
+UNEST
+VSmTrans
+class_checkpoint_map.xlsx
+这说明老师给你的不是单个模型，而是一个 checkpoint pool。
+用途：
+CADS_series：大范围 anatomical structure segmentation 候选模型
+MOOSE_series：clinical CT organs / digestive / cardiac / bones 等候选模型
+nnUNet_private：内部私有模型，可能是老师强调不要公开的模型
+UNEST：特定结构候选模型，在 class map 中主要对应 kidney cortex/medulla 等
+VSmTrans：腹部核心器官候选模型，对 PanTS 任务很重要
+class_checkpoint_map.xlsx：所有 anatomical structures 和 checkpoint 的索引表
+你必须做的事情：
+把 class_checkpoint_map.xlsx 转成 model_registry
+根据目标 organ 自动选择候选模型
+不要手动一个个硬编码 checkpoint
+________________________________________
+2. class_checkpoint_map.xlsx
+我直接读取了这个表。它一共有 385 个 anatomical structures，两列是：
+Anatomical Structures
+Checkpoint
+主要 checkpoint 覆盖大致是：
+模型家族	覆盖数量	作用判断
+CADS	165	覆盖最广，适合做大范围候选模型
+MOOSE	135	多 clinical CT 子任务
+MOOSE3.0	111	organs / cardiac / digestive / bones 等
+TotalSegmentator	121	public baseline
+VISTA3D	99	foundation segmentation candidate
+DAP	38	血管、乳腺、头颈等
+GOACC	25	主要 vertebrae
+VSmTrans	22	腹部器官重点
+SAROS nnUNet	16	body / cavity / arm / adipose 等
+ePAI	13	pancreas、duodenum、colon、adrenal、duct/tumor 相关
+Pedro	11	liver segment / pancreas part 相关
+UNEST	3	kidney 子结构
+AirRC / ATM / VSNet / Duke	少量	特定结构
+对你当前 50 个 PanTS/PAINTS tumor case，最相关的是：
+结构	class map 推荐模型
+pancreas	VSmTrans / CADS / ePAI / MOOSE3.0
+liver	VSmTrans / CADS / MOOSE3.0
+spleen	VSmTrans / CADS / MOOSE3.0
+stomach	VSmTrans / CADS / MOOSE3.0
+duodenum	VSmTrans / ePAI / CADS / MOOSE3.0
+colon	VSmTrans / ePAI / CADS / MOOSE3.0
+kidney_left/right	VSmTrans / CADS / MOOSE3.0
+gall_bladder	VSmTrans / CADS / MOOSE3.0
+aorta	VISTA3D / CADS / MOOSE3.0
+postcava	VSmTrans
+portal/splenic veins	VSmTrans / CADS / MOOSE3.0
+pancreatic_duct / CBD / SMA / renal veins	ePAI
+这张表的真正作用是：让你的系统知道每个 organ 应该调用哪些候选模型。
+你应该生成：
+configs/class_checkpoint_map.parsed.csv
+configs/model_registry.yaml
+________________________________________
+3. Another version of ShapeKit.docx
+这个文件名叫 “Another version of ShapeKit”，但内容其实不是 ShapeKit，而是 ATLAS-Net 的 Hugging Face model card。
+它说明 ATLAS-Net 是一个 nnUNet v2 checkpoint，用于 multi-organ abdominal CT segmentation；训练数据来自 145 个 medical centers，使用 organ-specific anatomical rules 自动修正 pseudo-labels，覆盖 25 个 organ classes。它要求 Linux server、NVIDIA GPU、CUDA 11.7+，输入 CT 必须是 .nii.gz 3D volume，文件名以 _0000.nii.gz 结尾。
+它的 label map 非常重要，刚好对应 PanTS/胰腺任务：
+1 Aorta
+2/3 Adrenal gland L/R
+4 Common bile duct
+5 Celiac artery
+6 Colon
+7 Duodenum
+8 Gallbladder
+9 Inferior vena cava
+10/11 Kidney L/R
+12 Liver
+13 Pancreas
+14 Pancreatic duct
+15 Superior mesenteric artery
+16 Small intestine
+17 Spleen
+18 Stomach
+19 Portal/splenic veins
+20/21 Renal vein L/R
+22 CBD stent
+23 Pancreatic PDAC
+24 Pancreatic cyst
+25 Pancreatic PNET
+这份资料的用途：作为一个腹部多器官 + 胰腺肿瘤相关结构的 nnUNet baseline/candidate model。它和 ePAI、VSmTrans、CADS、MOOSE 都能一起进入候选模型池。
+________________________________________
+4. ePAI-main.zip
+ePAI 是这批资料里和胰腺任务最直接相关的模型。它的 README 里明确要求：
+pancreas
+pancreatic_duct
+pancreatic_pdac
+pancreatic_cyst
+pancreatic_pnet
+这 5 类 mask 是 required，其他 class optional。
+它也明确提供了 checkpoint 下载，包括：
+qchen76_2025_0421.tar.gz
+qchen76_2025_0404.tar.gz
+wli131_2024_1115.tar.gz
+这和老师会议里说的“直接用最近的那个，4 月 21 日那个”完全对应。
+ePAI 的用途：
+1. 作为老师指定的重点 private/internal candidate model；
+2. 用 2025-04-21 checkpoint 跑 inference；
+3. 输出 pancreas、duct、PDAC、cyst、PNET 相关 masks；
+4. 作为 PanTS tumor case 的核心候选结果；
+5. 封装成 CLI wrapper；
+6. 不把 checkpoint 放到公开 GitHub。
+你要特别检查：老师说有些 organ output 被关掉了，需要进代码打开；如果不改，可能只输出几个 tumor 或 1 个 organ + 3 个 tumor，正确目标应该是 20+ organs + 3 tumor types。
+________________________________________
+5. TotalSegmentator-master.zip
+TotalSegmentator 是 public baseline。它支持直接 CLI 调用：
+TotalSegmentator -i ct.nii.gz -o segmentations
+它还支持：
+--fast：低分辨率快速推理
+--roi_subset：只预测指定器官，节省时间和显存
+--statistics：输出每类体积和平均强度
+totalseg_combine_masks：合并 subclasses
+用途：
+1. 快速 smoke test；
+2. public baseline；
+3. 生成第一版 organ masks；
+4. 和 ePAI / VISTA3D / CADS / MOOSE / VSmTrans 做候选比较；
+5. 可作为 DICE verifier 的 baseline prediction。
+但是 TotalSegmentator 不应该是最终亮点。你最终亮点应该是：
+TotalSegmentator baseline
++ teacher checkpoints
++ ShapeKit post-processing
++ DICE filtering
++ LabelCritic/VLM selection
++ annotation update
++ RadThinking trace
+________________________________________
+6. VISTA3D-Inference-Pipeline.zip
+VISTA3D 是一个更强的 foundation segmentation candidate model，但资源要求高。README 明确提示：
+GPU memory >= 40GB is highly recommended
+它的 pipeline 里有：
+run.sh
+configs/inference.json
+configs/batch_inference.json
+configs/metadata.json
+labels2onehot.py
+label_mappings/
+scripts/inferer.py
+scripts/evaluator.py
+重要点：
+默认 inference spacing 是 [3.5, 3.5, 3.5]，用于省显存；
+如果想释放完整能力，要改 configs/inference.json 里的 resample_spacing 到 [1.5, 1.5, 1.5]；
+可以先输出 combined labels，再用 labels2onehot.py 拆成 one-hot organ masks；
+它默认主要跑 117 + 2 = 119 类，第二阶段 7 个 tumor/vessel 类不一定必须跑。
+用途：
+1. 作为 foundation segmentation candidate；
+2. 有 GPU 时加入多模型候选池；
+3. 输出统一拆成 organ-wise .nii.gz；
+4. 进入 ShapeKit / DICE / LabelCritic。
+它不适合你本地 Windows CPU 环境主跑，应该作为 GPU/服务器模型封装。
+________________________________________
+7. ShapeKit-main.zip
+ShapeKit 是 anatomy-aware post-processing tool，不是 segmentation model。它的作用是修正模型预测中不符合解剖结构的错误。
+用途：
+raw model prediction
+→ ShapeKit refined prediction
+→ DICE before/after
+→ 如果仍差，再进 LabelCritic
+你要重点做：
+1. 把所有模型输出统一成 segmentations/*.nii.gz；
+2. 修改 config.yaml 中 target_organs，只保留当前 50-case 相关 organ；
+3. 跑 ShapeKit；
+4. 保存 combined_labels.nii.gz；
+5. 保存 postprocessing.log / debug.log；
+6. 计算 ShapeKit 前后 DICE 是否提高。
+________________________________________
+8. LabelCritic-main.zip
+LabelCritic 是 VLM-based annotation selector。它的核心价值是：多个模型输出不同 masks 时，用 VLM 判断哪个更好，而不是人工全量检查。
+用途：
+DICE < 0.5 或多个候选 mask 不一致
+→ 生成 2D projection / overlay
+→ VLM 比较 candidate A 和 candidate B
+→ 输出 best mask
+→ annotation manager 替换原 mask
+你要做：
+把 CompareOrgan.py 封装成 medai_cli critic
+把 ProjectDatasetFlex_single.py 作为 projection builder
+把 RunAPI_single.py 作为 VLM backend caller
+把 VLM 输出整理成 JSON
+________________________________________
+9. RadThinking.pdf
+RadThinking 是你的 reasoning trace / VQA dataset 方向依据。它不是用来跑 segmentation 的，而是告诉你最后数据应该怎么组织。
+它的核心结构：
+Foundation VQA：原子视觉问题
+Single-step reasoning VQA：一条规则推理
+Compositional VQA：多步医学推理
+它的四步 trace：
+Step 1: imaging observations
+Step 2: temporal comparison
+Step 3: clinical context
+Step 4: conclusion
+它还强调 cancer screening 不是简单 detection，而是观察、比较 prior scans、整合 clinical context、得出 pathology-confirmed conclusion。
+用途：
+1. 给你的 trace_builder 提供 schema；
+2. 让你的 50 case 不只是 mask improvement，而是 reasoning dataset sample；
+3. 支持老师说的 VQA / mid-training / RL 方向；
+4. 让项目具备论文研究价值。
+________________________________________
+10. r_super_pseudo_masks.py
+这个脚本不是普通 segmentation inference。它更像是 report-supervised pseudo-mask refinement / tumor pseudo-label bundle builder。
+我检查后它主要做：
+1. 读取 reports 和 metadata；
+2. 从报告里解析 tumor organ、location、size；
+3. 估计 tumor volume / diameter；
+4. 根据 predictions_raw 里的 lesion probability 和 organ mask 做 crop；
+5. 用 ball_mask 生成 refined tumor lesion mask；
+6. 输出 refined_xxx_lesion_mask.nii.gz；
+7. 复制 CT、binary organ masks、predictions_raw；
+8. 写 info.txt 和 summary.csv；
+9. 支持 debug、GPU 分片、parts/part 并行。
+它和老师说的“用 report supervision 替代旧 ROC analysis”有关。老师说现在不一定要用 ROC/sensitivity-specificity 那套旧方法，可以用 report 来做 supervision，因为 report 里已经说明有没有 tumor、有多大，AI label 和 report 对得上就更可信，对不上就要 review。
+所以这个脚本可以作为：
+report supervision module
+tumor pseudo-mask refinement module
+case bundle generator
+summary.csv generator
+但它不是你 organ mask improvement 的主流程。你的主流程还是：
+multi-model organ segmentation
+→ ShapeKit
+→ DICE
+→ LabelCritic
+→ annotation update
+________________________________________
+四、最终系统应该怎么实现
+你的最终 pipeline 应该长这样：
+Step 0. 读取 class_checkpoint_map.xlsx
+        生成 model_registry.yaml
+
+Step 1. 选择 50 个有 tumor annotation 的 PanTS/PAINTS case
+        生成 case_list_50_tumor.csv
+
+Step 2. 多模型推理
+        TotalSegmentator / ePAI / VISTA3D / ATLAS-Net / VSmTrans / CADS / MOOSE / nnUNet_private
+
+Step 3. 统一输出格式
+        case_id/model_name/segmentations/organ_name.nii.gz
+
+Step 4. ShapeKit 后处理
+        raw masks → refined masks
+
+Step 5. DICE 评估
+        raw prediction vs ground truth
+        ShapeKit prediction vs ground truth
+        updated annotation vs ground truth
+
+Step 6. 低质量 mask 路由
+        DICE < 0.5 → LabelCritic
+        uncertain → review queue
+        high-quality → accept
+
+Step 7. LabelCritic/VLM 比较
+        candidate A vs candidate B
+        输出 best mask
+
+Step 8. Annotation update
+        更新 annotation version
+        记录 decision log
+
+Step 9. ITK-SNAP 人工检查
+        只检查少量最终 uncertain cases
+
+Step 10. 生成 RadThinking-style trace
+        observations / temporal comparison / clinical context / conclusion
+
+Step 11. M-step 准备
+        生成 training_manifest.json
+        可接入 nnUNet / ePAI fine-tuning
+
+Step 12. 输出 report 和 README
+        展示 quantitative + qualitative results
+________________________________________
+五、最终交付结果应该是什么样
+你下一次给老师展示时，不能只说“我又封装了几个工具”。你应该展示一个完整可运行的小闭环。
+1. 工程交付
+项目结构建议：
+medai-agent-loop/
+├── configs/
+│   ├── model_registry.yaml
+│   ├── class_checkpoint_map.parsed.csv
+│   ├── shapekit_config.yaml
+│   └── mstep_config.yaml
+├── wrappers/
+│   ├── totalseg_wrapper.py
+│   ├── epai_wrapper.py
+│   ├── atlasnet_wrapper.py
+│   ├── vista3d_wrapper.py
+│   ├── shapekit_wrapper.py
+│   ├── labelcritic_wrapper.py
+│   └── private_nnunet_wrapper.py
+├── tools/
+│   ├── label_verifier.py
+│   ├── projection_builder.py
+│   ├── vlm_label_critic.py
+│   ├── annotation_manager.py
+│   ├── report_supervision.py
+│   ├── trace_builder.py
+│   └── mstep_runner.py
+├── data_manifest/
+│   └── case_list_50_tumor.csv
+├── outputs/
+│   └── run_YYYYMMDD/
+│       ├── dice_metrics.csv
+│       ├── round_metrics.csv
+│       ├── review_queue.jsonl
+│       ├── vlm_decisions.jsonl
+│       ├── annotation_versions/
+│       ├── patient_traces.jsonl
+│       ├── report_supervision_summary.csv
+│       ├── training_manifest.json
+│       ├── projections/
+│       └── itk_snap_examples/
+└── README.md
+________________________________________
+2. CLI 交付
+至少要有这些命令：
+python medai_cli.py build-registry \
+  --checkpoint-map class_checkpoint_map.xlsx \
+  --output configs/model_registry.yaml \
+  --json
+python medai_cli.py infer \
+  --model epai_20250421 \
+  --input data/case_001/ct.nii.gz \
+  --output outputs/case_001/epai \
+  --json
+python medai_cli.py postprocess \
+  --tool shapekit \
+  --input outputs/case_001/epai \
+  --output outputs/case_001/epai_shapekit \
+  --json
+python medai_cli.py verify \
+  --prediction outputs/case_001/epai_shapekit/segmentations \
+  --reference data/case_001/ground_truth/segmentations \
+  --output outputs/run/dice_metrics.csv \
+  --json
+python medai_cli.py critic \
+  --ct data/case_001/ct.nii.gz \
+  --mask-a outputs/case_001/totalseg/segmentations \
+  --mask-b outputs/case_001/epai_shapekit/segmentations \
+  --organ pancreas \
+  --output outputs/run/vlm_decisions.jsonl \
+  --json
+python medai_cli.py run-loop \
+  --case-list data_manifest/case_list_50_tumor.csv \
+  --models totalsegmentator,epai_20250421,atlasnet,vista3d \
+  --output outputs/run_YYYYMMDD \
+  --json
+________________________________________
+3. 汇报展示结果
+你最终应该展示这些内容：
+A. 模型注册表
+展示 class_checkpoint_map.xlsx 被你转成了 model registry，比如：
+Organ	Candidate models
+pancreas	VSmTrans / CADS / ePAI / MOOSE3.0 / ATLAS-Net
+liver	VSmTrans / CADS / MOOSE3.0 / TotalSegmentator
+colon	VSmTrans / ePAI / CADS / MOOSE3.0
+duodenum	VSmTrans / ePAI / CADS / MOOSE3.0
+B. 50-case case list
+展示你选的是有 tumor annotation 的 case，而不是随机健康 case。
+C. 1 个完整 case 的 end-to-end demo
+展示：
+Input CT
+→ ePAI / TotalSegmentator / VISTA3D predictions
+→ ShapeKit refinement
+→ DICE table
+→ LabelCritic decision
+→ updated annotation
+→ reasoning trace
+D. Quantitative metrics
+展示：
+raw DICE
+ShapeKit-after DICE
+VLM-selected DICE
+low-DICE mask count reduction
+uncertain case count reduction
+E. Qualitative examples
+展示 2-3 个 case：
+Original mask
+Candidate A
+Candidate B
+ShapeKit refined
+LabelCritic selected
+ITK-SNAP screenshot
+F. Reasoning trace 样例
+展示一个 RadThinking-style JSON：
+Observation:
+Temporal comparison:
+Clinical context:
+Conclusion:
+________________________________________
+六、老师真正想看到什么
+老师想看到的不是你“能不能调用模型”，而是下面这几个能力：
+第一，工程能力：你能不能把一堆不同 repo、不同模型、不同 test script 统一封装成稳定 CLI。
+第二，医学 AI workflow 理解：你是否理解医学 AI 不是单次 inference，而是 data-model co-evolution 的 loop。
+第三，annotation refinement 能力：你是否能用 DICE、ShapeKit、LabelCritic、ITK-SNAP 让 50 个 case 的 mask 质量真的变好。
+第四，研究价值：你能不能把 mini annotation tool 和 RadThinking-style trace 合起来，做成一个 VQA / reasoning dataset，而不是只做普通项目。
+第五，可扩展性：50 个 case 只是 debug，后面应该能扩展到 500、5000、10000。
+第六，保密意识：老师明确说新的内部模型不要公开，之前给你的可以公开，但这个内部模型不能放网上。
+________________________________________
+七、你现在最该做的优先级
+按真实优先级来：
+1. 先把 class_checkpoint_map.xlsx 转成 model_registry.yaml。
+2. 下载/确认 4 月 21 日 ePAI/private checkpoint。
+3. 跑通 1 个 case 的 ePAI / private model inference。
+4. 检查是否输出完整 organ + tumor；如果输出被关掉，进代码打开。
+5. 把输出统一成 segmentations/*.nii.gz。
+6. 跑 ShapeKit，计算 before/after DICE。
+7. 从 PanTS/PAINTS 选 50 个有 tumor annotation 的 case。
+8. 跑 50-case inference + ShapeKit + DICE。
+9. DICE < 0.5 的送 LabelCritic。
+10. 用 ITK-SNAP 检查少量不确定 case。
+11. 生成 updated annotations。
+12. 生成 RadThinking-style traces。
+13. 准备 M-step training_manifest，而不是只保留 retraining stub。
+14. 更新 README 和汇报图，必须画出 loop，不要画成线性 pipeline。
+________________________________________
+八、一句话最终总结
+你第二次任务的最终目标应该表述为：
+我需要把老师给的多模型 checkpoint、TotalSegmentator、VISTA3D、ATLAS-Net/ePAI、ShapeKit、LabelCritic、RadThinking 和 report-supervision 脚本统一成一个 CLI-based medical annotation refinement loop。短期先在 50 个有 tumor annotation 的 PanTS/PAINTS case 上 debug：用多模型生成候选 masks，用 ShapeKit 修正 anatomy errors，用 DICE 筛低质量结果，用 LabelCritic/VLM 比较候选 annotation，用 ITK-SNAP 检查少量 uncertain case，最后更新 organ masks 并生成 RadThinking-style reasoning traces。最终交付不是单模型 demo，而是一个可量化、可审计、可扩展、可用于论文和数据集构建的医学 AI workflow。
+

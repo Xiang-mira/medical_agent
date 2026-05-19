@@ -1,0 +1,6 @@
+{
+  "patient_id": "patient_001",
+  "sex": "male",
+  "age": 67,
+  "note": "Synthetic RadThinking-style demo only; not clinical data."
+}

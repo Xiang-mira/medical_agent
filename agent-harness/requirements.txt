@@ -1,0 +1,14 @@
+click>=8.0.0
+pyyaml>=6.0
+numpy>=1.22,<3.0
+nibabel>=5.0.0
+tqdm>=4.60.0
+scipy
+scikit-image
+connected-components-3d
+pandas
+openpyxl
+SimpleITK
+# Optional real AI backends are intentionally not installed by default.
+# Install them only on Colab/Linux GPU/CPU runtime when you run real inference:
+#   pip install -r agent-harness/requirements-real-inference.txt

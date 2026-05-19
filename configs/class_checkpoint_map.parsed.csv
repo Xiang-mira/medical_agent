@@ -1,0 +1,386 @@
+organ,organ_display,checkpoint,candidate_models,candidate_model_names
+abdominal_cavity,abdominal_cavity,CADS/SAROS nnUNet,"cads,saros_nnunet","CADS,SAROS nnUNet"
+adrenal_gland_left,adrenal_gland_left,ePAI/CADS/MOOSE3.0 (clin_ct_organs),"epai_20250421,cads,moose3_0","ePAI,CADS,MOOSE3.0"
+adrenal_gland_right,adrenal_gland_right,ePAI/CADS/MOOSE3.0 (clin_ct_organs),"epai_20250421,cads,moose3_0","ePAI,CADS,MOOSE3.0"
+airway,airway,VISTA3D,vista3d,VISTA3D
+airway_tree,airway_tree,ATM,atm,ATM
+airway_wall,airway_wall,AirRC,airrc,AirRC
+anterior_eyeball_segment_left,anterior_eyeball_segment_left,CADS,cads,CADS
+anterior_eyeball_segment_right,anterior_eyeball_segment_right,CADS,cads,CADS
+anterior_scalene_left,anterior_scalene_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+anterior_scalene_right,anterior_scalene_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+aorta,aorta,VISTA3D/CADS/MOOSE3.0 (clin_ct_cardiac),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+arm_left,arm_left,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+arm_right,arm_right,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+arms,arms,MOOSE3.0 (clin_ct_body),moose3_0,MOOSE3.0
+artery_brachiocephalic,artery_brachiocephalic,DAP,dap,DAP
+artery_common_carotid_left,artery_common_carotid_left,DAP,dap,DAP
+artery_common_carotid_right,artery_common_carotid_right,DAP,dap,DAP
+artery_internal_carotid_left,artery_internal_carotid_left,DAP,dap,DAP
+artery_internal_carotid_right,artery_internal_carotid_right,DAP,dap,DAP
+artery_subclavian_left,artery_subclavian_left,DAP,dap,DAP
+artery_subclavian_right,artery_subclavian_right,DAP,dap,DAP
+atrial_appendage_left,atrial_appendage_left,VISTA3D,vista3d,VISTA3D
+arytenoid_cartilage,arytenoid_cartilage,CADS,cads,CADS
+auditory_canal_left,auditory_canal_left,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+auditory_canal_right,auditory_canal_right,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+autochthon_left,autochthon_left,VISTA3D/MOOSE3.0 (clin_ct_muscles),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+autochthon_right,autochthon_right,VISTA3D/MOOSE3.0 (clin_ct_muscles),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+bladder,bladder,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+blood,blood,CADS,cads,CADS
+body,body,Totalsegmentator (body),totalsegmentator,Totalsegmentator
+body_extremities,body_extremities,Totalsegmentator (body),totalsegmentator,Totalsegmentator
+body_trunc,body_trunc,Totalsegmentator (body),totalsegmentator,Totalsegmentator
+bones,bones,CADS,cads,CADS
+both_lips,both_lips,CADS,cads,CADS
+brachiocephalic_trunk,brachiocephalic_trunk,VISTA3D,vista3d,VISTA3D
+brachiocephalic_vein_left,brachiocephalic_vein_left,VISTA3D,vista3d,VISTA3D
+brachiocephalic_vein_right,brachiocephalic_vein_right,VISTA3D,vista3d,VISTA3D
+brain,brain,VISTA3D/CADS/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+brain_ventricle,brain_ventricle,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+brainstem,brainstem,Totalsegmentator (brain_structures)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+breast_left,breast_left,DAP,dap,DAP
+breast_right,breast_right,DAP,dap,DAP
+bronchus,bronchus,DAP,dap,DAP
+buccal_mucosa,buccal_mucosa,CADS,cads,CADS
+carotid_artery_left,carotid_artery_left,CADS,cads,CADS
+carotid_artery_right,carotid_artery_right,CADS,cads,CADS
+carpal,carpal,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+carpal_left,carpal_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+carpal_right,carpal_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+caudate_nucleus,caudate_nucleus,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+cbd_stent,cbd_stent,ePAI,epai_20250421,ePAI
+celiac_aa_celiac_artery,celiac_aa (celiac_artery),ePAI,epai_20250421,ePAI
+celiac_trunk,celiac_trunk,VSmTrans,vsmtrans,VSmTrans
+central_sulcus,central_sulcus,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+cerebellum,cerebellum,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+cerebrospinal_fluid,cerebrospinal_fluid,CADS,cads,CADS
+cervical_esophagus,cervical_esophagus,CADS,cads,CADS
+cheek_left,cheek_left,DAP,dap,DAP
+cheek_right,cheek_right,DAP,dap,DAP
+clavicula_left,clavicula_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+clavicula_right,clavicula_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+cochlear_left,cochlear_left,CADS,cads,CADS
+cochlear_right,cochlear_right,CADS,cads,CADS
+colon,colon,VSmTrans/ePAI/CADS/MOOSE3.0 (clin_ct_digestive),"vsmtrans,epai_20250421,cads,moose3_0","VSmTrans,ePAI,CADS,MOOSE3.0"
+colostomy_bag,colostomy_bag,CADS,cads,CADS
+common_bile_duct,common_bile_duct,ePAI,epai_20250421,ePAI
+common_carotid_artery_left,common_carotid_artery_left,VISTA3D,vista3d,VISTA3D
+common_carotid_artery_right,common_carotid_artery_right,VISTA3D,vista3d,VISTA3D
+common_iliac_artery_left,common_iliac_artery_left,CADS,cads,CADS
+common_iliac_artery_right,common_iliac_artery_right,CADS,cads,CADS
+common_iliac_vein_left,common_iliac_vein_left,CADS,cads,CADS
+common_iliac_vein_right,common_iliac_vein_right,CADS,cads,CADS
+compact_bone,compact_bone,CADS,cads,CADS
+coronary_artery,coronary_artery,Totalsegmentator (coronary_arteries),totalsegmentator,Totalsegmentator
+costal_cartilages,costal_cartilages,VISTA3D,vista3d,VISTA3D
+cricoid_cartilage,cricoid_cartilage,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+cricopharyngeus,cricopharyngeus,CADS,cads,CADS
+digastric_left,digastric_left,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+digastric_right,digastric_right,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+duodenum,duodenum,VSmTrans/ePAI/CADS/MOOSE3.0 (clin_ct_digestive),"vsmtrans,epai_20250421,cads,moose3_0","VSmTrans,ePAI,CADS,MOOSE3.0"
+esophagus,esophagus,VSmTrans/CADS/MOOSE3.0 (clin_ct_digestive),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+eye_lens_left,eye_lens_left,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+eye_lens_right,eye_lens_right,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+eyeball,eyeball,CADS,cads,CADS
+eyeball_left,eyeball_left,DAP,dap,DAP
+eyeball_right,eyeball_right,DAP,dap,DAP
+face,face,CADS,cads,CADS
+fat,fat,DAP,dap,DAP
+femur_left,femur_left,VSmTrans/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+femur_right,femur_right,VSmTrans/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+fibula,fibula,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+fibula_left,fibula_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+fibula_right,fibula_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+fingers_left,fingers_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+fingers_right,fingers_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+frontal_lobe,frontal_lobe,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+gall_bladder,gall_bladder,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+gland_structure,gland_structure,CADS,cads,CADS
+glottis,glottis,CADS,cads,CADS
+gluteus_maximus_left,gluteus_maximus_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+gluteus_maximus_right,gluteus_maximus_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+gluteus_medius_left,gluteus_medius_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+gluteus_medius_right,gluteus_medius_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+gluteus_minimus_left,gluteus_minimus_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+gluteus_minimus_right,gluteus_minimus_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+gonads,gonads,DAP,dap,DAP
+gray_matter,gray_matter,CADS,cads,CADS
+hard_palate,hard_palate,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+head,head,SAROS nnUNet/MOOSE3.0 (clin_ct_body),"saros_nnunet,moose3_0","SAROS nnUNet,MOOSE3.0"
+heart,heart,VISTA3D/CADS,"vista3d,cads","VISTA3D,CADS"
+heart_atrium_left,heart_atrium_left,DAP/CADS/MOOSE3.0 (clin_ct_cardiac),"dap,cads,moose3_0","DAP,CADS,MOOSE3.0"
+heart_atrium_right,heart_atrium_right,DAP/CADS/MOOSE3.0 (clin_ct_cardiac),"dap,cads,moose3_0","DAP,CADS,MOOSE3.0"
+heart_myocardium,heart_myocardium,DAP/CADS/MOOSE3.0 (clin_ct_cardiac),"dap,cads,moose3_0","DAP,CADS,MOOSE3.0"
+heart_tissue,heart_tissue,DAP,dap,DAP
+heart_ventricle_left,heart_ventricle_left,DAP/CADS/MOOSE3.0 (clin_ct_cardiac),"dap,cads,moose3_0","DAP,CADS,MOOSE3.0"
+heart_ventricle_right,heart_ventricle_right,DAP/CADS/MOOSE3.0 (clin_ct_cardiac),"dap,cads,moose3_0","DAP,CADS,MOOSE3.0"
+hepatic_vessel,hepatic_vessel,VSmTrans,vsmtrans,VSmTrans
+hip_left,hip_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_vertebrae),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+hip_right,hip_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_vertebrae),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+humerus_left,humerus_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+humerus_right,humerus_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+hyoid,hyoid,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+hypopharynx,hypopharynx,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+iliac_artery_left,iliac_artery_left,VISTA3D/MOOSE3.0 (clin_ct_cardiac),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+iliac_artery_right,iliac_artery_right,VISTA3D/MOOSE3.0 (clin_ct_cardiac),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+iliac_vena_left,iliac_vena_left,VISTA3D/MOOSE3.0 (clin_ct_cardiac),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+iliac_vena_right,iliac_vena_right,VISTA3D/MOOSE3.0 (clin_ct_cardiac),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+iliopsoas_left,iliopsoas_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+iliopsoas_right,iliopsoas_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_muscles),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+inferior_oblique_muscle_left,inferior_oblique_muscle_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+inferior_oblique_muscle_right,inferior_oblique_muscle_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+inferior_pharyngeal_constrictor,inferior_pharyngeal_constrictor,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+inferior_rectus_muscle_left,inferior_rectus_muscle_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+inferior_rectus_muscle_right,inferior_rectus_muscle_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+inferior_vena_cava,inferior_vena_cava,Totalsegmentator(total)/DAP/CADS/MOOSE3.0 (clin_ct_cardiac),"totalsegmentator,dap,cads,moose3_0","Totalsegmentator,DAP,CADS,MOOSE3.0"
+insular_cortex,insular_cortex,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+intermuscular_adipose_tissue,intermuscular_adipose_tissue,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+internal_capsule,internal_capsule,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+internal_carotid_artery_left,internal_carotid_artery_left,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+internal_carotid_artery_right,internal_carotid_artery_right,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+internal_jugular_vein_left,internal_jugular_vein_left,Totalsegmentator(headneck_bones_vessels)/DAP,"totalsegmentator,dap","Totalsegmentator,DAP"
+internal_jugular_vein_right,internal_jugular_vein_right,Totalsegmentator(headneck_bones_vessels)/DAP,"totalsegmentator,dap","Totalsegmentator,DAP"
+intestine,intestine,VSmTrans,vsmtrans,VSmTrans
+kidney,kidney,VISTA3D,vista3d,VISTA3D
+kidney_cortex,kidney_cortex,UNEST,unest,UNEST
+kidney_left,kidney_left,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+kidney_medulla,kidney_medulla,UNEST,unest,UNEST
+kidney_pelvicalyceal_system,kidney_pelvicalyceal_system,UNEST,unest,UNEST
+kidney_right,kidney_right,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+lacrimal_gland_left,lacrimal_gland_left,CADS,cads,CADS
+lacrimal_gland_right,lacrimal_gland_right,CADS,cads,CADS
+larynx,larynx,CADS,cads,CADS
+lateral_pterygoid_left,lateral_pterygoid_left,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+lateral_pterygoid_right,lateral_pterygoid_right,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+lateral_rectus_muscle_left,lateral_rectus_muscle_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+lateral_rectus_muscle_right,lateral_rectus_muscle_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+lentiform_nucleus,lentiform_nucleus,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+leg_left,leg_left,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+leg_right,leg_right,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+legs,legs,MOOSE3.0 (clin_ct_body),moose3_0,MOOSE3.0
+levator_palpebrae_superioris_left,levator_palpebrae_superioris_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+levator_palpebrae_superioris_right,levator_palpebrae_superioris_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+levator_scapulae_left,levator_scapulae_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+levator_scapulae_right,levator_scapulae_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+liver,liver,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+liver_hepatic_vein,liver_hepatic_vein,VSNet (liver),vsnet,VSNet
+liver_portal_vein,liver_portal_vein,VSNet (liver),vsnet,VSNet
+liver_segment_1,liver_segment_1,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_2,liver_segment_2,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_3,liver_segment_3,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_4,liver_segment_4,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_5,liver_segment_5,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_6,liver_segment_6,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_7,liver_segment_7,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+liver_segment_8,liver_segment_8,Pedro/Totalsegmentator (liver_segments),"pedro,totalsegmentator","Pedro,Totalsegmentator"
+lung,lung,VISTA3D,vista3d,VISTA3D
+lung_left,lung_left,VSmTrans,vsmtrans,VSmTrans
+lung_lower_left_lobe,lung_lower_left_lobe,VISTA3D/CADS/MOOSE3.0 (clin_ct_lungs)/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+lung_lower_right_lobe,lung_lower_right_lobe,VISTA3D/CADS/MOOSE3.0 (clin_ct_lungs)/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+lung_middle_right_lobe,lung_middle_right_lobe,VISTA3D/CADS/MOOSE3.0 (clin_ct_lungs)/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+lung_pulmonary_arteries,lung_pulmonary_arteries,AirRC,airrc,AirRC
+lung_pulmonary_veins,lung_pulmonary_veins,AirRC,airrc,AirRC
+lung_right,lung_right,VSmTrans,vsmtrans,VSmTrans
+lung_trachea_bronchia,lung_trachea_bronchia,Totalsegmentator (lung_vessels),totalsegmentator,Totalsegmentator
+lung_upper_left_lobe,lung_upper_left_lobe,VISTA3D/CADS/MOOSE3.0 (clin_ct_lungs)/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+lung_upper_right_lobe,lung_upper_right_lobe,VISTA3D/CADS/MOOSE3.0 (clin_ct_lungs)/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+lung_vessels,lung_vessels,Totalsegmentator (lung_vessels),totalsegmentator,Totalsegmentator
+mammary_gland_left,mammary_gland_left,CADS,cads,CADS
+mammary_gland_right,mammary_gland_right,CADS,cads,CADS
+mandible,mandible,CADS,cads,CADS
+masseter_left,masseter_left,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+masseter_right,masseter_right,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+medial_pterygoid_left,medial_pterygoid_left,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+medial_pterygoid_right,medial_pterygoid_right,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+medial_rectus_muscle_left,medial_rectus_muscle_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+medial_rectus_muscle_right,medial_rectus_muscle_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+mediastinal_tissue,mediastinal_tissue,DAP,dap,DAP
+mediastinum,mediastinum,SAROS nnUNet/CADS,"saros_nnunet,cads","SAROS nnUNet,CADS"
+metacarpal,metacarpal,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+metacarpal_left,metacarpal_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+metacarpal_right,metacarpal_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+metatarsal,metatarsal,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+metatarsal_left,metatarsal_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+metatarsal_right,metatarsal_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+middle_pharyngeal_constrictor,middle_pharyngeal_constrictor,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+middle_scalene_left,middle_scalene_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+middle_scalene_right,middle_scalene_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+muscle,muscle,SAROS nnUNet/CADS,"saros_nnunet,cads","SAROS nnUNet,CADS"
+muscle_fat,muscle_fat,Duke,duke,Duke
+muscle_of_head,muscle_of_head,CADS,cads,CADS
+nasal_cavity_left,nasal_cavity_left,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+nasal_cavity_right,nasal_cavity_right,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+nasopharynx,nasopharynx,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+occipital_lobe,occipital_lobe,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+optic_chiasm,optic_chiasm,CADS,cads,CADS
+optic_nerve_left,optic_nerve_left,Totalsegmentator (head_glands_cavities)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+optic_nerve_right,optic_nerve_right,Totalsegmentator (head_glands_cavities)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+oral_cavity,oral_cavity,CADS,cads,CADS
+oropharynx,oropharynx,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+pancreas,pancreas,VSmTrans/CADS/ePAI/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,epai_20250421,moose3_0","VSmTrans,CADS,ePAI,MOOSE3.0"
+pancreas_body,pancreas_body,Pedro,pedro,Pedro
+pancreas_head,pancreas_head,Pedro,pedro,Pedro
+pancreas_tail,pancreas_tail,Pedro,pedro,Pedro
+pancreatic_duct,pancreatic_duct,ePAI,epai_20250421,ePAI
+parietal_lobe,parietal_lobe,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+parotid_gland_left,parotid_gland_left,Totalsegmentator (head_glands_cavities)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+parotid_gland_right,parotid_gland_right,Totalsegmentator (head_glands_cavities)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+parotid_glands,parotid_glands,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+patella,patella,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+patella_left,patella_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+patella_right,patella_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+pericardium,pericardium,SAROS nnUNet/CADS,"saros_nnunet,cads","SAROS nnUNet,CADS"
+phalanges_feet,phalanges_feet,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+phalanges_hand,phalanges_hand,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+pituitary_gland,pituitary_gland,CADS,cads,CADS
+platysma_left,platysma_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+platysma_right,platysma_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+portal_vein_and_splenic_vein,portal_vein_and_splenic_vein,VSmTrans/CADS/MOOSE3.0 (clin_ct_cardiac),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+postcava,postcava,VSmTrans,vsmtrans,VSmTrans
+posterior_eyeball_segment_left,posterior_eyeball_segment_left,CADS,cads,CADS
+posterior_eyeball_segment_right,posterior_eyeball_segment_right,CADS,cads,CADS
+posterior_scalene_left,posterior_scalene_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+posterior_scalene_right,posterior_scalene_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+prevertebral_left,prevertebral_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+prevertebral_right,prevertebral_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+prostate,prostate,VSmTrans/CADS,"vsmtrans,cads","VSmTrans,CADS"
+prosthetic_breast_implant,prosthetic_breast_implant,CADS,cads,CADS
+psoas_major_muscle_left,psoas_major_muscle_left,CADS,cads,CADS
+psoas_major_muscle_right,psoas_major_muscle_right,CADS,cads,CADS
+pulmonary_artery,pulmonary_artery,DAP/Totalsegmentator (heartchambers_highres)/CADS,"dap,totalsegmentator,cads","DAP,Totalsegmentator,CADS"
+pulmonary_vein,pulmonary_vein,VISTA3D/MOOSE3.0 (clin_ct_cardiac),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+radius,radius,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+radius_left,radius_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+radius_right,radius_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+rectum,rectum,VSmTrans/CADS,"vsmtrans,cads","VSmTrans,CADS"
+rectus_abdominis_muscle_left,rectus_abdominis_muscle_left,CADS,cads,CADS
+rectus_abdominis_muscle_right,rectus_abdominis_muscle_right,CADS,cads,CADS
+renal_vein_left,renal_vein_left,ePAI,epai_20250421,ePAI
+renal_vein_right,renal_vein_right,ePAI,epai_20250421,ePAI
+rib_cartilage,rib_cartilage,Totalsegmentator(total)/DAP,"totalsegmentator,dap","Totalsegmentator,DAP"
+rib_left_1,rib_left_1,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_2,rib_left_2,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_3,rib_left_3,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_4,rib_left_4,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_5,rib_left_5,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_6,rib_left_6,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_7,rib_left_7,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_8,rib_left_8,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_9,rib_left_9,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_10,rib_left_10,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_11,rib_left_11,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_left_12,rib_left_12,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_1,rib_right_1,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_2,rib_right_2,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_3,rib_right_3,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_4,rib_right_4,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_5,rib_right_5,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_6,rib_right_6,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_7,rib_right_7,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_8,rib_right_8,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_9,rib_right_9,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_10,rib_right_10,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_11,rib_right_11,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+rib_right_12,rib_right_12,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+sacrum,sacrum,VISTA3D/CADS/MOOSE3.0 (clin_ct_vertebrae),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+scalp,scalp,CADS,cads,CADS
+scapula_left,scapula_left,VISTA3D/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+scapula_right,scapula_right,VISTA3D/CADS/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+seminal_vesicle,seminal_vesicle,CADS,cads,CADS
+septum_pellucidum,septum_pellucidum,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+sigmoid_colon,sigmoid_colon,CADS,cads,CADS
+skeletal_muscle,skeletal_muscle,SAROS nnUNet/Duke/MOOSE3.0 (clin_ct_body_composition),"saros_nnunet,duke,moose3_0","SAROS nnUNet,Duke,MOOSE3.0"
+skin,skin,Totalsegmentator(body)/DAP,"totalsegmentator,dap","Totalsegmentator,DAP"
+skull,skull,VISTA3D/MOOSE3.0 (clin_ct_peripheral_bones),"vista3d,moose3_0","VISTA3D,MOOSE3.0"
+small_bowel,small_bowel,Totalsegmentator(total)/DAP/CADS/MOOSE3.0 (clin_ct_digestive),"totalsegmentator,dap,cads,moose3_0","Totalsegmentator,DAP,CADS,MOOSE3.0"
+soft_palate,soft_palate,Totalsegmentator (head_glands_cavities),totalsegmentator,Totalsegmentator
+spinal_canal,spinal_canal,DAP/CADS,"dap,cads","DAP,CADS"
+spinal_cord,spinal_cord,VISTA3D/CADS,"vista3d,cads","VISTA3D,CADS"
+spleen,spleen,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+spongy_bone,spongy_bone,CADS,cads,CADS
+sterno_thyroid_left,sterno_thyroid_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+sterno_thyroid_right,sterno_thyroid_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+sternocleidomastoid_left,sternocleidomastoid_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+sternocleidomastoid_right,sternocleidomastoid_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+sternum,sternum,VISTA3D/CADS/MOOSE3.0 (clin_ct_ribs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+sternum_corpus,sternum_corpus,DAP,dap,DAP
+sternum_manubrium,sternum_manubrium,DAP,dap,DAP
+stomach,stomach,VSmTrans/CADS/MOOSE3.0 (clin_ct_organs),"vsmtrans,cads,moose3_0","VSmTrans,CADS,MOOSE3.0"
+styloid_process_left,styloid_process_left,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+styloid_process_right,styloid_process_right,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+subarachnoid_space,subarachnoid_space,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+subclavian_artery_left,subclavian_artery_left,VISTA3D,vista3d,VISTA3D
+subclavian_artery_right,subclavian_artery_right,VISTA3D,vista3d,VISTA3D
+subcutaneous_adipose_tissue,subcutaneous_adipose_tissue,SAROS nnUNet/Duke/CADS/MOOSE3.0 (clin_ct_body_composition),"saros_nnunet,duke,cads,moose3_0","SAROS nnUNet,Duke,CADS,MOOSE3.0"
+submandibular_gland_left,submandibular_gland_left,Totalsegmentator (head_glands_cavities)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+submandibular_gland_right,submandibular_gland_right,Totalsegmentator (head_glands_cavities)/CADS,"totalsegmentator,cads","Totalsegmentator,CADS"
+submandibular_glands,submandibular_glands,SAROS nnUNet,saros_nnunet,SAROS nnUNet
+superior_mesenteric_artery,superior_mesenteric_artery,ePAI,epai_20250421,ePAI
+superior_mesenteric_vein,superior_mesenteric_vein,,,
+superior_oblique_muscle_left,superior_oblique_muscle_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+superior_oblique_muscle_right,superior_oblique_muscle_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+superior_rectus_muscle_left,superior_rectus_muscle_left,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+superior_rectus_muscle_right,superior_rectus_muscle_right,Totalsegmentator (oculomotor_muscles),totalsegmentator,Totalsegmentator
+superior_vena_cava,superior_vena_cava,VISTA3D,vista3d,VISTA3D
+supraglottis,supraglottis,CADS,cads,CADS
+tarsal,tarsal,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+tarsal_left,tarsal_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+tarsal_right,tarsal_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+temporal_lobe,temporal_lobe,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+temporalis_left,temporalis_left,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+temporalis_right,temporalis_right,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+thalamus,thalamus,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+thoracic_cavity,thoracic_cavity,SAROS nnUNet/CADS,"saros_nnunet,cads","SAROS nnUNet,CADS"
+thymus,thymus,DAP,dap,DAP
+thyrohyoid_left,thyrohyoid_left,Totalsegmentator (headneck_muscles)/MOOSE3.0 (clin_ct_organs),"totalsegmentator,moose3_0","Totalsegmentator,MOOSE3.0"
+thyrohyoid_right,thyrohyoid_right,Totalsegmentator (headneck_muscles)/MOOSE3.0 (clin_ct_organs),"totalsegmentator,moose3_0","Totalsegmentator,MOOSE3.0"
+thyroid_cartilage,thyroid_cartilage,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+thyroid_gland,thyroid_gland,VISTA3D/CADS,"vista3d,cads","VISTA3D,CADS"
+thyroid_left,thyroid_left,DAP,dap,DAP
+thyroid_right,thyroid_right,DAP,dap,DAP
+tibia,tibia,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+tibia_left,tibia_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+tibia_right,tibia_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+toes_left,toes_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+toes_right,toes_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+tongue,tongue,Totalsegmentator (head_muscles),totalsegmentator,Totalsegmentator
+trachea,trachea,VISTA3D/CADS/MOOSE3.0 (clin_ct_organs),"vista3d,cads,moose3_0","VISTA3D,CADS,MOOSE3.0"
+trapezius_left,trapezius_left,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+trapezius_right,trapezius_right,Totalsegmentator (headneck_muscles),totalsegmentator,Totalsegmentator
+ulna,ulna,Totalsegmentator (appendicular_bones),totalsegmentator,Totalsegmentator
+ulna_left,ulna_left,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+ulna_right,ulna_right,MOOSE3.0 (clin_ct_peripheral_bones),moose3_0,MOOSE3.0
+uterocervix,uterocervix,DAP,dap,DAP
+uterus,uterus,DAP,dap,DAP
+veins,veins,ePAI,epai_20250421,ePAI
+venous_sinuses,venous_sinuses,Totalsegmentator (brain_structures),totalsegmentator,Totalsegmentator
+vertebrae_c1,vertebrae_C1,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_c2,vertebrae_C2,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_c3,vertebrae_C3,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_c4,vertebrae_C4,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_c5,vertebrae_C5,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_c6,vertebrae_C6,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_c7,vertebrae_C7,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_l1,vertebrae_L1,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_l2,vertebrae_L2,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_l3,vertebrae_L3,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_l4,vertebrae_L4,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_l5,vertebrae_L5,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_s1,vertebrae_S1,GOACC/VISTA3D,"goacc,vista3d","GOACC,VISTA3D"
+vertebrae_t1,vertebrae_T1,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t2,vertebrae_T2,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t3,vertebrae_T3,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t4,vertebrae_T4,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t5,vertebrae_T5,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t6,vertebrae_T6,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t7,vertebrae_T7,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t8,vertebrae_T8,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t9,vertebrae_T9,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t10,vertebrae_T10,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t11,vertebrae_T11,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+vertebrae_t12,vertebrae_T12,GOACC/VISTA3D/CADS/MOOSE (clin_ct_vertebrae),"goacc,vista3d,cads,moose","GOACC,VISTA3D,CADS,MOOSE"
+visceral_adipose_tissue,visceral_adipose_tissue,SAROS nnUNet/Duke/MOOSE3.0 (clin_ct_body_composition),"saros_nnunet,duke,moose3_0","SAROS nnUNet,Duke,MOOSE3.0"
+white_matter,white_matter,CADS,cads,CADS
+zygomatic_arch_left,zygomatic_arch_left,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator
+zygomatic_arch_right,zygomatic_arch_right,Totalsegmentator (headneck_bones_vessels),totalsegmentator,Totalsegmentator

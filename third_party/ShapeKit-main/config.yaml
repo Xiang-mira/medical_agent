@@ -1,0 +1,92 @@
+# folder name to contain all the organ files in a case
+subfolder_name: segmentations
+
+# mapping dict, remember to change
+class_map:
+  1: aorta
+  2: gall_bladder
+  3: kidney_left
+  4: kidney_right
+  5: liver
+  6: pancreas
+  7: postcava
+  8: spleen
+  9: stomach
+  10: adrenal_gland_left
+  11: adrenal_gland_right
+  12: bladder
+  13: celiac_trunk
+  14: colon
+  15: duodenum
+  16: esophagus
+  17: femur_left
+  18: femur_right
+  19: hepatic_vessel
+  20: intestine
+  21: lung_left
+  22: lung_right
+  23: portal_vein_and_splenic_vein
+  24: prostate
+  25: rectum
+  26: vertebrae_L5
+  27: vertebrae_L4
+  28: vertebrae_L3
+  29: vertebrae_L2
+  30: vertebrae_L1
+  31: vertebrae_T12
+  32: vertebrae_T11
+  33: vertebrae_T10
+  34: vertebrae_T9
+  35: vertebrae_T8
+  36: vertebrae_T7
+  37: vertebrae_T6
+  38: vertebrae_T5
+  39: vertebrae_T4
+  40: vertebrae_T3
+  41: vertebrae_T2
+  42: vertebrae_T1
+  43: vertebrae_C7
+  44: vertebrae_C6
+  45: vertebrae_C5
+  46: vertebrae_C4
+  47: vertebrae_C3
+  48: vertebrae_C2
+  49: vertebrae_C1
+
+# plug-and-play like Lego! choose organs for processing
+target_organs:
+  - adrenal_gland
+  - aorta
+  - bladder
+  - colon
+  - duodenum
+  - femur
+  - intestine
+  - kidney
+  - liver
+  - lung
+  - pancreas
+  - postcava
+  - prostate
+  - spleen
+  - stomach
+  - vertebrae
+
+
+# list of false positive suspects
+organ_adjacency_map:
+  lung_left: [postcava]
+  lung_right: [postcava]
+  liver: [kidney_right, pancreas]
+  pancreas: [liver, stomach, colon, intestine]
+  spleen: [liver]
+  kidney_left: [liver]
+  stomach: [pancreas, intestine, colon]
+  aorta: [postcava]
+  postcava: [aorta]
+  colon: [intestine, lung_left, lung_right]
+
+# affine reference, default as liver
+affine_reference_file_name: liver.nii.gz
+
+if_save_combined_label: True

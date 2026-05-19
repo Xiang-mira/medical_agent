@@ -1,0 +1,72 @@
+# ── Model checkpoints (large binary weights) ──────────────────────────────────
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.pkl
+
+# ── CT / medical imaging data ─────────────────────────────────────────────────
+third_party/PanTS-main/data/
+PanTSMini_Label/
+*.nii.gz
+*.nii
+*.mha
+*.mhd
+*.dcm
+*.tar.gz
+*.zip
+*.tar
+
+# ── Runtime outputs ───────────────────────────────────────────────────────────
+outputs/
+results/
+comparison_results/
+rows/
+cid/
+label_dir/
+import/
+
+# ── nnUNet environment folders (generated at runtime) ─────────────────────────
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.npz
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+_inspect_*/
+.pytest_tmp*/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+secrets.json
+credentials.json

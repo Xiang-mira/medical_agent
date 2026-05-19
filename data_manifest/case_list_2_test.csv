@@ -1,0 +1,3 @@
+case_id,ct_path,annotation_folder
+PanTS_00000001,/root/autodl-tmp/medai_v14/third_party/PanTS-main/data/ImageTr/PanTS_00000001/ct.nii.gz,
+PanTS_00000002,/root/autodl-tmp/medai_v14/third_party/PanTS-main/data/ImageTr/PanTS_00000002/ct.nii.gz,/root/autodl-tmp/medai_v14/third_party/PanTS-main/data/LabelTr/PanTS_00000002/segmentations

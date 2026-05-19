@@ -1,0 +1,3 @@
+case_id,ct_path,annotation_folder,report_path,clinical_path,pathology_path
+PanTS_00000001,data/PanTS_00000001/ct.nii.gz,data/PanTS_00000001/reference/segmentations,data/PanTS_00000001/report.txt,data/PanTS_00000001/clinical.json,data/PanTS_00000001/pathology.json
+PanTS_00000002,data/PanTS_00000002/ct.nii.gz,data/PanTS_00000002/reference/segmentations,data/PanTS_00000002/report.txt,data/PanTS_00000002/clinical.json,data/PanTS_00000002/pathology.json

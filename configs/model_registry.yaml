@@ -1,0 +1,2298 @@
+schema_version: '1.0'
+generated_from: D:\Desktop\medai_agent_loop_task2_final_v14_windows_safe\medai_v14\configs\class_checkpoint_map.xlsx
+checkpoint_root: checkpoints
+models:
+  airrc:
+    name: airrc
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - airway_wall
+    - lung_pulmonary_arteries
+    - lung_pulmonary_veins
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/airrc
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+  atlasnet:
+    name: ATLAS-Net nnUNet v2 abdominal 25-class model
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - adrenal_gland_left
+    - adrenal_gland_right
+    - aorta
+    - colon
+    - common_bile_duct
+    - duodenum
+    - gall_bladder
+    - inferior_vena_cava
+    - kidney_left
+    - kidney_right
+    - liver
+    - pancreas
+    - pancreatic_cyst
+    - pancreatic_duct
+    - pancreatic_pdac
+    - pancreatic_pnet
+    - portal_vein_and_splenic_vein
+    - renal_vein_left
+    - renal_vein_right
+    - small_intestine
+    - spleen
+    - stomach
+    - superior_mesenteric_artery
+    status: ready_if_atlasnet_checkpoint_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: ATLAS-Net model card from teacher's 'Another version of ShapeKit.docx'
+      is integrated. It covers 25 abdominal organ/tumor labels and expects Linux/CUDA/nnUNet
+      v2 plus downloaded ATLAS-Net weights.
+    runner: command_template
+    checkpoint_path: checkpoints/ATLAS-Net
+    label_map_path: configs/atlasnet_label_map.json
+    command_template: python scripts/atlasnet_predict_and_split.py --image {image}
+      --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path}
+    private_checkpoint: false
+    source_code_path: docs/ATLAS-Net_model_card_from_teacher.docx
+    trainable: yes_if_atlasnet_nnunet_training_state_present
+    mstep_role: conditional_trainable_abdominal_25_class_backend
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1002
+    mstep_init_from: checkpoints/ATLAS-Net
+    mstep_reason: ATLAS-Net is described as an nnUNet v2 abdominal model; fine-tuning
+      requires downloaded weights and nnUNet-compatible training files.
+  atm:
+    name: atm
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - airway_tree
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/atm
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+  cads:
+    name: CADS abdominal nnUNet Dataset551
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - abdominal_cavity
+    - adrenal_gland_left
+    - adrenal_gland_right
+    - anterior_eyeball_segment_left
+    - anterior_eyeball_segment_right
+    - aorta
+    - arytenoid_cartilage
+    - bladder
+    - blood
+    - bones
+    - both_lips
+    - brain
+    - brainstem
+    - buccal_mucosa
+    - carotid_artery_left
+    - carotid_artery_right
+    - cerebrospinal_fluid
+    - cervical_esophagus
+    - clavicula_left
+    - clavicula_right
+    - cochlear_left
+    - cochlear_right
+    - colon
+    - colostomy_bag
+    - common_iliac_artery_left
+    - common_iliac_artery_right
+    - common_iliac_vein_left
+    - common_iliac_vein_right
+    - compact_bone
+    - cricopharyngeus
+    - duodenum
+    - esophagus
+    - eyeball
+    - face
+    - femur_left
+    - femur_right
+    - gall_bladder
+    - gland_structure
+    - glottis
+    - gluteus_maximus_left
+    - gluteus_maximus_right
+    - gluteus_medius_left
+    - gluteus_medius_right
+    - gluteus_minimus_left
+    - gluteus_minimus_right
+    - gray_matter
+    - heart
+    - heart_atrium_left
+    - heart_atrium_right
+    - heart_myocardium
+    - heart_ventricle_left
+    - heart_ventricle_right
+    - hip_left
+    - hip_right
+    - humerus_left
+    - humerus_right
+    - iliopsoas_left
+    - iliopsoas_right
+    - inferior_vena_cava
+    - kidney_left
+    - kidney_right
+    - lacrimal_gland_left
+    - lacrimal_gland_right
+    - larynx
+    - liver
+    - lung_lower_left_lobe
+    - lung_lower_right_lobe
+    - lung_middle_right_lobe
+    - lung_upper_left_lobe
+    - lung_upper_right_lobe
+    - mammary_gland_left
+    - mammary_gland_right
+    - mandible
+    - mediastinum
+    - muscle
+    - muscle_of_head
+    - optic_chiasm
+    - optic_nerve_left
+    - optic_nerve_right
+    - oral_cavity
+    - pancreas
+    - parotid_gland_left
+    - parotid_gland_right
+    - pericardium
+    - pituitary_gland
+    - portal_vein_and_splenic_vein
+    - posterior_eyeball_segment_left
+    - posterior_eyeball_segment_right
+    - prostate
+    - prosthetic_breast_implant
+    - psoas_major_muscle_left
+    - psoas_major_muscle_right
+    - pulmonary_artery
+    - rectum
+    - rectus_abdominis_muscle_left
+    - rectus_abdominis_muscle_right
+    - rib_left_1
+    - rib_left_10
+    - rib_left_11
+    - rib_left_12
+    - rib_left_2
+    - rib_left_3
+    - rib_left_4
+    - rib_left_5
+    - rib_left_6
+    - rib_left_7
+    - rib_left_8
+    - rib_left_9
+    - rib_right_1
+    - rib_right_10
+    - rib_right_11
+    - rib_right_12
+    - rib_right_2
+    - rib_right_3
+    - rib_right_4
+    - rib_right_5
+    - rib_right_6
+    - rib_right_7
+    - rib_right_8
+    - rib_right_9
+    - sacrum
+    - scalp
+    - scapula_left
+    - scapula_right
+    - seminal_vesicle
+    - sigmoid_colon
+    - small_bowel
+    - spinal_canal
+    - spinal_cord
+    - spleen
+    - spongy_bone
+    - sternum
+    - stomach
+    - subcutaneous_adipose_tissue
+    - submandibular_gland_left
+    - submandibular_gland_right
+    - supraglottis
+    - thoracic_cavity
+    - thyroid_gland
+    - trachea
+    - vertebrae_c1
+    - vertebrae_c2
+    - vertebrae_c3
+    - vertebrae_c4
+    - vertebrae_c5
+    - vertebrae_c6
+    - vertebrae_c7
+    - vertebrae_l1
+    - vertebrae_l2
+    - vertebrae_l3
+    - vertebrae_l4
+    - vertebrae_l5
+    - vertebrae_t1
+    - vertebrae_t10
+    - vertebrae_t11
+    - vertebrae_t12
+    - vertebrae_t2
+    - vertebrae_t3
+    - vertebrae_t4
+    - vertebrae_t5
+    - vertebrae_t6
+    - vertebrae_t7
+    - vertebrae_t8
+    - vertebrae_t9
+    - white_matter
+    status: checkpoint_corrupted
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: 'Dataset551 checkpoint is corrupted (truncated transfer). Only Dataset557
+      (Brain) and Dataset558 (OAR/head-neck) are valid. CADS is disabled for abdominal
+      organ inference until Dataset551 is re-downloaded.'
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series
+    dataset_json_path: checkpoints/CADS_series/Dataset551_Totalseg251/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 551
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
+    private_checkpoint: true
+    trainable: checkpoint_corrupted
+    mstep_role: trainable_candidate_for_broad_abdominal_organs
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1551
+    mstep_init_from: checkpoints/CADS_series/Dataset551_Totalseg251
+    mstep_reason: CADS is exposed as an nnUNet-style checkpoint family and covers
+      many abdominal structures; fine-tuning requires its complete training state/checkpoint
+      layout.
+  dap:
+    name: dap
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - artery_brachiocephalic
+    - artery_common_carotid_left
+    - artery_common_carotid_right
+    - artery_internal_carotid_left
+    - artery_internal_carotid_right
+    - artery_subclavian_left
+    - artery_subclavian_right
+    - breast_left
+    - breast_right
+    - bronchus
+    - cheek_left
+    - cheek_right
+    - eyeball_left
+    - eyeball_right
+    - fat
+    - gonads
+    - heart_atrium_left
+    - heart_atrium_right
+    - heart_myocardium
+    - heart_tissue
+    - heart_ventricle_left
+    - heart_ventricle_right
+    - inferior_vena_cava
+    - internal_jugular_vein_left
+    - internal_jugular_vein_right
+    - mediastinal_tissue
+    - pulmonary_artery
+    - rib_cartilage
+    - skin
+    - small_bowel
+    - spinal_canal
+    - sternum_corpus
+    - sternum_manubrium
+    - thymus
+    - thyroid_left
+    - thyroid_right
+    - uterocervix
+    - uterus
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Template retained; the lightweight export did not include a runnable script
+      for this family.
+    runner: command_template
+    checkpoint_path: checkpoints/dap
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+  duke:
+    name: duke
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - muscle_fat
+    - skeletal_muscle
+    - subcutaneous_adipose_tissue
+    - visceral_adipose_tissue
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/duke
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+  epai_20250421:
+    name: ePAI qchen76 2025-04-21 / Dataset1017 25-class abdomen-pancreas model
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - aorta
+    - adrenal_gland_left
+    - adrenal_gland_right
+    - common_bile_duct
+    - celiac_aa
+    - colon
+    - duodenum
+    - gall_bladder
+    - postcava
+    - kidney_left
+    - kidney_right
+    - liver
+    - pancreas
+    - pancreatic_duct
+    - superior_mesenteric_artery
+    - intestine
+    - spleen
+    - stomach
+    - veins
+    - renal_vein_left
+    - renal_vein_right
+    - cbd_stent
+    - pancreatic_pdac
+    - pancreatic_cyst
+    - pancreatic_pnet
+    status: ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Verified against qchen76_2025_0421.tar.gz. Dataset1017_ePAI_3MM has background
+      plus 25 foreground organ/duct/tumor labels. ePAI source is bundled and patched
+      so all-organ output is the default; pancreas/tumor-only filtering can be restored
+      with --output_label_mode pancreas_only.
+    runner: command_template
+    supported_organ_aliases:
+      celiac_aa_celiac_artery: celiac_aa
+      inferior_vena_cava: postcava
+      small_intestine: intestine
+      portal_splenic_veins: veins
+      portal_vein_and_splenic_vein: veins
+    checkpoint_path: checkpoints/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres
+    dataset_json_path: checkpoints/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 1017
+    trainer: nnUNetTrainer
+    plans: nnUNetPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_root}
+      --dataset-json {dataset_json_path} --model-folder {checkpoint_path} --workdir
+      third_party/ePAI-main/train --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name checkpoint_final.pth --output-label-mode
+      all_organs
+    private_checkpoint: true
+    source_code_path: third_party/ePAI-main
+    all_organ_patch: scripts/patch_epai_enable_all_organs.py
+    trainable: yes_if_nnunet_checkpoint_present
+    mstep_role: primary_trainable_for_pancreas_and_pancreatic_tumor_and_candidate_for_25_class_abdominal_organs
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1939
+    mstep_init_from: checkpoints/qchen76_2025_0421
+    mstep_reason: ePAI qchen76_2025_0421 is the teacher-specified 25-class abdominal
+      organ/duct/tumor checkpoint and is nnUNet-style, so it is the preferred M-step
+      target for PanTS pancreas tasks and a candidate for related organ refinement.
+  epai_finetuned:
+    name: ePAI finetuned (M-step round1, 50 epochs, 9-class)
+    type: segmentation
+    source: mstep_output
+    covered_organs:
+    - aorta
+    - duodenum
+    - kidney_left
+    - kidney_right
+    - liver
+    - pancreas
+    - postcava
+    - spleen
+    - stomach
+    status: ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Fine-tuned from scratch on 12 annotated PanTS cases, 50 epochs, nnUNetTrainer_fast_50epochs.
+      Covers 9 abdominal organs. Use alongside epai_20250421 for Round 2 comparison.
+    runner: command_template
+    checkpoint_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results/Dataset1939_MedAI_epai_20250421/nnUNetTrainer_fast_50epochs__nnUNetPlans__3d_fullres
+    nnunet_results_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results
+    dataset_json_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results/Dataset1939_MedAI_epai_20250421/nnUNetTrainer_fast_50epochs__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 1939
+    trainer: nnUNetTrainer_fast_50epochs
+    plans: nnUNetPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {nnunet_results_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --use-python-api
+    private_checkpoint: false
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_backend: nnunetv2_finetune
+  goacc:
+    name: goacc
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - vertebrae_c1
+    - vertebrae_c2
+    - vertebrae_c3
+    - vertebrae_c4
+    - vertebrae_c5
+    - vertebrae_c6
+    - vertebrae_c7
+    - vertebrae_l1
+    - vertebrae_l2
+    - vertebrae_l3
+    - vertebrae_l4
+    - vertebrae_l5
+    - vertebrae_s1
+    - vertebrae_t1
+    - vertebrae_t10
+    - vertebrae_t11
+    - vertebrae_t12
+    - vertebrae_t2
+    - vertebrae_t3
+    - vertebrae_t4
+    - vertebrae_t5
+    - vertebrae_t6
+    - vertebrae_t7
+    - vertebrae_t8
+    - vertebrae_t9
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Template retained; the lightweight export did not include a runnable script
+      for this family.
+    runner: command_template
+    checkpoint_path: checkpoints/goacc
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+  mock_seg:
+    name: Local mock segmentation wrapper
+    type: segmentation
+    runner: command_template
+    status: ready
+    private_checkpoint: false
+    covered_organs:
+    - liver
+    - pancreas
+    - spleen
+    - kidney_left
+    - kidney_right
+    - aorta
+    - postcava
+    command_template: python third_party/mock_model/mock_seg_infer.py --image {image}
+      --output {output} --case-id {case_id}
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Synthetic smoke-test backend only. Use it to validate the CLI loop before
+      real GPU checkpoints are available.
+    trainable: 'no'
+    mstep_role: dry_run_only
+    mstep_backend: none
+    mstep_reason: Synthetic mock model for pipeline dry-runs only.
+  moose:
+    name: MOOSE available cardiac/vascular nnUNet Dataset888
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - vertebrae_c1
+    - vertebrae_c2
+    - vertebrae_c3
+    - vertebrae_c4
+    - vertebrae_c5
+    - vertebrae_c6
+    - vertebrae_c7
+    - vertebrae_l1
+    - vertebrae_l2
+    - vertebrae_l3
+    - vertebrae_l4
+    - vertebrae_l5
+    - vertebrae_t1
+    - vertebrae_t10
+    - vertebrae_t11
+    - vertebrae_t12
+    - vertebrae_t2
+    - vertebrae_t3
+    - vertebrae_t4
+    - vertebrae_t5
+    - vertebrae_t6
+    - vertebrae_t7
+    - vertebrae_t8
+    - vertebrae_t9
+    status: partial_ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: The lightweight export only exposed MOOSE Dataset666/888. Dataset888 is
+      useful for aorta/vascular structures; not a full abdominal organ model.
+    runner: command_template
+    checkpoint_path: checkpoints/MOOSE_series
+    dataset_json_path: checkpoints/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 888
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
+    private_checkpoint: true
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: conditional_trainable_candidate_for_moose_tasks
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1888
+    mstep_init_from: checkpoints/MOOSE_series/Dataset888_Cardiac
+    mstep_reason: MOOSE is treated as nnUNet-style only when the corresponding full
+      dataset/checkpoint is present; the current lightweight export exposes limited
+      runnable structure.
+  moose3_0:
+    name: MOOSE3.0 full-body nnUNet Dataset666 (multi-organ)
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - adrenal_gland_left
+    - adrenal_gland_right
+    - aorta
+    - arms
+    - autochthon_left
+    - autochthon_right
+    - bladder
+    - brain
+    - carpal_left
+    - carpal_right
+    - clavicula_left
+    - clavicula_right
+    - colon
+    - duodenum
+    - esophagus
+    - femur_left
+    - femur_right
+    - fibula_left
+    - fibula_right
+    - fingers_left
+    - fingers_right
+    - gall_bladder
+    - gluteus_maximus_left
+    - gluteus_maximus_right
+    - gluteus_medius_left
+    - gluteus_medius_right
+    - gluteus_minimus_left
+    - gluteus_minimus_right
+    - head
+    - heart_atrium_left
+    - heart_atrium_right
+    - heart_myocardium
+    - heart_ventricle_left
+    - heart_ventricle_right
+    - hip_left
+    - hip_right
+    - humerus_left
+    - humerus_right
+    - iliac_artery_left
+    - iliac_artery_right
+    - iliac_vena_left
+    - iliac_vena_right
+    - iliopsoas_left
+    - iliopsoas_right
+    - inferior_vena_cava
+    - kidney_left
+    - kidney_right
+    - legs
+    - liver
+    - lung_lower_left_lobe
+    - lung_lower_right_lobe
+    - lung_middle_right_lobe
+    - lung_upper_left_lobe
+    - lung_upper_right_lobe
+    - metacarpal_left
+    - metacarpal_right
+    - metatarsal_left
+    - metatarsal_right
+    - pancreas
+    - patella_left
+    - patella_right
+    - portal_vein_and_splenic_vein
+    - pulmonary_vein
+    - radius_left
+    - radius_right
+    - rib_left_1
+    - rib_left_10
+    - rib_left_11
+    - rib_left_12
+    - rib_left_2
+    - rib_left_3
+    - rib_left_4
+    - rib_left_5
+    - rib_left_6
+    - rib_left_7
+    - rib_left_8
+    - rib_left_9
+    - rib_right_1
+    - rib_right_10
+    - rib_right_11
+    - rib_right_12
+    - rib_right_2
+    - rib_right_3
+    - rib_right_4
+    - rib_right_5
+    - rib_right_6
+    - rib_right_7
+    - rib_right_8
+    - rib_right_9
+    - sacrum
+    - scapula_left
+    - scapula_right
+    - skeletal_muscle
+    - skull
+    - small_bowel
+    - spleen
+    - sternum
+    - stomach
+    - subcutaneous_adipose_tissue
+    - tarsal_left
+    - tarsal_right
+    - thyrohyoid_left
+    - thyrohyoid_right
+    - tibia_left
+    - tibia_right
+    - toes_left
+    - toes_right
+    - trachea
+    - ulna_left
+    - ulna_right
+    - visceral_adipose_tissue
+    status: partial_ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: 'MOOSE3.0 covers full-body organs (Dataset666) and is DISTINCT from MOOSE
+      (Dataset888_Cardiac). Set checkpoint_path to checkpoints/MOOSE_series/Dataset666_*
+      once the teacher provides MOOSE3.0 weights. Currently shares Dataset888 path as
+      placeholder; update dataset_id and dataset_json_path when MOOSE3.0 checkpoint arrives.'
+    runner: command_template
+    checkpoint_path: checkpoints/MOOSE_series
+    dataset_json_path: checkpoints/MOOSE_series/Dataset666_Organs/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 666
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
+    private_checkpoint: true
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: conditional_trainable_candidate_for_moose3_tasks
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1889
+    mstep_init_from: checkpoints/MOOSE_series/Dataset666_Organs
+    mstep_reason: MOOSE3.0 uses Dataset666 (full-body organs), not Dataset888 (cardiac).
+      Fine-tuning requires the complete MOOSE3.0 checkpoint/training state.
+  nnunet_private:
+    name: Private AbdomenAtlas nnUNet Dataset224
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - aorta
+    - colon
+    - duodenum
+    - kidney_left
+    - kidney_right
+    - liver
+    - pancreas
+    - postcava
+    - spleen
+    - stomach
+    status: ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Private AbdomenAtlas organ model from Drive export; useful as an organ-mask
+      candidate.
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 224
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
+    private_checkpoint: true
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: private_abdominal_organ_trainable_backend
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1224
+    mstep_init_from: checkpoints/nnUNet_private/Dataset224_AbdomenAtlas1.1
+    mstep_reason: Private AbdomenAtlas nnUNet is a natural trainable backend for organ-mask
+      refinement if the lab's full checkpoint/training layout is mounted.
+  pedro:
+    name: pedro
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - liver_segment_1
+    - liver_segment_2
+    - liver_segment_3
+    - liver_segment_4
+    - liver_segment_5
+    - liver_segment_6
+    - liver_segment_7
+    - liver_segment_8
+    - pancreas_body
+    - pancreas_head
+    - pancreas_tail
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/pedro
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+  saros_nnunet:
+    name: Private SAROS nnUNet Dataset1345
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - abdominal_cavity
+    - arm_left
+    - arm_right
+    - head
+    - intermuscular_adipose_tissue
+    - leg_left
+    - leg_right
+    - mediastinum
+    - muscle
+    - parotid_glands
+    - pericardium
+    - skeletal_muscle
+    - subcutaneous_adipose_tissue
+    - submandibular_glands
+    - thoracic_cavity
+    - visceral_adipose_tissue
+    status: ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: SAROS body-region model; not the first choice for PanTS organ refinement.
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1345
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
+    private_checkpoint: true
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: conditional_trainable_body_region_backend
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 2345
+    mstep_init_from: checkpoints/nnUNet_private/Dataset1345_SAROS
+    mstep_reason: SAROS is a private nnUNet-style model but not the first-choice PanTS
+      pancreas target.
+  totalsegmentator:
+    name: TotalSegmentator
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - anterior_scalene_left
+    - anterior_scalene_right
+    - auditory_canal_left
+    - auditory_canal_right
+    - body
+    - body_extremities
+    - body_trunc
+    - brain_ventricle
+    - brainstem
+    - carpal
+    - caudate_nucleus
+    - central_sulcus
+    - cerebellum
+    - coronary_artery
+    - cricoid_cartilage
+    - digastric_left
+    - digastric_right
+    - eye_lens_left
+    - eye_lens_right
+    - fibula
+    - frontal_lobe
+    - hard_palate
+    - hyoid
+    - hypopharynx
+    - inferior_oblique_muscle_left
+    - inferior_oblique_muscle_right
+    - inferior_pharyngeal_constrictor
+    - inferior_rectus_muscle_left
+    - inferior_rectus_muscle_right
+    - inferior_vena_cava
+    - insular_cortex
+    - internal_capsule
+    - internal_carotid_artery_left
+    - internal_carotid_artery_right
+    - internal_jugular_vein_left
+    - internal_jugular_vein_right
+    - lateral_pterygoid_left
+    - lateral_pterygoid_right
+    - lateral_rectus_muscle_left
+    - lateral_rectus_muscle_right
+    - lentiform_nucleus
+    - levator_palpebrae_superioris_left
+    - levator_palpebrae_superioris_right
+    - levator_scapulae_left
+    - levator_scapulae_right
+    - liver_segment_1
+    - liver_segment_2
+    - liver_segment_3
+    - liver_segment_4
+    - liver_segment_5
+    - liver_segment_6
+    - liver_segment_7
+    - liver_segment_8
+    - lung_trachea_bronchia
+    - lung_vessels
+    - masseter_left
+    - masseter_right
+    - medial_pterygoid_left
+    - medial_pterygoid_right
+    - medial_rectus_muscle_left
+    - medial_rectus_muscle_right
+    - metacarpal
+    - metatarsal
+    - middle_pharyngeal_constrictor
+    - middle_scalene_left
+    - middle_scalene_right
+    - nasal_cavity_left
+    - nasal_cavity_right
+    - nasopharynx
+    - occipital_lobe
+    - optic_nerve_left
+    - optic_nerve_right
+    - oropharynx
+    - parietal_lobe
+    - parotid_gland_left
+    - parotid_gland_right
+    - patella
+    - phalanges_feet
+    - phalanges_hand
+    - platysma_left
+    - platysma_right
+    - posterior_scalene_left
+    - posterior_scalene_right
+    - prevertebral_left
+    - prevertebral_right
+    - pulmonary_artery
+    - radius
+    - rib_cartilage
+    - septum_pellucidum
+    - skin
+    - small_bowel
+    - soft_palate
+    - sterno_thyroid_left
+    - sterno_thyroid_right
+    - sternocleidomastoid_left
+    - sternocleidomastoid_right
+    - styloid_process_left
+    - styloid_process_right
+    - subarachnoid_space
+    - submandibular_gland_left
+    - submandibular_gland_right
+    - superior_oblique_muscle_left
+    - superior_oblique_muscle_right
+    - superior_rectus_muscle_left
+    - superior_rectus_muscle_right
+    - tarsal
+    - temporal_lobe
+    - temporalis_left
+    - temporalis_right
+    - thalamus
+    - thyrohyoid_left
+    - thyrohyoid_right
+    - thyroid_cartilage
+    - tibia
+    - tongue
+    - trapezius_left
+    - trapezius_right
+    - ulna
+    - venous_sinuses
+    - zygomatic_arch_left
+    - zygomatic_arch_right
+    status: ready_if_installed
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: builtin_totalsegmentator
+    command_template: TotalSegmentator -i {image} -o {output}
+    private_checkpoint: false
+    trainable: conditional_public_nnunet_recipe
+    mstep_role: public_baseline_and_optional_totalseg_style_training_backend
+    mstep_backend: totalseg_public_nnunet
+    mstep_dataset_id: 2101
+    mstep_init_from: third_party/TotalSegmentator-master
+    mstep_reason: TotalSegmentator is a public E-step baseline and has a bundled public
+      nnUNet training recipe under resources/train_nnunet.md and train_nnunet.sh.
+      This supports a TotalSegmentator-style nnUNet M-step plan, but it does not fully
+      reproduce the released TotalSegmentator v2 model because the official v2 training
+      used additional non-public data.
+  unest:
+    name: UNEST renalStructures segmentation
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - kidney_cortex
+    - kidney_medulla
+    - kidney_pelvicalyceal_system
+    status: ready_if_unest_checkpoint_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: UNEST run_UNEST.sh and configs from the teacher Drive lightweight export
+      are bundled. Real inference requires the actual UNEST model/checkpoint environment.
+    runner: command_template
+    checkpoint_path: third_party/UNEST_renalStructures_lightweight
+    command_template: python scripts/unest_predict_and_split.py --image {image} --output
+      {case_output} --unest-root {checkpoint_path}
+    private_checkpoint: true
+    source_code_path: third_party/UNEST_renalStructures_lightweight
+    trainable: external_script_required
+    mstep_role: kidney_substructure_inference_candidate
+    mstep_backend: external_training_required
+    mstep_reason: UNEST is task-specific for renal structures. The lightweight export
+      contains a run script, not a complete training wrapper.
+  vista3d:
+    name: VISTA3D Inference Pipeline
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - airway
+    - aorta
+    - atrial_appendage_left
+    - autochthon_left
+    - autochthon_right
+    - brachiocephalic_trunk
+    - brachiocephalic_vein_left
+    - brachiocephalic_vein_right
+    - brain
+    - clavicula_left
+    - clavicula_right
+    - common_carotid_artery_left
+    - common_carotid_artery_right
+    - costal_cartilages
+    - gluteus_maximus_left
+    - gluteus_maximus_right
+    - gluteus_medius_left
+    - gluteus_medius_right
+    - gluteus_minimus_left
+    - gluteus_minimus_right
+    - heart
+    - hip_left
+    - hip_right
+    - humerus_left
+    - humerus_right
+    - iliac_artery_left
+    - iliac_artery_right
+    - iliac_vena_left
+    - iliac_vena_right
+    - iliopsoas_left
+    - iliopsoas_right
+    - kidney
+    - lung
+    - lung_lower_left_lobe
+    - lung_lower_right_lobe
+    - lung_middle_right_lobe
+    - lung_upper_left_lobe
+    - lung_upper_right_lobe
+    - pulmonary_vein
+    - rib_left_1
+    - rib_left_10
+    - rib_left_11
+    - rib_left_12
+    - rib_left_2
+    - rib_left_3
+    - rib_left_4
+    - rib_left_5
+    - rib_left_6
+    - rib_left_7
+    - rib_left_8
+    - rib_left_9
+    - rib_right_1
+    - rib_right_10
+    - rib_right_11
+    - rib_right_12
+    - rib_right_2
+    - rib_right_3
+    - rib_right_4
+    - rib_right_5
+    - rib_right_6
+    - rib_right_7
+    - rib_right_8
+    - rib_right_9
+    - sacrum
+    - scapula_left
+    - scapula_right
+    - skull
+    - spinal_cord
+    - sternum
+    - subclavian_artery_left
+    - subclavian_artery_right
+    - superior_vena_cava
+    - thyroid_gland
+    - trachea
+    - vertebrae_c1
+    - vertebrae_c2
+    - vertebrae_c3
+    - vertebrae_c4
+    - vertebrae_c5
+    - vertebrae_c6
+    - vertebrae_c7
+    - vertebrae_l1
+    - vertebrae_l2
+    - vertebrae_l3
+    - vertebrae_l4
+    - vertebrae_l5
+    - vertebrae_s1
+    - vertebrae_t1
+    - vertebrae_t10
+    - vertebrae_t11
+    - vertebrae_t12
+    - vertebrae_t2
+    - vertebrae_t3
+    - vertebrae_t4
+    - vertebrae_t5
+    - vertebrae_t6
+    - vertebrae_t7
+    - vertebrae_t8
+    - vertebrae_t9
+    status: ready_if_vista3d_env_and_checkpoint_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Full source is bundled under third_party/VISTA3D-Inference-Pipeline-master.
+      Real inference requires MONAI bundle/checkpoint download and a GPU environment;
+      output is standardized to segmentations/*.nii.gz.
+    runner: command_template
+    checkpoint_path: third_party/VISTA3D-Inference-Pipeline-master
+    label_map_path: third_party/VISTA3D-Inference-Pipeline-master/label_mappings/label_dict_127_abdomenAtlas3-1.json
+    command_template: python scripts/vista3d_predict_and_split.py --image {image}
+      --output {case_output} --vista-root {checkpoint_path} --label-map {label_map_path}
+    private_checkpoint: false
+    source_code_path: third_party/VISTA3D-Inference-Pipeline-master
+    trainable: conditional_monai_bundle_finetune
+    mstep_role: foundation_candidate_and_optional_monai_bundle_finetune_backend
+    mstep_backend: monai_bundle_finetune
+    mstep_dataset_id: 3101
+    mstep_init_from: third_party/VISTA3D-Inference-Pipeline-master
+    mstep_reason: VISTA3D is integrated as a high-resource foundation segmentation
+      candidate and the bundled pipeline contains MONAI bundle training/fine-tuning/continual-learning
+      configs (configs/train.json, train_continual.json, multi_gpu_train.json, scripts/trainer.py).
+      Fine-tuning requires a VISTA3D checkpoint, datalist, MONAI environment, and
+      sufficient GPU memory; this is not a from-scratch reproduction of the original
+      foundation model.
+  vsmtrans:
+    name: VSmTrans BDMAP nnUNet Dataset001
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - bladder
+    - celiac_trunk
+    - colon
+    - duodenum
+    - esophagus
+    - femur_left
+    - femur_right
+    - gall_bladder
+    - hepatic_vessel
+    - intestine
+    - kidney_left
+    - kidney_right
+    - liver
+    - lung_left
+    - lung_right
+    - pancreas
+    - portal_vein_and_splenic_vein
+    - postcava
+    - prostate
+    - rectum
+    - spleen
+    - stomach
+    status: ready_if_checkpoint_folder_present
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: VSmTrans README, predict_script.py, bounding_boxes.py and nnUNet lightweight
+      source are included. Real inference requires the actual VSmTrans/nnUNet checkpoint
+      folder.
+    runner: command_template
+    checkpoint_path: checkpoints/VSmTrans/nnUNet_results
+    dataset_json_path: checkpoints/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 1
+    trainer: nnUNetTrainer
+    plans: nnUNetPlans
+    folds: '0'
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --workdir third_party/VSmTrans_lightweight/nnUNet
+    private_checkpoint: true
+    source_code_path: third_party/VSmTrans_lightweight
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: trainable_candidate_for_abdominal_organs
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1001
+    mstep_init_from: checkpoints/VSmTrans/nnUNet_results/Dataset001_BDMAP
+    mstep_reason: VSmTrans is routed to abdominal organs; fine-tuning is possible
+      only if its nnUNet-compatible training state and environment are available.
+  vsnet:
+    name: vsnet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - liver_hepatic_vein
+    - liver_portal_vein
+    status: template
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/vsnet
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+organ_to_models:
+  abdominal_cavity:
+  - cads
+  - saros_nnunet
+  adrenal_gland_left:
+  - epai_20250421
+  - cads
+  - moose3_0
+  adrenal_gland_right:
+  - epai_20250421
+  - cads
+  - moose3_0
+  airway:
+  - vista3d
+  airway_tree:
+  - atm
+  airway_wall:
+  - airrc
+  anterior_eyeball_segment_left:
+  - cads
+  anterior_eyeball_segment_right:
+  - cads
+  anterior_scalene_left:
+  - totalsegmentator
+  anterior_scalene_right:
+  - totalsegmentator
+  aorta:
+  - vista3d
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  - mock_seg
+  arm_left:
+  - saros_nnunet
+  arm_right:
+  - saros_nnunet
+  arms:
+  - moose3_0
+  artery_brachiocephalic:
+  - dap
+  artery_common_carotid_left:
+  - dap
+  artery_common_carotid_right:
+  - dap
+  artery_internal_carotid_left:
+  - dap
+  artery_internal_carotid_right:
+  - dap
+  artery_subclavian_left:
+  - dap
+  artery_subclavian_right:
+  - dap
+  arytenoid_cartilage:
+  - cads
+  atrial_appendage_left:
+  - vista3d
+  auditory_canal_left:
+  - totalsegmentator
+  auditory_canal_right:
+  - totalsegmentator
+  autochthon_left:
+  - vista3d
+  - moose3_0
+  autochthon_right:
+  - vista3d
+  - moose3_0
+  bladder:
+  - vsmtrans
+  - cads
+  - moose3_0
+  blood:
+  - cads
+  body:
+  - totalsegmentator
+  body_extremities:
+  - totalsegmentator
+  body_trunc:
+  - totalsegmentator
+  bones:
+  - cads
+  both_lips:
+  - cads
+  brachiocephalic_trunk:
+  - vista3d
+  brachiocephalic_vein_left:
+  - vista3d
+  brachiocephalic_vein_right:
+  - vista3d
+  brain:
+  - vista3d
+  - cads
+  - moose3_0
+  brain_ventricle:
+  - totalsegmentator
+  brainstem:
+  - totalsegmentator
+  - cads
+  breast_left:
+  - dap
+  breast_right:
+  - dap
+  bronchus:
+  - dap
+  buccal_mucosa:
+  - cads
+  carotid_artery_left:
+  - cads
+  carotid_artery_right:
+  - cads
+  carpal:
+  - totalsegmentator
+  carpal_left:
+  - moose3_0
+  carpal_right:
+  - moose3_0
+  caudate_nucleus:
+  - totalsegmentator
+  cbd_stent:
+  - epai_20250421
+  celiac_aa:
+  - epai_20250421
+  celiac_aa_celiac_artery:
+  - epai_20250421
+  celiac_trunk:
+  - vsmtrans
+  central_sulcus:
+  - totalsegmentator
+  cerebellum:
+  - totalsegmentator
+  cerebrospinal_fluid:
+  - cads
+  cervical_esophagus:
+  - cads
+  cheek_left:
+  - dap
+  cheek_right:
+  - dap
+  clavicula_left:
+  - vista3d
+  - cads
+  - moose3_0
+  clavicula_right:
+  - vista3d
+  - cads
+  - moose3_0
+  cochlear_left:
+  - cads
+  cochlear_right:
+  - cads
+  colon:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  colostomy_bag:
+  - cads
+  common_bile_duct:
+  - epai_20250421
+  common_carotid_artery_left:
+  - vista3d
+  common_carotid_artery_right:
+  - vista3d
+  common_iliac_artery_left:
+  - cads
+  common_iliac_artery_right:
+  - cads
+  common_iliac_vein_left:
+  - cads
+  common_iliac_vein_right:
+  - cads
+  compact_bone:
+  - cads
+  coronary_artery:
+  - totalsegmentator
+  costal_cartilages:
+  - vista3d
+  cricoid_cartilage:
+  - totalsegmentator
+  cricopharyngeus:
+  - cads
+  digastric_left:
+  - totalsegmentator
+  digastric_right:
+  - totalsegmentator
+  duodenum:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  esophagus:
+  - vsmtrans
+  - cads
+  - moose3_0
+  eye_lens_left:
+  - totalsegmentator
+  eye_lens_right:
+  - totalsegmentator
+  eyeball:
+  - cads
+  eyeball_left:
+  - dap
+  eyeball_right:
+  - dap
+  face:
+  - cads
+  fat:
+  - dap
+  femur_left:
+  - vsmtrans
+  - cads
+  - moose3_0
+  femur_right:
+  - vsmtrans
+  - cads
+  - moose3_0
+  fibula:
+  - totalsegmentator
+  fibula_left:
+  - moose3_0
+  fibula_right:
+  - moose3_0
+  fingers_left:
+  - moose3_0
+  fingers_right:
+  - moose3_0
+  frontal_lobe:
+  - totalsegmentator
+  gall_bladder:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  gland_structure:
+  - cads
+  glottis:
+  - cads
+  gluteus_maximus_left:
+  - vista3d
+  - cads
+  - moose3_0
+  gluteus_maximus_right:
+  - vista3d
+  - cads
+  - moose3_0
+  gluteus_medius_left:
+  - vista3d
+  - cads
+  - moose3_0
+  gluteus_medius_right:
+  - vista3d
+  - cads
+  - moose3_0
+  gluteus_minimus_left:
+  - vista3d
+  - cads
+  - moose3_0
+  gluteus_minimus_right:
+  - vista3d
+  - cads
+  - moose3_0
+  gonads:
+  - dap
+  gray_matter:
+  - cads
+  hard_palate:
+  - totalsegmentator
+  head:
+  - saros_nnunet
+  - moose3_0
+  heart:
+  - vista3d
+  - cads
+  heart_atrium_left:
+  - dap
+  - cads
+  - moose3_0
+  heart_atrium_right:
+  - dap
+  - cads
+  - moose3_0
+  heart_myocardium:
+  - dap
+  - cads
+  - moose3_0
+  heart_tissue:
+  - dap
+  heart_ventricle_left:
+  - dap
+  - cads
+  - moose3_0
+  heart_ventricle_right:
+  - dap
+  - cads
+  - moose3_0
+  hepatic_vessel:
+  - vsmtrans
+  hip_left:
+  - vista3d
+  - cads
+  - moose3_0
+  hip_right:
+  - vista3d
+  - cads
+  - moose3_0
+  humerus_left:
+  - vista3d
+  - cads
+  - moose3_0
+  humerus_right:
+  - vista3d
+  - cads
+  - moose3_0
+  hyoid:
+  - totalsegmentator
+  hypopharynx:
+  - totalsegmentator
+  iliac_artery_left:
+  - vista3d
+  - moose3_0
+  iliac_artery_right:
+  - vista3d
+  - moose3_0
+  iliac_vena_left:
+  - vista3d
+  - moose3_0
+  iliac_vena_right:
+  - vista3d
+  - moose3_0
+  iliopsoas_left:
+  - vista3d
+  - cads
+  - moose3_0
+  iliopsoas_right:
+  - vista3d
+  - cads
+  - moose3_0
+  inferior_oblique_muscle_left:
+  - totalsegmentator
+  inferior_oblique_muscle_right:
+  - totalsegmentator
+  inferior_pharyngeal_constrictor:
+  - totalsegmentator
+  inferior_rectus_muscle_left:
+  - totalsegmentator
+  inferior_rectus_muscle_right:
+  - totalsegmentator
+  inferior_vena_cava:
+  - totalsegmentator
+  - dap
+  - cads
+  - moose3_0
+  insular_cortex:
+  - totalsegmentator
+  intermuscular_adipose_tissue:
+  - saros_nnunet
+  internal_capsule:
+  - totalsegmentator
+  internal_carotid_artery_left:
+  - totalsegmentator
+  internal_carotid_artery_right:
+  - totalsegmentator
+  internal_jugular_vein_left:
+  - totalsegmentator
+  - dap
+  internal_jugular_vein_right:
+  - totalsegmentator
+  - dap
+  intestine:
+  - vsmtrans
+  - epai_20250421
+  kidney:
+  - vista3d
+  kidney_cortex:
+  - unest
+  kidney_left:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  - mock_seg
+  kidney_medulla:
+  - unest
+  kidney_pelvicalyceal_system:
+  - unest
+  kidney_right:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  - mock_seg
+  lacrimal_gland_left:
+  - cads
+  lacrimal_gland_right:
+  - cads
+  larynx:
+  - cads
+  lateral_pterygoid_left:
+  - totalsegmentator
+  lateral_pterygoid_right:
+  - totalsegmentator
+  lateral_rectus_muscle_left:
+  - totalsegmentator
+  lateral_rectus_muscle_right:
+  - totalsegmentator
+  leg_left:
+  - saros_nnunet
+  leg_right:
+  - saros_nnunet
+  legs:
+  - moose3_0
+  lentiform_nucleus:
+  - totalsegmentator
+  levator_palpebrae_superioris_left:
+  - totalsegmentator
+  levator_palpebrae_superioris_right:
+  - totalsegmentator
+  levator_scapulae_left:
+  - totalsegmentator
+  levator_scapulae_right:
+  - totalsegmentator
+  liver:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  - mock_seg
+  liver_hepatic_vein:
+  - vsnet
+  liver_portal_vein:
+  - vsnet
+  liver_segment_1:
+  - pedro
+  - totalsegmentator
+  liver_segment_2:
+  - pedro
+  - totalsegmentator
+  liver_segment_3:
+  - pedro
+  - totalsegmentator
+  liver_segment_4:
+  - pedro
+  - totalsegmentator
+  liver_segment_5:
+  - pedro
+  - totalsegmentator
+  liver_segment_6:
+  - pedro
+  - totalsegmentator
+  liver_segment_7:
+  - pedro
+  - totalsegmentator
+  liver_segment_8:
+  - pedro
+  - totalsegmentator
+  lung:
+  - vista3d
+  lung_left:
+  - vsmtrans
+  lung_lower_left_lobe:
+  - vista3d
+  - cads
+  - moose3_0
+  lung_lower_right_lobe:
+  - vista3d
+  - cads
+  - moose3_0
+  lung_middle_right_lobe:
+  - vista3d
+  - cads
+  - moose3_0
+  lung_pulmonary_arteries:
+  - airrc
+  lung_pulmonary_veins:
+  - airrc
+  lung_right:
+  - vsmtrans
+  lung_trachea_bronchia:
+  - totalsegmentator
+  lung_upper_left_lobe:
+  - vista3d
+  - cads
+  - moose3_0
+  lung_upper_right_lobe:
+  - vista3d
+  - cads
+  - moose3_0
+  lung_vessels:
+  - totalsegmentator
+  mammary_gland_left:
+  - cads
+  mammary_gland_right:
+  - cads
+  mandible:
+  - cads
+  masseter_left:
+  - totalsegmentator
+  masseter_right:
+  - totalsegmentator
+  medial_pterygoid_left:
+  - totalsegmentator
+  medial_pterygoid_right:
+  - totalsegmentator
+  medial_rectus_muscle_left:
+  - totalsegmentator
+  medial_rectus_muscle_right:
+  - totalsegmentator
+  mediastinal_tissue:
+  - dap
+  mediastinum:
+  - saros_nnunet
+  - cads
+  metacarpal:
+  - totalsegmentator
+  metacarpal_left:
+  - moose3_0
+  metacarpal_right:
+  - moose3_0
+  metatarsal:
+  - totalsegmentator
+  metatarsal_left:
+  - moose3_0
+  metatarsal_right:
+  - moose3_0
+  middle_pharyngeal_constrictor:
+  - totalsegmentator
+  middle_scalene_left:
+  - totalsegmentator
+  middle_scalene_right:
+  - totalsegmentator
+  muscle:
+  - saros_nnunet
+  - cads
+  muscle_fat:
+  - duke
+  muscle_of_head:
+  - cads
+  nasal_cavity_left:
+  - totalsegmentator
+  nasal_cavity_right:
+  - totalsegmentator
+  nasopharynx:
+  - totalsegmentator
+  occipital_lobe:
+  - totalsegmentator
+  optic_chiasm:
+  - cads
+  optic_nerve_left:
+  - totalsegmentator
+  - cads
+  optic_nerve_right:
+  - totalsegmentator
+  - cads
+  oral_cavity:
+  - cads
+  oropharynx:
+  - totalsegmentator
+  pancreas:
+  - vsmtrans
+  - cads
+  - epai_20250421
+  - moose3_0
+  - nnunet_private
+  - mock_seg
+  pancreas_body:
+  - pedro
+  pancreas_head:
+  - pedro
+  pancreas_tail:
+  - pedro
+  pancreatic_duct:
+  - epai_20250421
+  pancreatic_cyst:
+  - epai_20250421
+  - atlasnet
+  pancreatic_pdac:
+  - epai_20250421
+  - atlasnet
+  pancreatic_pnet:
+  - epai_20250421
+  - atlasnet
+  parietal_lobe:
+  - totalsegmentator
+  parotid_gland_left:
+  - totalsegmentator
+  - cads
+  parotid_gland_right:
+  - totalsegmentator
+  - cads
+  parotid_glands:
+  - saros_nnunet
+  patella:
+  - totalsegmentator
+  patella_left:
+  - moose3_0
+  patella_right:
+  - moose3_0
+  pericardium:
+  - saros_nnunet
+  - cads
+  phalanges_feet:
+  - totalsegmentator
+  phalanges_hand:
+  - totalsegmentator
+  pituitary_gland:
+  - cads
+  platysma_left:
+  - totalsegmentator
+  platysma_right:
+  - totalsegmentator
+  portal_vein_and_splenic_vein:
+  - vsmtrans
+  - cads
+  - moose3_0
+  postcava:
+  - vsmtrans
+  - epai_20250421
+  - nnunet_private
+  - mock_seg
+  posterior_eyeball_segment_left:
+  - cads
+  posterior_eyeball_segment_right:
+  - cads
+  posterior_scalene_left:
+  - totalsegmentator
+  posterior_scalene_right:
+  - totalsegmentator
+  prevertebral_left:
+  - totalsegmentator
+  prevertebral_right:
+  - totalsegmentator
+  prostate:
+  - vsmtrans
+  - cads
+  prosthetic_breast_implant:
+  - cads
+  psoas_major_muscle_left:
+  - cads
+  psoas_major_muscle_right:
+  - cads
+  pulmonary_artery:
+  - dap
+  - totalsegmentator
+  - cads
+  pulmonary_vein:
+  - vista3d
+  - moose3_0
+  radius:
+  - totalsegmentator
+  radius_left:
+  - moose3_0
+  radius_right:
+  - moose3_0
+  rectum:
+  - vsmtrans
+  - cads
+  rectus_abdominis_muscle_left:
+  - cads
+  rectus_abdominis_muscle_right:
+  - cads
+  renal_vein_left:
+  - epai_20250421
+  renal_vein_right:
+  - epai_20250421
+  rib_cartilage:
+  - totalsegmentator
+  - dap
+  rib_left_1:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_10:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_11:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_12:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_2:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_3:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_4:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_5:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_6:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_7:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_8:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_left_9:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_1:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_10:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_11:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_12:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_2:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_3:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_4:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_5:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_6:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_7:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_8:
+  - vista3d
+  - cads
+  - moose3_0
+  rib_right_9:
+  - vista3d
+  - cads
+  - moose3_0
+  sacrum:
+  - vista3d
+  - cads
+  - moose3_0
+  scalp:
+  - cads
+  scapula_left:
+  - vista3d
+  - cads
+  - moose3_0
+  scapula_right:
+  - vista3d
+  - cads
+  - moose3_0
+  seminal_vesicle:
+  - cads
+  septum_pellucidum:
+  - totalsegmentator
+  sigmoid_colon:
+  - cads
+  skeletal_muscle:
+  - saros_nnunet
+  - duke
+  - moose3_0
+  skin:
+  - totalsegmentator
+  - dap
+  skull:
+  - vista3d
+  - moose3_0
+  small_bowel:
+  - totalsegmentator
+  - dap
+  - cads
+  - moose3_0
+  soft_palate:
+  - totalsegmentator
+  spinal_canal:
+  - dap
+  - cads
+  spinal_cord:
+  - vista3d
+  - cads
+  spleen:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  - mock_seg
+  spongy_bone:
+  - cads
+  sterno_thyroid_left:
+  - totalsegmentator
+  sterno_thyroid_right:
+  - totalsegmentator
+  sternocleidomastoid_left:
+  - totalsegmentator
+  sternocleidomastoid_right:
+  - totalsegmentator
+  sternum:
+  - vista3d
+  - cads
+  - moose3_0
+  sternum_corpus:
+  - dap
+  sternum_manubrium:
+  - dap
+  stomach:
+  - vsmtrans
+  - epai_20250421
+  - cads
+  - moose3_0
+  - nnunet_private
+  styloid_process_left:
+  - totalsegmentator
+  styloid_process_right:
+  - totalsegmentator
+  subarachnoid_space:
+  - totalsegmentator
+  subclavian_artery_left:
+  - vista3d
+  subclavian_artery_right:
+  - vista3d
+  subcutaneous_adipose_tissue:
+  - saros_nnunet
+  - duke
+  - cads
+  - moose3_0
+  submandibular_gland_left:
+  - totalsegmentator
+  - cads
+  submandibular_gland_right:
+  - totalsegmentator
+  - cads
+  submandibular_glands:
+  - saros_nnunet
+  superior_mesenteric_artery:
+  - epai_20250421
+  superior_mesenteric_vein: []
+  superior_oblique_muscle_left:
+  - totalsegmentator
+  superior_oblique_muscle_right:
+  - totalsegmentator
+  superior_rectus_muscle_left:
+  - totalsegmentator
+  superior_rectus_muscle_right:
+  - totalsegmentator
+  superior_vena_cava:
+  - vista3d
+  supraglottis:
+  - cads
+  tarsal:
+  - totalsegmentator
+  tarsal_left:
+  - moose3_0
+  tarsal_right:
+  - moose3_0
+  temporal_lobe:
+  - totalsegmentator
+  temporalis_left:
+  - totalsegmentator
+  temporalis_right:
+  - totalsegmentator
+  thalamus:
+  - totalsegmentator
+  thoracic_cavity:
+  - saros_nnunet
+  - cads
+  thymus:
+  - dap
+  thyrohyoid_left:
+  - totalsegmentator
+  - moose3_0
+  thyrohyoid_right:
+  - totalsegmentator
+  - moose3_0
+  thyroid_cartilage:
+  - totalsegmentator
+  thyroid_gland:
+  - vista3d
+  - cads
+  thyroid_left:
+  - dap
+  thyroid_right:
+  - dap
+  tibia:
+  - totalsegmentator
+  tibia_left:
+  - moose3_0
+  tibia_right:
+  - moose3_0
+  toes_left:
+  - moose3_0
+  toes_right:
+  - moose3_0
+  tongue:
+  - totalsegmentator
+  trachea:
+  - vista3d
+  - cads
+  - moose3_0
+  trapezius_left:
+  - totalsegmentator
+  trapezius_right:
+  - totalsegmentator
+  ulna:
+  - totalsegmentator
+  ulna_left:
+  - moose3_0
+  ulna_right:
+  - moose3_0
+  uterocervix:
+  - dap
+  uterus:
+  - dap
+  veins:
+  - epai_20250421
+  venous_sinuses:
+  - totalsegmentator
+  vertebrae_c1:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_c2:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_c3:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_c4:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_c5:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_c6:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_c7:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_l1:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_l2:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_l3:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_l4:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_l5:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_s1:
+  - goacc
+  - vista3d
+  vertebrae_t1:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t10:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t11:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t12:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t2:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t3:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t4:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t5:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t6:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t7:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t8:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  vertebrae_t9:
+  - goacc
+  - vista3d
+  - cads
+  - moose
+  visceral_adipose_tissue:
+  - saros_nnunet
+  - duke
+  - moose3_0
+  white_matter:
+  - cads
+  zygomatic_arch_left:
+  - totalsegmentator
+  zygomatic_arch_right:
+  - totalsegmentator
+notes:
+- Do not commit private checkpoints to a public repository.
+- Edit command_template for private models after inspecting each original inference
+  script.
+- All wrappers normalize outputs to case_id/segmentations/*.nii.gz.

@@ -1,0 +1,32 @@
+# Real inference backends. These may change numpy/torch and can be large.
+#
+# Recommended Colab install order:
+#
+#   Step 1 — base deps
+#   pip install -r agent-harness/requirements.txt
+#
+#   Step 2 — ePAI nnunetv2 fork (REQUIRED for epai_20250421 inference)
+#   ePAI uses custom CLI args (--input_csv, --output_csv, --output_label_mode)
+#   that only exist in the bundled fork, not in standard nnunetv2 from PyPI.
+#   Install it BEFORE standard nnunetv2 so pip does not downgrade it later:
+#   pip install -e third_party/ePAI-main/train
+#
+#   Step 3 — standard nnunetv2 and TotalSegmentator (use --no-deps to avoid
+#   overwriting the ePAI nnunetv2 with an incompatible PyPI version)
+#   pip install TotalSegmentator --no-deps
+#   pip install nnunetv2 --no-deps
+#
+#   Step 4 — install any remaining missing deps as reported:
+#   pip install batchgeneratorsv2 acvl-utils dynamic-network-architectures blosc2
+#
+# If a numpy conflict appears after restart, pin:
+#   pip install --force-reinstall "numpy==2.0.2"
+
+# ePAI's bundled nnunetv2 fork — install via editable install, not from PyPI
+# pip install -e third_party/ePAI-main/train
+
+# Standard nnunetv2 (for non-ePAI models; install --no-deps after ePAI fork)
+nnunetv2
+
+# TotalSegmentator (downloads model weights on first run)
+TotalSegmentator

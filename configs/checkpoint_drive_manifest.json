@@ -1,0 +1,67 @@
+{
+  "source": "Google Drive My Drive/checkpoints",
+  "source_url": "https://drive.google.com/drive/folders/1H11EMT83SyteAnh5DwaK5kkJpsr3UEbx",
+  "safety": {
+    "policy": "read_only_source",
+    "note": "Do not rename, delete, move, or edit the teacher-owned Google Drive checkpoint folders. Mount or link them into the local project; write all inference outputs under outputs/."
+  },
+  "expected_local_root": "checkpoints",
+  "colab_mount_hint": "/content/drive/MyDrive/checkpoints",
+  "folders": {
+    "class_checkpoint_map.xlsx": {
+      "drive_url": "https://docs.google.com/spreadsheets/d/1ody7_fo7FwEeq5b73XDMUp9Q5XNt7F6u/edit",
+      "expected_local_path": "checkpoints/class_checkpoint_map.xlsx"
+    },
+    "CADS_series": {
+      "drive_url": "https://drive.google.com/drive/folders/1k8oxGM0QB-iOrBtUHn5YIbeguA5kgJMD",
+      "expected_local_path": "checkpoints/CADS_series",
+      "notable_children": {
+        "Dataset551_Totalseg251": "https://drive.google.com/drive/folders/1R3I-7tE6ACHcXJJmbi_vbYVaWJDbNWe5",
+        "Dataset552_Totalseg252": "https://drive.google.com/drive/folders/1fpP9Ol6QPB8f5XsshaEfOejbDWP2Obeu",
+        "Dataset553_Totalseg253": "https://drive.google.com/drive/folders/1mBfLE0aoRTwXlUgZwa4G5A_l7DPTwG28",
+        "Dataset554_Totalseg254": "https://drive.google.com/drive/folders/104IG-dXfCtwdNHLbRjuCIo8Wh-F3MgdN",
+        "Dataset555_Totalseg255": "https://drive.google.com/drive/folders/1mf_YbrBNGKH6ekgHbgK1dP4VL08w0f4l",
+        "Dataset556_GC256": "https://drive.google.com/drive/folders/1xpUnpaKQCmqLzA9kBfmUxapyt5g-GUty",
+        "Dataset557_Brain257": "https://drive.google.com/drive/folders/1AuXjU6G_PChSf_ox-j0b7zf2rDPSauWz",
+        "Dataset558_OAR258": "https://drive.google.com/drive/folders/1wTGYZNbwYtGyB_7g3LwtxefkXq8st6NU",
+        "Dataset559_Saros259": "https://drive.google.com/drive/folders/1HCn9z5OpCGKNDELevvccRQXIGcWS86iE"
+      }
+    },
+    "MOOSE_series": {
+      "drive_url": "https://drive.google.com/drive/folders/1su-xnA9PG_91ZXu6iUUTKqnjXwaPSf3v",
+      "expected_local_path": "checkpoints/MOOSE_series",
+      "notable_children": {
+        "Dataset888_Cardiac": "https://drive.google.com/drive/folders/1rBOshYopciWCEMS-TPuEVEYCKA-6GbJZ",
+        "Dataset666_Peripheral-Bones": "https://drive.google.com/drive/folders/1X7nWAwormzMpEjwwJBDVM_tEXYWOBHV0"
+      }
+    },
+    "nnUNet_private": {
+      "drive_url": "https://drive.google.com/drive/folders/1LVfyoseO23wxPk6xd1PblPBoWNoec5Cd",
+      "expected_local_path": "checkpoints/nnUNet_private",
+      "notable_children": {
+        "Dataset1339_ePAI": "https://drive.google.com/drive/folders/1aCjBaLYnDnD1l4OfFKivuoTe0lizIHrc",
+        "Dataset224_AbdomenAtlas1.1": "https://drive.google.com/drive/folders/1k1VZywMnFByuhbVMIS2y_VnxXzDOocV9",
+        "Dataset1345_SAROS": "https://drive.google.com/drive/folders/1NVnfPj9HqwTitRe1cRBXp47szyzPoA07",
+        "Dataset1370_ATM": "https://drive.google.com/drive/folders/1QSRrfQYFE-XtjikiAz8czT0DQtLYv5vA",
+        "Dataset1380_AirRC": "https://drive.google.com/drive/folders/1AOuaWYKxjMfde-TI8hrAYxufpveL9P8W",
+        "Dataset1381_LVP": "https://drive.google.com/drive/folders/1FKUZQxzTRo-sZIk6PiaEeETuw2P2ua6M"
+      }
+    },
+    "UNEST": {
+      "drive_url": "https://drive.google.com/drive/folders/1c1D1NMi7eGxRvBSTwjQ-sJsRlWnlHoKR",
+      "expected_local_path": "checkpoints/UNEST",
+      "notable_children": {
+        "renalStructures_UNEST_segmentation": "https://drive.google.com/drive/folders/1vT1Vhhw7v5QY69_zny4xpfGUMK6JnMSa"
+      }
+    },
+    "VSmTrans": {
+      "drive_url": "https://drive.google.com/drive/folders/16cS9G9d4K6WeWiGDKTcV3gJyqnsr0rfN",
+      "expected_local_path": "checkpoints/VSmTrans",
+      "notable_children": {
+        "nnUNet_results": "https://drive.google.com/drive/folders/1TammCzPW3Sx0_UJdgQ8QNgXGZjdLZ-O2",
+        "nnUNet_results/Dataset001_BDMAP": "https://drive.google.com/drive/folders/1wqKUwpy0bWhaACiP2GduefwqsukpF7i-",
+        "nnUNet": "https://drive.google.com/drive/folders/1YTS_H4atzxooRKQiGMWLCNpyNDeHFVl7"
+      }
+    }
+  }
+}
