@@ -145,7 +145,7 @@ def run_agent_loop(patient_folder: str | Path, output_folder: str | Path, backen
                 iter_decisions: list[dict] = []
                 for o in iter_organs:
                     ann_a = ann_mgr.get_current(o)    # currently accepted annotation (may differ from raw after prior iterations)
-                    ann_b = ann_mgr.get_prediction(o, 0)  # model prediction round 0
+                    ann_b = ann_mgr.get_prediction(o, iter_idx - 1)  # model prediction for this round
                     if ann_a is None and ann_b is None:
                         continue
                     vlm_refine = run_vlm_label_expert(
@@ -160,7 +160,7 @@ def run_agent_loop(patient_folder: str | Path, output_folder: str | Path, backen
                     )
                     winner = vlm_refine.get("winner", "A")
                     ann_mgr.log_decision(o, iter_idx, vlm_refine)
-                    ann_mgr.apply_update(o, winner, 0, candidate_a=ann_a, candidate_b=ann_b)
+                    ann_mgr.apply_update(o, winner, iter_idx - 1, candidate_a=ann_a, candidate_b=ann_b)
                     iter_decisions.append({"organ": o, "winner": winner, "decision": vlm_refine.get("decision"), "reason": vlm_refine.get("reason", "")})
                     state.add_event(f"act_refine_iter{iter_idx}_{o}", vlm_refine.get("status", "unknown"), vlm_refine, scan_id)
 

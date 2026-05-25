@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from .radthinking import compare_temporal_masks
 
 DEFAULT_CORE_ORGANS = ["liver", "pancreas", "aorta", "postcava"]
 

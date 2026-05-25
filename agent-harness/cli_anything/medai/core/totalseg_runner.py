@@ -64,10 +64,10 @@ def run_custom_inference(image_path: str, output_folder: str, model_command: str
         case_id = image.parent.name or image.stem
     case_out = Path(output_folder).resolve() / case_id
     seg_out = case_out / "segmentations"
-    seg_out.mkdir(parents=True, exist_ok=True)
     command_str = model_command.format(image=str(image), output=str(seg_out), case_output=str(case_out), case_id=case_id)
     if dry_run:
         return {"stage": "infer", "backend": "custom", "status": "dry_run", "case_id": case_id, "command": command_str, "segmentation_output": str(seg_out)}
+    seg_out.mkdir(parents=True, exist_ok=True)
     start = time.time()
     # Use shell=True for custom command templates because users often pass
     # Windows-style paths (e.g., third_party\mock_model\mock_seg_infer.py).

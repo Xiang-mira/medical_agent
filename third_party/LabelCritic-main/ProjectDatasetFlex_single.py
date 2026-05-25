@@ -50,8 +50,9 @@ def main():
 
     args = parser.parse_args()
     
-    if not args.organ.endswith('.nii.gz'):
-        args.organ += '.nii.gz'
+    # Normalize organ name: strip any existing .nii.gz suffix before adding it,
+    # so callers passing "pancreas.nii.gz" don't get "pancreas.nii.gz.nii.gz".
+    args.organ = args.organ.removesuffix('.nii.gz') + '.nii.gz'
 
     is_combined = args.mask_good.endswith('.nii.gz') and args.mask_bad.endswith('.nii.gz')
 

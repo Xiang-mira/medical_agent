@@ -23,33 +23,67 @@ def _prepare_mask_folder(mask: Path, organ: str, dst_root: Path, label: str) -> 
     return out.resolve()
 
 
-def _parse_labelcritic_log(log_path: Path, mask1_folder: Path | None = None, mask2_folder: Path | None = None) -> dict[str, Any]:
+def _parse_labelcritic_log(
+    log_path: Path,
+    mask1_folder: Path | None = None,
+    mask2_folder: Path | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
     """Parse LabelCritic's comparison_summary.log.
 
-    The teacher-supplied CompareOrgan.py writes a line like:
-        Better: /path/to/mask1_or_mask2
-    not always a natural-language phrase such as "mask1 is better".  The earlier
-    parser only looked for words like "mask1 better" and could miss successful
-    LabelCritic decisions.  This parser checks the explicit Better path first,
-    then falls back to phrase-based parsing.
+    Uses run_id to scope the search to the current run's log block, avoiding
+    stale results from earlier runs in the same append-only log file.
+    Falls back to tail-read when run_id is not provided.
     """
     if not log_path.exists():
         return {"winner": "uncertain", "confidence": 0.5, "reason": "LabelCritic log was not generated", "parse_status": "missing_log"}
-    text = log_path.read_text(encoding="utf-8", errors="ignore")[-12000:]
-    lower = text.lower()
 
     import re
+    full_text = log_path.read_text(encoding="utf-8", errors="ignore")
+
+    # Scope to the current run's block using run_id
+    if run_id:
+        pattern = rf"Run ID: {re.escape(run_id)}\n(.*?)(?=\n\[|\Z)"
+        m = re.search(pattern, full_text, re.S)
+        text = m.group(0) if m else full_text[-12000:]
+    else:
+        text = full_text[-12000:]
+
+    lower = text.lower()
+
     better_lines = re.findall(r"Better:\s*(.+)", text, flags=re.I)
     if better_lines:
         best = better_lines[-1].strip().strip('"\'')
-        best_lower = best.lower()
-        if mask1_folder and str(mask1_folder).lower() in best_lower:
-            return {"winner": "a", "confidence": 0.75, "reason": text, "parse_status": "better_path_parse"}
-        if mask2_folder and str(mask2_folder).lower() in best_lower:
-            return {"winner": "b", "confidence": 0.75, "reason": text, "parse_status": "better_path_parse"}
-        if "mask1" in best_lower:
+
+        # Bug fix: handle explicit "uncertain" written by patched CompareOrgan.py
+        if best.lower() == "uncertain":
+            return {"winner": "uncertain", "confidence": 0.0, "reason": text, "parse_status": "vlm_undecided"}
+
+        # Bug fix: normalize paths with resolve() before comparison
+        try:
+            best_resolved = str(Path(best).resolve()).lower()
+        except Exception:
+            best_resolved = best.lower()
+
+        if mask1_folder:
+            try:
+                m1_resolved = str(Path(mask1_folder).resolve()).lower()
+            except Exception:
+                m1_resolved = str(mask1_folder).lower()
+            if m1_resolved == best_resolved or m1_resolved in best_resolved:
+                return {"winner": "a", "confidence": 0.75, "reason": text, "parse_status": "better_path_parse"}
+
+        if mask2_folder:
+            try:
+                m2_resolved = str(Path(mask2_folder).resolve()).lower()
+            except Exception:
+                m2_resolved = str(mask2_folder).lower()
+            if m2_resolved == best_resolved or m2_resolved in best_resolved:
+                return {"winner": "b", "confidence": 0.75, "reason": text, "parse_status": "better_path_parse"}
+
+        if "mask1" in best.lower():
             return {"winner": "a", "confidence": 0.7, "reason": text, "parse_status": "better_line_mask1"}
-        if "mask2" in best_lower:
+        if "mask2" in best.lower():
             return {"winner": "b", "confidence": 0.7, "reason": text, "parse_status": "better_line_mask2"}
 
     winner = "uncertain"
@@ -105,6 +139,10 @@ def run_labelcritic_compare(
     script = lc_root / "CompareOrgan.py"
     normalized_base_url, normalized_port = _normalize_labelcritic_base_url(base_url, port)
 
+    # Generate a stable run_id so _parse_labelcritic_log can scope to this run
+    import uuid as _uuid
+    run_id = _uuid.uuid4().hex[:8]
+
     mask1_folder = _prepare_mask_folder(a, organ, work_dir, "mask1")
     mask2_folder = _prepare_mask_folder(b, organ, work_dir, "mask2")
     log_file = work_dir / "comparison_summary.log"
@@ -150,16 +188,10 @@ def run_labelcritic_compare(
         write_json(out_json, result)
         return result
 
-    # Build projections only when we will actually run the comparison.
-    proj = build_projection(
-        ct,
-        a if a.is_file() else a / f"{organ}.nii.gz",
-        b if b.is_file() else b / f"{organ}.nii.gz",
-        work_dir / "projections",
-        organ=organ, views=["axial", "coronal"], strict_alignment=strict_alignment,
-        projection_backend="auto", labelcritic_root=labelcritic_root,
-        axis=1, device="cpu", num_processes=2, dry_run=False,
-    )
+    # Bug fix: do NOT call build_projection here — CompareOrgan.py calls
+    # ProjectDatasetFlex_single.py internally which runs the projection itself.
+    # Calling it here would double the I/O and compute cost.
+    proj = {"status": "skipped", "reason": "projection handled internally by CompareOrgan.py → ProjectDatasetFlex_single.py"}
 
     start = time.time()
     try:
@@ -169,7 +201,7 @@ def run_labelcritic_compare(
         completed = subprocess.CompletedProcess(command, 124, stdout=exc.stdout or "", stderr=(exc.stderr or "") + f"\n[labelcritic] Timeout after {timeout_sec}s")
         timed_out = True
     elapsed = time.time() - start
-    decision = _parse_labelcritic_log(log_file, mask1_folder, mask2_folder)
+    decision = _parse_labelcritic_log(log_file, mask1_folder, mask2_folder, run_id=run_id)
     result = {
         "stage": "labelcritic", "status": "timed_out" if timed_out else ("success" if completed.returncode == 0 else "failed"),
         "backend": backend, "organ": organ, "ct_image": str(ct), "mask_a": str(a), "mask_b": str(b),

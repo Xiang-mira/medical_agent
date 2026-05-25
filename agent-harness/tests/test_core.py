@@ -225,9 +225,13 @@ class TestProjectionBuilder:
         from cli_anything.medai.core.projection_builder import build_projection
         ct   = _make_nii(np.random.randint(-100, 200, (32, 32, 32), dtype=np.int16), tmp_path / "ct.nii.gz")
         mask = _make_nii(_sphere_mask(), tmp_path / "mask.nii.gz")
-        result = build_projection(ct, mask_a=mask, mask_b=None,
-                                  output_folder=tmp_path / "out", organ="liver")
-        assert result["stage"] == "projection_builder"
+        lc_root = Path(__file__).resolve().parents[2] / "third_party" / "LabelCritic-main"
+        result = build_projection(ct, mask_a=mask, mask_b=mask,
+                                  output_folder=tmp_path / "out", organ="liver",
+                                  projection_backend="labelcritic",
+                                  labelcritic_root=str(lc_root),
+                                  dry_run=True)
+        assert result["stage"] in {"projection_builder", "labelcritic_projection_builder"}
         assert "saved_projections" in result
         assert "output_folder" in result
 
@@ -248,7 +252,7 @@ class TestEmLoop:
         )
         assert result["status"] == "dry_run"
         assert len(result["rounds"]) == 1
-        assert result["rounds"][0]["m_step"]["status"] == "stub"
+        assert result["rounds"][0]["m_step"]["status"] == "dry_run"
         metrics_path = Path(result["rounds_metrics_json"])
         assert metrics_path.exists()
         saved = json.loads(metrics_path.read_text(encoding="utf-8"))

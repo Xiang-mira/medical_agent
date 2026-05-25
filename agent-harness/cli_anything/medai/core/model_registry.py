@@ -558,7 +558,10 @@ def load_registry(path: str | Path) -> dict[str, Any]:
     text = p.read_text(encoding="utf-8")
     if yaml:
         return yaml.safe_load(text)
-    return json.loads(text)
+    raise ImportError(
+        "PyYAML is required to load the model registry. "
+        "Install it with: pip install pyyaml>=6.0"
+    )
 
 
 def get_model_entry(registry: dict[str, Any], model_key: str) -> dict[str, Any]:

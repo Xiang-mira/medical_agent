@@ -564,12 +564,13 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--accept-threshold", default=0.8, type=float, show_default=True)
 @click.option("--device", default=None)
 @click.option("--timeout-sec", default=1800, type=int, show_default=True)
+@click.option("--perf-tracker-path", default=None, help="Path to organ_model_performance.json for explore/exploit switching.")
 @click.option("--dry-run", is_flag=True, default=False)
-def run_loop_cmd(case_list, models, organs, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, vlm_threshold, accept_threshold, device, timeout_sec, dry_run):
+def run_loop_cmd(case_list, models, organs, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, dry_run):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
     model_list = [x.strip() for x in models.replace(";", ",").split(",") if x.strip()]
     organ_list = [x.strip() for x in organs.replace(";", ",").split(",") if x.strip()]
-    emit(run_multimodel_annotation_loop(resolve_path(case_list), resolve_path(output_folder), model_list, organ_list, resolve_path(registry_path), checkpoint_map_models, resolve_path(shapekit_root), enable_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, vlm_threshold, accept_threshold, dry_run, timeout_sec, device))
+    emit(run_multimodel_annotation_loop(resolve_path(case_list), resolve_path(output_folder), model_list, organ_list, resolve_path(registry_path), checkpoint_map_models, resolve_path(shapekit_root), enable_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, vlm_threshold, accept_threshold, dry_run, timeout_sec, device, perf_tracker_path=resolve_path(perf_tracker_path) if perf_tracker_path else None))
 
 
 @cli.command("em-loop")
@@ -733,6 +734,88 @@ def itksnap_review_cmd(review_queue, ct_root, annotation_root, output_script, ma
         resolve_path(output_script) if output_script else None,
         max_cases,
     ))
+
+
+@cli.command("vista3d-segment")
+@click.option("--ct-image", required=True, help="CT NIfTI 文件路径")
+@click.option("--prompts", required=True, help="逗号分隔的器官名或自然语言提示，如 'pancreas,liver' 或 'segment pancreas,segment liver'")
+@click.option("--output-folder", required=True, help="输出 mask 目录")
+@click.option("--vista3d-root", default="checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master", show_default=True)
+@click.option("--model-path", default=None, help="VISTA3D checkpoint 路径，默认使用 vista3d_root/models/model.pt")
+@click.option("--device", default="cuda", show_default=True)
+@click.option("--dry-run", is_flag=True, default=False)
+def vista3d_segment_cmd(ct_image, prompts, output_folder, vista3d_root, model_path, device, dry_run):
+    """使用 VISTA3D 统一学生模型进行语言提示式分割。
+
+    推理流程：text prompt → label_id → VISTA3D → 3D mask
+    支持同时分割多个器官（一次前向传播）。
+    """
+    from .core.vista3d_student import VISTA3DStudent
+    student = VISTA3DStudent(
+        vista3d_root=resolve_path(vista3d_root),
+        model_path=resolve_path(model_path) if model_path else None,
+        device=device,
+    )
+    result = student.segment(
+        ct_image=resolve_path(ct_image),
+        prompts=[p.strip() for p in prompts.split(",")],
+        output_dir=resolve_path(output_folder),
+        dry_run=dry_run,
+    )
+    emit(result)
+
+
+@cli.command("vista3d-finetune")
+@click.option("--pseudo-label-dir", required=True, help="伪标签目录（每个 case 一个子目录）")
+@click.option("--ct-dir", required=True, help="CT 文件根目录")
+@click.option("--target-organs", required=True, help="逗号分隔的目标器官名")
+@click.option("--output-folder", required=True, help="微调后 checkpoint 输出目录")
+@click.option("--vista3d-root", default="checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master", show_default=True)
+@click.option("--model-path", default=None)
+@click.option("--learning-rate", default=5e-5, show_default=True, type=float)
+@click.option("--max-epochs", default=50, show_default=True, type=int)
+@click.option("--freeze-backbone", is_flag=True, default=True, help="冻结 SwinUNETR backbone，只更新 point_head")
+@click.option("--global-consolidation", is_flag=True, default=False, help="全局整合模式：小学习率部分解冻 backbone")
+@click.option("--device", default="cuda", show_default=True)
+@click.option("--dry-run", is_flag=True, default=False)
+def vista3d_finetune_cmd(pseudo_label_dir, ct_dir, target_organs, output_folder,
+                          vista3d_root, model_path, learning_rate, max_epochs,
+                          freeze_backbone, global_consolidation, device, dry_run):
+    """M-step：VISTA3D class-level continual fine-tuning。
+
+    默认冻结 SwinUNETR backbone，只更新 point_head / class_embedding。
+    使用 --global-consolidation 进行阶段性全局整合（小学习率，部分解冻 backbone）。
+    """
+    from .core.vista3d_student import VISTA3DStudent
+    student = VISTA3DStudent(
+        vista3d_root=resolve_path(vista3d_root),
+        model_path=resolve_path(model_path) if model_path else None,
+        device=device,
+    )
+    result = student.continual_finetune(
+        pseudo_label_dir=resolve_path(pseudo_label_dir),
+        ct_dir=resolve_path(ct_dir),
+        target_organs=[o.strip() for o in target_organs.split(",")],
+        output_dir=resolve_path(output_folder),
+        learning_rate=learning_rate,
+        max_epochs=max_epochs,
+        freeze_backbone=freeze_backbone,
+        global_consolidation=global_consolidation,
+        dry_run=dry_run,
+    )
+    emit(result)
+
+
+@cli.command("build-teacher-map")
+@click.option("--output", default="configs/teacher_branch_map.yaml", show_default=True, help="输出 YAML 路径")
+def build_teacher_map_cmd(output):
+    """从 xlsx 分析结果生成 teacher_branch_map.yaml。
+
+    该文件定义每个器官的 VISTA3D label_id、最优 teacher 模型和 M-step 更新策略。
+    """
+    from .core.teacher_branch_map import build_teacher_branch_map
+    result = build_teacher_branch_map(resolve_path(output))
+    emit(result)
 
 
 def main(): cli()

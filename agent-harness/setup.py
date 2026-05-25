@@ -12,9 +12,10 @@ setup(
         "numpy>=1.22,<3.0",
         "nibabel>=5.0.0",
         "tqdm>=4.60.0",
-        "scipy",
-        "scikit-image",
-        "connected-components-3d",
+        "requests>=2.28.0",
+        "scipy>=1.9.0",
+        "scikit-image>=0.19.0",
+        "connected-components-3d>=3.10.0",
     ],
     extras_require={
         "totalseg": ["TotalSegmentator"],

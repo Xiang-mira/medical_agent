@@ -114,11 +114,9 @@ def parse_report_sections(report_path: str | Path | None = None, clinical_path: 
         m = re.search(rf"{key}s?\s*:\s*(.*?)(?=\n\s*(findings?|impression|recommendations?)\s*:|\Z)", report_text, flags=re.I | re.S)
         if m: sections[key] = m.group(1).strip()
     suspicious_terms = ["suspicious", "recurrence", "growing", "new lesion", "malign", "cancer", "hcc", "li-rads", "mass"]
-    # Negation window: check the 40 chars before the term for negation signals.
-    # Matches: "no suspicious", "not growing", "without malignancy",
-    #          "negative for cancer", "absence of mass", etc.
+    # Issue 1 fix: align negation regex window with the 60-char prefix slice used in _term_affirmed
     _NEGATION_RE = re.compile(
-        r"\b(no|not|without|negative\s+for|absence\s+of|exclude[sd]?|ruled?\s+out)\b.{0,40}$",
+        r"\b(no|not|without|negative\s+for|absence\s+of|exclude[sd]?|ruled?\s+out)\b.{0,60}$",
         re.I,
     )
     def _term_affirmed(term: str, text: str) -> bool:
@@ -133,7 +131,17 @@ def parse_report_sections(report_path: str | Path | None = None, clinical_path: 
     return {"step": "clinical_context", "status": "success", "organ": organ, "report_path": str(Path(report_path).resolve()) if report_path and Path(report_path).exists() else None, "clinical_path": str(Path(clinical_path).resolve()) if clinical_path and Path(clinical_path).exists() else None, "sections": sections, "clinical_variables": clinical, "suspicious_terms_found": found_suspicious, "radthinking_alignment": "Step 3: report sections + clinical variables. This prototype uses rule-based parsing; LLM extraction can be added later."}
 
 
-def _build_trace_narrative(obs: dict, temp: dict, ctx: dict, conclusion: dict, organ: str | None) -> dict:
+def _build_trace_narrative(
+    obs: dict,
+    temp: dict,
+    ctx: dict,
+    conclusion: dict,
+    organ: str | None,
+    narrative_generator=None,  # Issue 4 fix: optional callable for LLM-generated prose
+) -> dict:
+    # Issue 4: if a real LLM generator is provided, delegate to it
+    if narrative_generator is not None:
+        return narrative_generator(obs, temp, ctx, conclusion, organ)
     organ_name = organ or "target structure"
     if obs.get("status") == "success":
         obs_sentence = (
@@ -186,22 +194,60 @@ def _build_trace_narrative(obs: dict, temp: dict, ctx: dict, conclusion: dict, o
     }
 
 
-def build_reasoning_trace(patient_folder: str | Path | None = None, scan_id: str | None = None, ct_image: str | Path | None = None, current_mask: str | Path | None = None, previous_mask: str | Path | None = None, organ: str | None = None, report_path: str | Path | None = None, clinical_path: str | Path | None = None, pathology_path: str | Path | None = None, output_json: str | Path | None = None) -> dict:
+def build_reasoning_trace(
+    patient_folder: str | Path | None = None,
+    scan_id: str | None = None,
+    ct_image: str | Path | None = None,
+    current_mask: str | Path | None = None,
+    previous_mask: str | Path | None = None,
+    organ: str | None = None,
+    report_path: str | Path | None = None,
+    clinical_path: str | Path | None = None,
+    pathology_path: str | Path | None = None,
+    output_json: str | Path | None = None,
+    narrative_generator=None,  # Issue 4: optional LLM narrative callable
+) -> dict:
     obs = extract_observation(ct_image, current_mask, organ)
     temp = compare_temporal_masks(previous_mask, current_mask, organ)
     ctx = parse_report_sections(report_path, clinical_path, organ)
     conclusion = read_json(pathology_path, {}) if pathology_path else {}
     if not conclusion:
         conclusion = {"status": "not_provided", "note": "No pathology/follow-up JSON was provided; this tool does not fabricate diagnosis."}
-    # simple prototype complexity label
+
+    # Issue 2 fix: multi-label complexity — collect ALL triggered labels instead of single priority chain
     label = temp.get("temporal_label")
-    if label in {"NEW", "GROWING", "RESOLVED", "SHRINKING"}: complexity = "TEMPORAL"
-    elif ctx.get("suspicious_terms_found"): complexity = "INTEGRATIVE"
-    elif obs.get("status") == "success": complexity = "PERCEPTUAL"
-    else: complexity = "AMBIGUOUS"
-    narrative = _build_trace_narrative(obs, temp, ctx, conclusion, organ)
-    trace = {"status": "success", "patient_folder": str(Path(patient_folder).resolve()) if patient_folder else None, "scan_id": scan_id, "organ": organ, "radthinking_trace": {"observation": obs, "temporal_comparison": temp, "clinical_context": ctx, "diagnostic_conclusion": conclusion, "narrative": narrative}, "natural_language_trace": narrative, "complexity_level_prototype": complexity, "scope_note": "Prototype trace generator only. It structures available evidence and emits template prose, but does not infer clinical diagnosis."}
-    if output_json: trace["saved_to"] = write_json(output_json, trace)
+    complexity_labels = []
+    if label in {"NEW", "GROWING", "RESOLVED", "SHRINKING"}:
+        complexity_labels.append("TEMPORAL")
+    if ctx.get("suspicious_terms_found"):
+        complexity_labels.append("INTEGRATIVE")
+    if obs.get("status") == "success":
+        complexity_labels.append("PERCEPTUAL")
+    complexity = complexity_labels if complexity_labels else ["AMBIGUOUS"]
+
+    narrative = _build_trace_narrative(obs, temp, ctx, conclusion, organ, narrative_generator=narrative_generator)
+
+    # Issue 3 fix: propagate warning status from extract_observation to outer trace
+    outer_status = "warning" if obs.get("status") == "warning" else "success"
+
+    trace = {
+        "status": outer_status,
+        "patient_folder": str(Path(patient_folder).resolve()) if patient_folder else None,
+        "scan_id": scan_id,
+        "organ": organ,
+        "radthinking_trace": {
+            "observation": obs,
+            "temporal_comparison": temp,
+            "clinical_context": ctx,
+            "diagnostic_conclusion": conclusion,
+            "narrative": narrative,
+        },
+        "natural_language_trace": narrative,
+        "complexity_level_prototype": complexity,
+        "scope_note": "Prototype trace generator only. It structures available evidence and emits template prose, but does not infer clinical diagnosis.",
+    }
+    if output_json:
+        trace["saved_to"] = write_json(output_json, trace)
     return trace
 
 
@@ -211,6 +257,13 @@ def build_patient_traces_from_outputs(patient_folder: str | Path, output_folder:
     for s in scans:
         mask_cands = list((out / s.scan_id).glob(f"**/segmentations/{organ}.nii.gz")) + list((out / "scan_outputs" / s.scan_id).glob(f"**/segmentations/{organ}.nii.gz"))
         cur = mask_cands[0] if mask_cands else None
+        # Issue 5 fix: warn when no mask is found instead of silently passing None
+        if cur is None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "build_patient_traces_from_outputs: no mask found for organ=%s scan=%s in %s",
+                organ, s.scan_id, out,
+            )
         tr = build_reasoning_trace(root, s.scan_id, s.ct_image, cur, prev, organ, s.report_path, s.clinical_path, root / "pathology.json" if (root / "pathology.json").exists() else None)
         traces.append(tr)
         if cur and Path(cur).exists(): prev = cur

@@ -10,21 +10,27 @@ models:
     - airway_wall
     - lung_pulmonary_arteries
     - lung_pulmonary_veins
-    status: template
+    status: ready_if_checkpoint_folder_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
+    notes: Checkpoint found in nnUNet_private Dataset1380_AirRC.
     runner: command_template
-    checkpoint_path: checkpoints/airrc
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1380
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
     private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: trainable_candidate_for_airway_and_lung_vessels
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1380
+    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC
+    mstep_reason: AirRC checkpoint is now available via nnUNet_private.
   atlasnet:
     name: ATLAS-Net nnUNet v2 abdominal 25-class model
     type: segmentation
@@ -78,21 +84,27 @@ models:
     source: class_checkpoint_map.xlsx
     covered_organs:
     - airway_tree
-    status: template
+    status: ready_if_checkpoint_folder_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
+    notes: Checkpoint found in nnUNet_private Dataset1370_ATM.
     runner: command_template
-    checkpoint_path: checkpoints/atm
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1370
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
     private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: trainable_candidate_for_airway_tree
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1370
+    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM
+    mstep_reason: ATM checkpoint is now available via nnUNet_private.
   cads:
     name: CADS abdominal nnUNet Dataset551
     type: segmentation
@@ -263,14 +275,14 @@ models:
     - vertebrae_t8
     - vertebrae_t9
     - white_matter
-    status: checkpoint_corrupted
+    status: ready_if_checkpoint_folder_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: 'Dataset551 checkpoint is corrupted (truncated transfer). Only Dataset557
-      (Brain) and Dataset558 (OAR/head-neck) are valid. CADS is disabled for abdominal
-      organ inference until Dataset551 is re-downloaded.'
+    notes: 'Dataset551 checkpoint is now available. All 9 CADS datasets (551-559) are
+      present with checkpoint_final.pth. CADS covers 150+ organs across abdominal,
+      head-neck, brain, OAR, and body-region tasks.'
     runner: command_template
-    checkpoint_path: checkpoints/CADS_series
-    dataset_json_path: checkpoints/CADS_series/Dataset551_Totalseg251/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset551_Totalseg251/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
     dataset_id: 551
     trainer: nnUNetTrainerNoMirroring
     plans: nnUNetResEncUNetLPlans
@@ -280,11 +292,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds}
     private_checkpoint: true
-    trainable: checkpoint_corrupted
+    trainable: yes_if_nnunet_checkpoint_present
     mstep_role: trainable_candidate_for_broad_abdominal_organs
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 1551
-    mstep_init_from: checkpoints/CADS_series/Dataset551_Totalseg251
+    mstep_init_from: checkpoints/CADS_series/CADS_series/Dataset551_Totalseg251
     mstep_reason: CADS is exposed as an nnUNet-style checkpoint family and covers
       many abdominal structures; fine-tuning requires its complete training state/checkpoint
       layout.
@@ -413,8 +425,8 @@ models:
       small_intestine: intestine
       portal_splenic_veins: veins
       portal_vein_and_splenic_vein: veins
-    checkpoint_path: checkpoints/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres
-    dataset_json_path: checkpoints/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
     dataset_id: 1017
     trainer: nnUNetTrainer
     plans: nnUNetPlans
@@ -432,7 +444,7 @@ models:
     mstep_role: primary_trainable_for_pancreas_and_pancreatic_tumor_and_candidate_for_25_class_abdominal_organs
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 1939
-    mstep_init_from: checkpoints/qchen76_2025_0421
+    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI
     mstep_reason: ePAI qchen76_2025_0421 is the teacher-specified 25-class abdominal
       organ/duct/tumor checkpoint and is nnUNet-style, so it is the preferred M-step
       target for PanTS pancreas tasks and a candidate for related organ refinement.
@@ -571,8 +583,8 @@ models:
     notes: The lightweight export only exposed MOOSE Dataset666/888. Dataset888 is
       useful for aorta/vascular structures; not a full abdominal organ model.
     runner: command_template
-    checkpoint_path: checkpoints/MOOSE_series
-    dataset_json_path: checkpoints/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/MOOSE_series/MOOSE_series
+    dataset_json_path: checkpoints/MOOSE_series/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
     dataset_id: 888
     trainer: nnUNetTrainerNoMirroring
     plans: nnUNetPlans
@@ -586,7 +598,7 @@ models:
     mstep_role: conditional_trainable_candidate_for_moose_tasks
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 1888
-    mstep_init_from: checkpoints/MOOSE_series/Dataset888_Cardiac
+    mstep_init_from: checkpoints/MOOSE_series/MOOSE_series/Dataset888_Cardiac
     mstep_reason: MOOSE is treated as nnUNet-style only when the corresponding full
       dataset/checkpoint is present; the current lightweight export exposes limited
       runnable structure.
@@ -713,8 +725,8 @@ models:
       once the teacher provides MOOSE3.0 weights. Currently shares Dataset888 path as
       placeholder; update dataset_id and dataset_json_path when MOOSE3.0 checkpoint arrives.'
     runner: command_template
-    checkpoint_path: checkpoints/MOOSE_series
-    dataset_json_path: checkpoints/MOOSE_series/Dataset666_Organs/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/MOOSE_series/MOOSE_series
+    dataset_json_path: checkpoints/MOOSE_series/MOOSE_series/Dataset666_Peripheral-Bones/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
     dataset_id: 666
     trainer: nnUNetTrainerNoMirroring
     plans: nnUNetPlans
@@ -728,7 +740,7 @@ models:
     mstep_role: conditional_trainable_candidate_for_moose3_tasks
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 1889
-    mstep_init_from: checkpoints/MOOSE_series/Dataset666_Organs
+    mstep_init_from: checkpoints/MOOSE_series/MOOSE_series/Dataset666_Peripheral-Bones
     mstep_reason: MOOSE3.0 uses Dataset666 (full-body organs), not Dataset888 (cardiac).
       Fine-tuning requires the complete MOOSE3.0 checkpoint/training state.
   nnunet_private:
@@ -751,8 +763,8 @@ models:
     notes: Private AbdomenAtlas organ model from Drive export; useful as an organ-mask
       candidate.
     runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
     dataset_id: 224
     trainer: nnUNetTrainer
     plans: nnUNetResEncUNetLPlans
@@ -766,7 +778,7 @@ models:
     mstep_role: private_abdominal_organ_trainable_backend
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 1224
-    mstep_init_from: checkpoints/nnUNet_private/Dataset224_AbdomenAtlas1.1
+    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset224_AbdomenAtlas1.1
     mstep_reason: Private AbdomenAtlas nnUNet is a natural trainable backend for organ-mask
       refinement if the lab's full checkpoint/training layout is mounted.
   pedro:
@@ -825,8 +837,8 @@ models:
     output_layout: case_id/segmentations/*.nii.gz
     notes: SAROS body-region model; not the first choice for PanTS organ refinement.
     runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
     dataset_id: 1345
     trainer: nnUNetTrainer
     plans: nnUNetResEncUNetLPlans
@@ -840,7 +852,7 @@ models:
     mstep_role: conditional_trainable_body_region_backend
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 2345
-    mstep_init_from: checkpoints/nnUNet_private/Dataset1345_SAROS
+    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1345_SAROS
     mstep_reason: SAROS is a private nnUNet-style model but not the first-choice PanTS
       pancreas target.
   totalsegmentator:
@@ -999,11 +1011,11 @@ models:
     notes: UNEST run_UNEST.sh and configs from the teacher Drive lightweight export
       are bundled. Real inference requires the actual UNEST model/checkpoint environment.
     runner: command_template
-    checkpoint_path: third_party/UNEST_renalStructures_lightweight
+    checkpoint_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
     command_template: python scripts/unest_predict_and_split.py --image {image} --output
       {case_output} --unest-root {checkpoint_path}
     private_checkpoint: true
-    source_code_path: third_party/UNEST_renalStructures_lightweight
+    source_code_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
     trainable: external_script_required
     mstep_role: kidney_substructure_inference_candidate
     mstep_backend: external_training_required
@@ -1119,17 +1131,17 @@ models:
       Real inference requires MONAI bundle/checkpoint download and a GPU environment;
       output is standardized to segmentations/*.nii.gz.
     runner: command_template
-    checkpoint_path: third_party/VISTA3D-Inference-Pipeline-master
-    label_map_path: third_party/VISTA3D-Inference-Pipeline-master/label_mappings/label_dict_127_abdomenAtlas3-1.json
+    checkpoint_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
+    label_map_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master/label_mappings/label_dict_127_abdomenAtlas3-1.json
     command_template: python scripts/vista3d_predict_and_split.py --image {image}
       --output {case_output} --vista-root {checkpoint_path} --label-map {label_map_path}
     private_checkpoint: false
-    source_code_path: third_party/VISTA3D-Inference-Pipeline-master
+    source_code_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
     trainable: conditional_monai_bundle_finetune
     mstep_role: foundation_candidate_and_optional_monai_bundle_finetune_backend
     mstep_backend: monai_bundle_finetune
     mstep_dataset_id: 3101
-    mstep_init_from: third_party/VISTA3D-Inference-Pipeline-master
+    mstep_init_from: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
     mstep_reason: VISTA3D is integrated as a high-resource foundation segmentation
       candidate and the bundled pipeline contains MONAI bundle training/fine-tuning/continual-learning
       configs (configs/train.json, train_continual.json, multi_gpu_train.json, scripts/trainer.py).
@@ -1169,8 +1181,8 @@ models:
       source are included. Real inference requires the actual VSmTrans/nnUNet checkpoint
       folder.
     runner: command_template
-    checkpoint_path: checkpoints/VSmTrans/nnUNet_results
-    dataset_json_path: checkpoints/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
+    checkpoint_path: checkpoints/VSmTrans/VSmTrans/nnUNet_results
+    dataset_json_path: checkpoints/VSmTrans/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
     dataset_id: 1
     trainer: nnUNetTrainer
     plans: nnUNetPlans
@@ -1185,7 +1197,7 @@ models:
     mstep_role: trainable_candidate_for_abdominal_organs
     mstep_backend: nnunetv2_finetune
     mstep_dataset_id: 1001
-    mstep_init_from: checkpoints/VSmTrans/nnUNet_results/Dataset001_BDMAP
+    mstep_init_from: checkpoints/VSmTrans/VSmTrans/nnUNet_results/Dataset001_BDMAP
     mstep_reason: VSmTrans is routed to abdominal organs; fine-tuning is possible
       only if its nnUNet-compatible training state and environment are available.
   vsnet:
@@ -1195,21 +1207,27 @@ models:
     covered_organs:
     - liver_hepatic_vein
     - liver_portal_vein
-    status: template
+    status: ready_if_checkpoint_folder_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
+    notes: Checkpoint found in nnUNet_private Dataset1381_LVP (liver vein portal).
     runner: command_template
-    checkpoint_path: checkpoints/vsnet
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1381_LVP/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1381
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds}
     private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
+    trainable: yes_if_full_nnunet_training_state_present
+    mstep_role: trainable_candidate_for_liver_vessels
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1381
+    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1381_LVP
+    mstep_reason: VSNet/LVP checkpoint is now available via nnUNet_private.
 organ_to_models:
   abdominal_cavity:
   - cads

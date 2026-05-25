@@ -81,10 +81,12 @@ def run_registered_model(
 
     runner = entry.get("runner", "command_template")
     if runner == "builtin_totalsegmentator":
+        # TotalSegmentator uses "gpu"/"cpu" not "cuda"
+        ts_device = "gpu" if device and device.startswith("cuda") else (device or "gpu")
         return run_totalsegmentator(
             str(image), str(Path(output_folder).resolve()), case_id=case_id,
-            fast=fast, task=None, roi_preset="shapekit_abdomen", roi_subset=None,
-            device=device, dry_run=dry_run, timeout_sec=timeout_sec,
+            fast=fast, task=None, roi_preset="none", roi_subset=None,
+            device=ts_device, dry_run=dry_run, timeout_sec=timeout_sec,
         ) | {"model_key": model_key, "registry_path": str(registry_file)}
 
     template = entry.get("command_template")

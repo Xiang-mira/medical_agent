@@ -121,6 +121,15 @@ def build_labelcritic_projection(
         csvs = sorted(str(p.resolve()) for p in out.rglob("*.csv"))
         result["saved_projections"] = pngs
         result["saved_csvs"] = csvs
+
+        # Bug fix: copy mask staging folders to a persistent location inside `out`
+        # before the TemporaryDirectory context exits, so result paths remain valid.
+        for label, src_folder in [("candidate_a", mask_a_folder), ("candidate_b", mask_b_folder)]:
+            if src_folder and src_folder.exists():
+                persistent = out / f"{label}_staging"
+                if not persistent.exists():
+                    shutil.copytree(src_folder, persistent)
+                result[f"mask_{label.split('_')[1]}_folder"] = str(persistent)
         if proc.returncode != 0:
             result.update({"status": "failed", "reason": "LabelCritic projection command failed."})
         else:

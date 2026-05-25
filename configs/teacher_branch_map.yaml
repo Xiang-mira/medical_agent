@@ -1,0 +1,1187 @@
+adrenal_gland_left:
+  fallback_teachers:
+  - moose3_0
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 9
+adrenal_gland_right:
+  fallback_teachers:
+  - moose3_0
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 8
+airway:
+  fallback_teachers: &id001
+  - vista3d
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 132
+airway_tree:
+  fallback_teachers:
+  - vista3d
+  freeze_backbone: true
+  teacher_model: atm
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 132
+aorta:
+  fallback_teachers:
+  - vista3d
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 6
+atrial_appendage_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 108
+autochthon_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 104
+autochthon_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 105
+bladder:
+  fallback_teachers:
+  - cads
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 15
+bone:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 21
+bone_lesion:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 128
+brachiocephalic_trunk:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 109
+brachiocephalic_vein_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 110
+brachiocephalic_vein_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 111
+brain:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 22
+clavicula_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 91
+clavicula_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 92
+colon:
+  fallback_teachers:
+  - vsmtrans
+  - cads
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 62
+common_carotid_artery_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 112
+common_carotid_artery_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 113
+costal_cartilages:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 114
+duodenum:
+  fallback_teachers:
+  - vsmtrans
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 13
+esophagus:
+  fallback_teachers:
+  - cads
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 11
+femur_left:
+  fallback_teachers:
+  - totalsegmentator
+  - vista3d
+  freeze_backbone: true
+  teacher_model: moose3_0
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 93
+femur_right:
+  fallback_teachers:
+  - totalsegmentator
+  - vista3d
+  freeze_backbone: true
+  teacher_model: moose3_0
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 94
+gall_bladder:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 10
+gallbladder:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 10
+gluteus_maximus_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 98
+gluteus_maximus_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 99
+gluteus_medius_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 100
+gluteus_medius_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 101
+gluteus_minimus_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 102
+gluteus_minimus_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 103
+heart:
+  fallback_teachers:
+  - moose
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 115
+hepatic_vessel:
+  fallback_teachers:
+  - vsmtrans
+  freeze_backbone: true
+  teacher_model: vsnet
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 25
+hip_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 95
+hip_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 96
+humerus_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 87
+humerus_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 88
+iliopsoas_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 106
+iliopsoas_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 107
+inferior_vena_cava:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 7
+intestine:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 19
+kidney:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 2
+kidney_left:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 14
+kidney_mass:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 129
+kidney_right:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 5
+liver:
+  fallback_teachers:
+  - totalsegmentator
+  - vista3d
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 1
+liver_hepatic_vein:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 25
+liver_tumor:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 130
+lung:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 20
+lung_left:
+  fallback_teachers:
+  - totalsegmentator
+  - vista3d
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 20
+lung_right:
+  fallback_teachers:
+  - totalsegmentator
+  - vista3d
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 20
+lung_tumor:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 23
+pancreas:
+  fallback_teachers:
+  - epai_20250421
+  - vista3d
+  - vsmtrans
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 4
+pancreatic_cyst:
+  fallback_teachers: []
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 24
+pancreatic_pdac:
+  fallback_teachers:
+  - vista3d
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 24
+pancreatic_pnet:
+  fallback_teachers: []
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 24
+portal_vein_and_splenic_vein:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 17
+postcava:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 7
+prostate:
+  fallback_teachers:
+  - vsmtrans
+  - cads
+  freeze_backbone: true
+  teacher_model: nnunet_private
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 16
+rectum:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 18
+rib_left_1:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 63
+rib_left_10:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 72
+rib_left_11:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 73
+rib_left_12:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 74
+rib_left_2:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 64
+rib_left_3:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 65
+rib_left_4:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 66
+rib_left_5:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 67
+rib_left_6:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 68
+rib_left_7:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 69
+rib_left_8:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 70
+rib_left_9:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 71
+rib_right_1:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 75
+rib_right_10:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 84
+rib_right_11:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 85
+rib_right_12:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 86
+rib_right_2:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 76
+rib_right_3:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 77
+rib_right_4:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 78
+rib_right_5:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 79
+rib_right_6:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 80
+rib_right_7:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 81
+rib_right_8:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 82
+rib_right_9:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 83
+sacrum:
+  fallback_teachers:
+  - moose3_0
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 97
+scapula_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 89
+scapula_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 90
+skull:
+  fallback_teachers:
+  - moose3_0
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 120
+small_bowel:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 19
+spinal_cord:
+  fallback_teachers:
+  - cads
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 121
+spleen:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 3
+sternum:
+  fallback_teachers:
+  - cads
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 122
+stomach:
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: vsmtrans
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 12
+subclavian_artery_left:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 123
+subclavian_artery_right:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 124
+superior_vena_cava:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 125
+thyroid_gland:
+  fallback_teachers:
+  - cads
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 126
+trachea:
+  fallback_teachers:
+  - cads
+  freeze_backbone: true
+  teacher_model: vista3d
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 57
+uterus:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 16
+veins:
+  fallback_teachers:
+  - totalsegmentator
+  - vista3d
+  freeze_backbone: true
+  teacher_model: epai_20250421
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 17
+vertebrae_c1:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 56
+vertebrae_c2:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 55
+vertebrae_c3:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 54
+vertebrae_c4:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 53
+vertebrae_c5:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 52
+vertebrae_c6:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 51
+vertebrae_c7:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 50
+vertebrae_l1:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 37
+vertebrae_l2:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 36
+vertebrae_l3:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 35
+vertebrae_l4:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 34
+vertebrae_l5:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 33
+vertebrae_s1:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 127
+vertebrae_t1:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 49
+vertebrae_t10:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 40
+vertebrae_t11:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 39
+vertebrae_t12:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 38
+vertebrae_t2:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 48
+vertebrae_t3:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 47
+vertebrae_t4:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 46
+vertebrae_t5:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 45
+vertebrae_t6:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 44
+vertebrae_t7:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 43
+vertebrae_t8:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 42
+vertebrae_t9:
+  fallback_teachers: *id001
+  freeze_backbone: true
+  teacher_model: totalsegmentator
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 41

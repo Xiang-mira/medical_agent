@@ -56,11 +56,16 @@ def compare_organ(ct_path, mask1_path, mask2_path, organ,base_url,
                 elif answer == "2":
                     better = "mask2"
                 elif answer == "0.5":
-                    better = "mask1"
+                    better = "uncertain"
                     print("Undecided case (answer=0.5):", ",".join(row))
 
-        # Determine which path is better
-        best_path = mask1_path if better == "mask1" else mask2_path
+        # Determine which path is better; uncertain means VLM could not decide
+        if better == "mask1":
+            best_path = mask1_path
+        elif better == "mask2":
+            best_path = mask2_path
+        else:
+            best_path = None
 
         # Step 4. Write to log file
         with open(log_file, "a") as log:
@@ -70,7 +75,7 @@ def compare_organ(ct_path, mask1_path, mask2_path, organ,base_url,
                 f"  CT: {ct_path}\n"
                 f"  Mask1: {mask1_path}\n"
                 f"  Mask2: {mask2_path}\n"
-                f"  Better: {best_path}\n\n"
+                f"  Better: {best_path if best_path is not None else 'uncertain'}\n\n"
             )
         print(mask1_path, mask2_path)
         print(best_path)

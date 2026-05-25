@@ -125,8 +125,8 @@ class AnnotationManager:
     # ── summary ───────────────────────────────────────────────────────────────
 
     def summary(self) -> dict:
-        raw_organs = [p.stem.replace(".nii", "") for p in self.raw_dir.glob("*.nii.gz")]
-        updated_organs = [p.stem.replace(".nii", "") for p in self.updated_dir.glob("*.nii.gz")]
+        raw_organs = [p.name.removesuffix(".nii.gz") for p in self.raw_dir.glob("*.nii.gz")]
+        updated_organs = [p.name.removesuffix(".nii.gz") for p in self.updated_dir.glob("*.nii.gz")]
         history = self.get_history()
         rounds_done = sorted({h["round"] for h in history})
         return {

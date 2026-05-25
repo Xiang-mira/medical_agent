@@ -12,6 +12,7 @@ from .label_verifier import verify_annotation
 from .labelcritic_wrapper import run_labelcritic_compare
 from .mstep_runner import build_training_manifest, write_mstep_config
 from .model_registry import candidate_models_for_organs, load_registry, recommend_primary_models_for_organs
+from .organ_model_performance import OrganModelPerformance
 from .radthinking import build_reasoning_trace
 from .registered_infer import run_registered_model
 from .shapekit_runner import run_shapekit
@@ -73,7 +74,17 @@ def run_multimodel_annotation_loop(
     dry_run: bool = False,
     timeout_sec: int = 1800,
     device: str | None = None,
+    perf_tracker_path: str | Path | None = None,
+    resume: bool = True,
+    preseeded_model_dirs: dict[str, Path] | None = None,
 ) -> dict[str, Any]:
+    """
+    preseeded_model_dirs: mapping of model_key -> base directory where
+        per-case predictions already exist as <base>/<case_id>/<organ>.nii.gz.
+        These models are injected directly into model_seg_dirs without running
+        inference, allowing the student model from a previous round to compete
+        with teachers in the current round's E-step.
+    """
     """Run the teacher-requested multi-model annotation refinement loop.
 
     Required case_list columns:
@@ -90,6 +101,11 @@ def run_multimodel_annotation_loop(
         organs = ["pancreas", "liver", "spleen", "kidney_left", "kidney_right", "colon", "duodenum", "stomach", "aorta", "postcava"]
     if models is None or not models:
         models = ["mock_seg"] if dry_run else ["totalsegmentator"]
+
+    # Initialise organ-model performance tracker (None = disabled)
+    tracker: OrganModelPerformance | None = (
+        OrganModelPerformance(perf_tracker_path) if perf_tracker_path else None
+    )
 
     dice_rows: list[dict[str, Any]] = []
     round_rows: list[dict[str, Any]] = []
@@ -115,6 +131,24 @@ def run_multimodel_annotation_loop(
         case_updated = updated_root / case_id / "updated"
         case_updated.mkdir(parents=True, exist_ok=True)
 
+        import time as _time
+        _case_start = _time.time()
+
+        # Resume: skip cases that already have at least one model's output
+        if resume and not dry_run:
+            pred_root = case_out / "raw_predictions"
+            if pred_root.exists():
+                already_done = any(
+                    any((pred_root / m / case_id / "segmentations").glob("*.nii.gz"))
+                    for m in (pred_root.iterdir() if pred_root.exists() else [])
+                    if (pred_root / m.name / case_id / "segmentations").exists()
+                )
+                if already_done:
+                    print(f"[{_time.strftime('%H:%M:%S')}] Case {idx}/{len(cases)}: {case_id} 已完成，跳过", flush=True)
+                    continue
+
+        print(f"[{_time.strftime('%H:%M:%S')}] Case {idx}/{len(cases)}: {case_id} 开始推理...", flush=True)
+
         if not ct.exists() and not dry_run:
             _append_jsonl(review_queue, {"case_id": case_id, "reason": "ct_path missing", "ct_path": str(ct)})
             continue
@@ -129,12 +163,26 @@ def run_multimodel_annotation_loop(
                         case_models.append(m)
 
         model_seg_dirs: dict[str, Path] = {}
-        for model_key in case_models:
+
+        # Inject preseeded predictions (e.g. student from previous round) directly
+        # into model_seg_dirs without running inference.
+        if preseeded_model_dirs:
+            for seed_key, seed_base in preseeded_model_dirs.items():
+                seed_seg = Path(seed_base) / case_id
+                if seed_seg.exists() and any(seed_seg.glob("*.nii.gz")):
+                    model_seg_dirs[seed_key] = seed_seg
+                    print(f"[{_time.strftime('%H:%M:%S')}]   [preseeded] {seed_key} ✓ ({sum(1 for _ in seed_seg.glob('*.nii.gz'))} masks)", flush=True)
+
+        for model_idx, model_key in enumerate(case_models, start=1):
+            print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key}...", flush=True)
             infer = run_registered_model(ct, case_raw / model_key, model_key, registry_path=registry_path, case_id=case_id, dry_run=dry_run, timeout_sec=timeout_sec, device=device)
             inference_results.append({"case_id": case_id, **infer})
             seg_dir = Path(infer.get("segmentation_output", case_raw / model_key / case_id / "segmentations"))
             if infer.get("status") in {"success", "dry_run"}:
                 model_seg_dirs[model_key] = seg_dir
+                print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✓ ({infer.get('num_masks',0)} masks)", flush=True)
+            else:
+                print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✗ ({infer.get('status')})", flush=True)
                 if not dry_run:
                     normalize_totalseg_to_shapekit(seg_dir)
                 if enable_shapekit and infer.get("status") == "success" and not dry_run:
@@ -152,7 +200,23 @@ def run_multimodel_annotation_loop(
             best_pred: Path | None = None
             organ_rows: list[dict[str, Any]] = []
 
-            for model_key, seg_dir in model_seg_dirs.items():
+            # Performance tracker: decide which models to run for this organ.
+            # Preseeded models (e.g. student_prev) always participate regardless
+            # of tracker state — they must compete to drive distillation.
+            if tracker and not tracker.should_run_all(organ):
+                top_models = tracker.get_top_k_models(organ, k=2)
+                organ_model_seg_dirs = {
+                    k: v for k, v in model_seg_dirs.items()
+                    if k in top_models
+                    or k.replace("_shapekit", "") in top_models
+                    or k in (preseeded_model_dirs or {})
+                }
+                if not organ_model_seg_dirs:
+                    organ_model_seg_dirs = model_seg_dirs  # fallback to all
+            else:
+                organ_model_seg_dirs = model_seg_dirs
+
+            for model_key, seg_dir in organ_model_seg_dirs.items():
                 pred = _mask_path(seg_dir, organ)
                 v = verify_annotation(current_ref if current_ref and current_ref.exists() else None, pred if pred.exists() else None, organ, dsc_replace_threshold=0.0, dsc_vlm_threshold=vlm_threshold)
                 dice = v.get("dice")
@@ -161,6 +225,10 @@ def run_multimodel_annotation_loop(
                     best_dice = float(dice); best_model = model_key; best_pred = pred
                 row = {"case_id": case_id, "organ": organ, "model": model_key, "prediction": str(pred), "reference": str(current_ref) if current_ref else "", "dice": dice, "decision": v.get("decision"), "status": v.get("status"), "reason": v.get("reason")}
                 dice_rows.append(row); organ_rows.append(row)
+
+                # Update performance tracker with this (organ, model, dice) observation
+                if tracker and dice is not None and not dry_run:
+                    tracker.update(organ, model_key, float(dice))
 
             if not organ_rows:
                 _append_jsonl(review_queue, {"case_id": case_id, "organ": organ, "reason": "no candidate masks produced"})
@@ -245,6 +313,9 @@ def run_multimodel_annotation_loop(
             "updated_masks": updated,
             "remaining_uncertain": uncertain,
         })
+        _case_elapsed = round(_time.time() - _case_start, 1)
+        print(f"[{_time.strftime('%H:%M:%S')}] Case {idx}/{len(cases)}: {case_id} 完成 "
+              f"(耗时{_case_elapsed}s, accepted={accepted}, updated={updated}, critic={critic_count})", flush=True)
 
     dice_csv = out / "dice_metrics.csv"
     round_csv = out / "round_metrics.csv"
