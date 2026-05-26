@@ -1,8 +1,6 @@
-﻿# MedAI Agent Loop Task 2 – Multi-Model Medical Annotation Refinement
+# MedAI Agent Loop Task 2 – Multi-Model Medical Annotation Refinement
 
-This repository implements a step-by-step medical image annotation refinement pipeline for abdominal CT segmentation. It starts from selected PanTS/PAINTS tumor cases, runs multiple segmentation teachers, refines masks with anatomy-aware post-processing and LabelCritic/VLM review, then prepares a selected-model-aware M-step so the improved annotations can update the next E-step model.
-
-The README is written in the same practical style as a Hugging Face model card: what the project does, what files are needed, exactly which commands to run, and what outputs to expect.
+This repository implements a step-by-step medical image annotation refinement pipeline for abdominal CT segmentation. It starts from selected PanTS/PAINTS tumor cases, runs multiple segmentation teacher models, refines masks with anatomy-aware post-processing and LabelCritic/VLM review, and prepares a selected-model-aware M-step so the improved annotations can update the next E-step model.
 
 ## What this project does, step by step
 
@@ -42,7 +40,7 @@ DICE/DSC gate: accept, uncertain, or send to LabelCritic/VLM
 Annotation update + review queue + RadThinking-style traces
         |
         v
-M-step: update selected trainable model family
+M-step: update the selected trainable model family when training state is available
         |
         v
 Updated checkpoint returns to the next E-step candidate pool
@@ -54,7 +52,8 @@ Use a Linux machine or GPU server with:
 
 - Python environment that can run this repository's CLI.
 - NVIDIA GPU for real model inference/training.
-- CUDA-compatible PyTorch / nnUNet v2 environment for ePAI and M-step training.
+- CUDA-compatible PyTorch / nnUNet environment for ePAI and nnUNet-style M-step training.
+- MONAI environment for VISTA3D fine-tuning if VISTA3D is used as an M-step backend.
 - Local PanTS/PAINTS CT data in NIfTI format (`.nii.gz`).
 - Local checkpoints for any private or large models you want to run.
 - Optional LabelCritic/VLM server on `localhost:8000` for real visual review.
@@ -246,7 +245,7 @@ python run_medai_cli.py --json mstep-update \
   --dry-run
 ```
 
-M-step outputs include a prepared nnUNet-style dataset, training logs, a training result JSON, and a new checkpoint such as `checkpoint_best.pth` or `checkpoint_final.pth` when training succeeds.
+M-step outputs include a prepared training dataset, training logs, a training result JSON, and a new checkpoint such as `checkpoint_best.pth` or `checkpoint_final.pth` when training succeeds. The exact training format depends on the selected backend: ePAI and other nnUNet-compatible models use nnUNet-style training data, while VISTA3D requires its MONAI bundle configuration and resources.
 
 ## 10. Run E-step Round 2 with the updated model
 
@@ -313,22 +312,32 @@ python run_medai_cli.py --json build-samples \
   --output-jsonl outputs/run_pants50_round1/case_samples.jsonl
 ```
 
-## 14. V9 update: TotalSegmentator and VISTA3D are now selectable M-step backends
+## 14. Optional M-step backends: TotalSegmentator and VISTA3D
 
-This version treats **TotalSegmentator** and **VISTA3D** as selectable model families in the registry, not just inference-only references. The distinction is precise:
+This implementation treats **TotalSegmentator** and **VISTA3D** as selectable model families in the registry, not just inference-only references. The distinction is precise:
 
-- `totalsegmentator` remains a public E-step baseline, but it also exposes a **conditional TotalSegmentator-style public nnUNet training backend** through the bundled `third_party/TotalSegmentator-master/resources/train_nnunet.md`, `train_nnunet.sh`, and `convert_dataset_to_nnunet.py`. This does **not** claim to reproduce released TotalSegmentator v2, because the official v2 training used additional non-public data.
+- `totalsegmentator` remains a public E-step baseline, but it also exposes a **conditional TotalSegmentator-style public nnUNet training backend** through the bundled `third_party/TotalSegmentator-master/resources/train_nnunet.md`, `train_nnunet.sh`, and `convert_dataset_to_nnunet.py`. This does **not** claim to reproduce the official released TotalSegmentator model, because the official training used additional non-public data.
 - `vista3d` remains a high-resource foundation candidate, but it also exposes a **conditional MONAI bundle fine-tuning backend** through `third_party/VISTA3D-Inference-Pipeline-master/configs/train.json`, `train_continual.json`, `multi_gpu_train.json`, and `scripts/trainer.py`. This supports fine-tuning/continual learning when a VISTA3D checkpoint, datalist, MONAI environment, and sufficient GPU memory are available.
 
 Example dry-run checks:
 
 ```bash
-python run_medai_cli.py --json mstep-update --training-manifest outputs/run_pants50_real/training_manifest.json --output-folder outputs/mstep_totalseg --target-model totalsegmentator --dry-run
-python run_medai_cli.py --json mstep-update --training-manifest outputs/run_pants50_real/training_manifest.json --output-folder outputs/mstep_vista3d --target-model vista3d --dry-run
+python run_medai_cli.py --json mstep-update \
+  --training-manifest outputs/run_pants50_round1/training_manifest.json \
+  --output-folder outputs/mstep_totalseg \
+  --target-model totalsegmentator \
+  --dry-run
+
+python run_medai_cli.py --json mstep-update \
+  --training-manifest outputs/run_pants50_round1/training_manifest.json \
+  --output-folder outputs/mstep_vista3d \
+  --target-model vista3d \
+  --dry-run
 ```
 
+### Selected-model-aware M-step semantics
 
-This v7 revision fixes the M-step semantics. The project no longer presents M-step as "training a generic new nnUNet regardless of the E-step model." Instead, it implements **selected-model-aware M-step**:
+This project uses **selected-model-aware M-step** rather than training a generic new nnUNet regardless of the E-step model.
 
 ```text
 choose task/organ-specific primary model
@@ -339,18 +348,22 @@ choose task/organ-specific primary model
 
 Important clarification:
 
-- `TotalSegmentator` is a **public baseline / E-step candidate**, not the default retraining target in this implementation.
+- `TotalSegmentator` is a **public baseline / E-step candidate** and an optional conditional M-step backend, but it is not the default retraining target.
 - `ePAI_20250421` is the preferred trainable target for pancreas / pancreatic duct / pancreatic tumor tasks when the teacher's nnUNet-compatible checkpoint is mounted.
 - CADS, MOOSE, VSmTrans, private nnUNet, SAROS, and ATLAS-Net are conditional M-step targets when their full nnUNet-compatible training state exists.
-- VISTA3D, UNEST, and template-only families remain inference/external-training candidates unless their original training recipes are provided.
+- VISTA3D is a high-resource foundation candidate. It can be used as a conditional MONAI fine-tuning backend only when the required checkpoint, datalist, MONAI configuration, and GPU resources are available.
+- UNEST and template-only families remain inference/external-training candidates unless their original training recipes are provided.
 
-New commands:
+Useful commands:
 
 ```bash
 python run_medai_cli.py --json model-inventory
-python run_medai_cli.py --json route-models --organs pancreas,liver,aorta,kidney_cortex
+
+python run_medai_cli.py --json route-models \
+  --organs pancreas,liver,aorta,kidney_cortex
+
 python run_medai_cli.py --json mstep-update \
-  --training-manifest outputs/run_pants50_real/training_manifest.json \
+  --training-manifest outputs/run_pants50_round1/training_manifest.json \
   --output-folder outputs/mstep_epai_round1 \
   --target-model epai_20250421 \
   --ct-source-root third_party/PanTS-main/data \
@@ -362,13 +375,11 @@ See:
 - `docs/SELECTED_MODEL_AWARE_MSTEP_V7.md`
 - `docs/MODEL_INVENTORY_AND_TRAINABILITY_V7.md`
 
----
-
-# MedAI Agent Loop CLI — Final v6 Verified Delivery
+## 15. Implementation status and verified source coverage
 
 This project is a registry-driven, multi-model medical annotation refinement workflow for the teacher's Task 2. It is designed for PanTS/PAINTS 50 tumor-case debugging first, then scalable extension to larger cohorts.
 
-## Core loop
+### Core loop
 
 ```text
 class_checkpoint_map.xlsx -> model_registry
@@ -396,26 +407,27 @@ M-step: selected-model-aware fine-tuning plan/training manifest
                        |
                        +---- updated model/checkpoint -> next E-step
 ```
-## What is implemented in source
+
+### What is implemented in source
 
 | Module | Status | Notes |
 |---|---:|---|
 | Multi-model registry | Implemented | `configs/model_registry.yaml`, `configs/class_checkpoint_map.parsed.csv`; formal candidate lists exclude `mock_seg` unless `--include-mock` is used. |
 | ePAI 2025-04-21 25-class output | Implemented | `qchen76_2025_0421.tar.gz` was verified as `Dataset1017_ePAI_3MM` with 25 foreground labels. MedAI calls it through `nnUNetv2_predict_from_modelfolder` and keeps all labels by default. |
 | ATLAS-Net | Implemented wrapper | `configs/atlasnet_label_map.json`, `scripts/atlasnet_predict_and_split.py`. Real weights still required. |
-| VISTA3D | Implemented wrapper | Bundled source and splitting wrapper. Real bundle/checkpoint and GPU environment still required. |
+| VISTA3D | Implemented wrapper + conditional fine-tuning backend | Bundled source and splitting wrapper. Real bundle/checkpoint, MONAI environment, datalist, and sufficient GPU memory are required for fine-tuning. |
 | UNEST | Implemented wrapper | Bundled teacher Drive lightweight script/config and wrapper. Real checkpoint environment still required. |
-| TotalSegmentator | Bundled source + CLI runner | Source in `third_party/TotalSegmentator-master`; real use requires installation/weights. |
+| TotalSegmentator | Bundled source + CLI runner + conditional nnUNet-style backend | Source in `third_party/TotalSegmentator-master`; real use requires installation/weights. The training backend is conditional and does not claim to reproduce the official released TotalSegmentator model. |
 | ShapeKit | Core post-processing | Enabled by default in `run-loop` and `em-loop`. |
 | DICE/DSC quality gate | Implemented | `>=0.8 accept`, `0.5–0.8 uncertain`, `<0.5 LabelCritic/review`. |
 | LabelCritic projection | Implemented | Uses teacher-provided `ProjectDatasetFlex_single.py` + `projection.py`, not naive average projection. |
 | LabelCritic/VLM comparison | Implemented wrapper | Default real backend is `labelcritic`; use `--critic-backend stub` only for offline dry-run. |
 | Report supervision | Implemented | Single and batch CLI compare tumor mask presence/size with report text. |
 | RadThinking-style sample | Implemented structure + template prose | Builds observation/temporal/context/conclusion objects and deterministic natural-language trace fields; VLM-generated clinical prose remains an optional future backend. |
-| M-step | Implemented interface | Prepares nnUNet v2 raw dataset and `nnUNetv2_train` command. Real training must run on GPU; 50 cases are smoke-test only. |
+| M-step | Implemented selected-model-aware interface | Prepares the selected backend's training data/command when the required training state exists. Real training must run on GPU; 50 cases are smoke-test/debugging scale only. |
 | ITK-SNAP review | Implemented helper | Generates commands from `review_queue.jsonl`; screenshots must be captured manually. |
 
-## What is not bundled
+### What is not bundled
 
 The zip does **not** contain private checkpoints or real PanTS NIfTI images. Put them locally/Colab as:
 
@@ -437,19 +449,22 @@ third_party/PanTS-main/data/
   LabelTr/
 ```
 
-## Minimal verification
+### Minimal verification
 
 ```bash
 python scripts/verify_final_v4_integrity.py
-python run_medai_cli.py --json registry-candidates --organs pancreas,liver,aorta,pancreatic_duct,kidney_cortex
+python run_medai_cli.py --json registry-candidates \
+  --organs pancreas,liver,aorta,pancreatic_duct,kidney_cortex
 ```
 
 Expected: `status: success`, ePAI 2025-04-21 appears for its verified 25-class labels, and no `mock_seg` in formal candidate lists. Use `--include-mock` only for smoke tests.
 
-## Real run sequence
+### Real run sequence
 
 ```bash
-python scripts/validate_case_list_50.py --case-list data_manifest/case_list_50_tumor.csv
+python scripts/validate_case_list_50.py \
+  --case-list data_manifest/case_list_50_tumor.csv
+
 python run_medai_cli.py --json run-loop \
   --case-list data_manifest/case_list_50_tumor.csv \
   --models totalsegmentator,epai_20250421,cads,vsmtrans,nnunet_private \
@@ -458,9 +473,8 @@ python run_medai_cli.py --json run-loop \
   --enable-shapekit \
   --enable-critic \
   --critic-backend labelcritic \
-  --base-url http://localhost \
-  --port 8000
+  --critic-base-url http://localhost \
+  --critic-port 8000
 ```
 
 For offline command checks only, add `--dry-run` or use `--critic-backend stub`. Do not report stub results as real LabelCritic/VLM results.
-
