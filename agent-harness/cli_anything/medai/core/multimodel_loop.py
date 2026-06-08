@@ -857,16 +857,20 @@ def _auto_arbitrate_organ(
     port: int,
     vlm_model: str | None,
     accept_grade: float,
+    reject_grade: float,
     timeout_sec: int,
 ) -> dict[str, Any]:
-    """Automated absolute-quality arbitration (de-human) for one organ.
+    """Conservative automated absolute-quality arbitration (de-human) for one organ.
 
-    Grades the selected pseudo-label with the VLM absolute gate. If the gate runs
-    and rejects it, grades the best alternative candidate (fusion first, then
-    highest pseudo-consistency DSC) and swaps to it when that one is accepted and
-    scores higher. Returns an audit record; ``_selected`` is the final chosen
-    candidate dict and ``final_accept`` the machine verdict. No-ops gracefully
-    (status carried from the grader) when no VLM is available.
+    The VLM absolute single-mask grade is noisy (it reliably flags empty/garbage
+    masks at ~0.0 but is promptable and unreliable at distinguishing decent vs
+    wrong-organ masks). So this acts as a SAFETY NET, not a strict filter: it only
+    treats a pick as rejected when the grade is confidently bad (<= reject_grade,
+    e.g. empty/clearly-wrong), and only then swaps to an alternative that grades
+    clearly good (>= accept_grade). Everything else is recorded as an advisory
+    verdict and the original (fusion/LabelCritic) selection is kept. ``_selected``
+    is the final chosen candidate; ``final_accept`` is the machine verdict
+    (True unless confidently bad). No-ops gracefully when no VLM is available.
     """
     grade_dir = out / "critic" / case_id
 
@@ -878,6 +882,12 @@ def _auto_arbitrate_organ(
             accept_grade=accept_grade, dry_run=False, timeout_sec=min(timeout_sec, 300),
         )
 
+    def _confident_bad(g: dict[str, Any]) -> bool:
+        return g.get("status") == "success" and g.get("grade") is not None and float(g["grade"]) <= reject_grade
+
+    def _clearly_good(g: dict[str, Any]) -> bool:
+        return g.get("status") == "success" and g.get("grade") is not None and float(g["grade"]) >= accept_grade
+
     g0 = _grade(selected)
     record: dict[str, Any] = {
         "case_id": case_id,
@@ -887,28 +897,32 @@ def _auto_arbitrate_organ(
         "grade_before": g0.get("grade"),
         "grade_after": g0.get("grade"),
         "grade_status": g0.get("status"),
-        "final_accept": g0.get("accept"),
+        "final_accept": not _confident_bad(g0),
+        "confident_bad": _confident_bad(g0),
         "reason": g0.get("reason"),
         "swapped": False,
         "_selected": selected,
     }
-    if g0.get("status") == "success" and g0.get("accept") is False:
+    # Only act when the selected pick is confidently bad (the regime where the VLM
+    # is reliable). Try up to two alternatives; swap to the first clearly-good one.
+    if _confident_bad(g0):
         alts = [
             c for c in candidates
             if c is not selected and c.get("candidate_exists") and c.get("eligible_for_labelcritic", True)
         ]
         alts.sort(key=lambda c: (0 if c.get("is_fusion") else 1, -(c.get("dice") or 0.0)))
-        if alts:
-            g1 = _grade(alts[0])
-            if g1.get("status") == "success" and g1.get("accept") and (g1.get("grade") or 0.0) > (g0.get("grade") or 0.0):
+        for alt in alts[:2]:
+            g1 = _grade(alt)
+            if _clearly_good(g1) and not _confident_bad(g1):
                 record.update({
                     "swapped": True,
-                    "selected_model_after": alts[0]["model"],
+                    "selected_model_after": alt["model"],
                     "grade_after": g1.get("grade"),
-                    "final_accept": g1.get("accept"),
+                    "final_accept": True,
                     "reason": g1.get("reason"),
-                    "_selected": alts[0],
+                    "_selected": alt,
                 })
+                break
     return record
 
 
@@ -938,6 +952,7 @@ def run_multimodel_annotation_loop(
     fusion_method: str = "auto",
     enable_auto_arbitration: bool = True,
     arbitration_accept_grade: float = 0.5,
+    arbitration_reject_grade: float = 0.2,
     vlm_model: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -1292,7 +1307,8 @@ def run_multimodel_annotation_loop(
                 auto_grade_record = _auto_arbitrate_organ(
                     ct=ct, organ=organ, selected=selected, candidates=candidates,
                     out=out, case_id=case_id, base_url=critic_base_url, port=critic_port,
-                    vlm_model=vlm_model, accept_grade=arbitration_accept_grade, timeout_sec=timeout_sec,
+                    vlm_model=vlm_model, accept_grade=arbitration_accept_grade,
+                    reject_grade=arbitration_reject_grade, timeout_sec=timeout_sec,
                 )
                 chosen = auto_grade_record.get("_selected")
                 if chosen is not None and chosen is not selected:

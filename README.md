@@ -434,13 +434,19 @@ stage; they are not separate end-to-end orchestrators.
 
 ## 13. Optional manual review with ITK-SNAP
 
-Manual review is **optional**. The E-step now runs an automated absolute-quality
-gate (LabelCritic VLM grading) over every flagged organ — selection fallbacks,
-low pseudo-consistency, QC-flagged, and single-teacher cases — recording a
-machine accept/reject verdict in `auto_arbitration_log.jsonl` and auto-swapping
-a rejected pick for a better-graded alternative when one exists. `review_queue.jsonl`
-is therefore an audit trail, not a required human step. If you still want to
-spot-check, generate ITK-SNAP commands for flagged cases:
+Manual review is **optional**. The E-step runs an automated arbitration gate over
+every flagged organ (selection fallbacks, low pseudo-consistency, QC-flagged, and
+single-teacher cases), recording a machine verdict in `auto_arbitration_log.jsonl`,
+so `review_queue.jsonl` is an audit trail rather than a required human step.
+
+The gate is deliberately **conservative**: empty masks are deterministically
+rejected (grade 0.0), and a pick is only auto-rejected/auto-swapped when the VLM
+absolute grade is confidently bad (`<= arbitration_reject_grade`, default 0.2).
+This is because absolute single-mask VLM grading (e.g. Qwen2-VL-7B) is only a
+coarse safety net — it reliably flags empty/garbage masks but is unreliable at
+finer judgments — so it is treated as advisory and never overrides the more
+reliable fusion + LabelCritic-pairwise selection on borderline cases. If you
+still want to spot-check, generate ITK-SNAP commands for flagged cases:
 
 ```bash
 python run_medai_cli.py --json itksnap-review \

@@ -696,7 +696,7 @@ class TestTeacherMeetingPipeline:
         def fake_grade(ct_image, mask, organ, output_json, **kwargs):
             # Reject teacher_a's masks, accept anything else with a high grade.
             reject = "teacher_a" in str(mask)
-            d = ({"status": "success", "grade": 0.2, "accept": False, "reason": "stub reject"}
+            d = ({"status": "success", "grade": 0.1, "accept": False, "reason": "stub reject"}
                  if reject else {"status": "success", "grade": 0.9, "accept": True, "reason": "stub accept"})
             Path(output_json).parent.mkdir(parents=True, exist_ok=True)
             Path(output_json).write_text(json.dumps(d))

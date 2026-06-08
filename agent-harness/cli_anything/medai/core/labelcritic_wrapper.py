@@ -214,15 +214,19 @@ def _parse_grade_response(raw: str, accept_grade: float) -> dict[str, Any]:
     return {"grade": None, "accept": None, "reason": (raw or "")[:300], "parse_status": "unparseable"}
 
 
-GRADE_PROMPT_TEMPLATE = """You are a medical imaging QA expert. The image shows a CT slice with a single predicted {organ} segmentation highlighted.
+GRADE_PROMPT_TEMPLATE = """You are a medical imaging QA expert. The image shows a CT slice with a single predicted {organ} segmentation highlighted in color.
 
-Judge ONLY this one segmentation's quality as an automatic pseudo-label:
-- Is the highlighted region anatomically plausible as {organ} (correct location, shape, size)?
-- If {organ} is absent here, or the mask is clearly misplaced/over- or under-segmented, give a LOW score.
+Grade how well the highlighted region matches the true {organ} in this slice:
+- 1.0 : accurate location, shape and boundaries.
+- 0.7 : correct location and shape; only minor boundary error.
+- 0.5 : correct location but noticeable over- or under-segmentation.
+- 0.2 : mostly wrong — highlights a different structure or grossly mislocated.
+- 0.0 : {organ} is absent here, or the highlight is empty / clearly a different organ.
+
+Localising small or elongated structures from one slice is hard: if you are unsure whether the location is correct, assume it is plausible and grade around 0.5 rather than 0.0. Reserve 0.0-0.2 for cases where the highlight is clearly NOT the {organ}. accept=true if the highlight is plausibly the {organ} and usable as a pseudo-label (grade >= 0.5).
 
 Respond with JSON only, no other text:
-{{"grade": <0.0-1.0>, "accept": <true|false>, "reason": "<brief anatomical reasoning>"}}
-grade = overall correctness (1.0 perfect, 0.0 completely wrong); accept = true only if usable as a pseudo-label."""
+{{"grade": <0.0-1.0>, "accept": <true|false>, "reason": "<brief anatomical reasoning>"}}"""
 
 
 def run_labelcritic_grade(
@@ -235,6 +239,7 @@ def run_labelcritic_grade(
     vlm_model: str | None = None,
     accept_grade: float = 0.5,
     labelcritic_root: str | Path = "third_party/LabelCritic-main",
+    projection_backend: str = "auto",
     dry_run: bool = False,
     timeout_sec: int = 300,
 ) -> dict[str, Any]:
@@ -266,15 +271,28 @@ def run_labelcritic_grade(
     if not mask_file.exists():
         return _finish({"status": "skipped", "grade": None, "accept": None, "reason": "mask file missing"})
 
+    # Deterministic short-circuit: an empty mask is unambiguously a failed
+    # pseudo-label. Decide it here rather than sending a blank overlay to the VLM,
+    # which has been observed to hallucinate a highlight and "accept" empty masks.
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        if int((np.asanyarray(nib.load(str(mask_file)).dataobj) > 0).sum()) == 0:
+            return _finish({"status": "success", "grade": 0.0, "accept": False,
+                            "reason": "mask is empty (no positive voxels)", "parse_status": "empty_mask"})
+    except Exception:
+        pass
+
     model = _resolve_vlm_model(base_url, port, vlm_model)
     if not model:
         return _finish({"status": "skipped", "grade": None, "accept": None, "reason": "no VLM model/server available"})
 
-    work_dir = out_json.parent / f"grade_{organ}"
+    work_dir = out_json.parent / f"grade_{out_json.stem}"
     try:
         proj = build_projection(
             ct_image, mask_file, None, work_dir / "projections", organ=organ,
-            projection_backend="slice", labelcritic_root=labelcritic_root,
+            projection_backend=projection_backend, labelcritic_root=labelcritic_root,
         )
     except Exception as exc:
         return _finish({"status": "failed", "grade": None, "accept": None, "reason": f"projection error: {exc}"})

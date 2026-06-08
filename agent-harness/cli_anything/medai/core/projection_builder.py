@@ -117,9 +117,16 @@ def _build_slice_projection(
             if mask_arr is None:
                 continue
             mask_slice = _get_slice(mask_arr.astype(np.uint8), view, center_idx)
-            rgb = np.stack([ct_slice, ct_slice, ct_slice], axis=-1)
-            rgb[mask_slice > 0, 0] = np.clip(rgb[mask_slice > 0, 0].astype(int) + 120, 0, 255)
-            rgb[mask_slice > 0, 2] = np.clip(rgb[mask_slice > 0, 2].astype(int) - 60, 0, 255)
+            rgb = np.stack([ct_slice, ct_slice, ct_slice], axis=-1).astype(np.uint8)
+            sel = mask_slice > 0
+            # Vivid, unmistakable red overlay (50% blend with pure red) so the VLM
+            # can clearly see WHERE the mask is — a subtle additive tint washes out
+            # on bright soft tissue and makes empty masks indistinguishable from
+            # real ones, which breaks single-mask absolute grading.
+            if sel.any():
+                base = rgb[sel].astype(np.float32)
+                blended = base * 0.45 + np.array([255.0, 0.0, 0.0], dtype=np.float32) * 0.55
+                rgb[sel] = np.clip(blended, 0, 255).astype(np.uint8)
             panels.append((label, rgb))
 
         if not panels:
