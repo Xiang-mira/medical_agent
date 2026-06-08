@@ -242,7 +242,8 @@ outputs/run_pants50_round1/
   dice_metrics.csv              # pseudo-consistency DICE when prior pseudo references exist
   round_metrics.csv             # aggregated round metrics
   inference_results.json        # raw inference status/result records
-  review_queue.jsonl            # uncertain masks for ITK-SNAP/manual review
+  review_queue.jsonl            # flagged masks (now auto-arbitrated; optional human audit)
+  auto_arbitration_log.jsonl    # automated VLM absolute-grade verdicts (de-human acceptance gate)
   vlm_decisions.jsonl           # LabelCritic/VLM decisions when enabled
   report_supervision.jsonl      # report supervision records when available
   annotation_versions/          # accepted or updated annotation versions
@@ -431,9 +432,15 @@ The standalone CLI commands (`run-loop`, `mstep-update`, `convergence-table`,
 etc.) remain available as building blocks for inspecting or rerunning a single
 stage; they are not separate end-to-end orchestrators.
 
-## 13. Manual review with ITK-SNAP
+## 13. Optional manual review with ITK-SNAP
 
-After `run-loop`, generate review commands for uncertain cases:
+Manual review is **optional**. The E-step now runs an automated absolute-quality
+gate (LabelCritic VLM grading) over every flagged organ — selection fallbacks,
+low pseudo-consistency, QC-flagged, and single-teacher cases — recording a
+machine accept/reject verdict in `auto_arbitration_log.jsonl` and auto-swapping
+a rejected pick for a better-graded alternative when one exists. `review_queue.jsonl`
+is therefore an audit trail, not a required human step. If you still want to
+spot-check, generate ITK-SNAP commands for flagged cases:
 
 ```bash
 python run_medai_cli.py --json itksnap-review \

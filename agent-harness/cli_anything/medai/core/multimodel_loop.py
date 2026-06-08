@@ -10,7 +10,7 @@ from .json_utils import write_json
 from .auto_fine_label import build_label_passport, passport_path_for_mask
 from .label_fusion import fuse_candidate_masks
 from .label_verifier import verify_annotation
-from .labelcritic_wrapper import run_labelcritic_compare
+from .labelcritic_wrapper import run_labelcritic_compare, run_labelcritic_grade
 from .mstep_runner import build_training_manifest, write_mstep_config
 from .model_registry import candidate_models_for_organs, load_registry, recommend_primary_models_for_organs
 from .organ_model_performance import OrganModelPerformance
@@ -845,6 +845,73 @@ def _fusion_weight(tracker: OrganModelPerformance | None, organ: str, model: str
     return 1.0
 
 
+def _auto_arbitrate_organ(
+    *,
+    ct: Path,
+    organ: str,
+    selected: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    out: Path,
+    case_id: str,
+    base_url: str,
+    port: int,
+    vlm_model: str | None,
+    accept_grade: float,
+    timeout_sec: int,
+) -> dict[str, Any]:
+    """Automated absolute-quality arbitration (de-human) for one organ.
+
+    Grades the selected pseudo-label with the VLM absolute gate. If the gate runs
+    and rejects it, grades the best alternative candidate (fusion first, then
+    highest pseudo-consistency DSC) and swaps to it when that one is accepted and
+    scores higher. Returns an audit record; ``_selected`` is the final chosen
+    candidate dict and ``final_accept`` the machine verdict. No-ops gracefully
+    (status carried from the grader) when no VLM is available.
+    """
+    grade_dir = out / "critic" / case_id
+
+    def _grade(cand: dict[str, Any]) -> dict[str, Any]:
+        return run_labelcritic_grade(
+            ct, Path(cand["prediction"]), organ,
+            grade_dir / f"{organ}_{cand['model']}_grade.json",
+            base_url=base_url, port=port, vlm_model=vlm_model,
+            accept_grade=accept_grade, dry_run=False, timeout_sec=min(timeout_sec, 300),
+        )
+
+    g0 = _grade(selected)
+    record: dict[str, Any] = {
+        "case_id": case_id,
+        "organ": organ,
+        "selected_model_before": selected["model"],
+        "selected_model_after": selected["model"],
+        "grade_before": g0.get("grade"),
+        "grade_after": g0.get("grade"),
+        "grade_status": g0.get("status"),
+        "final_accept": g0.get("accept"),
+        "reason": g0.get("reason"),
+        "swapped": False,
+        "_selected": selected,
+    }
+    if g0.get("status") == "success" and g0.get("accept") is False:
+        alts = [
+            c for c in candidates
+            if c is not selected and c.get("candidate_exists") and c.get("eligible_for_labelcritic", True)
+        ]
+        alts.sort(key=lambda c: (0 if c.get("is_fusion") else 1, -(c.get("dice") or 0.0)))
+        if alts:
+            g1 = _grade(alts[0])
+            if g1.get("status") == "success" and g1.get("accept") and (g1.get("grade") or 0.0) > (g0.get("grade") or 0.0):
+                record.update({
+                    "swapped": True,
+                    "selected_model_after": alts[0]["model"],
+                    "grade_after": g1.get("grade"),
+                    "final_accept": g1.get("accept"),
+                    "reason": g1.get("reason"),
+                    "_selected": alts[0],
+                })
+    return record
+
+
 def run_multimodel_annotation_loop(
     case_list: str | Path,
     output_folder: str | Path,
@@ -869,6 +936,9 @@ def run_multimodel_annotation_loop(
     labelcritic_options: dict[str, Any] | None = None,
     enable_fusion: bool = True,
     fusion_method: str = "auto",
+    enable_auto_arbitration: bool = True,
+    arbitration_accept_grade: float = 0.5,
+    vlm_model: str | None = None,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -1205,6 +1275,33 @@ def run_multimodel_annotation_loop(
             if best_dice is not None and float(best_dice) < vlm_threshold and not empty_reference_nonempty_prediction:
                 low_dice += 1
 
+            # Phase 2 — automated absolute-quality arbitration (de-human).
+            # Only grade organs a human would otherwise review: selection
+            # fallback, low pseudo-consistency, QC-flagged, or single-teacher
+            # (no competition). The VLM verdict replaces human review; a rejected
+            # pick can be auto-swapped for a better-graded alternative.
+            auto_grade_record = None
+            non_fusion_count = len([c for c in candidates if not c.get("is_fusion")])
+            needs_arbitration = bool(selected) and (
+                selection.get("selection_status") != "selected"
+                or (best_dice is not None and float(best_dice) < vlm_threshold and not empty_reference_nonempty_prediction)
+                or (selected.get("candidate_qc_status") not in (None, "pass"))
+                or non_fusion_count <= 1
+            )
+            if enable_auto_arbitration and enable_critic and not dry_run and needs_arbitration:
+                auto_grade_record = _auto_arbitrate_organ(
+                    ct=ct, organ=organ, selected=selected, candidates=candidates,
+                    out=out, case_id=case_id, base_url=critic_base_url, port=critic_port,
+                    vlm_model=vlm_model, accept_grade=arbitration_accept_grade, timeout_sec=timeout_sec,
+                )
+                chosen = auto_grade_record.get("_selected")
+                if chosen is not None and chosen is not selected:
+                    selected = chosen
+                    best_dice = selected.get("dice")
+                    selected_reference_quality_bucket = selected.get("reference_quality_bucket")
+                    empty_reference_nonempty_prediction = selected_reference_quality_bucket == "empty_reference_nonempty_prediction"
+                _append_jsonl(out / "auto_arbitration_log.jsonl", {k: v for k, v in auto_grade_record.items() if not k.startswith("_")})
+
             selection_record = {
                 "case_id": case_id,
                 "ct_path": str(ct),
@@ -1255,6 +1352,17 @@ def run_multimodel_annotation_loop(
             selection_record["labelcritic_records"] = selection_record.get("critic_records", [])
             selection_record["labelcritic_decision_path"] = _labelcritic_decision_path(selection_record["labelcritic_records"])
             selection_record["label_critic_decision_path"] = selection_record["labelcritic_decision_path"]
+            if auto_grade_record is not None:
+                arb = {k: v for k, v in auto_grade_record.items() if not k.startswith("_")}
+                selection_record["auto_arbitration"] = arb
+                selection_record["auto_grade"] = arb.get("grade_after")
+                selection_record["auto_grade_accept"] = arb.get("final_accept")
+                selection_record["auto_grade_swapped"] = arb.get("swapped")
+                if arb.get("swapped"):
+                    # The arbitration swapped the pick; keep selected_* consistent.
+                    selection_record["selected_model"] = selected.get("model")
+                    selection_record["source_model"] = selected.get("model")
+                    selection_record["selected_prediction"] = selected.get("prediction")
             selection_rows.append(selection_record)
             all_selection_rows.append(selection_record)
             for critic_record in selection_record.get("labelcritic_records", []) or []:
@@ -1276,6 +1384,17 @@ def run_multimodel_annotation_loop(
             if copied:
                 review_flags: list[str] = list(selection_record.get("review_flags", []) or [])
                 quality_flags: list[str] = list(selection_record.get("quality_flags", []) or [])
+                if auto_grade_record is not None and auto_grade_record.get("final_accept") is False:
+                    _add_unique(review_flags, "auto_grade_reject")
+                    _add_unique(quality_flags, "auto_grade_reject")
+                    _append_jsonl(review_queue, {
+                        "case_id": case_id,
+                        "organ": organ,
+                        "reason": "automated VLM quality gate rejected the selected pseudo-label and found no better alternative; kept as low-grade candidate (no human required)",
+                        **selection_record,
+                        "review_flags": review_flags,
+                        "quality_flags": quality_flags,
+                    })
                 selected_qc_status = selected.get("candidate_qc_status") if selected else None
                 if selected_qc_status and selected_qc_status != "pass":
                     _add_unique(review_flags, f"candidate_qc_{selected_qc_status}")

@@ -154,6 +154,146 @@ def _normalize_labelcritic_base_url(base_url: str, port: int) -> tuple[str, int]
     return url, int(port)
 
 
+def _resolve_vlm_model(base_url: str, port: int, model: str | None) -> str | None:
+    """Return the VLM model id to call: explicit override, else first id served."""
+    if model:
+        return model
+    host, p = _normalize_labelcritic_base_url(base_url, port)
+    try:
+        import requests as req_lib
+
+        resp = req_lib.get(f"{host}:{p}/v1/models", timeout=10, proxies={"http": None, "https": None})
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        if data:
+            return data[0].get("id")
+    except Exception:
+        return None
+    return None
+
+
+def _call_vlm_grade(base_url: str, port: int, model: str, prompt: str, image_paths: list[str], timeout: int) -> str:
+    """Single OpenAI-compatible (vLLM) chat call with images; returns raw content."""
+    import base64
+
+    import requests as req_lib
+
+    host, p = _normalize_labelcritic_base_url(base_url, port)
+    content: list[dict[str, Any]] = []
+    for ip in image_paths:
+        b64 = base64.b64encode(Path(ip).read_bytes()).decode("utf-8")
+        content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}})
+    content.append({"type": "text", "text": prompt})
+    payload = {"model": model, "messages": [{"role": "user", "content": content}], "max_tokens": 400, "temperature": 0}
+    resp = req_lib.post(
+        f"{host}:{p}/v1/chat/completions",
+        json=payload, timeout=timeout, proxies={"http": None, "https": None},
+    )
+    resp.raise_for_status()
+    return resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+
+
+def _parse_grade_response(raw: str, accept_grade: float) -> dict[str, Any]:
+    """Extract {grade, accept, reason} from a VLM absolute-quality reply."""
+    import re
+
+    text = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL).strip()
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            parsed = json.loads(text[start:end])
+            grade = float(parsed.get("grade"))
+            grade = min(1.0, max(0.0, grade))
+            accept = parsed.get("accept")
+            if not isinstance(accept, bool):
+                accept = grade >= accept_grade
+            return {"grade": round(grade, 4), "accept": bool(accept), "reason": str(parsed.get("reason", ""))[:300], "parse_status": "success"}
+    except Exception:
+        pass
+    return {"grade": None, "accept": None, "reason": (raw or "")[:300], "parse_status": "unparseable"}
+
+
+GRADE_PROMPT_TEMPLATE = """You are a medical imaging QA expert. The image shows a CT slice with a single predicted {organ} segmentation highlighted.
+
+Judge ONLY this one segmentation's quality as an automatic pseudo-label:
+- Is the highlighted region anatomically plausible as {organ} (correct location, shape, size)?
+- If {organ} is absent here, or the mask is clearly misplaced/over- or under-segmented, give a LOW score.
+
+Respond with JSON only, no other text:
+{{"grade": <0.0-1.0>, "accept": <true|false>, "reason": "<brief anatomical reasoning>"}}
+grade = overall correctness (1.0 perfect, 0.0 completely wrong); accept = true only if usable as a pseudo-label."""
+
+
+def run_labelcritic_grade(
+    ct_image: str | Path,
+    mask: str | Path,
+    organ: str,
+    output_json: str | Path,
+    base_url: str = "http://localhost",
+    port: int = 8000,
+    vlm_model: str | None = None,
+    accept_grade: float = 0.5,
+    labelcritic_root: str | Path = "third_party/LabelCritic-main",
+    dry_run: bool = False,
+    timeout_sec: int = 300,
+) -> dict[str, Any]:
+    """Absolute single-mask quality grade via the VLM expert.
+
+    Returns a dict with status and (on success) ``grade`` (0-1), ``accept``
+    (bool), ``reason``. Degrades gracefully to status ``dry_run`` / ``skipped``
+    / ``failed`` with ``grade=None, accept=None`` whenever projection or the VLM
+    server is unavailable, so callers can treat "no verdict" as non-blocking.
+    """
+    out_json = Path(output_json).resolve()
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    m = Path(mask)
+    base: dict[str, Any] = {
+        "stage": "labelcritic_grade", "organ": organ, "mask": str(m),
+        "ct_image": str(ct_image), "output_json": str(out_json),
+        "accept_grade": accept_grade,
+    }
+
+    def _finish(extra: dict[str, Any]) -> dict[str, Any]:
+        result = {**base, **extra}
+        write_json(out_json, result)
+        return result
+
+    if dry_run:
+        return _finish({"status": "dry_run", "grade": None, "accept": None, "reason": "dry-run: VLM grade skipped"})
+
+    mask_file = m / f"{organ}.nii.gz" if m.is_dir() else m
+    if not mask_file.exists():
+        return _finish({"status": "skipped", "grade": None, "accept": None, "reason": "mask file missing"})
+
+    model = _resolve_vlm_model(base_url, port, vlm_model)
+    if not model:
+        return _finish({"status": "skipped", "grade": None, "accept": None, "reason": "no VLM model/server available"})
+
+    work_dir = out_json.parent / f"grade_{organ}"
+    try:
+        proj = build_projection(
+            ct_image, mask_file, None, work_dir / "projections", organ=organ,
+            projection_backend="slice", labelcritic_root=labelcritic_root,
+        )
+    except Exception as exc:
+        return _finish({"status": "failed", "grade": None, "accept": None, "reason": f"projection error: {exc}"})
+
+    pngs = [p for p in (proj.get("saved_projections") or []) if str(p).endswith(".png")][:2]
+    if not pngs:
+        return _finish({"status": "skipped", "grade": None, "accept": None, "reason": "no projection image produced", "projection": proj})
+
+    prompt = GRADE_PROMPT_TEMPLATE.format(organ=organ)
+    try:
+        raw = _call_vlm_grade(base_url, port, model, prompt, pngs, timeout=min(timeout_sec, 300))
+    except Exception as exc:
+        return _finish({"status": "failed", "grade": None, "accept": None, "reason": f"VLM call failed: {exc}"})
+
+    parsed = _parse_grade_response(raw, accept_grade)
+    status = "success" if parsed.get("parse_status") == "success" else "failed"
+    return _finish({"status": status, "vlm_model": model, "raw_response": raw[:1000], **parsed})
+
+
 def run_labelcritic_compare(
     ct_image: str | Path,
     mask_a: str | Path,

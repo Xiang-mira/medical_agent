@@ -576,6 +576,7 @@ class TestTeacherMeetingPipeline:
             resume=True,
             timeout_sec=30,
             enable_fusion=False,  # this contract test targets the pick-one + shapekit-fallback plumbing
+            enable_auto_arbitration=False,  # VLM grading is covered by its own tests
         )
 
         assert infer_calls, "resume must continue incomplete raw-only cases"
@@ -651,6 +652,78 @@ class TestTeacherMeetingPipeline:
         sel = json.loads((out / "annotation_versions" / "case_001" / "selection_metadata.json").read_text(encoding="utf-8"))
         liver_sel = next(r for r in sel["selection_rows"] if r["organ"] == "liver")
         assert "fusion_consensus" in liver_sel["candidate_models"]
+
+    def test_labelcritic_grade_degrades_gracefully(self, tmp_path):
+        from cli_anything.medai.core.labelcritic_wrapper import run_labelcritic_grade
+
+        ct = _make_nii(np.zeros((8, 8, 8), dtype=np.int16), tmp_path / "ct.nii.gz")
+        cube = np.zeros((8, 8, 8), dtype=np.uint8); cube[2:5, 2:5, 2:5] = 1
+        mask = _make_nii(cube, tmp_path / "liver.nii.gz")
+
+        # dry-run never touches the VLM and yields no verdict (non-blocking).
+        dr = run_labelcritic_grade(ct, mask, "liver", tmp_path / "g0.json", dry_run=True)
+        assert dr["status"] == "dry_run" and dr["grade"] is None and dr["accept"] is None
+        # missing mask -> skipped, still non-blocking.
+        miss = run_labelcritic_grade(ct, tmp_path / "nope.nii.gz", "liver", tmp_path / "g1.json")
+        assert miss["status"] == "skipped" and miss["accept"] is None
+
+    def test_auto_arbitration_swaps_and_flags(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
+        case_list = tmp_path / "cases.csv"
+        case_list.write_text("case_id,ct_path,annotation_folder\ncase_001,%s,\n" % ct, encoding="utf-8")
+        out = tmp_path / "out"
+
+        def fake_infer(ct_image, output_folder, model_key, **kwargs):
+            seg = Path(output_folder) / "case_001" / "segmentations"
+            seg.mkdir(parents=True, exist_ok=True)
+            if model_key == "teacher_a":
+                _make_nii(_sphere_mask(shape=(16, 16, 16), radius=4), seg / "liver.nii.gz")
+                _make_nii(_sphere_mask(shape=(16, 16, 16), radius=3), seg / "pancreas.nii.gz")
+            if model_key == "teacher_b":
+                _make_nii(_sphere_mask(shape=(16, 16, 16), radius=5), seg / "liver.nii.gz")
+            return {
+                "stage": "registered_infer", "status": "success", "model_key": model_key,
+                "segmentation_output": str(seg), "num_masks": len(list(seg.glob("*.nii.gz"))),
+            }
+
+        def fake_critic(*args, **kwargs):
+            out_json = Path(args[4]); out_json.parent.mkdir(parents=True, exist_ok=True)
+            res = {"status": "success", "decision": {"winner": "uncertain"}}
+            out_json.write_text(json.dumps(res)); return res
+
+        def fake_grade(ct_image, mask, organ, output_json, **kwargs):
+            # Reject teacher_a's masks, accept anything else with a high grade.
+            reject = "teacher_a" in str(mask)
+            d = ({"status": "success", "grade": 0.2, "accept": False, "reason": "stub reject"}
+                 if reject else {"status": "success", "grade": 0.9, "accept": True, "reason": "stub accept"})
+            Path(output_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_json).write_text(json.dumps(d))
+            return {"stage": "labelcritic_grade", "organ": organ, "mask": str(mask), **d}
+
+        monkeypatch.setattr(ml, "run_registered_model", fake_infer)
+        monkeypatch.setattr(ml, "run_labelcritic_compare", fake_critic)
+        monkeypatch.setattr(ml, "run_labelcritic_grade", fake_grade)
+
+        result = ml.run_multimodel_annotation_loop(
+            case_list=case_list, output_folder=out,
+            models=["teacher_a", "teacher_b"], organs=["liver", "pancreas"],
+            enable_critic=True, enable_shapekit=False, enable_fusion=False,
+            enable_auto_arbitration=True, dry_run=False, resume=False, timeout_sec=30,
+        )
+        assert result["status"] == "success"
+        sel = json.loads((out / "annotation_versions" / "case_001" / "selection_metadata.json").read_text(encoding="utf-8"))
+        rows = {r["organ"]: r for r in sel["selection_rows"]}
+        # liver: teacher_a (fallback pick) rejected -> swapped to the accepted teacher_b.
+        assert rows["liver"]["auto_grade_swapped"] is True
+        assert rows["liver"]["selected_model"] == "teacher_b"
+        assert rows["liver"]["auto_grade_accept"] is True
+        # pancreas: single teacher rejected, no alternative -> machine verdict reject, no human.
+        assert rows["pancreas"]["auto_grade_accept"] is False
+        log_lines = (out / "auto_arbitration_log.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        organs_logged = {json.loads(l)["organ"] for l in log_lines}
+        assert {"liver", "pancreas"} <= organs_logged
 
     def test_failure_mining_preserves_labelcritic_and_review_context(self, tmp_path):
         import importlib.util
