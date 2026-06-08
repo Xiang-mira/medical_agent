@@ -315,7 +315,14 @@ def _add_unique(items: list[str], value: str) -> None:
 
 
 def _pick_reference_fallback(candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    """Fallback selection when LabelCritic is unavailable or inconclusive."""
+    """Fallback selection when LabelCritic is unavailable or inconclusive.
+
+    Prefer the multi-teacher fusion consensus (the denoised default) when present;
+    otherwise the highest pseudo-consistency-Dice candidate; otherwise the first.
+    """
+    fusion = [c for c in candidates if c.get("is_fusion")]
+    if fusion:
+        return fusion[0]
     with_dice = [c for c in candidates if c.get("dice") is not None]
     if with_dice:
         return max(with_dice, key=lambda c: float(c.get("dice") or -1))
@@ -767,6 +774,8 @@ def _select_candidate(
     selected = comparison_candidates[0]
     selection_status = "selected"
     fallback_reason = None
+    decisive = 0
+    inconclusive = 0
 
     if enable_critic and not dry_run:
         for challenger in comparison_candidates[1:]:
@@ -795,14 +804,30 @@ def _select_candidate(
             winner = (critic.get("decision", {}) or {}).get("winner")
             if critic.get("status") == "success" and winner == "b":
                 selected = challenger
+                decisive += 1
             elif critic.get("status") == "success" and winner == "a":
-                continue
+                decisive += 1
             else:
-                fallback_reason = f"LabelCritic inconclusive for {selected['model']} vs {challenger['model']}"
-                selected = _pick_reference_fallback(comparison_candidates)
-                selection_status = "fallback"
-                break
-        method = "label_critic" if selection_status == "selected" else "label_critic_fallback"
+                # Inconclusive: VLM undecided, the dice-check skipped a near-identical
+                # pair (LabelCritic's efficiency gate produces no rows), or the call
+                # errored. Keep the incumbent and continue the tournament — a single
+                # inconclusive pair must not abort it and discard decisive results or
+                # the consensus pick.
+                inconclusive += 1
+        if decisive > 0:
+            method = "label_critic"
+            selection_status = "selected"
+            fallback_reason = (
+                f"{inconclusive} pairwise comparison(s) inconclusive; kept decisive LabelCritic result"
+                if inconclusive else None
+            )
+        else:
+            # No decisive VLM decision at all (commonly: all pairs near-identical and
+            # skipped by dice_check). Fall back to the fusion consensus / highest-Dice pick.
+            selected = _pick_reference_fallback(comparison_candidates)
+            method = "label_critic_inconclusive"
+            selection_status = "fallback"
+            fallback_reason = "LabelCritic produced no decisive comparison (all pairs inconclusive or skipped)"
     else:
         selected = _pick_reference_fallback(comparison_candidates)
         method = "critic_disabled_fallback"
@@ -814,6 +839,8 @@ def _select_candidate(
         "selection_status": selection_status,
         "candidate_count": len(candidates),
         "comparison_candidate_count": len(comparison_candidates),
+        "comparison_decisive_count": decisive,
+        "comparison_inconclusive_count": inconclusive,
         "comparison_candidate_models": [c["model"] for c in comparison_candidates],
         "qc_rejected_candidates": [_candidate_qc_summary(c) for c in qc_rejected],
         "candidate_qc_policy": "hard_fail_candidates_excluded_before_labelcritic",

@@ -591,7 +591,7 @@ class TestTeacherMeetingPipeline:
         assert liver["label_passport_path"]
         assert liver["training_weight"] in {0.0, 0.1, 0.5, 1.0}
         assert liver["source_model"] == "teacher_a"
-        assert liver["selection_method"] == "label_critic_fallback"
+        assert liver["selection_method"] == "label_critic_inconclusive"
         assert liver["comparison_input_stage"] == "post_shapekit_candidate"
         assert liver["labelcritic_decision_path"]
         assert liver["label_critic_decision_path"]
@@ -847,3 +847,69 @@ class TestAutoGradeRejectDownweights:
                 "selection_method": "label_critic_fallback", "selected_pseudo_consistency_dice": 0.4}
         weak_rej = compute_reliability({**weak, "review_flags": ["auto_grade_reject", "selection_fallback"]})
         assert weak_rej["grade"] == "D" and weak_rej["training_weight"] == 0.0
+
+
+# ─── Test 11 : LabelCritic tournament robustness (inconclusive != abort) ──────
+
+class TestLabelCriticTournament:
+    def test_inconclusive_pair_does_not_abort_tournament(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        cands = [
+            {"model": "fusion_consensus", "prediction": str(tmp_path / "f.nii.gz"),
+             "is_fusion": True, "eligible_for_labelcritic": True, "dice": 0.6},
+            {"model": "teacher_a", "prediction": str(tmp_path / "a.nii.gz"),
+             "eligible_for_labelcritic": True, "dice": 0.5},
+            {"model": "teacher_b", "prediction": str(tmp_path / "b.nii.gz"),
+             "eligible_for_labelcritic": True, "dice": 0.7},
+        ]
+        calls = {"n": 0}
+
+        def fake_compare(ct, a, b, organ, out_json, **kw):
+            Path(out_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_json).write_text("{}")
+            calls["n"] += 1
+            # 1st pair inconclusive, 2nd pair decisive winner = challenger (b).
+            decision = {"winner": "uncertain"} if calls["n"] == 1 else {"winner": "b"}
+            return {"status": "success", "decision": decision}
+
+        monkeypatch.setattr(ml, "run_labelcritic_compare", fake_compare)
+        selected, sel = ml._select_candidate(
+            ct=tmp_path / "ct.nii.gz", organ="liver", candidates=cands, out=tmp_path / "out",
+            case_id="c1", enable_critic=True, critic_backend="labelcritic",
+            critic_base_url="http://localhost", critic_port=8000, timeout_sec=30,
+            dry_run=False, labelcritic_options={},
+        )
+        assert calls["n"] == 2                              # both pairs compared (no early abort)
+        assert sel["selection_method"] == "label_critic"
+        assert sel["selection_status"] == "selected"
+        assert sel["comparison_decisive_count"] == 1
+        assert sel["comparison_inconclusive_count"] == 1
+        assert selected["model"] == "teacher_b"            # decisive winner kept
+
+    def test_all_inconclusive_falls_back_to_fusion(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        cands = [
+            {"model": "teacher_a", "prediction": str(tmp_path / "a.nii.gz"),
+             "eligible_for_labelcritic": True, "dice": 0.5},
+            {"model": "fusion_consensus", "prediction": str(tmp_path / "f.nii.gz"),
+             "is_fusion": True, "eligible_for_labelcritic": True, "dice": 0.4},
+        ]
+
+        def fake_compare(ct, a, b, organ, out_json, **kw):
+            Path(out_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_json).write_text("{}")
+            return {"status": "success", "decision": {"winner": "uncertain"}}
+
+        monkeypatch.setattr(ml, "run_labelcritic_compare", fake_compare)
+        selected, sel = ml._select_candidate(
+            ct=tmp_path / "ct.nii.gz", organ="liver", candidates=cands, out=tmp_path / "out",
+            case_id="c1", enable_critic=True, critic_backend="labelcritic",
+            critic_base_url="http://localhost", critic_port=8000, timeout_sec=30,
+            dry_run=False, labelcritic_options={},
+        )
+        assert sel["selection_method"] == "label_critic_inconclusive"
+        assert sel["selection_status"] == "fallback"
+        # Fallback prefers the fusion consensus even though it is not first / has lower dice.
+        assert selected["model"] == "fusion_consensus"
