@@ -913,3 +913,32 @@ class TestLabelCriticTournament:
         assert sel["selection_status"] == "fallback"
         # Fallback prefers the fusion consensus even though it is not first / has lower dice.
         assert selected["model"] == "fusion_consensus"
+
+    def test_near_identical_pair_skips_vlm(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        m = _sphere_mask(shape=(16, 16, 16), radius=5)
+        a = _make_nii(m, tmp_path / "a.nii.gz")
+        b = _make_nii(m, tmp_path / "b.nii.gz")   # identical -> 3D Dice 1.0
+        cands = [
+            {"model": "fusion_consensus", "prediction": str(a), "is_fusion": True,
+             "eligible_for_labelcritic": True, "dice": 0.6},
+            {"model": "teacher_a", "prediction": str(b),
+             "eligible_for_labelcritic": True, "dice": 0.5},
+        ]
+        called = {"n": 0}
+
+        def fake_compare(*args, **kw):
+            called["n"] += 1
+            return {"status": "success", "decision": {"winner": "b"}}
+
+        monkeypatch.setattr(ml, "run_labelcritic_compare", fake_compare)
+        selected, sel = ml._select_candidate(
+            ct=tmp_path / "ct.nii.gz", organ="liver", candidates=cands, out=tmp_path / "out",
+            case_id="c1", enable_critic=True, critic_backend="labelcritic",
+            critic_base_url="http://localhost", critic_port=8000, timeout_sec=30,
+            dry_run=False, labelcritic_options={},
+        )
+        assert called["n"] == 0                      # near-identical pair -> VLM not invoked
+        assert sel["comparison_agreed_count"] == 1
+        assert selected["model"] == "fusion_consensus"

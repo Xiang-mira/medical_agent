@@ -314,6 +314,31 @@ def _add_unique(items: list[str], value: str) -> None:
         items.append(value)
 
 
+def _mask_dice_3d(a_path: str | Path, b_path: str | Path) -> float | None:
+    """3D binary Dice between two mask files, or None if unreadable/mismatched.
+
+    Used as a correct pre-check before LabelCritic: LabelCritic's own 2D dice gate
+    compares CT-window background images (background-dominated -> ~1.0 for any
+    pair), so it skips every comparison. We gate on the real 3D mask overlap
+    instead so near-identical candidates are skipped while genuine disagreements
+    actually reach the VLM.
+    """
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        a = np.asanyarray(nib.load(str(a_path)).dataobj) > 0
+        b = np.asanyarray(nib.load(str(b_path)).dataobj) > 0
+        if a.shape != b.shape:
+            return None
+        total = int(a.sum()) + int(b.sum())
+        if total == 0:
+            return 1.0
+        return float(2 * int(np.logical_and(a, b).sum()) / total)
+    except Exception:
+        return None
+
+
 def _pick_reference_fallback(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     """Fallback selection when LabelCritic is unavailable or inconclusive.
 
@@ -689,6 +714,7 @@ def _select_candidate(
     timeout_sec: int,
     dry_run: bool,
     labelcritic_options: dict[str, Any] | None = None,
+    near_identical_dice: float = 0.95,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Select the pseudo-label candidate for one organ.
 
@@ -776,9 +802,24 @@ def _select_candidate(
     fallback_reason = None
     decisive = 0
     inconclusive = 0
+    agreed = 0
+    # LabelCritic's internal 2D dice gate compares background-dominated CT images
+    # and skips every pair, so bypass it and gate on the real 3D mask overlap here.
+    lc_opts = {**labelcritic_options, "no_dice_check": True}
 
     if enable_critic and not dry_run:
         for challenger in comparison_candidates[1:]:
+            d3 = _mask_dice_3d(selected["prediction"], challenger["prediction"])
+            if d3 is not None and d3 >= near_identical_dice:
+                # Candidates effectively agree; no VLM judgment needed (efficiency).
+                agreed += 1
+                critic_records.append({
+                    "candidate_a": selected["model"],
+                    "candidate_b": challenger["model"],
+                    "status": "skipped_near_identical",
+                    "decision": {"winner": "agree", "dice_3d": round(d3, 4)},
+                })
+                continue
             critic_out = out / "critic" / case_id / f"{organ}_{selected['model']}_vs_{challenger['model']}.json"
             critic = run_labelcritic_compare(
                 ct,
@@ -791,7 +832,7 @@ def _select_candidate(
                 port=critic_port,
                 dry_run=False,
                 timeout_sec=min(timeout_sec, 300),
-                **labelcritic_options,
+                **lc_opts,
             )
             record = {
                 "candidate_a": selected["model"],
@@ -841,6 +882,7 @@ def _select_candidate(
         "comparison_candidate_count": len(comparison_candidates),
         "comparison_decisive_count": decisive,
         "comparison_inconclusive_count": inconclusive,
+        "comparison_agreed_count": agreed,
         "comparison_candidate_models": [c["model"] for c in comparison_candidates],
         "qc_rejected_candidates": [_candidate_qc_summary(c) for c in qc_rejected],
         "candidate_qc_policy": "hard_fail_candidates_excluded_before_labelcritic",
