@@ -428,6 +428,14 @@ python scripts/run_em_training.py
 Each run records the exact environment + server preflight it used in
 `outputs/<run>/run_formal_em.sh`, which doubles as a reproducibility record.
 
+The loop self-cleans and self-stops without a human: each round's pseudo-labels
+are weighted by an auto-reliability score (low-reliability and gate-rejected
+labels are down-weighted or skipped during student training), and the EM loop
+stops early once the student's round-over-round pseudo-consistency change drops
+below `MEDAI_CONVERGENCE_DSC_DELTA` (default 0.01, after `MEDAI_CONVERGENCE_MIN_ROUNDS`),
+writing `outputs/<run>/convergence_stop.json`. Disable with
+`MEDAI_CONVERGENCE_AUTOSTOP=0`.
+
 The standalone CLI commands (`run-loop`, `mstep-update`, `convergence-table`,
 etc.) remain available as building blocks for inspecting or rerunning a single
 stage; they are not separate end-to-end orchestrators.

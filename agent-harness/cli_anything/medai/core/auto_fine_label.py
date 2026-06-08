@@ -88,6 +88,10 @@ def compute_reliability(selection: dict[str, Any]) -> dict[str, Any]:
         "candidate_qc_fail",
         "empty_mask",
         "shape_mismatch_ct",
+        # Confident-bad verdict from the automated VLM acceptance gate (Phase 2):
+        # down-weight it so reliability-weighted self-cleaning training (Phase 3)
+        # learns less from labels the gate rejected.
+        "auto_grade_reject",
     }
     if flags & hard_flags:
         score -= 0.35

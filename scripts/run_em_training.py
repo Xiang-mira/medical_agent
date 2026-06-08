@@ -85,6 +85,14 @@ ALL_TEACHERS = [
 
 NUM_ROUNDS             = int(os.getenv("MEDAI_NUM_ROUNDS", "3"))
 CONSOLIDATION_INTERVAL = 2
+
+# Cross-round convergence auto-stop: end the EM loop early when the student's
+# round-over-round pseudo-consistency stops improving, so we do not burn GPU on
+# rounds that no longer change the labels (de-human stopping criterion — no human
+# decides when to stop).
+CONVERGENCE_AUTOSTOP   = env_bool("MEDAI_CONVERGENCE_AUTOSTOP", default=True)
+CONVERGENCE_DSC_DELTA  = float(os.getenv("MEDAI_CONVERGENCE_DSC_DELTA", "0.01"))
+CONVERGENCE_MIN_ROUNDS = int(os.getenv("MEDAI_CONVERGENCE_MIN_ROUNDS", "2"))
 FINETUNE_EPOCHS        = 100   # 增加 epoch 数，让模型充分学习
 CONSOLIDATION_EPOCHS   = 50    # 全局整合也需要足够 epoch
 LEARNING_RATE          = 5e-5
@@ -978,6 +986,52 @@ def save_student_predictions(round_idx: int):
 
 # ── 主训练循环 ────────────────────────────────────────────────────────────────
 
+def convergence_reached(current_dsc, previous_dsc, threshold: float) -> bool:
+    """Pure convergence test: True when both round scores are valid and the
+    absolute round-over-round change is below ``threshold``. Kept side-effect-free
+    so it is unit-testable without running the full EM loop."""
+    if not isinstance(current_dsc, (int, float)) or not isinstance(previous_dsc, (int, float)):
+        return False
+    return abs(float(current_dsc) - float(previous_dsc)) < float(threshold)
+
+
+def _round_mean_dsc(round_idx: int):
+    """Read a completed round's student pseudo-consistency mean DSC, or None."""
+    sp = OUTPUT_ROOT / f"round{round_idx}" / "round_summary.json"
+    if not sp.exists():
+        return None
+    try:
+        m = json.loads(sp.read_text(encoding="utf-8")).get("metrics", {})
+    except Exception:
+        return None
+    v = m.get("overall_mean_dsc")
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+def _student_manifest_weight_summary(round_idx: int) -> dict:
+    """Reliability-weight distribution of this round's student manifest, so the
+    self-cleaning trend (more strong / fewer zero-weight items over rounds) is
+    auditable in round_summary."""
+    mp = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_student_manifest.json"
+    if not mp.exists():
+        return {}
+    try:
+        doc = json.loads(mp.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    rows = doc.get("items") if isinstance(doc, dict) else (doc if isinstance(doc, list) else [])
+    rows = rows or []
+    weights = [float(r.get("training_weight") or 0.0) for r in rows if isinstance(r, dict)]
+    if not weights:
+        return {}
+    return {
+        "num_items": len(weights),
+        "mean_training_weight": round(sum(weights) / len(weights), 4),
+        "num_strong_items_weight_ge_0_5": sum(1 for w in weights if w >= 0.5),
+        "num_zero_weight_items": sum(1 for w in weights if w == 0.0),
+    }
+
+
 def main():
     ensure_current_student_backend_allowed()
     ensure_formal_teacher_pool_registered()
@@ -1120,10 +1174,37 @@ def main():
             },
             "round_elapsed_hours": round(round_elapsed / 3600, 2),
         }
+        summary["reliability_weights"] = _student_manifest_weight_summary(round_idx)
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         log(f"摘要已保存: {summary_path}")
+
+        # 跨轮收敛自动停机：student 伪一致性不再提升则提前结束，省 GPU，无需人工决定何时停。
+        if CONVERGENCE_AUTOSTOP and round_idx >= CONVERGENCE_MIN_ROUNDS:
+            cur_dsc = round_metrics.get("overall_mean_dsc") if isinstance(round_metrics, dict) else None
+            prev_dsc = _round_mean_dsc(round_idx - 1)
+            if isinstance(cur_dsc, (int, float)) and isinstance(prev_dsc, (int, float)):
+                delta = abs(float(cur_dsc) - float(prev_dsc))
+                log(f"收敛检查: Round{round_idx} mean_dsc={cur_dsc:.4f} vs Round{round_idx-1} {prev_dsc:.4f}, "
+                    f"|Δ|={delta:.4f} (阈值 {CONVERGENCE_DSC_DELTA})")
+                if convergence_reached(cur_dsc, prev_dsc, CONVERGENCE_DSC_DELTA):
+                    log(f"✅ 跨轮收敛，提前停机（跳过剩余 {NUM_ROUNDS - round_idx} 轮）")
+                    summary["converged"] = True
+                    summary["convergence"] = {
+                        "stopped_after_round": round_idx,
+                        "overall_mean_dsc_current": cur_dsc,
+                        "overall_mean_dsc_previous": prev_dsc,
+                        "delta": round(delta, 6),
+                        "threshold": CONVERGENCE_DSC_DELTA,
+                        "metric_family": "pseudo_consistency",
+                        "metric_scope": "student_vs_selected_pseudo_label",
+                    }
+                    with open(summary_path, "w") as f:
+                        json.dump(summary, f, indent=2, ensure_ascii=False)
+                    (OUTPUT_ROOT / "convergence_stop.json").write_text(
+                        json.dumps(summary["convergence"], indent=2, ensure_ascii=False), encoding="utf-8")
+                    break
 
     # 跨轮对比报告
     total_elapsed = time.time() - total_start

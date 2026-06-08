@@ -796,3 +796,54 @@ class TestTeacherMeetingPipeline:
         assert row["metric_family"] == "fine_label_eval"
         assert row["metric_scope"] == "student_vs_expert_fine_label"
         assert row["ground_truth_status"] == "expert_fine_label"
+
+
+# ─── Test 9 : Cross-round convergence auto-stop (Phase 3) ─────────────────────
+
+class TestConvergenceAutoStop:
+    def _load_module(self):
+        import importlib.util
+        script = Path(__file__).resolve().parents[2] / "scripts" / "run_em_training.py"
+        spec = importlib.util.spec_from_file_location("run_em_training", script)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        return module
+
+    def test_converged_when_delta_below_threshold(self):
+        m = self._load_module()
+        assert m.convergence_reached(0.80, 0.795, 0.01) is True
+        assert m.convergence_reached(0.80, 0.80, 0.01) is True
+
+    def test_not_converged_when_delta_large_or_missing(self):
+        m = self._load_module()
+        assert m.convergence_reached(0.80, 0.70, 0.01) is False     # still improving
+        assert m.convergence_reached(None, 0.70, 0.01) is False     # no current metric
+        assert m.convergence_reached(0.80, None, 0.01) is False     # no previous metric
+
+
+# ─── Test 10 : Phase-2 verdict feeds Phase-3 reliability weight ───────────────
+
+class TestAutoGradeRejectDownweights:
+    def test_auto_grade_reject_lowers_training_weight(self):
+        from cli_anything.medai.core.auto_fine_label import compute_reliability
+
+        base = {
+            "mask_path": "x/liver.nii.gz",
+            "selected_candidate_qc_status": "pass",
+            "shapekit_status": "success",
+            "selection_method": "label_critic",
+            "selected_pseudo_consistency_dice": 0.9,
+            "review_flags": [],
+            "quality_flags": [],
+        }
+        good = compute_reliability(base)
+        rejected = compute_reliability({**base, "review_flags": ["auto_grade_reject"]})
+        # The confident-bad gate verdict must measurably reduce the training weight.
+        assert rejected["training_weight"] < good["training_weight"]
+        assert rejected["auto_fine_label_reliability_score"] < good["auto_fine_label_reliability_score"]
+        # And on an already-weak label it pushes all the way to the zero-weight floor.
+        weak = {**base, "selected_candidate_qc_status": "review", "shapekit_status": "failed",
+                "selection_method": "label_critic_fallback", "selected_pseudo_consistency_dice": 0.4}
+        weak_rej = compute_reliability({**weak, "review_flags": ["auto_grade_reject", "selection_fallback"]})
+        assert weak_rej["grade"] == "D" and weak_rej["training_weight"] == 0.0
