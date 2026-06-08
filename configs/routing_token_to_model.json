@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "note": "token 归一化映射；裸 CADS 按器官区分见 bare_cads_organ_overrides。Totalsegmentator 空格差异归并到同一 subtask。",
+  "bare_cads_organ_overrides": {
+    "pericardium": "cads556",
+    "submandibular_gland_left": "cads558",
+    "submandibular_gland_right": "cads558"
+  },
+  "organ_token_overrides": {
+    "anterior_eyeball_segment_left": {
+      "CADS559": {
+        "model": "cads558",
+        "subtask": null,
+        "enabled": true,
+        "reason": null,
+        "note": "Dataset559 is SAROS-style coarse tissue labels; Dataset558 contains OAR_Eye_AL."
+      }
+    },
+    "anterior_eyeball_segment_right": {
+      "CADS559": {
+        "model": "cads558",
+        "subtask": null,
+        "enabled": true,
+        "reason": null,
+        "note": "Dataset559 is SAROS-style coarse tissue labels; Dataset558 contains OAR_Eye_AR."
+      }
+    }
+  },
+  "tokens": {
+    "ATM": {
+      "model": "atm",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_ribs)": {
+      "model": null,
+      "subtask": "clin_ct_ribs",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "Totalsegmentator (head_muscles)": {
+      "model": "totalsegmentator",
+      "subtask": "head_muscles",
+      "enabled": true,
+      "reason": null
+    },
+    "VISTA3D": {
+      "model": "vista3d",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "DAPS": {
+      "model": "daps",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (headneck_bones_vessels)": {
+      "model": "totalsegmentator",
+      "subtask": "headneck_bones_vessels",
+      "enabled": true,
+      "reason": null
+    },
+    "CADS552": {
+      "model": "cads552",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (brain_structures)": {
+      "model": "totalsegmentator",
+      "subtask": "brain_structures",
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (lung_vessels)": {
+      "model": "totalsegmentator",
+      "subtask": "lung_vessels",
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator(total)": {
+      "model": "totalsegmentator",
+      "subtask": "total",
+      "enabled": true,
+      "reason": null
+    },
+    "VSmTrans": {
+      "model": "vsmtrans",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "Duke": {
+      "model": null,
+      "subtask": null,
+      "enabled": false,
+      "reason": "决策:忽略不封装"
+    },
+    "Totalsegmentator (oculomotor_muscles)": {
+      "model": "totalsegmentator",
+      "subtask": "oculomotor_muscles",
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (body)": {
+      "model": "totalsegmentator",
+      "subtask": "body",
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (liver_segments)": {
+      "model": "totalsegmentator",
+      "subtask": "liver_segments",
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator(body)": {
+      "model": "totalsegmentator",
+      "subtask": "body",
+      "enabled": true,
+      "reason": null
+    },
+    "CADS": {
+      "model": null,
+      "subtask": null,
+      "enabled": true,
+      "reason": null,
+      "note": "需在 organ 级按器官指定 cads556/cads558，见 bare_cads_organ_overrides"
+    },
+    "MOOSE (clin_ct_vertebrae)": {
+      "model": null,
+      "subtask": "clin_ct_vertebrae",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "Totalsegmentator(headneck_bones_vessels)": {
+      "model": "totalsegmentator",
+      "subtask": "headneck_bones_vessels",
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_digestive)": {
+      "model": null,
+      "subtask": "clin_ct_digestive",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "Totalsegmentator (heartchambers_highres)": {
+      "model": "totalsegmentator",
+      "subtask": "heartchambers_highres",
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_lungs)": {
+      "model": null,
+      "subtask": "clin_ct_lungs",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "CADS558": {
+      "model": "cads558",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (head_glands_cavities)": {
+      "model": "totalsegmentator",
+      "subtask": "head_glands_cavities",
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_organs)": {
+      "model": null,
+      "subtask": "clin_ct_organs",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "ePAI": {
+      "model": "epai_20250421",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "CADS554": {
+      "model": "cads554",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "CADS557": {
+      "model": "cads557",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (headneck_muscles)": {
+      "model": "totalsegmentator",
+      "subtask": "headneck_muscles",
+      "enabled": true,
+      "reason": null
+    },
+    "SAROS nnUNet": {
+      "model": "saros_nnunet",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (coronary_arteries)": {
+      "model": "totalsegmentator",
+      "subtask": "coronary_arteries",
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_body)": {
+      "model": null,
+      "subtask": "clin_ct_body",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "CADS555": {
+      "model": "cads555",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_vertebrae)": {
+      "model": null,
+      "subtask": "clin_ct_vertebrae",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "Dataset224_AbdomenAtlas1.1": {
+      "model": "nnunet_private",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "CADS559": {
+      "model": "cads559",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_cardiac)": {
+      "model": "moose888",
+      "subtask": "clin_ct_cardiac",
+      "enabled": true,
+      "reason": null
+    },
+    "Totalsegmentator (appendicular_bones)": {
+      "model": "totalsegmentator",
+      "subtask": "appendicular_bones",
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_muscles)": {
+      "model": null,
+      "subtask": "clin_ct_muscles",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "Dataset001_ATLASNet": {
+      "model": null,
+      "subtask": null,
+      "enabled": false,
+      "reason": "决策:忽略不封装"
+    },
+    "CADS551": {
+      "model": "cads551",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "CADS556": {
+      "model": "cads556",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "UNEST": {
+      "model": "unest",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_peripheral_bones)": {
+      "model": "moose666",
+      "subtask": "clin_ct_peripheral_bones",
+      "enabled": true,
+      "reason": null
+    },
+    "MOOSE3.0 (clin_ct_body_composition)": {
+      "model": null,
+      "subtask": "clin_ct_body_composition",
+      "enabled": false,
+      "reason": "missing weight (only 666/888 available)"
+    },
+    "LVP": {
+      "model": "lvp",
+      "subtask": null,
+      "enabled": true,
+      "reason": null,
+      "note": "lvp 即 vsnet"
+    },
+    "CADS553": {
+      "model": "cads553",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    },
+    "AirRC": {
+      "model": "airrc",
+      "subtask": null,
+      "enabled": true,
+      "reason": null
+    }
+  }
+}

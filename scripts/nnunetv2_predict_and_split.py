@@ -28,7 +28,59 @@ ORGAN_ALIASES = {
 }
 
 
-def load_labels(dataset_json: Path) -> dict[str, int]:
+def _coerce_label_id(value, label_arr=None) -> int | None:
+    """Coerce a dataset.json label value to a single representative int id.
+
+    nnUNet dataset.json labels are usually ``{name: int}``. For region-based
+    datasets the value can be a list/tuple of ids (e.g. ``[1, 2]``). In that case
+    we pick a representative id: if a combined label array is available we choose
+    the first id that actually occurs in the array, otherwise the first id.
+    """
+    # Scalar int / float / numeric-string
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().lstrip("-").isdigit()):
+        try:
+            return int(value)
+        except Exception:
+            try:
+                return int(float(value))
+            except Exception:
+                return None
+    # Region-based: list/tuple of ids
+    if isinstance(value, (list, tuple)) and value:
+        ids: list[int] = []
+        for v in value:
+            try:
+                ids.append(int(v))
+            except Exception:
+                try:
+                    ids.append(int(float(v)))
+                except Exception:
+                    continue
+        if not ids:
+            return None
+        if label_arr is not None:
+            present = [i for i in ids if i != 0]
+            for i in present:
+                try:
+                    import numpy as _np
+                    if bool((_np.asarray(label_arr) == i).any()):
+                        return i
+                except Exception:
+                    break
+            for i in present:
+                return i
+        for i in ids:
+            if i != 0:
+                return i
+        return ids[0]
+    return None
+
+
+def load_labels(dataset_json: Path, label_arr=None) -> dict[str, int]:
+    """Read ``labels`` from a nnUNet dataset.json into ``{name: int_id}``.
+
+    Tolerates both ``{name: id}`` and region-based ``{name: [ids]}`` formats.
+    """
     data = json.loads(dataset_json.read_text(encoding="utf-8"))
     raw = data.get("labels") or {}
     labels: dict[str, int] = {}
@@ -36,16 +88,18 @@ def load_labels(dataset_json: Path) -> dict[str, int]:
         key = str(name).strip()
         if key.lower() == "background":
             continue
-        try:
-            ivalue = int(value)
-        except Exception:
-            try:
-                ivalue = int(float(value))
-            except Exception:
-                continue
-        if ivalue == 0:
+        ivalue = _coerce_label_id(value, label_arr=label_arr)
+        if ivalue is None or ivalue == 0:
             continue
         labels[key] = ivalue
+    return labels
+
+
+def dump_local_labels(dataset_json: Path, out_path: Path, label_arr=None) -> dict[str, int]:
+    """Write ``{local_label_name: int_id}`` to ``out_path`` and return the dict."""
+    labels = load_labels(dataset_json, label_arr=label_arr)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(labels, indent=2, ensure_ascii=False), encoding="utf-8")
     return labels
 
 
@@ -96,6 +150,7 @@ def main() -> int:
     ap.add_argument("--device", default=None, help="Optional CUDA_VISIBLE_DEVICES value or cpu")
     ap.add_argument("--organs", default=None, help="Optional comma-separated organ names to split")
     ap.add_argument("--output-label-mode", choices=["all_organs", "pancreas_only"], default="all_organs", help="For ePAI native code compatibility; this wrapper keeps all combined labels unless --organs restricts splitting.")
+    ap.add_argument("--per-model-dir", default=None, help="Optional directory where the unified per-model contract artifacts (combined_labels.nii.gz, local_labels.json) are written. Defaults to --output.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -106,8 +161,11 @@ def main() -> int:
     nnunet_results = Path(args.nnunet_results).resolve()
     model_folder = Path(args.model_folder).resolve() if args.model_folder else None
     workdir = Path(args.workdir).resolve() if args.workdir else None
+    per_model_dir = Path(args.per_model_dir).resolve() if args.per_model_dir else output
     output.mkdir(parents=True, exist_ok=True)
     seg_dir.mkdir(parents=True, exist_ok=True)
+    per_model_dir.mkdir(parents=True, exist_ok=True)
+    per_model_seg_dir = per_model_dir / "segmentations"
 
     case_id = image.parent.name if image.name == "ct.nii.gz" else image.name.replace(".nii.gz", "").replace("_0000", "")
     requested_organs = [x.strip() for x in args.organs.replace(";", ",").split(",") if x.strip()] if args.organs else None
@@ -122,7 +180,7 @@ def main() -> int:
         else:
             command = [
                 "nnUNetv2_predict", "-d", str(args.dataset_id), "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
-                "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "--continue_prediction",
+                "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "-chk", args.checkpoint_name, "--continue_prediction",
             ]
         print(json.dumps({"status": "dry_run", "command": command, "output": str(output), "seg_dir": str(seg_dir), "output_label_mode": args.output_label_mode}, indent=2))
         return 0
@@ -239,7 +297,7 @@ def main() -> int:
         else:
             cmd = [
                 "nnUNetv2_predict", "-d", str(args.dataset_id), "-i", str(input_dir), "-o", str(combined_dir),
-                "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "--continue_prediction",
+                "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "-chk", args.checkpoint_name, "--continue_prediction",
             ]
             proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(workdir) if workdir else None, check=False)
             (output / "nnunet_stdout.log").write_text(proc.stdout or "", encoding="utf-8")
@@ -256,10 +314,37 @@ def main() -> int:
         # Python API outputs a combined label map named after the case (e.g. PanTS_00000002.nii.gz)
         # Standard subprocess outputs a combined label map too. Either way, take the first .nii.gz.
         combined = candidates[0]
-        shutil.copy2(combined, output / "combined_labels.nii.gz")
-        split = split_labelmap(combined, dataset_json, seg_dir, requested_organs=requested_organs)
-        summary = {"status": "success", "case_id": case_id, "combined_label": str(output / "combined_labels.nii.gz"), "segmentation_output": str(seg_dir), **split}
-        (output / "inference_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        combined_out = per_model_dir / "combined_labels.nii.gz"
+        shutil.copy2(combined, combined_out)
+        # Also keep a copy at --output for backward compatibility when per-model-dir
+        # differs from output.
+        if combined_out != output / "combined_labels.nii.gz":
+            shutil.copy2(combined, output / "combined_labels.nii.gz")
+        # Dump local_labels.json (name -> int id), region-aware via the actual array.
+        try:
+            import numpy as _np
+            import nibabel as _nib
+            _label_arr = _np.asanyarray(_nib.load(str(combined)).dataobj)
+        except Exception:
+            _label_arr = None
+        local_labels = dump_local_labels(dataset_json, per_model_dir / "local_labels.json", label_arr=_label_arr)
+        split = split_labelmap(combined, dataset_json, per_model_seg_dir, requested_organs=requested_organs)
+        if per_model_seg_dir != seg_dir:
+            seg_dir.mkdir(parents=True, exist_ok=True)
+            for mask_path in per_model_seg_dir.glob("*.nii.gz"):
+                shutil.copy2(mask_path, seg_dir / mask_path.name)
+        summary = {
+            "status": "success", "case_id": case_id,
+            "combined_label": str(combined_out),
+            "local_labels": str(per_model_dir / "local_labels.json"),
+            "num_local_labels": len(local_labels),
+            "segmentation_output": str(per_model_seg_dir),
+            "legacy_segmentation_output": str(seg_dir),
+            **split,
+        }
+        (per_model_dir / "inference_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        if per_model_dir != output:
+            (output / "inference_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         print(json.dumps(summary, indent=2))
         return 0
 

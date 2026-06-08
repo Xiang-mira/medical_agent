@@ -1,0 +1,891 @@
+{
+ "count": 89,
+ "organs": [
+  {
+   "organ": "adrenal_gland_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "ePAI",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "adrenal_gland_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "ePAI",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "arms",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_body)"
+   ],
+   "fallback": []
+  },
+  {
+   "organ": "autochthon_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "autochthon_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "bladder",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS553"
+   ]
+  },
+  {
+   "organ": "brain",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS553"
+   ]
+  },
+  {
+   "organ": "duodenum",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_digestive)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "ePAI",
+    "CADS553"
+   ]
+  },
+  {
+   "organ": "esophagus",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_digestive)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS553"
+   ]
+  },
+  {
+   "organ": "gall_bladder",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "gluteus_maximus_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "gluteus_maximus_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "gluteus_medius_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "gluteus_medius_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "gluteus_minimus_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "gluteus_minimus_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "head",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_body)"
+   ],
+   "fallback": [
+    "SAROS nnUNet"
+   ]
+  },
+  {
+   "organ": "hip_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "hip_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "iliopsoas_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "iliopsoas_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_muscles)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "kidney_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "kidney_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "legs",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_body)"
+   ],
+   "fallback": []
+  },
+  {
+   "organ": "liver",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "lung_lower_left_lobe",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_lungs)",
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "lung_lower_right_lobe",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_lungs)",
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "lung_middle_right_lobe",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_lungs)",
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "lung_upper_left_lobe",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_lungs)",
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "lung_upper_right_lobe",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_lungs)",
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "pancreas",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS551",
+    "ePAI"
+   ]
+  },
+  {
+   "organ": "rib_left_1",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_10",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_11",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_12",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_2",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_3",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_4",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_5",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_6",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_7",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_8",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_left_9",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_1",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_10",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_11",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_12",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_2",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_3",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_4",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_5",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_6",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_7",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_8",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "rib_right_9",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS555"
+   ]
+  },
+  {
+   "organ": "sacrum",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS554"
+   ]
+  },
+  {
+   "organ": "skeletal_muscle",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_body_composition)"
+   ],
+   "fallback": [
+    "SAROS nnUNet"
+   ]
+  },
+  {
+   "organ": "small_bowel",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_digestive)"
+   ],
+   "fallback": [
+    "Totalsegmentator(total)",
+    "CADS553"
+   ]
+  },
+  {
+   "organ": "spleen",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VSmTrans",
+    "CADS551"
+   ]
+  },
+  {
+   "organ": "sternum",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_ribs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS556"
+   ]
+  },
+  {
+   "organ": "subcutaneous_adipose_tissue",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_body_composition)"
+   ],
+   "fallback": [
+    "SAROS nnUNet",
+    "CADS559"
+   ]
+  },
+  {
+   "organ": "thyrohyoid_left",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "Totalsegmentator (headneck_muscles)"
+   ]
+  },
+  {
+   "organ": "thyrohyoid_right",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "Totalsegmentator (headneck_muscles)"
+   ]
+  },
+  {
+   "organ": "trachea",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_organs)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS553"
+   ]
+  },
+  {
+   "organ": "vertebrae_C1",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_C2",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_C3",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_C4",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_C5",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_C6",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_C7",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_L1",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_L2",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_L3",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_L4",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_L5",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T1",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T10",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T11",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T12",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T2",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T3",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T4",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T5",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T6",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T7",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T8",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "vertebrae_T9",
+   "missing_moose": [
+    "MOOSE (clin_ct_vertebrae)"
+   ],
+   "fallback": [
+    "VISTA3D",
+    "CADS552"
+   ]
+  },
+  {
+   "organ": "visceral_adipose_tissue",
+   "missing_moose": [
+    "MOOSE3.0 (clin_ct_body_composition)"
+   ],
+   "fallback": [
+    "SAROS nnUNet"
+   ]
+  }
+ ]
+}

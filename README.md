@@ -4,6 +4,11 @@ This repository implements a registry-driven medical image annotation refinement
 
 The code is designed for PanTS/PAINTS 50-case debugging first, then extension to larger cohorts when real checkpoints, data, and GPU environments are available.
 
+Current student direction: keep CT as 3D volumes and use a VoxTell-style
+3D prompt-based student over 373 exact organ prompts. VISTA3D remains a teacher
+or legacy/reference student backend only; its 127-label space must not limit the
+system target space.
+
 ## What this project does
 
 ```text
@@ -12,11 +17,11 @@ The code is designed for PanTS/PAINTS 50-case debugging first, then extension to
 3. Select or validate 50 tumor-positive PanTS/PAINTS cases
 4. Run E-step Round 1 with selected segmentation models
 5. Normalize model outputs into segmentations/*.nii.gz
-6. Evaluate organs that have current annotations with true DICE/DSC
-7. Keep organs without reference annotations as teacher-derived pseudo-label candidates
-8. Queue low-confidence or conflicting masks for LabelCritic/VLM/manual review when enabled
-9. Save metrics, annotation versions, pseudo-label training data, and review artifacts
-10. Run selected-model-aware M-step when the target model has a usable training backend
+6. Treat any existing masks as prior pseudo references, not expert ground truth
+7. Keep teacher outputs as auditable pseudo-label candidates for 373 targets
+8. Run candidate ShapeKit, candidate QC, then LabelCritic selection for competing masks
+9. Queue low-confidence, QC-failed, ShapeKit-fallback, or conflicting masks for review
+10. Build/run the 3D prompt-based student M-step when the trainer/checkpoint is configured
 11. Run a later E-step round and compare metrics with convergence-table
 ```
 
@@ -32,17 +37,23 @@ Model registry chooses candidate teachers per organ
 E-step: ePAI / VSmTrans / TotalSegmentator / VISTA3D / private nnUNet-style entries
         |
         v
-Mask normalization + optional post-processing/review
+Mask normalization + candidate ShapeKit
         |
         v
-GT organs: true DICE/DSC gate
-Non-GT organs: teacher-derived pseudo-label candidates and surrogate checks
+Candidate QC gate: geometry, empty mask, volume, connected components
+        |
+        v
+LabelCritic selects among eligible post-ShapeKit candidates
+        |
+        v
+Pseudo-reference consistency checks when prior masks exist
+All targets: teacher-derived pseudo-label candidates and surrogate checks
         |
         v
 Annotation update + review queue + RadThinking-style traces + training_manifest.json
         |
         v
-M-step: prepare or run selected-model-aware update for a trainable target model
+M-step: prepare or run VoxTell-style 3D prompt student training
         |
         v
 Updated checkpoint can be returned to the next E-step candidate pool if training succeeds
@@ -56,6 +67,8 @@ Use a Linux machine or GPU server with:
 - NVIDIA GPU for real model inference/training.
 - CUDA-compatible PyTorch / nnUNet v2 environment for nnUNet-style models such as ePAI.
 - MONAI/VISTA3D environment if using VISTA3D fine-tuning.
+- VoxTell-style 3D prompt student dependencies/checkpoint if using the new
+  prompt-based student route.
 - Local PanTS/PAINTS CT data in NIfTI format (`.nii.gz`).
 - Local checkpoints for private or large models you want to run.
 - Optional LabelCritic/VLM server on `localhost:8000` for real visual review.
@@ -197,25 +210,28 @@ For every case and every requested model, the loop:
 1. Loads the CT path and current annotation folder from the case-list CSV.
 2. Runs the selected registry model wrapper.
 3. Converts each model's output into a normalized `segmentations/*.nii.gz` folder.
-4. Computes DICE/DSC for organs that have reference annotation masks.
-5. Applies the quality gate for annotated organs:
-   - `DICE >= 0.8`: accept.
+4. Runs candidate-level ShapeKit when enabled, falling back to the original candidate if ShapeKit is unsupported or fails.
+5. Runs candidate QC on the post-ShapeKit-or-fallback mask before the LabelCritic pool is formed.
+6. Computes pseudo-consistency DICE/DSC only when prior pseudo-reference masks exist.
+7. Applies the consistency gate as a routing signal, not as accuracy:
+   - `DICE >= 0.8`: strong agreement with prior pseudo reference.
    - `0.5 <= DICE < 0.8`: uncertain, keep for review.
    - `DICE < 0.5`: send to LabelCritic/VLM if enabled.
-6. Keeps candidate masks for requested organs without usable reference masks as pseudo-label candidates rather than true GT DSC results.
-7. Writes annotation versions, review queues, VLM decisions, routing metadata, and a training manifest.
+8. Keeps candidate masks for requested organs without usable prior pseudo references as pseudo-label candidates.
+9. Lets LabelCritic compare only QC-eligible competing candidates; hard QC failures are excluded and written to review/gap metadata.
+10. Writes annotation versions, review queues, VLM decisions, routing metadata, and a training manifest.
 
-Important implementation note: the standalone `postprocess` command supports ShapeKit through `shapekit_runner.py`, and `run-loop` exposes `--enable-shapekit`. In the current `run_multimodel_annotation_loop` implementation, the ShapeKit call inside the loop should be verified or corrected before claiming that every successful prediction has been ShapeKit-postprocessed. Treat ShapeKit-in-loop as intended/conditional unless the run artifacts confirm it.
+Important implementation note: `run_multimodel_annotation_loop` runs ShapeKit on each teacher/student candidate before LabelCritic comparison when `--enable-shapekit` is active, then applies candidate QC before the LabelCritic pool is formed. LabelCritic therefore compares post-ShapeKit candidates that pass hard structural checks. Unsupported or failed candidate post-processing falls back to that candidate's original mask, records `shapekit_status`, and writes review/gap metadata to `pseudo_label_gap_report.json/csv`. Candidate QC records empty masks, CT geometry mismatches, suspicious reference-volume ratios, and connected-component anomalies; hard failures are excluded from LabelCritic comparison, while review-level anomalies remain eligible but are flagged in selection metadata, manifests, and gap reports. These checks are pseudo-label consistency controls, not human-verified accuracy.
 
-## 7. Ground-truth and non-ground-truth organ handling
+## 7. No Fine-Label Assumption
 
-The workflow distinguishes between organs with current reference annotations and organs without current reference annotations.
+The default project assumption is that no JHU expert fine-label set is available. This is not a blocker; it is the point of the project. The system is designed to build a reviewed pseudo-label dataset from multiple teacher candidates, candidate ShapeKit, candidate QC, LabelCritic selection, and later student competition.
 
-For organs with reference masks, predictions are compared against the current annotation using true DICE/DSC. These organs can be used for real Round 1 / Round 2 / later-round quality comparison.
+If a case list contains an `annotation_folder`, those masks are treated as prior/current pseudo references or imported weak labels. They may be used for consistency checks, volume sanity checks, and review routing, but they are not counted as expert ground truth.
 
-For organs without reference masks, the pipeline cannot compute true ground-truth DSC. It can still retain teacher outputs as pseudo-label candidates for distillation. Downstream checks for those organs should be interpreted as teacher-reference or sanity metrics, such as teacher/student overlap and volume consistency, not as human-verified ground-truth DSC.
+Therefore every default metric is labeled as `metric_family=pseudo_consistency` and every training item keeps `ground_truth_status=pseudo_label_candidate`. Dice/DSC numbers mean overlap with a pseudo reference or selected pseudo label. They do not mean anatomical accuracy.
 
-Do not report teacher-derived pseudo-label performance as human-verified ground-truth performance unless the masks have been manually reviewed, externally labeled, or otherwise validated.
+Future expert-label evaluation can be added only through an explicit separate path, such as `--fine-label-root` in the failure-mining script. Until that path is configured with real expert labels, reports must not use phrases like true accuracy, ground-truth DSC, or expert-label performance.
 
 ## 8. Expected E-step output
 
@@ -223,7 +239,7 @@ A full `run-loop` output folder can contain:
 
 ```text
 outputs/run_pants50_round1/
-  dice_metrics.csv              # per-case/per-organ/per-model DICE decisions where reference masks exist
+  dice_metrics.csv              # pseudo-consistency DICE when prior pseudo references exist
   round_metrics.csv             # aggregated round metrics
   inference_results.json        # raw inference status/result records
   review_queue.jsonl            # uncertain masks for ITK-SNAP/manual review
@@ -234,6 +250,9 @@ outputs/run_pants50_round1/
   critic/                       # LabelCritic artifacts when the real critic runs
   patient_traces.jsonl          # RadThinking-style structured/template traces when produced
   training_manifest.json        # cases/masks used by the M-step
+  shapekit_report.json          # run-level index of per-case ShapeKit reports
+  pseudo_label_gap_report.json  # missing/fallback/unsupported pseudo-label rows
+  pseudo_label_gap_report.csv
   mstep_config.json             # selected M-step configuration
   mstep_model_routing.json      # selected primary/auxiliary model routing for M-step decisions
   run_summary.json              # machine-readable summary
@@ -291,6 +310,54 @@ The registry includes selected-model-aware trainability metadata:
 - `unest` and template/private families remain inference or external-training candidates unless their original training recipes are provided.
 - `mock_seg` is not trainable and is developer-only smoke-test infrastructure, not a formal teacher model.
 
+The default full EM training script now uses `MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt`.
+It builds `outputs/round*/mstep/voxtell_prompt_student_manifest.json` from prompt/mask
+pairs for the accepted 373 exact organs. If `MEDAI_VOXTELL_TRAIN_CMD` is not
+configured, the script stops at a manifest-ready state and does not fabricate a
+checkpoint or student DSC metrics. Set `MEDAI_STUDENT_BACKEND=vista3d_legacy`
+only for old 127-label VISTA3D reproduction runs.
+
+Download the official VoxTell v1.1 checkpoint to the server:
+
+```bash
+python - <<'PY'
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id="mrokuss/VoxTell",
+    allow_patterns=["voxtell_v1.1/*", "*.json"],
+    local_dir="/home/teacher1/JHU-project1/medical_agent/checkpoints/VoxTell",
+)
+PY
+```
+
+The project fine-tuning command is:
+
+```bash
+export MEDAI_VOXTELL_MODEL_DIR=/home/teacher1/JHU-project1/medical_agent/checkpoints/VoxTell/voxtell_v1.1
+export MEDAI_TEXT_ENCODING_MODEL=/home/teacher1/JHU-project1/medical_agent/checkpoints/Qwen/Qwen3-Embedding-4B
+export MEDAI_VOXTELL_TRAIN_CMD='python scripts/train_voxtell_prompt_student.py'
+```
+
+For a quick trainer path check:
+
+```bash
+python scripts/train_voxtell_prompt_student.py \
+  --manifest outputs/round1/mstep/voxtell_prompt_student_manifest.json \
+  --model-dir checkpoints/VoxTell/voxtell_v1.1 \
+  --output-dir outputs/round1/mstep \
+  --dry-run
+```
+
+VoxTell's official inference writes files as `ct_<prompt>.nii.gz`; the MedAI
+wrapper also standardizes successful outputs to `<organ>.nii.gz` so the next
+E-step can inject `student_predictions/<case_id>/<organ>.nii.gz` as candidates.
+
+Student failure mining reports `metric_family=pseudo_consistency` by default:
+student masks are compared with selected pseudo labels, not expert labels. When
+JHU expert fine labels become available, pass `--fine-label-root` to
+`scripts/mine_student_failure_cases.py` to generate the reserved
+`fine_label_eval_*` outputs and true `student_vs_expert_fine_label` metrics.
+
 Example developer-only backend dry-runs:
 
 ```bash
@@ -331,18 +398,38 @@ python run_medai_cli.py --json convergence-table \
   --round-csvs outputs/run_pants50_round1/round_metrics.csv,outputs/run_pants50_round2/round_metrics.csv
 ```
 
-For annotated organs, compare true DSC across rounds. For non-GT organs, use teacher-reference or volume sanity metrics and clearly label them as surrogate metrics.
+Across rounds, compare pseudo-consistency trends, student-vs-selected-pseudo-label overlap, failure counts, QC flags, ShapeKit fallback rates, and LabelCritic/manual review burden. Do not describe these trends as true accuracy improvements.
 
-## 12. One-command EM loop scripts
+## 12. Formal multi-round EM orchestration
 
-The repository includes orchestration scripts for longer GPU-server workflows:
+There is exactly one formal orchestration entry point for the full multi-round EM
+experiment: `scripts/run_em_training.py`. It is configured entirely through
+`MEDAI_*` environment variables (student backend, number of rounds, ShapeKit /
+LabelCritic gates, VoxTell model dir, output root) and drives the registry-based
+teacher pool, the E-step (`run_multimodel_annotation_loop`), and the M-step.
+
+Minimal formal launch (start the vLLM/LabelCritic server first, then):
 
 ```bash
-bash run_em_loop.sh
-bash run_m_e2_loop.sh
+export MEDAI_OUTPUT_ROOT="$PWD/outputs/formal_pants50_em_$(date +%Y%m%d_%H%M%S)"
+export MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt
+export MEDAI_ENABLE_SHAPEKIT=1
+export MEDAI_ENABLE_CRITIC=1
+export MEDAI_NUM_ROUNDS=3
+export MEDAI_VOXTELL_MODEL_DIR="$PWD/checkpoints/VoxTell/voxtell_v1.1"
+export MEDAI_TEXT_ENCODING_MODEL="$PWD/checkpoints/Qwen/Qwen3-Embedding-4B"
+export MEDAI_VOXTELL_TRAIN_CMD='python scripts/train_voxtell_prompt_student.py'
+export PYTHONPATH="$PWD/agent-harness:${PYTHONPATH:-}"
+
+python scripts/run_em_training.py
 ```
 
-Check each script before running to confirm the exact pre-flight checks, model list, output paths, and log locations for your server.
+Each run records the exact environment + server preflight it used in
+`outputs/<run>/run_formal_em.sh`, which doubles as a reproducibility record.
+
+The standalone CLI commands (`run-loop`, `mstep-update`, `convergence-table`,
+etc.) remain available as building blocks for inspecting or rerunning a single
+stage; they are not separate end-to-end orchestrators.
 
 ## 13. Manual review with ITK-SNAP
 
@@ -401,9 +488,9 @@ For formal runs, do not use `--dry-run`, `mock_seg`, or `--critic-backend stub`.
 
 ## 17. Registry and reporting scope
 
-Model and organ coverage are registry-driven. 15 model families are real or conditionally runnable depending on local checkpoints and environment setup. The registry maps 389 organ/task keys under `organ_to_models`, 388 of which currently have at least one candidate model; the non-mock model entries cover 388 unique organ/task names through their `covered_organs` lists.
+Model and organ coverage are registry-driven. The current registry contains 20 model entries, including one developer-only mock smoke-test entry. Excluding the mock entry and template-only placeholders, 15 model families are real or conditionally runnable depending on local checkpoints and environment setup. The registry maps 389 organ/task keys under `organ_to_models`, 388 of which currently have at least one candidate model; the non-mock model entries cover 388 unique organ/task names through their `covered_organs` lists.
 
-Ground-truth availability is determined per run from the case manifest and annotation folders. Organs with usable reference masks are evaluated with true DSC/DICE. Organs without reference masks may still be retained as teacher-derived pseudo-label candidates and should be reported with surrogate checks such as teacher overlap or volume consistency, not as human-verified ground-truth DSC.
+The formal reporting scope assumes no expert ground truth. Case manifest annotation folders are prior pseudo references only. Organs with usable prior masks may get pseudo-consistency DSC/DICE; organs without prior masks rely on teacher competition, QC, ShapeKit status, LabelCritic decisions, teacher overlap, and volume/shape sanity checks. None of these should be reported as human-verified ground-truth DSC.
 
 The repository also includes a 127-organ VISTA3D-label-mapped teacher branch map and a 358-organ all-teacher list for specific workflows. These are separate target sets and should not be reported as universal ground-truth or performance counts.
 

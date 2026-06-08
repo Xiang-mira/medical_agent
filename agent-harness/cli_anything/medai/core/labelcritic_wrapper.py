@@ -14,13 +14,42 @@ from .json_utils import write_json
 def _prepare_mask_folder(mask: Path, organ: str, dst_root: Path, label: str) -> Path:
     """LabelCritic expects a folder of organ masks. Accept either folder or file."""
     if mask.is_dir():
-        return mask.resolve()
+        prepared = mask.resolve()
+        _ensure_left_right_projection_companion(prepared, organ)
+        return prepared
     out = dst_root / label
     out.mkdir(parents=True, exist_ok=True)
     dst = out / f"{organ}.nii.gz"
     if mask.exists() and not dst.exists():
         shutil.copy2(mask, dst)
+    _ensure_left_right_projection_companion(out, organ)
     return out.resolve()
+
+
+def _ensure_left_right_projection_companion(mask_dir: Path, organ: str) -> dict[str, Any] | None:
+    """Add a projection-only companion mask for LabelCritic left/right joins.
+
+    ProjectDatasetFlex_single.py tries to merge any `*left*` organ projection
+    with its `*right*` counterpart. Pairwise LabelCritic calls compare one organ
+    at a time, so the right counterpart often is not present. Adding a copied
+    companion prevents projection from failing; it is used only inside the
+    temporary LabelCritic work folder and never becomes a training target.
+    """
+    organ_name = str(organ).removesuffix(".nii.gz")
+    if "left" not in organ_name:
+        return None
+    src = mask_dir / f"{organ_name}.nii.gz"
+    companion_name = organ_name.replace("left", "right")
+    dst = mask_dir / f"{companion_name}.nii.gz"
+    if not src.exists() or dst.exists():
+        return None
+    shutil.copy2(src, dst)
+    return {
+        "status": "created",
+        "source": str(src),
+        "companion": str(dst),
+        "reason": "projection_only_companion_for_labelcritic_left_right_join",
+    }
 
 
 def _parse_labelcritic_log(
@@ -28,6 +57,7 @@ def _parse_labelcritic_log(
     mask1_folder: Path | None = None,
     mask2_folder: Path | None = None,
     run_id: str | None = None,
+    csv_path: Path | None = None,
 ) -> dict[str, Any]:
     """Parse LabelCritic's comparison_summary.log.
 
@@ -39,6 +69,9 @@ def _parse_labelcritic_log(
         return {"winner": "uncertain", "confidence": 0.5, "reason": "LabelCritic log was not generated", "parse_status": "missing_log"}
 
     import re
+    csv_rows = 0
+    if csv_path and csv_path.exists():
+        csv_rows = max(0, len(csv_path.read_text(encoding="utf-8", errors="ignore").splitlines()) - 1)
     full_text = log_path.read_text(encoding="utf-8", errors="ignore")
 
     # Scope to the current run's block using run_id
@@ -57,6 +90,15 @@ def _parse_labelcritic_log(
 
         # Bug fix: handle explicit "uncertain" written by patched CompareOrgan.py
         if best.lower() == "uncertain":
+            if csv_path and csv_path.exists() and csv_rows == 0:
+                return {
+                    "winner": "uncertain",
+                    "confidence": 0.0,
+                    "reason": text,
+                    "parse_status": "no_comparison_rows",
+                    "csv_path": str(csv_path),
+                    "csv_rows": csv_rows,
+                }
             return {"winner": "uncertain", "confidence": 0.0, "reason": text, "parse_status": "vlm_undecided"}
 
         # Bug fix: normalize paths with resolve() before comparison
@@ -125,6 +167,12 @@ def run_labelcritic_compare(
     dry_run: bool = False,
     strict_alignment: bool = False,
     timeout_sec: int = 300,
+    no_dice_check: bool = False,
+    no_dual_confirmation: bool = False,
+    simple_prompt_ablation: bool = False,
+    conservative_dual: bool = False,
+    skip_organ_presence_gate: bool = False,
+    strict_choice_prompt: bool = False,
 ) -> dict[str, Any]:
     ct = Path(ct_image).resolve()
     a = Path(mask_a).resolve()
@@ -146,6 +194,7 @@ def run_labelcritic_compare(
     mask1_folder = _prepare_mask_folder(a, organ, work_dir, "mask1")
     mask2_folder = _prepare_mask_folder(b, organ, work_dir, "mask2")
     log_file = work_dir / "comparison_summary.log"
+    csv_path = work_dir / "results" / run_id / f"{organ}.csv"
     command = [
         "python", str(script),
         "--ct", str(ct),
@@ -155,7 +204,32 @@ def run_labelcritic_compare(
         "--port", str(normalized_port),
         "--log_file", str(log_file),
         "--base_url", normalized_base_url,
+        "--run_id", run_id,
+        "--base_output", str(work_dir / "comparison_results"),
+        "--base_csv", str(work_dir / "results"),
     ]
+    if no_dice_check:
+        command.append("--no_dice_check")
+    if no_dual_confirmation:
+        command.append("--no_dual_confirmation")
+    if simple_prompt_ablation:
+        command.append("--simple_prompt_ablation")
+    if conservative_dual:
+        command.append("--conservative_dual")
+    if skip_organ_presence_gate:
+        command.append("--skip_organ_presence_gate")
+    if strict_choice_prompt:
+        command.append("--strict_choice_prompt")
+    labelcritic_options = {
+        "no_dice_check": no_dice_check,
+        "no_dual_confirmation": no_dual_confirmation,
+        "simple_prompt_ablation": simple_prompt_ablation,
+        "conservative_dual": conservative_dual,
+        "skip_organ_presence_gate": skip_organ_presence_gate,
+        "strict_choice_prompt": strict_choice_prompt,
+        "run_id": run_id,
+        "csv_path": str(csv_path),
+    }
 
     if dry_run or backend == "stub":
         # Build projections for dry-run/stub so reviewers can inspect the images.
@@ -179,6 +253,7 @@ def run_labelcritic_compare(
             "backend": backend, "organ": organ, "ct_image": str(ct),
             "mask_a": str(a), "mask_b": str(b), "output_json": str(out_json),
             "projection": proj, "command": command, "normalized_base_url": normalized_base_url, "normalized_port": normalized_port, "decision": decision,
+            "labelcritic_options": labelcritic_options,
         }
         write_json(out_json, result)
         return result
@@ -201,7 +276,7 @@ def run_labelcritic_compare(
         completed = subprocess.CompletedProcess(command, 124, stdout=exc.stdout or "", stderr=(exc.stderr or "") + f"\n[labelcritic] Timeout after {timeout_sec}s")
         timed_out = True
     elapsed = time.time() - start
-    decision = _parse_labelcritic_log(log_file, mask1_folder, mask2_folder, run_id=run_id)
+    decision = _parse_labelcritic_log(log_file, mask1_folder, mask2_folder, run_id=run_id, csv_path=csv_path)
     result = {
         "stage": "labelcritic", "status": "timed_out" if timed_out else ("success" if completed.returncode == 0 else "failed"),
         "backend": backend, "organ": organ, "ct_image": str(ct), "mask_a": str(a), "mask_b": str(b),
@@ -209,6 +284,7 @@ def run_labelcritic_compare(
         "return_code": completed.returncode, "runtime_sec": round(elapsed, 3),
         "stdout_tail": completed.stdout[-4000:], "stderr_tail": completed.stderr[-4000:],
         "log_file": str(log_file), "normalized_base_url": normalized_base_url, "normalized_port": normalized_port, "decision": decision,
+        "labelcritic_options": labelcritic_options,
     }
     write_json(out_json, result)
     return result

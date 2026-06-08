@@ -4,7 +4,7 @@ Round 2 M-step 재실행 스크립트.
 수정 사항: LR 이중 감소 버그 수정 (5e-7 → 5e-6), n_train_samples 10 → 50
 E-step은 이미 완료되었으므로 M-step + student 추론만 재실행.
 """
-import sys, time, json, csv, subprocess
+import os, sys, time, json, csv, subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-harness"))
@@ -22,6 +22,15 @@ LEARNING_RATE        = 5e-5
 CONSOLIDATION_LR     = 5e-6
 CONSOLIDATION_EPOCHS = 20
 KEY_ORGANS = None  # None = 使用 teacher_branch_map 里全部127个器官
+
+
+if os.getenv("MEDAI_ALLOW_VISTA3D_LEGACY") != "1":
+    raise SystemExit(
+        "This helper is a legacy VISTA3D/127-class Round2 path and is disabled "
+        "for the current 3D prompt-based student mainline. Use "
+        "scripts/run_em_training.py or scripts/run_student_infer_then_round2.py. "
+        "Set MEDAI_ALLOW_VISTA3D_LEGACY=1 only for historical reproduction."
+    )
 
 
 def log(msg):

@@ -130,11 +130,20 @@ def main():
         for organ in organs:
             organ = organ.replace(".nii.gz", "")
             if 'left' in organ:
-                pj.join_left_and_right_dataset(
-                    os.path.join(args.output_dir, organ),
-                    os.path.join(args.output_dir, organ.replace('left', 'right')),
-                    os.path.join(args.output_dir, organ.replace('_left', 's'))
-                )
+                left_dir = os.path.join(args.output_dir, organ)
+                right_dir = os.path.join(args.output_dir, organ.replace('left', 'right'))
+                if os.path.isdir(left_dir) and os.path.isdir(right_dir):
+                    pj.join_left_and_right_dataset(
+                        left_dir,
+                        right_dir,
+                        os.path.join(args.output_dir, organ.replace('_left', 's'))
+                    )
+                else:
+                    print(
+                        "Skipping left/right join for single-organ projection; "
+                        f"missing companion projection: left={os.path.isdir(left_dir)}, "
+                        f"right={os.path.isdir(right_dir)}"
+                    )
     finally:
         try:
             shutil.rmtree(temp_ct_good)

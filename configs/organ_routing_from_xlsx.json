@@ -1,0 +1,1598 @@
+{
+  "total_organs": 384,
+  "organ_to_models": {
+    "abdominal_cavity": [
+      "CADS559",
+      "SAROS nnUNet"
+    ],
+    "adrenal_gland_left": [
+      "ePAI",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "adrenal_gland_right": [
+      "ePAI",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "airway": [
+      "VISTA3D"
+    ],
+    "airway_tree": [
+      "ATM"
+    ],
+    "airway_wall": [
+      "AirRC"
+    ],
+    "anterior_eyeball_segment_left": [
+      "CADS559"
+    ],
+    "anterior_eyeball_segment_right": [
+      "CADS559"
+    ],
+    "anterior_scalene_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "anterior_scalene_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "aorta": [
+      "VISTA3D",
+      "CADS551",
+      "Dataset001_ATLASNet"
+    ],
+    "arm_left": [
+      "SAROS nnUNet"
+    ],
+    "arm_right": [
+      "SAROS nnUNet"
+    ],
+    "arms": [
+      "MOOSE3.0 (clin_ct_body)"
+    ],
+    "artery_brachiocephalic": [
+      "DAPS"
+    ],
+    "artery_common_carotid_left": [
+      "DAPS"
+    ],
+    "artery_common_carotid_right": [
+      "DAPS"
+    ],
+    "artery_internal_carotid_left": [
+      "DAPS"
+    ],
+    "artery_internal_carotid_right": [
+      "DAPS"
+    ],
+    "artery_subclavian_left": [
+      "DAPS"
+    ],
+    "artery_subclavian_right": [
+      "DAPS"
+    ],
+    "atrial_appendage_left": [
+      "VISTA3D"
+    ],
+    "arytenoid_cartilage": [
+      "CADS558"
+    ],
+    "auditory_canal_left": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "auditory_canal_right": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "autochthon_left": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_muscles)",
+      "CADS554"
+    ],
+    "autochthon_right": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_muscles)",
+      "CADS554"
+    ],
+    "bladder": [
+      "VSmTrans",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "blood": [
+      "CADS557"
+    ],
+    "body": [
+      "Totalsegmentator (body)"
+    ],
+    "body_extremities": [
+      "Totalsegmentator (body)"
+    ],
+    "body_trunc": [
+      "Totalsegmentator (body)"
+    ],
+    "bones": [
+      "CADS559"
+    ],
+    "both_lips": [
+      "CADS558"
+    ],
+    "brachiocephalic_trunk": [
+      "VISTA3D"
+    ],
+    "brachiocephalic_vein_left": [
+      "VISTA3D"
+    ],
+    "brachiocephalic_vein_right": [
+      "VISTA3D"
+    ],
+    "brain": [
+      "VISTA3D",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "brain_ventricle": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "brainstem": [
+      "Totalsegmentator (brain_structures)",
+      "CADS558"
+    ],
+    "breast_left": [
+      "DAPS"
+    ],
+    "breast_right": [
+      "DAPS"
+    ],
+    "bronchus": [
+      "DAPS"
+    ],
+    "buccal_mucosa": [
+      "CADS558"
+    ],
+    "carotid_artery_left": [
+      "CADS558"
+    ],
+    "carotid_artery_right": [
+      "CADS558"
+    ],
+    "carpal": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "carpal_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "carpal_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "caudate_nucleus": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "cbd_stent": [
+      "ePAI"
+    ],
+    "celiac_aa (celiac_artery)": [
+      "ePAI"
+    ],
+    "celiac_trunk": [
+      "VSmTrans"
+    ],
+    "central_sulcus": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "cerebellum": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "cerebrospinal_fluid": [
+      "CADS557"
+    ],
+    "cervical_esophagus": [
+      "CADS558"
+    ],
+    "cheek_left": [
+      "DAPS"
+    ],
+    "cheek_right": [
+      "DAPS"
+    ],
+    "clavicula_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "clavicula_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "cochlear_left": [
+      "CADS558"
+    ],
+    "cochlear_right": [
+      "CADS558"
+    ],
+    "colon": [
+      "VSmTrans",
+      "ePAI",
+      "CADS553",
+      "Dataset001_ATLASNet"
+    ],
+    "colostomy_bag": [
+      "CADS556"
+    ],
+    "common_bile_duct": [
+      "ePAI"
+    ],
+    "common_carotid_artery_left": [
+      "VISTA3D"
+    ],
+    "common_carotid_artery_right": [
+      "VISTA3D"
+    ],
+    "common_iliac_artery_left": [
+      "CADS553"
+    ],
+    "common_iliac_artery_right": [
+      "CADS553"
+    ],
+    "common_iliac_vein_left": [
+      "CADS553"
+    ],
+    "common_iliac_vein_right": [
+      "CADS553"
+    ],
+    "compact_bone": [
+      "CADS557"
+    ],
+    "coronary_artery": [
+      "Totalsegmentator (coronary_arteries)"
+    ],
+    "costal_cartilages": [
+      "VISTA3D"
+    ],
+    "cricoid_cartilage": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "cricopharyngeus": [
+      "CADS558"
+    ],
+    "digastric_left": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "digastric_right": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "duodenum": [
+      "VSmTrans",
+      "ePAI",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_digestive)"
+    ],
+    "esophagus": [
+      "VSmTrans",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_digestive)"
+    ],
+    "eye_lens_left": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "eye_lens_right": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "eyeball": [
+      "CADS557"
+    ],
+    "eyeball_left": [
+      "DAPS"
+    ],
+    "eyeball_right": [
+      "DAPS"
+    ],
+    "face": [
+      "CADS553"
+    ],
+    "fat": [
+      "DAPS"
+    ],
+    "femur_left": [
+      "VSmTrans",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "femur_right": [
+      "VSmTrans",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "fibula": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "fibula_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "fibula_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "fingers_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "fingers_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "frontal_lobe": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "gall_bladder": [
+      "VSmTrans",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "gland_structure": [
+      "CADS559"
+    ],
+    "glottis": [
+      "CADS558"
+    ],
+    "gluteus_maximus_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "gluteus_maximus_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "gluteus_medius_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "gluteus_medius_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "gluteus_minimus_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "gluteus_minimus_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "gonads": [
+      "DAPS"
+    ],
+    "gray_matter": [
+      "CADS557"
+    ],
+    "hard_palate": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "head": [
+      "SAROS nnUNet",
+      "MOOSE3.0 (clin_ct_body)"
+    ],
+    "heart": [
+      "VISTA3D",
+      "CADS556"
+    ],
+    "heart_atrium_left": [
+      "DAPS",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "heart_atrium_right": [
+      "DAPS",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "heart_myocardium": [
+      "DAPS",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "heart_tissue": [
+      "DAPS"
+    ],
+    "heart_ventricle_left": [
+      "DAPS",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "heart_ventricle_right": [
+      "DAPS",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "hepatic_vessel": [
+      "VSmTrans"
+    ],
+    "hip_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_vertebrae)"
+    ],
+    "hip_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_vertebrae)"
+    ],
+    "humerus_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "humerus_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "hyoid": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "hypopharynx": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "iliac_artery_left": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_cardiac)",
+      "CADS553"
+    ],
+    "iliac_artery_right": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_cardiac)",
+      "CADS553"
+    ],
+    "iliac_vena_left": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_cardiac)",
+      "CADS553"
+    ],
+    "iliac_vena_right": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_cardiac)",
+      "CADS553"
+    ],
+    "iliopsoas_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "iliopsoas_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_muscles)"
+    ],
+    "inferior_oblique_muscle_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "inferior_oblique_muscle_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "inferior_pharyngeal_constrictor": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "inferior_rectus_muscle_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "inferior_rectus_muscle_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "inferior_vena_cava": [
+      "Totalsegmentator(total)",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "insular_cortex": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "intermuscular_adipose_tissue": [
+      "SAROS nnUNet"
+    ],
+    "internal_capsule": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "internal_carotid_artery_left": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "internal_carotid_artery_right": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "internal_jugular_vein_left": [
+      "Totalsegmentator(headneck_bones_vessels)"
+    ],
+    "internal_jugular_vein_right": [
+      "Totalsegmentator(headneck_bones_vessels)"
+    ],
+    "intestine": [
+      "VSmTrans"
+    ],
+    "kidney": [
+      "VISTA3D"
+    ],
+    "kidney_cortex": [
+      "UNEST"
+    ],
+    "kidney_left": [
+      "VSmTrans",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "kidney_medulla": [
+      "UNEST"
+    ],
+    "kidney_pelvicalyceal_system": [
+      "UNEST"
+    ],
+    "kidney_right": [
+      "VSmTrans",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "lacrimal_gland_left": [
+      "CADS558"
+    ],
+    "lacrimal_gland_right": [
+      "CADS558"
+    ],
+    "larynx": [
+      "CADS556"
+    ],
+    "lateral_pterygoid_left": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "lateral_pterygoid_right": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "lateral_rectus_muscle_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "lateral_rectus_muscle_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "lentiform_nucleus": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "leg_left": [
+      "SAROS nnUNet"
+    ],
+    "leg_right": [
+      "SAROS nnUNet"
+    ],
+    "legs": [
+      "MOOSE3.0 (clin_ct_body)"
+    ],
+    "levator_palpebrae_superioris_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "levator_palpebrae_superioris_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "levator_scapulae_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "levator_scapulae_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "liver": [
+      "VSmTrans",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "liver_hepatic_vein": [
+      "LVP"
+    ],
+    "liver_portal_vein": [
+      "LVP"
+    ],
+    "liver_segment_1": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_2": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_3": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_4": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_5": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_6": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_7": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "liver_segment_8": [
+      "Dataset224_AbdomenAtlas1.1",
+      "Totalsegmentator (liver_segments)"
+    ],
+    "lung": [
+      "VISTA3D"
+    ],
+    "lung_left": [
+      "VSmTrans"
+    ],
+    "lung_lower_left_lobe": [
+      "VISTA3D",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_lungs)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "lung_lower_right_lobe": [
+      "VISTA3D",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_lungs)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "lung_middle_right_lobe": [
+      "VISTA3D",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_lungs)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "lung_pulmonary_arteries": [
+      "AirRC"
+    ],
+    "lung_pulmonary_veins": [
+      "AirRC"
+    ],
+    "lung_right": [
+      "VSmTrans"
+    ],
+    "lung_trachea_bronchia": [
+      "Totalsegmentator (lung_vessels)"
+    ],
+    "lung_upper_left_lobe": [
+      "VISTA3D",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_lungs)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "lung_upper_right_lobe": [
+      "VISTA3D",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_lungs)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "lung_vessels": [
+      "Totalsegmentator (lung_vessels)"
+    ],
+    "mammary_gland_left": [
+      "CADS556"
+    ],
+    "mammary_gland_right": [
+      "CADS556"
+    ],
+    "mandible": [
+      "CADS558"
+    ],
+    "masseter_left": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "masseter_right": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "medial_pterygoid_left": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "medial_pterygoid_right": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "medial_rectus_muscle_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "medial_rectus_muscle_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "mediastinal_tissue": [
+      "DAPS"
+    ],
+    "mediastinum": [
+      "SAROS nnUNet",
+      "CADS559"
+    ],
+    "metacarpal": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "metacarpal_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "metacarpal_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "metatarsal": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "metatarsal_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "metatarsal_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "middle_pharyngeal_constrictor": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "middle_scalene_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "middle_scalene_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "muscle": [
+      "SAROS nnUNet",
+      "CADS559"
+    ],
+    "muscle_fat": [
+      "Duke"
+    ],
+    "muscle_of_head": [
+      "CADS557"
+    ],
+    "nasal_cavity_left": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "nasal_cavity_right": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "nasopharynx": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "occipital_lobe": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "optic_chiasm": [
+      "CADS558"
+    ],
+    "optic_nerve_left": [
+      "Totalsegmentator (head_glands_cavities)",
+      "CADS558"
+    ],
+    "optic_nerve_right": [
+      "Totalsegmentator (head_glands_cavities)",
+      "CADS558"
+    ],
+    "oral_cavity": [
+      "CADS558"
+    ],
+    "oropharynx": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "pancreas": [
+      "VSmTrans",
+      "CADS551",
+      "ePAI",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "pancreas_body": [
+      "Dataset224_AbdomenAtlas1.1"
+    ],
+    "pancreas_head": [
+      "Dataset224_AbdomenAtlas1.1"
+    ],
+    "pancreas_tail": [
+      "Dataset224_AbdomenAtlas1.1"
+    ],
+    "pancreatic_duct": [
+      "ePAI"
+    ],
+    "parietal_lobe": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "parotid_gland_left": [
+      "Totalsegmentator (head_glands_cavities)",
+      "CADS558"
+    ],
+    "parotid_gland_right": [
+      "Totalsegmentator (head_glands_cavities)",
+      "CADS558"
+    ],
+    "parotid_glands": [
+      "SAROS nnUNet"
+    ],
+    "patella": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "patella_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "patella_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "pericardium": [
+      "SAROS nnUNet",
+      "CADS559"
+    ],
+    "phalanges_feet": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "phalanges_hand": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "pituitary_gland": [
+      "CADS558"
+    ],
+    "platysma_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "platysma_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "portal_vein_and_splenic_vein": [
+      "VSmTrans",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "postcava": [
+      "VSmTrans"
+    ],
+    "posterior_eyeball_segment_left": [
+      "CADS558"
+    ],
+    "posterior_eyeball_segment_right": [
+      "CADS558"
+    ],
+    "posterior_scalene_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "posterior_scalene_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "prevertebral_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "prevertebral_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "prostate": [
+      "VSmTrans",
+      "CADS556"
+    ],
+    "prosthetic_breast_implant": [
+      "CADS559"
+    ],
+    "psoas_major_muscle_left": [
+      "CADS556"
+    ],
+    "psoas_major_muscle_right": [
+      "CADS556"
+    ],
+    "pulmonary_artery": [
+      "Totalsegmentator (heartchambers_highres)",
+      "CADS553"
+    ],
+    "pulmonary_vein": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_cardiac)"
+    ],
+    "radius": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "radius_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "radius_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "rectum": [
+      "VSmTrans",
+      "CADS556"
+    ],
+    "rectus_abdominis_muscle_left": [
+      "CADS556"
+    ],
+    "rectus_abdominis_muscle_right": [
+      "CADS556"
+    ],
+    "renal_vein_left": [
+      "ePAI"
+    ],
+    "renal_vein_right": [
+      "ePAI"
+    ],
+    "rib_cartilage": [
+      "Totalsegmentator(total)"
+    ],
+    "rib_left_1": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_2": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_3": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_4": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_5": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_6": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_7": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_8": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_9": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_10": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_11": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_left_12": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_1": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_2": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_3": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_4": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_5": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_6": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_7": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_8": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_9": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_10": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_11": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "rib_right_12": [
+      "VISTA3D",
+      "CADS555",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "sacrum": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_vertebrae)"
+    ],
+    "scalp": [
+      "CADS557"
+    ],
+    "scapula_left": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "scapula_right": [
+      "VISTA3D",
+      "CADS554",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "seminal_vesicle": [
+      "CADS556"
+    ],
+    "septum_pellucidum": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "sigmoid_colon": [
+      "CADS556"
+    ],
+    "skeletal_muscle": [
+      "SAROS nnUNet",
+      "Duke",
+      "MOOSE3.0 (clin_ct_body_composition)"
+    ],
+    "skin": [
+      "Totalsegmentator(body)"
+    ],
+    "skull": [
+      "VISTA3D",
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "small_bowel": [
+      "Totalsegmentator(total)",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_digestive)"
+    ],
+    "soft_palate": [
+      "Totalsegmentator (head_glands_cavities)"
+    ],
+    "spinal_canal": [
+      "CADS556"
+    ],
+    "spinal_cord": [
+      "VISTA3D",
+      "CADS559"
+    ],
+    "spleen": [
+      "VSmTrans",
+      "CADS551",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "spongy_bone": [
+      "CADS557"
+    ],
+    "sterno_thyroid_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "sterno_thyroid_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "sternocleidomastoid_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "sternocleidomastoid_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "sternum": [
+      "VISTA3D",
+      "CADS556",
+      "MOOSE3.0 (clin_ct_ribs)"
+    ],
+    "sternum_corpus": [
+      "DAPS"
+    ],
+    "sternum_manubrium": [
+      "DAPS"
+    ],
+    "stomach": [
+      "VSmTrans",
+      "CADS551",
+      "Dataset001_ATLASNet"
+    ],
+    "styloid_process_left": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "styloid_process_right": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "subarachnoid_space": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "subclavian_artery_left": [
+      "VISTA3D"
+    ],
+    "subclavian_artery_right": [
+      "VISTA3D"
+    ],
+    "subcutaneous_adipose_tissue": [
+      "SAROS nnUNet",
+      "Duke",
+      "CADS559",
+      "MOOSE3.0 (clin_ct_body_composition)"
+    ],
+    "submandibular_gland_left": [
+      "Totalsegmentator (head_glands_cavities)",
+      "CADS558"
+    ],
+    "submandibular_gland_right": [
+      "Totalsegmentator (head_glands_cavities)",
+      "CADS558"
+    ],
+    "submandibular_glands": [
+      "SAROS nnUNet"
+    ],
+    "superior_mesenteric_artery": [
+      "ePAI"
+    ],
+    "superior_oblique_muscle_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "superior_oblique_muscle_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "superior_rectus_muscle_left": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "superior_rectus_muscle_right": [
+      "Totalsegmentator (oculomotor_muscles)"
+    ],
+    "superior_vena_cava": [
+      "VISTA3D"
+    ],
+    "supraglottis": [
+      "CADS558"
+    ],
+    "tarsal": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "tarsal_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "tarsal_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "temporal_lobe": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "temporalis_left": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "temporalis_right": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "thalamus": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "thoracic_cavity": [
+      "SAROS nnUNet",
+      "CADS559"
+    ],
+    "thymus": [
+      "DAPS"
+    ],
+    "thyrohyoid_left": [
+      "Totalsegmentator (headneck_muscles)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "thyrohyoid_right": [
+      "Totalsegmentator (headneck_muscles)",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "thyroid_cartilage": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "thyroid_gland": [
+      "VISTA3D",
+      "CADS558"
+    ],
+    "thyroid_left": [
+      "DAPS"
+    ],
+    "thyroid_right": [
+      "DAPS"
+    ],
+    "tibia": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "tibia_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "tibia_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "toes_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "toes_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "tongue": [
+      "Totalsegmentator (head_muscles)"
+    ],
+    "trachea": [
+      "VISTA3D",
+      "CADS553",
+      "MOOSE3.0 (clin_ct_organs)"
+    ],
+    "trapezius_left": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "trapezius_right": [
+      "Totalsegmentator (headneck_muscles)"
+    ],
+    "ulna": [
+      "Totalsegmentator (appendicular_bones)"
+    ],
+    "ulna_left": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "ulna_right": [
+      "MOOSE3.0 (clin_ct_peripheral_bones)"
+    ],
+    "uterocervix": [
+      "DAPS"
+    ],
+    "uterus": [
+      "DAPS"
+    ],
+    "veins": [
+      "ePAI"
+    ],
+    "venous_sinuses": [
+      "Totalsegmentator (brain_structures)"
+    ],
+    "vertebrae_C1": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_C2": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_C3": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_C4": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_C5": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_C6": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_C7": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_L1": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_L2": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_L3": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_L4": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_L5": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_S1": [
+      "VISTA3D"
+    ],
+    "vertebrae_T1": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T2": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T3": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T4": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T5": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T6": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T7": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T8": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T9": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T10": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T11": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "vertebrae_T12": [
+      "VISTA3D",
+      "CADS552",
+      "MOOSE (clin_ct_vertebrae)"
+    ],
+    "visceral_adipose_tissue": [
+      "SAROS nnUNet",
+      "Duke",
+      "MOOSE3.0 (clin_ct_body_composition)"
+    ],
+    "white_matter": [
+      "CADS557"
+    ],
+    "zygomatic_arch_left": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ],
+    "zygomatic_arch_right": [
+      "Totalsegmentator (headneck_bones_vessels)"
+    ]
+  },
+  "model_to_organ_count": {
+    "Totalsegmentator(合计)": 121,
+    "VISTA3D": 99,
+    "MOOSE3.0 (clin_ct_peripheral_bones)": 31,
+    "DAPS": 30,
+    "CADS558": 27,
+    "MOOSE3.0 (clin_ct_ribs)": 25,
+    "CADS552": 24,
+    "CADS555": 24,
+    "MOOSE (clin_ct_vertebrae)": 24,
+    "CADS553": 22,
+    "Totalsegmentator (headneck_muscles)": 22,
+    "VSmTrans": 22,
+    "CADS554": 21,
+    "MOOSE3.0 (clin_ct_organs)": 18,
+    "CADS551": 17,
+    "Totalsegmentator (head_glands_cavities)": 17,
+    "SAROS nnUNet": 16,
+    "Totalsegmentator (brain_structures)": 16,
+    "CADS556": 15,
+    "Totalsegmentator (oculomotor_muscles)": 14,
+    "ePAI": 13,
+    "MOOSE3.0 (clin_ct_cardiac)": 12,
+    "CADS559": 12,
+    "Dataset224_AbdomenAtlas1.1": 11,
+    "Totalsegmentator (appendicular_bones)": 11,
+    "Totalsegmentator (head_muscles)": 11,
+    "MOOSE3.0 (clin_ct_muscles)": 10,
+    "CADS557": 9,
+    "Totalsegmentator (headneck_bones_vessels)": 9,
+    "Totalsegmentator (liver_segments)": 8,
+    "MOOSE3.0 (clin_ct_lungs)": 5,
+    "Duke": 4,
+    "AirRC": 3,
+    "Dataset001_ATLASNet": 3,
+    "MOOSE3.0 (clin_ct_body)": 3,
+    "MOOSE3.0 (clin_ct_body_composition)": 3,
+    "MOOSE3.0 (clin_ct_digestive)": 3,
+    "MOOSE3.0 (clin_ct_vertebrae)": 3,
+    "Totalsegmentator (body)": 3,
+    "Totalsegmentator(total)": 3,
+    "UNEST": 3,
+    "LVP": 2,
+    "Totalsegmentator (lung_vessels)": 2,
+    "Totalsegmentator(headneck_bones_vessels)": 2,
+    "ATM": 1,
+    "Totalsegmentator (coronary_arteries)": 1,
+    "Totalsegmentator (heartchambers_highres)": 1,
+    "Totalsegmentator(body)": 1
+  },
+  "multi_model_organs": [
+    "abdominal_cavity",
+    "adrenal_gland_left",
+    "adrenal_gland_right",
+    "aorta",
+    "autochthon_left",
+    "autochthon_right",
+    "bladder",
+    "brain",
+    "brainstem",
+    "clavicula_left",
+    "clavicula_right",
+    "colon",
+    "duodenum",
+    "esophagus",
+    "femur_left",
+    "femur_right",
+    "gall_bladder",
+    "gluteus_maximus_left",
+    "gluteus_maximus_right",
+    "gluteus_medius_left",
+    "gluteus_medius_right",
+    "gluteus_minimus_left",
+    "gluteus_minimus_right",
+    "head",
+    "heart",
+    "heart_atrium_left",
+    "heart_atrium_right",
+    "heart_myocardium",
+    "heart_ventricle_left",
+    "heart_ventricle_right",
+    "hip_left",
+    "hip_right",
+    "humerus_left",
+    "humerus_right",
+    "iliac_artery_left",
+    "iliac_artery_right",
+    "iliac_vena_left",
+    "iliac_vena_right",
+    "iliopsoas_left",
+    "iliopsoas_right",
+    "inferior_vena_cava",
+    "kidney_left",
+    "kidney_right",
+    "liver",
+    "liver_segment_1",
+    "liver_segment_2",
+    "liver_segment_3",
+    "liver_segment_4",
+    "liver_segment_5",
+    "liver_segment_6",
+    "liver_segment_7",
+    "liver_segment_8",
+    "lung_lower_left_lobe",
+    "lung_lower_right_lobe",
+    "lung_middle_right_lobe",
+    "lung_upper_left_lobe",
+    "lung_upper_right_lobe",
+    "mediastinum",
+    "muscle",
+    "optic_nerve_left",
+    "optic_nerve_right",
+    "pancreas",
+    "parotid_gland_left",
+    "parotid_gland_right",
+    "pericardium",
+    "portal_vein_and_splenic_vein",
+    "prostate",
+    "pulmonary_artery",
+    "pulmonary_vein",
+    "rectum",
+    "rib_left_1",
+    "rib_left_2",
+    "rib_left_3",
+    "rib_left_4",
+    "rib_left_5",
+    "rib_left_6",
+    "rib_left_7",
+    "rib_left_8",
+    "rib_left_9",
+    "rib_left_10",
+    "rib_left_11",
+    "rib_left_12",
+    "rib_right_1",
+    "rib_right_2",
+    "rib_right_3",
+    "rib_right_4",
+    "rib_right_5",
+    "rib_right_6",
+    "rib_right_7",
+    "rib_right_8",
+    "rib_right_9",
+    "rib_right_10",
+    "rib_right_11",
+    "rib_right_12",
+    "sacrum",
+    "scapula_left",
+    "scapula_right",
+    "skeletal_muscle",
+    "skull",
+    "small_bowel",
+    "spinal_cord",
+    "spleen",
+    "sternum",
+    "stomach",
+    "subcutaneous_adipose_tissue",
+    "submandibular_gland_left",
+    "submandibular_gland_right",
+    "thoracic_cavity",
+    "thyrohyoid_left",
+    "thyrohyoid_right",
+    "thyroid_gland",
+    "trachea",
+    "vertebrae_C1",
+    "vertebrae_C2",
+    "vertebrae_C3",
+    "vertebrae_C4",
+    "vertebrae_C5",
+    "vertebrae_C6",
+    "vertebrae_C7",
+    "vertebrae_L1",
+    "vertebrae_L2",
+    "vertebrae_L3",
+    "vertebrae_L4",
+    "vertebrae_L5",
+    "vertebrae_T1",
+    "vertebrae_T2",
+    "vertebrae_T3",
+    "vertebrae_T4",
+    "vertebrae_T5",
+    "vertebrae_T6",
+    "vertebrae_T7",
+    "vertebrae_T8",
+    "vertebrae_T9",
+    "vertebrae_T10",
+    "vertebrae_T11",
+    "vertebrae_T12",
+    "visceral_adipose_tissue"
+  ]
+}

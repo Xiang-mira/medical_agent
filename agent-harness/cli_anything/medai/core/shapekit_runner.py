@@ -31,6 +31,57 @@ def _mask_names(input_folder: Path) -> set[str]:
     return names
 
 
+def _case_mask_names(input_folder: Path) -> dict[str, set[str]]:
+    cases: dict[str, set[str]] = {}
+    for case in sorted(p for p in input_folder.iterdir() if p.is_dir()):
+        seg = case / "segmentations"
+        cases[case.name] = {p.name[:-7] for p in seg.glob("*.nii.gz")} if seg.exists() else set()
+    return cases
+
+
+def _resolve_affine_reference(config_ref: str, input_folder: Path, auto_config: bool) -> dict[str, Any]:
+    case_masks = _case_mask_names(input_folder)
+    if not case_masks:
+        return {"status": "failed", "reason": "No ShapeKit cases detected for affine reference selection."}
+    ref_stem = config_ref.replace(".nii.gz", "").replace(".nii", "")
+    missing_default = [case for case, masks in case_masks.items() if ref_stem not in masks]
+    if not missing_default:
+        return {
+            "status": "success",
+            "reference_file_name": config_ref,
+            "reference_source": "config_default",
+            "missing_default_reference_cases": [],
+        }
+    if not auto_config:
+        return {
+            "status": "failed",
+            "reason": f"ShapeKit requires affine reference mask '{config_ref}' in each case.",
+            "missing_default_reference_cases": missing_default,
+        }
+
+    common_masks: set[str] | None = None
+    for masks in case_masks.values():
+        common_masks = set(masks) if common_masks is None else common_masks & masks
+    common_sorted = sorted(common_masks or set())
+    if not common_sorted:
+        return {
+            "status": "failed",
+            "reason": (
+                f"ShapeKit requires affine reference mask '{config_ref}' in each case, "
+                "and no alternate mask exists in every case."
+            ),
+            "missing_default_reference_cases": missing_default,
+        }
+    alternate = common_sorted[0]
+    return {
+        "status": "success",
+        "reference_file_name": f"{alternate}.nii.gz",
+        "reference_source": "auto_selected_common_mask",
+        "missing_default_reference_cases": missing_default,
+        "available_common_masks": common_sorted[:80],
+    }
+
+
 def _derive_safe_targets(input_folder: Path) -> list[str]:
     names = _mask_names(input_folder)
     out = []
@@ -51,18 +102,39 @@ def _prepare_config(root: Path, input_folder: Path, auto_config: bool) -> dict[s
     config = yaml.safe_load(text) or {}
     mask_names = sorted(_mask_names(input_folder))
     ref = config.get("affine_reference_file_name", "liver.nii.gz")
-    ref_stem = ref.replace(".nii.gz", "").replace(".nii", "")
-    if ref_stem not in mask_names:
-        return {"status": "failed", "reason": f"ShapeKit requires affine reference mask '{ref}' in each case.", "available_masks": mask_names[:80], "suggested_fix": "include liver.nii.gz or change ShapeKit affine_reference_file_name"}
+    reference_info = _resolve_affine_reference(str(ref), input_folder, auto_config)
+    if reference_info.get("status") == "failed":
+        return {
+            "status": "failed",
+            "reason": reference_info.get("reason"),
+            "available_masks": mask_names[:80],
+            "suggested_fix": "include a common affine reference mask or enable ShapeKit auto_config",
+            "reference_check": reference_info,
+        }
     safe_targets = _derive_safe_targets(input_folder)
     if not safe_targets:
         return {"status": "failed", "reason": "No safe ShapeKit target organs detected", "available_masks": mask_names[:80]}
     original_targets = config.get("target_organs", [])
+    original_ref = config.get("affine_reference_file_name", "liver.nii.gz")
     if auto_config:
         config["target_organs"] = safe_targets
+        config["affine_reference_file_name"] = reference_info["reference_file_name"]
         config["if_save_combined_label"] = True
         config_path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    return {"status": "success", "auto_config": auto_config, "target_organs_original": original_targets, "target_organs_used": safe_targets, "available_masks": mask_names[:80], "backup_text": text, "config_path": str(config_path)}
+    return {
+        "status": "success",
+        "auto_config": auto_config,
+        "target_organs_original": original_targets,
+        "target_organs_used": safe_targets,
+        "affine_reference_original": original_ref,
+        "affine_reference_used": reference_info["reference_file_name"],
+        "affine_reference_source": reference_info.get("reference_source"),
+        "missing_default_reference_cases": reference_info.get("missing_default_reference_cases", []),
+        "available_common_reference_masks": reference_info.get("available_common_masks", []),
+        "available_masks": mask_names[:80],
+        "backup_text": text,
+        "config_path": str(config_path),
+    }
 
 
 def _restore_config(info: dict[str, Any]) -> None:

@@ -4,7 +4,7 @@
 pseudo_labels 和 datalist 已存在，直接从 M-step 开始。
 完成后修改 round_summary.json，让主循环不会重跑 round 1。
 """
-import json, sys, time, subprocess
+import json, os, sys, time, subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-harness"))
@@ -20,6 +20,15 @@ LOG_FILE      = OUTPUT_ROOT / "training.log"
 
 LEARNING_RATE   = 5e-5
 FINETUNE_EPOCHS = 50
+
+
+if os.getenv("MEDAI_ALLOW_VISTA3D_LEGACY") != "1":
+    raise SystemExit(
+        "This helper is a legacy VISTA3D/127-class repair path and is disabled "
+        "for the current 3D prompt-based student mainline. Use "
+        "scripts/run_em_training.py or scripts/run_student_infer_then_round2.py. "
+        "Set MEDAI_ALLOW_VISTA3D_LEGACY=1 only for historical reproduction."
+    )
 
 
 def log(msg):

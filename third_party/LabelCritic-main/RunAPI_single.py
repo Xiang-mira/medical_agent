@@ -36,6 +36,16 @@ parser.add_argument('--shapeless', action='store_true', default=False,
                     help='Ignore shape evaluation for pancreas/stomach/gallbladder')
 parser.add_argument('--simple_prompt_ablation', action='store_true', default=False,
                     help='Use simplified prompt for ablation study')
+parser.add_argument('--no_dice_check', action='store_true', default=False,
+                    help='Do not skip comparisons when 2D projection Dice is above threshold')
+parser.add_argument('--no_dual_confirmation', action='store_true', default=False,
+                    help='Use the original single-order prompt path instead of dual confirmation')
+parser.add_argument('--conservative_dual', action='store_true', default=False,
+                    help='Require both dual-confirmation answers to be decisive and order-consistent')
+parser.add_argument('--skip_organ_presence_gate', action='store_true', default=False,
+                    help='Diagnostic only: skip the initial organ-present-in-projection gate')
+parser.add_argument('--strict_choice_prompt', action='store_true', default=False,
+                    help='Diagnostic only: use a short forced-choice overlay comparison prompt')
 parser.add_argument(
     '--base_url',
     type=str,
@@ -74,12 +84,12 @@ ed.SystematicComparisonLMDeploySepFigures(
     #good_pth=args.good_proj,
     size=512,
     organ=organ,
-    dice_check=True,
     save_memory=True,
     solid_overlay='auto',
     multi_image_prompt_2='auto',
-    dual_confirmation=True,
-    conservative_dual=False,
+    dual_confirmation=not args.no_dual_confirmation,
+    conservative_dual=args.conservative_dual,
+    dice_check=not args.no_dice_check,
     dice_th=float(args.dice_th),
     base_url=base_url,
     csv_file=csv_file_path,
@@ -88,6 +98,8 @@ ed.SystematicComparisonLMDeploySepFigures(
     examples=args.examples,
     shapeless=args.shapeless,
     simple_prompt_ablation=args.simple_prompt_ablation,
+    skip_organ_presence_gate=args.skip_organ_presence_gate,
+    strict_choice_prompt=args.strict_choice_prompt,
     dice_threshold_max=float(args.dice_th_max)
 )
 

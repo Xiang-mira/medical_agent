@@ -335,9 +335,9 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
                 "portal_splenic_veins": "veins",
                 "portal_vein_and_splenic_vein": "veins",
             },
-            "checkpoint_path": f"{checkpoint_root}/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres",
-            "dataset_json_path": f"{checkpoint_root}/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json",
-            "dataset_id": 1017,
+            "checkpoint_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres",
+            "dataset_json_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json",
+            "dataset_id": 1339,
             "trainer": "nnUNetTrainer",
             "plans": "nnUNetPlans",
             "folds": "all",
@@ -364,8 +364,8 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
             "name": "CADS abdominal nnUNet Dataset551",
             "runner": "command_template",
             "status": "ready_if_checkpoint_folder_present",
-            "checkpoint_path": f"{checkpoint_root}/CADS_series",
-            "dataset_json_path": f"{checkpoint_root}/CADS_series/Dataset551_Totalseg251/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
+            "checkpoint_path": f"{checkpoint_root}/CADS_series/CADS_series",
+            "dataset_json_path": f"{checkpoint_root}/CADS_series/CADS_series/Dataset551_Totalseg251/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
             "dataset_id": 551,
             "trainer": "nnUNetTrainerNoMirroring",
             "plans": "nnUNetResEncUNetLPlans",
@@ -379,8 +379,8 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
             "name": "MOOSE available cardiac/vascular nnUNet Dataset888",
             "runner": "command_template",
             "status": "partial_ready_if_checkpoint_folder_present",
-            "checkpoint_path": f"{checkpoint_root}/MOOSE_series",
-            "dataset_json_path": f"{checkpoint_root}/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json",
+            "checkpoint_path": f"{checkpoint_root}/MOOSE_series/MOOSE_series",
+            "dataset_json_path": f"{checkpoint_root}/MOOSE_series/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json",
             "dataset_id": 888,
             "trainer": "nnUNetTrainerNoMirroring",
             "plans": "nnUNetPlans",
@@ -394,8 +394,8 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
             "name": "VSmTrans BDMAP nnUNet Dataset001",
             "runner": "command_template",
             "status": "ready_if_checkpoint_folder_present",
-            "checkpoint_path": f"{checkpoint_root}/VSmTrans/nnUNet_results",
-            "dataset_json_path": f"{checkpoint_root}/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json",
+            "checkpoint_path": f"{checkpoint_root}/VSmTrans/VSmTrans/nnUNet_results",
+            "dataset_json_path": f"{checkpoint_root}/VSmTrans/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json",
             "dataset_id": 1,
             "trainer": "nnUNetTrainer",
             "plans": "nnUNetPlans",
@@ -410,8 +410,8 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
             "name": "Private AbdomenAtlas nnUNet Dataset224",
             "runner": "command_template",
             "status": "ready_if_checkpoint_folder_present",
-            "checkpoint_path": f"{checkpoint_root}/nnUNet_private",
-            "dataset_json_path": f"{checkpoint_root}/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
+            "checkpoint_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private",
+            "dataset_json_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
             "dataset_id": 224,
             "trainer": "nnUNetTrainer",
             "plans": "nnUNetResEncUNetLPlans",
@@ -425,8 +425,8 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
             "name": "Private SAROS nnUNet Dataset1345",
             "runner": "command_template",
             "status": "ready_if_checkpoint_folder_present",
-            "checkpoint_path": f"{checkpoint_root}/nnUNet_private",
-            "dataset_json_path": f"{checkpoint_root}/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
+            "checkpoint_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private",
+            "dataset_json_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json",
             "dataset_id": 1345,
             "trainer": "nnUNetTrainer",
             "plans": "nnUNetResEncUNetLPlans",
@@ -576,17 +576,46 @@ def get_model_entry(registry: dict[str, Any], model_key: str) -> dict[str, Any]:
 def candidate_models_for_organs(registry: dict[str, Any], organs: list[str], include_mock: bool = False) -> dict[str, list[str]]:
     """Return candidate model keys for organs.
 
-    Uses explicit organ_to_models from class_checkpoint_map.xlsx and also
-    supplements with model entries whose covered_organs include the requested
-    organ. This is important for ATLAS-Net because it was supplied as a model
-    card rather than as a row in class_checkpoint_map.xlsx.
+    Prefer the formal organ router when available because it resolves routing
+    tokens such as CADS551..CADS559 to concrete runnable model keys.  The older
+    registry ``organ_to_models`` map was generated from the checkpoint workbook
+    and can contain coarse family names such as ``cads`` that are no longer
+    valid runnable registry keys.
     """
     mapping = registry.get("organ_to_models", {})
     models = registry.get("models", {})
     result: dict[str, list[str]] = {}
+
+    routed_by_organ: dict[str, list[str]] = {}
+    try:
+        from .organ_router import route_organs
+
+        routed = route_organs(organs)
+        for organ, candidates in (routed.get("ranked_candidates", {}) or {}).items():
+            keys: list[str] = []
+            seen_routed: set[str] = set()
+            for item in candidates or []:
+                model_key = item.get("model_key")
+                if (
+                    model_key
+                    and model_key in models
+                    and model_key not in seen_routed
+                    and (include_mock or model_key != "mock_seg")
+                ):
+                    keys.append(model_key)
+                    seen_routed.add(model_key)
+            routed_by_organ[_norm_key(organ)] = keys
+    except Exception:
+        routed_by_organ = {}
+
     for organ in organs:
         key = _norm_key(organ)
-        candidates = [m for m in list(mapping.get(key, [])) if include_mock or m != "mock_seg"]
+        candidates = list(routed_by_organ.get(key) or [])
+        if not candidates:
+            candidates = [
+                m for m in list(mapping.get(key, []))
+                if m in models and (include_mock or m != "mock_seg")
+            ]
         seen = set(candidates)
         for model_key, entry in models.items():
             covered = {_norm_key(x) for x in entry.get("covered_organs", [])}
@@ -633,20 +662,42 @@ def model_inventory(registry: dict[str, Any], include_mock: bool = False) -> dic
 def recommend_primary_models_for_organs(registry: dict[str, Any], organs: list[str]) -> dict[str, Any]:
     """Rule-based task/organ routing for selected-model-aware EM."""
     recs = {}
+    routed_by_organ: dict[str, list[str]] = {}
+    try:
+        from .organ_router import route_organs
+
+        routed = route_organs(organs)
+        models = registry.get("models", {})
+        for organ, candidates in (routed.get("ranked_candidates", {}) or {}).items():
+            keys: list[str] = []
+            seen: set[str] = set()
+            for item in candidates or []:
+                model_key = item.get("model_key")
+                if model_key and model_key in models and model_key not in seen:
+                    keys.append(model_key)
+                    seen.add(model_key)
+            routed_by_organ[_norm_key(organ)] = keys
+    except Exception:
+        routed_by_organ = {}
+
     for organ in organs:
         o = _norm_key(organ)
-        if o in {"pancreas", "pancreatic_duct", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet", "pancreatic_lesion", "common_bile_duct", "cbd_stent", "superior_mesenteric_artery", "celiac_aa", "celiac_aa_celiac_artery", "renal_vein_left", "renal_vein_right", "veins", "portal_vein_and_splenic_vein", "portal_splenic_veins"}:
+        routed_candidates = routed_by_organ.get(o) or []
+        if routed_candidates:
+            primary = routed_candidates[0]
+            auxiliaries = routed_candidates[1:]
+        elif o in {"pancreas", "pancreatic_duct", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet", "pancreatic_lesion", "common_bile_duct", "cbd_stent", "superior_mesenteric_artery", "celiac_aa", "celiac_aa_celiac_artery", "renal_vein_left", "renal_vein_right", "veins", "portal_vein_and_splenic_vein", "portal_splenic_veins"}:
             primary = "epai_20250421"
-            auxiliaries = ["atlasnet", "vsmtrans", "cads", "moose3_0", "totalsegmentator", "vista3d"]
+            auxiliaries = ["atlasnet", "vsmtrans", "cads551", "moose888", "totalsegmentator", "vista3d"]
         elif o in {"liver", "spleen", "stomach", "duodenum", "colon", "kidney_left", "kidney_right", "gall_bladder", "intestine"}:
             primary = "vsmtrans"
-            auxiliaries = ["epai_20250421", "cads", "moose3_0", "atlasnet", "totalsegmentator", "vista3d", "nnunet_private"]
+            auxiliaries = ["epai_20250421", "cads551", "moose888", "atlasnet", "totalsegmentator", "vista3d", "nnunet_private"]
         elif o in {"aorta", "postcava", "inferior_vena_cava"}:
-            primary = "cads"
-            auxiliaries = ["epai_20250421", "vista3d", "moose3_0", "atlasnet", "vsmtrans", "totalsegmentator"]
+            primary = "cads551"
+            auxiliaries = ["epai_20250421", "vista3d", "moose888", "atlasnet", "vsmtrans", "totalsegmentator"]
         elif o in {"kidney_cortex", "kidney_medulla"}:
             primary = "unest"
-            auxiliaries = ["nnunet_private", "cads", "vsmtrans"]
+            auxiliaries = ["nnunet_private", "cads551", "vsmtrans"]
         else:
             candidates = candidate_models_for_organs(registry, [o]).get(o, [])
             primary = candidates[0] if candidates else None

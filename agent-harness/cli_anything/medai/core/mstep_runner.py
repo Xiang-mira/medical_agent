@@ -9,28 +9,131 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .auto_fine_label import grade_to_training_weight
 from .json_utils import write_json
+
+
+def _quality_status(review_flags: Any, quality_flags: Any) -> str:
+    flags = set(review_flags or []) | set(quality_flags or [])
+    if not flags:
+        return "ok"
+    if {"missing_candidate", "missing_final_mask"} & flags:
+        return "missing"
+    if any(str(flag).startswith("shapekit_") for flag in flags):
+        return "postprocess_review"
+    if "selection_fallback" in flags:
+        return "selection_review"
+    return "review"
+
+
+def _labelcritic_decision_path(records: Any) -> str | None:
+    for record in records or []:
+        if isinstance(record, dict) and record.get("output_json"):
+            return str(record["output_json"])
+    return None
+
+
+def _csv_safe(value: Any) -> Any:
+    if isinstance(value, (dict, list, tuple, set)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def _load_case_selection_index(root: Path, case_id: str) -> dict[str, dict[str, Any]]:
+    """Load per-organ pseudo-label source metadata for one case when available."""
+    candidates = [
+        root / case_id / "selection_metadata.json",
+        root.parent / "cases" / case_id / "pseudo_label_selection.json",
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        rows = doc.get("selected_organs") or []
+        if not isinstance(rows, list):
+            continue
+        return {
+            str(item.get("organ")): item
+            for item in rows
+            if isinstance(item, dict) and item.get("organ")
+        }
+    return {}
 
 
 def build_training_manifest(updated_annotations_root: str | Path, output_manifest: str | Path, organs: list[str] | None = None) -> dict[str, Any]:
     root = Path(updated_annotations_root).resolve()
     out = Path(output_manifest).resolve()
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     if root.exists():
         for case_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
             seg_dir = case_dir / "updated"
             if not seg_dir.exists():
                 seg_dir = case_dir / "segmentations"
+            selection_index = _load_case_selection_index(root, case_dir.name)
             for mask in sorted(seg_dir.glob("*.nii.gz")):
                 organ = mask.name[:-7]
                 if organs and organ not in organs:
                     continue
-                rows.append({"case_id": case_dir.name, "organ": organ, "mask_path": str(mask.resolve())})
+                meta = selection_index.get(organ, {})
+                row: dict[str, Any] = {
+                    "case_id": case_dir.name,
+                    "dataset_type": "auto_fine_label_dataset",
+                    "organ": organ,
+                    "prompt": meta.get("prompt", organ.replace("_", " ")),
+                    "mask_path": str(mask.resolve()),
+                    "mask": str(mask.resolve()),
+                    "ct_path": meta.get("ct_path", ""),
+                    "image": meta.get("ct_path", ""),
+                    "selected_model": meta.get("selected_model"),
+                    "source_model": meta.get("source_model", meta.get("selected_model")),
+                    "candidate_models": meta.get("candidate_models", []),
+                    "candidate_count": meta.get("candidate_count"),
+                    "comparison_candidate_models": meta.get("comparison_candidate_models", []),
+                    "comparison_candidate_count": meta.get("comparison_candidate_count"),
+                    "qc_rejected_candidates": meta.get("qc_rejected_candidates", []),
+                    "candidate_qc_policy": meta.get("candidate_qc_policy"),
+                    "selection_method": meta.get("selection_method"),
+                    "selection_status": meta.get("selection_status"),
+                    "comparison_input_stage": meta.get("comparison_input_stage"),
+                    "fallback_reason": meta.get("fallback_reason"),
+                    "selected_dice": meta.get("selected_dice"),
+                    "selected_pseudo_consistency_dice": meta.get("selected_pseudo_consistency_dice", meta.get("selected_dice")),
+                    "metric_family": meta.get("metric_family", "pseudo_consistency"),
+                    "metric_scope": meta.get("metric_scope", "selected_pseudo_label_for_student_training"),
+                    "accuracy_warning": meta.get("accuracy_warning", "Pseudo labels are not expert ground truth; do not report true accuracy from this manifest."),
+                    "selected_candidate_qc_status": meta.get("selected_candidate_qc_status"),
+                    "selected_candidate_qc_score": meta.get("selected_candidate_qc_score"),
+                    "selected_candidate_qc_flags": meta.get("selected_candidate_qc_flags", []),
+                    "selected_reference_quality_bucket": meta.get("selected_reference_quality_bucket"),
+                    "labelcritic_records": meta.get("labelcritic_records", meta.get("critic_records", [])),
+                    "labelcritic_decision_path": meta.get("labelcritic_decision_path") or _labelcritic_decision_path(meta.get("labelcritic_records", meta.get("critic_records", []))),
+                    "label_critic_decision_path": meta.get("label_critic_decision_path") or meta.get("labelcritic_decision_path") or _labelcritic_decision_path(meta.get("labelcritic_records", meta.get("critic_records", []))),
+                    "shapekit_status": meta.get("shapekit_status"),
+                    "shapekit_reason": meta.get("shapekit_reason"),
+                    "dataset_role": meta.get("dataset_role", "pseudo_label"),
+                    "ground_truth_status": meta.get("ground_truth_status", "machine_generated_candidate"),
+                    "label_maturity_level": meta.get("label_maturity_level"),
+                    "auto_fine_label_status": meta.get("auto_fine_label_status", "auto_fine_label_candidate" if meta else "machine_label_candidate"),
+                    "auto_fine_label_reliability_score": meta.get("auto_fine_label_reliability_score"),
+                    "grade": meta.get("grade", "D"),
+                    "training_weight": float(meta.get("training_weight", grade_to_training_weight(meta.get("grade", "D")))),
+                    "label_passport_path": meta.get("label_passport_path"),
+                    "review_flags": meta.get("review_flags", []),
+                    "quality_flags": meta.get("quality_flags", []),
+                    "quality_status": meta.get("quality_status") or _quality_status(meta.get("review_flags", []), meta.get("quality_flags", [])),
+                    "source_metadata_available": bool(meta),
+                }
+                rows.append(row)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.suffix.lower() == ".csv":
+        fieldnames = sorted({k for row in rows for k in row.keys()}) or ["case_id", "organ", "mask_path"]
         with out.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["case_id", "organ", "mask_path"])
-            writer.writeheader(); writer.writerows(rows)
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows([{k: _csv_safe(v) for k, v in row.items()} for row in rows])
     else:
         write_json(out, rows)
     return {"stage": "mstep_manifest", "status": "success", "updated_annotations_root": str(root), "output_manifest": str(out), "num_items": len(rows), "sample_items": rows[:20]}

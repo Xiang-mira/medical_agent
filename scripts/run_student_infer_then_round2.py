@@ -1,43 +1,103 @@
 #!/usr/bin/env python3
+"""Run VoxTell-style 3D prompt student inference for a completed round.
+
+This replaces the old VISTA3D/127-class helper. The output layout remains:
+
+    outputs/round<round>/student_predictions/<case_id>/<organ>.nii.gz
+
+Round 2+ E-step can inject that folder as `student_prev` through
+`preseeded_model_dirs`.
 """
-Step 1: Round 1 student 推理（用 fine-tuned checkpoint）
-Step 2: 启动主训练循环（round 1 已标记完成，直接跑 round 2）
-"""
-import sys, time, json, csv
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-harness"))
 
-PROJECT_ROOT  = Path("/home/teacher1/JHU-project1/medical_agent")
-OUTPUT_ROOT   = PROJECT_ROOT / "outputs"
-VISTA3D_ROOT  = PROJECT_ROOT / "checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master"
-CASE_LIST     = PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"
-LOG_FILE      = OUTPUT_ROOT / "training.log"
-CKPT          = OUTPUT_ROOT / "round1/mstep/model_finetune.pt"
-QWEN_MODEL    = PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"
+PROJECT_ROOT = Path("/home/teacher1/JHU-project1/medical_agent")
+OUTPUT_ROOT = PROJECT_ROOT / "outputs"
+CASE_LIST = PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"
+TARGET_CONFIG = PROJECT_ROOT / "configs/student_3d_prompt_target_organs.json"
+VOXTELL_MODEL_DIR = Path(os.getenv("MEDAI_VOXTELL_MODEL_DIR", PROJECT_ROOT / "checkpoints/VoxTell/voxtell_v1.1"))
+TEXT_ENCODING_MODEL = Path(os.getenv("MEDAI_TEXT_ENCODING_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen3-Embedding-4B"))
+QWEN_VLM_MODEL = PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"
+LOG_FILE = OUTPUT_ROOT / "training.log"
 
-KEY_ORGANS = None  # None = 使用 teacher_branch_map 里全部127个器官
+
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Run 3D prompt student inference for Round N.")
+    ap.add_argument("--round", type=int, default=1, dest="round_idx", help="Round index whose M-step checkpoint should be used.")
+    ap.add_argument("--case-list", default=str(CASE_LIST), help="CSV with case_id,ct_path.")
+    ap.add_argument("--output-root", default=str(OUTPUT_ROOT), help="Project outputs root.")
+    ap.add_argument("--target-config", default=str(TARGET_CONFIG), help="3D prompt target-organ config.")
+    ap.add_argument("--model-dir", default=None, help="Explicit VoxTell model dir. Defaults to round finetuned dir, then official checkpoint.")
+    ap.add_argument("--text-encoding-model", default=str(TEXT_ENCODING_MODEL), help="Local Qwen3 embedding model path.")
+    ap.add_argument("--device", default=os.getenv("MEDAI_DEVICE", "cuda"))
+    ap.add_argument("--gpu", type=int, default=int(os.getenv("MEDAI_GPU", "0")))
+    ap.add_argument("--timeout-sec", type=int, default=1800)
+    ap.add_argument("--prompt-batch-size", type=int, default=16, help="Run VoxTell prompts in batches; do not push all 373 prompts at once.")
+    ap.add_argument("--max-cases", type=int, default=0, help="Optional smoke-test case limit.")
+    ap.add_argument("--prompts", default="", help="Optional comma-separated organ subset. Default: all 373 exact targets.")
+    ap.add_argument("--dry-run", action="store_true", help="Write per-case VoxTell commands without running inference.")
+    ap.add_argument("--restart-vllm", action="store_true", help="Restart LabelCritic VLM server after student inference.")
+    return ap.parse_args()
 
 
-def log(msg):
+def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}"
     print(line, flush=True)
-    with open(LOG_FILE, "a") as f:
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
-def restart_vllm():
-    import subprocess
+def load_target_organs(target_config: Path, prompt_subset: str = "") -> list[str]:
+    doc = json.loads(target_config.read_text(encoding="utf-8"))
+    targets = list(doc.get("target_organs", []))
+    if prompt_subset.strip():
+        requested = [x.strip() for x in prompt_subset.split(",") if x.strip()]
+        missing = [x for x in requested if x not in set(targets)]
+        if missing:
+            raise SystemExit(f"Unknown/non-target organs requested: {missing[:20]}")
+        return requested
+    return targets
+
+
+def load_cases(case_list: Path, max_cases: int = 0) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    with case_list.open("r", encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("case_id") and row.get("ct_path"):
+                rows.append(row)
+    return rows[:max_cases] if max_cases > 0 else rows
+
+
+def default_round_model_dir(output_root: Path, round_idx: int) -> Path:
+    finetuned = output_root / f"round{round_idx}" / "mstep" / "voxtell_finetuned_model"
+    if (finetuned / "plans.json").exists() and (finetuned / "fold_0" / "checkpoint_final.pth").exists():
+        return finetuned
+    return VOXTELL_MODEL_DIR
+
+
+def restart_vllm() -> bool:
     cmd = (
-        f"screen -dmS vllm_server bash -c '"
+        "screen -dmS vllm_server bash -c '"
         f"cd {PROJECT_ROOT} && "
-        f"python -m vllm.entrypoints.openai.api_server "
-        f"--model {QWEN_MODEL} "
-        f"--port 8000 "
-        f"--max-model-len 4096 "
-        f"--gpu-memory-utilization 0.4"
-        f"'"
+        "python -m vllm.entrypoints.openai.api_server "
+        f"--model {QWEN_VLM_MODEL} "
+        "--port 8000 "
+        "--max-model-len 4096 "
+        "--gpu-memory-utilization 0.4"
+        "'"
     )
     subprocess.run(cmd, shell=True, check=False)
     log("vLLM 已在后台重启，等待上线...")
@@ -46,76 +106,96 @@ def restart_vllm():
         time.sleep(5)
         try:
             urllib.request.urlopen("http://localhost:8000/v1/models", timeout=3)
-            log(f"vLLM 在线 ({(i+1)*5}s)")
+            log(f"vLLM 在线 ({(i + 1) * 5}s)")
             return True
         except Exception:
             pass
-    log("vLLM 启动超时，LabelCritic 本轮不可用")
+    log("vLLM 启动超时，后续 LabelCritic 可能不可用")
     return False
 
 
-def main():
-    log("=" * 60)
-    log("Round 1 student 推理 → Round 2 训练")
-    log("=" * 60)
-
-    if not CKPT.exists():
-        log(f"ERROR: checkpoint 不存在: {CKPT}")
-        sys.exit(1)
-
-    from cli_anything.medai.core.vista3d_student import VISTA3DStudent
-
-    student = VISTA3DStudent(vista3d_root=VISTA3D_ROOT, model_path=CKPT, device="cuda")
-
-    cases = []
-    with open(CASE_LIST) as f:
-        for row in csv.DictReader(f):
-            cases.append(row)
-
-    pred_dir = OUTPUT_ROOT / "round1" / "student_predictions"
+def main() -> int:
+    args = parse_args()
+    output_root = Path(args.output_root).resolve()
+    case_list = Path(args.case_list).resolve()
+    target_config = Path(args.target_config).resolve()
+    model_dir = Path(args.model_dir).resolve() if args.model_dir else default_round_model_dir(output_root, args.round_idx)
+    pred_dir = output_root / f"round{args.round_idx}" / "student_predictions"
     pred_dir.mkdir(parents=True, exist_ok=True)
 
+    from cli_anything.medai.core.voxtell_student import VoxTellStudent
+
+    organs = load_target_organs(target_config, args.prompts)
+    cases = load_cases(case_list, args.max_cases)
+    student = VoxTellStudent(
+        model_dir=model_dir,
+        target_config=target_config,
+        text_encoding_model=Path(args.text_encoding_model).resolve(),
+        device=args.device,
+        gpu=args.gpu,
+    )
+
+    log("=" * 60)
+    log(f"Round {args.round_idx} VoxTell-style 3D prompt student inference")
+    log(f"  Cases: {len(cases)}, prompts: {len(organs)}")
+    log(f"  Model dir: {model_dir}")
+    log(f"  Target config: {target_config}")
+    log(f"  Output: {pred_dir}")
+    log(f"  Dry run: {args.dry_run}")
+    log("=" * 60)
+
     saved = 0
-    for i, case in enumerate(cases, 1):
-        ct_path = Path(case["ct_path"])
+    results: list[dict[str, Any]] = []
+    for i, case in enumerate(cases, start=1):
+        ct_path = Path(case["ct_path"]).resolve()
         case_id = case["case_id"]
-        if not ct_path.exists():
+        if not ct_path.exists() and not args.dry_run:
             log(f"  [{i}/{len(cases)}] {case_id}: CT 不存在，跳过")
+            results.append({"case_id": case_id, "status": "skipped", "reason": f"CT not found: {ct_path}"})
             continue
         case_pred_dir = pred_dir / case_id
-        if case_pred_dir.exists() and any(case_pred_dir.glob("*.nii.gz")):
-            log(f"  [{i}/{len(cases)}] {case_id}: 已完成，跳过")
+        if case_pred_dir.exists() and any(case_pred_dir.glob("*.nii.gz")) and not args.dry_run:
             saved += 1
+            log(f"  [{i}/{len(cases)}] {case_id}: 已存在 masks，跳过")
+            results.append({"case_id": case_id, "status": "skipped_existing", "output_dir": str(case_pred_dir)})
             continue
-        case_pred_dir.mkdir(parents=True, exist_ok=True)
-        import yaml as _yaml
-        with open(PROJECT_ROOT / "configs/teacher_branch_map.yaml") as _f:
-            _bmap = _yaml.safe_load(_f)
-        all_organs = [o for o, info in _bmap.items() if info.get("vista3d_label_id", 0) > 0]
         result = student.segment(
             ct_image=ct_path,
-            prompts=all_organs,
+            prompts=organs,
             output_dir=case_pred_dir,
-            dry_run=False,
-            timeout_sec=900,
+            dry_run=args.dry_run,
+            timeout_sec=args.timeout_sec,
+            prompt_batch_size=args.prompt_batch_size,
         )
-        n = result.get("num_segmented", 0)
-        status = result.get("status")
-        if status == "success":
+        result["case_id"] = case_id
+        results.append(result)
+        if result.get("status") == "success":
             saved += 1
-            log(f"  [{i}/{len(cases)}] {case_id}: ✓ {n} organs")
+            log(f"  [{i}/{len(cases)}] {case_id}: ✓ {result.get('num_masks', 0)}/{len(organs)} masks")
         else:
-            log(f"  [{i}/{len(cases)}] {case_id}: ✗ {status} - {result.get('stderr_tail','')[-200:]}")
+            log(f"  [{i}/{len(cases)}] {case_id}: {result.get('status')} ({result.get('reason', 'see result json')})")
 
-    log(f"Student 推理完成: {saved}/{len(cases)} 个 case")
+    summary = {
+        "stage": "round_student_inference",
+        "student_backend": "voxtell_style_3d_prompt",
+        "round": args.round_idx,
+        "status": "dry_run" if args.dry_run else "success",
+        "num_cases": len(cases),
+        "num_prompts": len(organs),
+        "prompt_batch_size": args.prompt_batch_size,
+        "num_success_or_existing": saved,
+        "model_dir": str(model_dir),
+        "target_config": str(target_config),
+        "prediction_dir": str(pred_dir),
+        "results": results,
+    }
+    (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    log(f"3D prompt student 推理完成/计划完成: {saved}/{len(cases)} cases")
 
-    # 重启 vLLM 供 round 2 LabelCritic 使用
-    restart_vllm()
-
-    log("=" * 60)
-    log("启动 Round 2 训练循环")
-    log("=" * 60)
+    if args.restart_vllm:
+        restart_vllm()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-全器官评估脚本
-对有 ground truth 的器官：计算真实 DSC
-对没有 ground truth 的器官：
+Legacy 全器官评估脚本（VISTA3D/127-label path）
+对有 available reference annotation 的器官：计算 reference-consistency DSC
+对没有 available reference annotation 的器官：
   - 方法1：与最优 teacher 预测的重叠度（teacher_overlap）
   - 方法2：预测体积合理性（volume_ratio = student体积 / teacher体积）
+注意：除非 reference annotation 来自 JHU expert fine labels，否则不能报告为真实 accuracy。
 用法：
   python evaluate_all_organs.py --rounds 1 2 3
 """
-import argparse, csv, json, yaml
+import argparse, csv, json, os, yaml
 import numpy as np
 import nibabel as nib
 from pathlib import Path
@@ -19,6 +20,15 @@ TEACHER_MAP  = PROJECT_ROOT / "configs/teacher_branch_map.yaml"
 OUTPUT_ROOT  = PROJECT_ROOT / "outputs"
 TEACHERS = ["totalsegmentator","epai_20250421","vsmtrans","cads","moose","moose3_0",
             "nnunet_private","saros_nnunet","airrc","atm","vsnet","unest","vista3d"]
+
+
+if os.getenv("MEDAI_ALLOW_VISTA3D_LEGACY") != "1":
+    raise SystemExit(
+        "scripts/evaluate_all_organs.py is a legacy VISTA3D/127-label evaluation "
+        "helper and may overstate pseudo-label consistency as true DSC. Use "
+        "scripts/mine_student_failure_cases.py for the current 3D prompt-based "
+        "student mainline. Set MEDAI_ALLOW_VISTA3D_LEGACY=1 only for historical reproduction."
+    )
 
 
 def load_nii(path):
@@ -50,7 +60,7 @@ def evaluate_round(round_idx, cases, all_organs, estep_dir):
     if not pred_dir.exists():
         return None
 
-    organ_stats = {}  # organ -> {gt_dsc, teacher_overlap, volume_ratio, n_cases}
+    organ_stats = {}  # organ -> {reference_dsc, teacher_overlap, volume_ratio, n_cases}
 
     for case in cases:
         case_id = case["case_id"]
@@ -66,10 +76,10 @@ def evaluate_round(round_idx, cases, all_organs, estep_dir):
                 continue
 
             if organ not in organ_stats:
-                organ_stats[organ] = {"gt_dsc": [], "teacher_overlap": [], "volume_ratio": [], "n_cases": 0}
+                organ_stats[organ] = {"reference_dsc": [], "teacher_overlap": [], "volume_ratio": [], "n_cases": 0}
             organ_stats[organ]["n_cases"] += 1
 
-            # 方法1：有 ground truth → 计算真实 DSC
+            # 方法1：有 available reference → 计算 consistency DSC
             if ann_folder and ann_folder.exists():
                 ref = ann_folder / f"{organ}.nii.gz"
                 if ref.exists():
@@ -77,7 +87,7 @@ def evaluate_round(round_idx, cases, all_organs, estep_dir):
                     if ref_arr.sum() > 0:
                         d = dice(student_arr, ref_arr)
                         if d is not None:
-                            organ_stats[organ]["gt_dsc"].append(d)
+                            organ_stats[organ]["reference_dsc"].append(d)
 
             # 方法2：与最优 teacher 的重叠度
             teacher_path, teacher_vol = best_teacher_pred(estep_dir, case_id, organ)
@@ -130,30 +140,30 @@ def main():
             s = stats[organ]
             entry = {
                 "n_cases": s["n_cases"],
-                "has_gt": len(s["gt_dsc"]) > 0,
+                "has_reference": len(s["reference_dsc"]) > 0,
             }
-            if s["gt_dsc"]:
-                entry["gt_dsc_mean"] = round(float(np.mean(s["gt_dsc"])), 4)
-                entry["gt_dsc_std"]  = round(float(np.std(s["gt_dsc"])), 4)
-                gt_organs.append((organ, entry["gt_dsc_mean"]))
+            if s["reference_dsc"]:
+                entry["reference_dsc_mean"] = round(float(np.mean(s["reference_dsc"])), 4)
+                entry["reference_dsc_std"]  = round(float(np.std(s["reference_dsc"])), 4)
+                gt_organs.append((organ, entry["reference_dsc_mean"]))
             if s["teacher_overlap"]:
                 entry["teacher_overlap_mean"] = round(float(np.mean(s["teacher_overlap"])), 4)
             if s["volume_ratio"]:
                 entry["volume_ratio_mean"] = round(float(np.mean(s["volume_ratio"])), 4)
             report[f"round{rnd}"][organ] = entry
-            if not s["gt_dsc"]:
+            if not s["reference_dsc"]:
                 no_gt_organs.append((organ, entry.get("teacher_overlap_mean", 0)))
 
         # 打印摘要
-        gt_dscs = [v for _, v in gt_organs]
-        no_gt_overlaps = [v for _, v in no_gt_organs if v > 0]
-        print(f"  有 GT 的器官: {len(gt_organs)}个, 平均 DSC = {np.mean(gt_dscs):.4f}" if gt_dscs else "  无 GT 器官")
-        print(f"  无 GT 的器官: {len(no_gt_organs)}个, 平均 teacher_overlap = {np.mean(no_gt_overlaps):.4f}" if no_gt_overlaps else "  无 teacher_overlap 数据")
+        reference_dscs = [v for _, v in gt_organs]
+        no_reference_overlaps = [v for _, v in no_gt_organs if v > 0]
+        print(f"  有 reference 的器官: {len(gt_organs)}个, 平均 consistency DSC = {np.mean(reference_dscs):.4f}" if reference_dscs else "  无 reference 器官")
+        print(f"  无 reference 的器官: {len(no_gt_organs)}个, 平均 teacher_overlap = {np.mean(no_reference_overlaps):.4f}" if no_reference_overlaps else "  无 teacher_overlap 数据")
 
     # 跨轮对比
     if len(args.rounds) > 1:
         print("\n" + "="*70)
-        print("跨轮对比（有 GT 的器官）")
+        print("跨轮对比（有 reference 的器官）")
         print(f"{'器官':30s}", end="")
         for rnd in args.rounds:
             if f"round{rnd}" in report:
@@ -161,21 +171,21 @@ def main():
         print()
         print("-"*70)
 
-        all_organs_with_gt = set()
+        all_organs_with_reference = set()
         for rnd in args.rounds:
             key = f"round{rnd}"
             if key in report:
                 for o, v in report[key].items():
-                    if v.get("has_gt"):
-                        all_organs_with_gt.add(o)
+                    if v.get("has_reference"):
+                        all_organs_with_reference.add(o)
 
-        for organ in sorted(all_organs_with_gt):
+        for organ in sorted(all_organs_with_reference):
             print(f"{organ:30s}", end="")
             prev = None
             for rnd in args.rounds:
                 key = f"round{rnd}"
                 if key in report and organ in report[key]:
-                    v = report[key][organ].get("gt_dsc_mean", float("nan"))
+                    v = report[key][organ].get("reference_dsc_mean", float("nan"))
                     diff = f"({v-prev:+.3f})" if prev is not None else ""
                     print(f"  {v:.4f}{diff:8s}", end="")
                     prev = v
@@ -183,7 +193,7 @@ def main():
                     print(f"  {'N/A':14s}", end="")
             print()
 
-        print("\n无 GT 器官 teacher_overlap 对比（前20个）")
+        print("\n无 reference 器官 teacher_overlap 对比（前20个）")
         print(f"{'器官':30s}", end="")
         for rnd in args.rounds:
             if f"round{rnd}" in report:
@@ -191,16 +201,16 @@ def main():
         print()
         print("-"*70)
 
-        no_gt_set = set()
+        no_reference_set = set()
         for rnd in args.rounds:
             key = f"round{rnd}"
             if key in report:
                 for o, v in report[key].items():
-                    if not v.get("has_gt") and v.get("teacher_overlap_mean"):
-                        no_gt_set.add(o)
+                    if not v.get("has_reference") and v.get("teacher_overlap_mean"):
+                        no_reference_set.add(o)
 
         rows = []
-        for organ in sorted(no_gt_set):
+        for organ in sorted(no_reference_set):
             vals = []
             for rnd in args.rounds:
                 key = f"round{rnd}"

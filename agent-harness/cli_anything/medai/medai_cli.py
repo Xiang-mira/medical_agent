@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 import click
 
 from .core.adapter import normalize_totalseg_to_shapekit
@@ -9,14 +10,15 @@ from .core.agent_controller import run_agent_loop
 from .core.case_sample_builder import build_case_samples, build_convergence_table
 from .core.data_checker import check_case_folder, check_ct_image, check_environment
 from .core.json_utils import to_jsonable
-from .core.em_loop import run_em_loop
 from .core.itksnap_helper import generate_itksnap_commands
 from .core.label_verifier import verify_case
+from .core.label_merger import build_runtime_alias_report, merge_case_segmentations
 from .core.labelcritic_wrapper import run_labelcritic_compare
 from .core.paths import resolve_path
 from .core.model_registry import candidate_models_for_organs, load_registry, write_registry, model_inventory, recommend_primary_models_for_organs
 from .core.mstep_runner import run_mstep_nnunet_training, run_model_specific_mstep_update
 from .core.multimodel_loop import run_multimodel_annotation_loop
+from .core.organ_router import route_organs
 from .core.registered_infer import run_registered_model
 from .core.pants_utils import pants_download_info, check_pants_dataset, find_pants_case, import_pants_case, import_pants_files, evaluate_segmentation_folder
 from .core.presets import SHAPEKIT_ABDOMEN_ROI, SHAPEKIT_EXPECTED_ORGANS
@@ -27,6 +29,7 @@ from .core.report_supervision import verify_tumor_with_report, batch_verify_with
 from .core.shapekit_runner import run_shapekit
 from .core.summary import summarize_segmentation_folder, write_run_summary
 from .core.totalseg_runner import run_custom_inference, run_totalsegmentator
+from .core.target_space import validate_formal_373_target_space
 from .core.vlm_label_expert import run_vlm_label_expert
 
 
@@ -36,6 +39,24 @@ def emit(data: dict) -> None:
 
 def fail(data: dict, code: int = 1) -> None:
     emit(data); raise SystemExit(code)
+
+
+def parse_organ_option(organs: str, target_config: str = "configs/student_3d_prompt_target_organs.json") -> list[str]:
+    """Parse organ CLI option.
+
+    `student_373` is the current teacher-approved mainline target. Keeping this
+    as the run-loop default avoids accidentally running only the old 10-organ
+    smoke subset when users invoke the generic CLI.
+    """
+    token = (organs or "").strip()
+    if token.lower() in {"student_373", "373", "all_373", "prompt_targets"}:
+        config_path = resolve_path(target_config)
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        targets = [str(x) for x in data.get("target_organs", [])]
+        if not targets:
+            raise click.ClickException(f"No target_organs found in {config_path}")
+        return targets
+    return [x.strip() for x in token.replace(";", ",").split(",") if x.strip()]
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -211,11 +232,27 @@ def model_inventory_cmd(registry_path, include_mock):
 @cli.command("route-models")
 @click.option("--registry", "registry_path", default="configs/model_registry.yaml", show_default=True)
 @click.option("--organs", required=True, help="Comma-separated target organs/tasks.")
-def route_models_cmd(registry_path, organs):
+@click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True, help="Target config used when --organs=student_373.")
+def route_models_cmd(registry_path, organs, target_config):
     """Recommend primary E-step model, auxiliary models, and M-step target per organ."""
-    organ_list = [x.strip() for x in organs.replace(";", ",").split(",") if x.strip()]
+    organ_list = parse_organ_option(organs, target_config=target_config)
     reg = load_registry(resolve_path(registry_path))
     emit(recommend_primary_models_for_organs(reg, organ_list))
+
+
+@cli.command("validate-373-target")
+@click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True)
+@click.option("--organs", default="student_373", show_default=True, help="Optional requested organ set to validate against the formal target.")
+@click.option("--require-full-target/--allow-subset", default=True, show_default=True)
+def validate_373_target_cmd(target_config, organs, require_full_target):
+    """Validate the current formal 373-organ target source of truth."""
+    organ_list = parse_organ_option(organs, target_config=target_config) if organs else None
+    result = validate_formal_373_target_space(
+        resolve_path(target_config),
+        requested_organs=organ_list,
+        require_full_target=require_full_target,
+    )
+    emit(result)
 
 
 @cli.command("infer")
@@ -249,6 +286,140 @@ def infer_cmd(image, image_alias, output_folder, output_alias, case_id, model_ke
         infer_result = run_custom_inference(resolve_path(image), resolve_path(output_folder), model_command, case_id, dry_run)
     adapter_result = normalize_totalseg_to_shapekit(infer_result["segmentation_output"]) if adapt and infer_result.get("status") == "success" and infer_result.get("segmentation_output") and not dry_run else None
     emit({"pipeline_stage": "infer", "infer": infer_result, "adapter": adapter_result})
+
+
+@cli.command("segment-all")
+@click.option("--image", "image", default=None)
+@click.option("--input", "image_alias", default=None, help="Alias for --image.")
+@click.option("--output-folder", "output_folder", default=None)
+@click.option("--output", "output_alias", default=None, help="Alias for --output-folder.")
+@click.option("--case-id", default=None)
+@click.option("--registry", "registry_path", default="configs/model_registry.yaml", show_default=True)
+@click.option("--organs", default=None, help="Comma-separated global organs. Defaults to configs/student_3d_prompt_target_organs.json (current 373 exact targets).")
+@click.option("--device", default=None)
+@click.option("--fast/--no-fast", default=True, show_default=True)
+@click.option("--dry-run", is_flag=True, default=False)
+@click.option("--global-label-space", default="configs/global_label_space.json", show_default=True)
+@click.option("--alias-config", default="configs/model_label_aliases.json", show_default=True)
+@click.option("--models", default="", help="Optional comma-separated model keys to restrict segment-all to a small validation subset.")
+@click.option("--extra-models", default="", help="Optional comma-separated model keys to add to every requested organ for smoke/debug checks.")
+def segment_all_cmd(image, image_alias, output_folder, output_alias, case_id, registry_path, organs, device, fast, dry_run, global_label_space, alias_config, models, extra_models):
+    if image_alias:
+        image = image_alias
+    if output_alias:
+        output_folder = output_alias
+    if not image or not output_folder:
+        fail({"status": "failed", "reason": "segment-all requires --image/--input and --output-folder/--output"})
+
+    image_path = resolve_path(image)
+    output_root = resolve_path(output_folder)
+    resolved_case_id = case_id or (image_path.parent.name or image_path.stem)
+    case_root = output_root / resolved_case_id
+    (case_root / "per_model").mkdir(parents=True, exist_ok=True)
+
+    organ_list = parse_organ_option(organs) if organs else None
+    route_result = route_organs(organ_list)
+    registry = load_registry(resolve_path(registry_path))
+    model_filter = {x.strip() for x in models.replace(";", ",").split(",") if x.strip()}
+    extra_model_keys = [x.strip() for x in extra_models.replace(";", ",").split(",") if x.strip()]
+    if extra_model_keys:
+        existing_model_keys = {
+            item.get("model_key")
+            for item in route_result.get("selected_models", [])
+            if item.get("model_key")
+        }
+        for model_key in extra_model_keys:
+            if model_key not in existing_model_keys:
+                route_result.setdefault("selected_models", []).append({
+                    "model_key": model_key,
+                    "subtask": None,
+                    "manual_extra_model": True,
+                })
+                route_result.setdefault("selected_model_keys", []).append(model_key)
+                existing_model_keys.add(model_key)
+        for organ in route_result.get("requested_organs", []):
+            candidates = route_result.setdefault("ranked_candidates", {}).setdefault(organ, [])
+            candidate_keys = {item.get("model_key") for item in candidates}
+            for model_key in extra_model_keys:
+                if model_key not in candidate_keys:
+                    candidates.append({
+                        "token": "manual_extra_model",
+                        "model_key": model_key,
+                        "subtask": None,
+                        "enabled": True,
+                        "reason": None,
+                        "note": "Added through segment-all --extra-models for smoke/debug validation.",
+                    })
+    if model_filter:
+        route_result["selected_models"] = [
+            item for item in route_result.get("selected_models", [])
+            if item.get("model_key") in model_filter
+        ]
+        route_result["selected_model_keys"] = [
+            item.get("model_key")
+            for item in route_result.get("selected_models", [])
+            if item.get("model_key")
+        ]
+        for organ, candidates in (route_result.get("ranked_candidates", {}) or {}).items():
+            route_result["ranked_candidates"][organ] = [
+                item for item in candidates
+                if item.get("model_key") in model_filter
+            ]
+
+    grouped_models: dict[str, dict[str, Any]] = {}
+    for item in route_result.get("selected_models", []):
+        model_key = item["model_key"]
+        grouped = grouped_models.setdefault(model_key, {"model_key": model_key, "subtasks": []})
+        if item.get("subtask"):
+            grouped["subtasks"].append(item.get("subtask"))
+
+    model_runs = []
+    for model_key, grouped in grouped_models.items():
+        (case_root / "per_model" / model_key).mkdir(parents=True, exist_ok=True)
+        infer_result = run_registered_model(
+            image_path,
+            output_root,
+            model_key,
+            registry_path=resolve_path(registry_path),
+            case_id=resolved_case_id,
+            dry_run=dry_run,
+            fast=fast,
+            device=device,
+            extra_context={
+                "subtasks": grouped.get("subtasks", []),
+                "requested_organs": route_result.get("requested_organs", []),
+                "case_output_override": str(case_root),
+                "segmentation_output_override": str(case_root / "per_model" / model_key / "segmentations"),
+            },
+        )
+        model_runs.append({
+            "model_key": model_key,
+            "subtasks": grouped.get("subtasks", []),
+            "infer": infer_result,
+        })
+
+    alias_report_path = None
+    merge_result = None
+    if not dry_run:
+        alias_report_path = build_runtime_alias_report(case_root, route_result, registry, alias_config_path=alias_config)
+        merge_result = merge_case_segmentations(
+            case_root,
+            route_result,
+            registry,
+            global_label_space_path=global_label_space,
+            alias_config_path=alias_config,
+        )
+
+    emit({
+        "pipeline_stage": "segment_all",
+        "status": "dry_run" if dry_run else "success",
+        "case_id": resolved_case_id,
+        "case_root": str(case_root),
+        "routing": route_result,
+        "model_runs": model_runs,
+        "runtime_alias_report": alias_report_path,
+        "merge": merge_result,
+    })
 
 
 @cli.command("adapt")
@@ -433,14 +604,14 @@ def agent_loop_cmd(patient_folder, output_folder, backend, model_command, postpr
 
 
 @cli.command("label-verify")
-@click.option("--annotation-folder", required=True, help="Folder with current annotations (ground truth / prior labels).")
+@click.option("--annotation-folder", required=True, help="Folder with prior/current pseudo labels. Not treated as expert ground truth.")
 @click.option("--prediction-folder", required=True, help="Folder with model predictions.")
 @click.option("--organs", default="pancreas,liver,spleen,kidney_left,kidney_right,aorta", show_default=True)
 @click.option("--dsc-replace-threshold", default=0.0, type=float, show_default=True, help="DSC at or below this → auto_replace_candidate.")
 @click.option("--dsc-vlm-threshold", default=0.5, type=float, show_default=True, help="DSC below this → send_to_vlm_label_expert.")
 @click.option("--dsc-accept-threshold", default=0.8, type=float, show_default=True, help="DSC at/above this → accept; 0.5-0.8 → uncertain.")
 def label_verify_cmd(annotation_folder, prediction_folder, organs, dsc_replace_threshold, dsc_vlm_threshold, dsc_accept_threshold):
-    """Compare current annotations vs model predictions using DSC thresholds (Label Verifier)."""
+    """Compare pseudo references vs model predictions using DSC consistency thresholds."""
     organ_list = [x.strip() for x in organs.replace(";", ",").split(",") if x.strip()]
     emit(verify_case(resolve_path(annotation_folder), resolve_path(prediction_folder),
                      organ_list, dsc_replace_threshold, dsc_vlm_threshold, dsc_accept_threshold))
@@ -515,14 +686,14 @@ def vlm_label_expert_cmd(ct_image, annotation_a, annotation_b, organ, output_fol
 
 @cli.command("verify")
 @click.option("--prediction", "prediction_folder", required=True, help="Folder containing predicted masks.")
-@click.option("--reference", "annotation_folder", required=True, help="Folder containing reference/current masks.")
+@click.option("--reference", "annotation_folder", required=True, help="Folder containing prior/current pseudo-reference masks.")
 @click.option("--organs", default="pancreas,liver,spleen,kidney_left,kidney_right,aorta", show_default=True)
 @click.option("--dsc-replace-threshold", default=0.0, type=float, show_default=True)
 @click.option("--dsc-vlm-threshold", default=0.5, type=float, show_default=True)
 @click.option("--dsc-accept-threshold", default=0.8, type=float, show_default=True)
 @click.option("--output", "output_path", default=None, help="Optional JSON output file.")
 def verify_cmd(prediction_folder, annotation_folder, organs, dsc_replace_threshold, dsc_vlm_threshold, dsc_accept_threshold, output_path):
-    """Teacher-facing alias for label-verify: DICE/DSC quality gate."""
+    """Teacher-facing alias for label-verify: pseudo-consistency DICE/DSC gate."""
     organ_list = [x.strip() for x in organs.replace(";", ",").split(",") if x.strip()]
     result = verify_case(resolve_path(annotation_folder), resolve_path(prediction_folder), organ_list, dsc_replace_threshold, dsc_vlm_threshold, dsc_accept_threshold)
     if output_path:
@@ -542,82 +713,84 @@ def verify_cmd(prediction_folder, annotation_folder, organs, dsc_replace_thresho
 @click.option("--base-url", default="http://localhost", show_default=True, help="LabelCritic/vLLM host WITHOUT /v1; port is supplied by --port.")
 @click.option("--port", default=8000, type=int, show_default=True)
 @click.option("--dry-run", is_flag=True, default=False)
-def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, backend, base_url, port, dry_run):
+@click.option("--no-dice-check", is_flag=True, default=False, help="Diagnostic only: force VLM comparison even when projections are similar.")
+@click.option("--no-dual-confirmation", is_flag=True, default=False, help="Diagnostic only: disable dual confirmation prompt.")
+@click.option("--simple-prompt-ablation", is_flag=True, default=False, help="Diagnostic only: use simpler prompt wording.")
+@click.option("--conservative-dual", is_flag=True, default=False, help="Diagnostic only: require stricter dual agreement.")
+@click.option("--skip-organ-presence-gate", is_flag=True, default=False, help="Diagnostic only: bypass organ-presence gate.")
+@click.option("--strict-choice-prompt", is_flag=True, default=False, help="Diagnostic only: force overlay 1/overlay 2/tie answer format.")
+def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, backend, base_url, port, dry_run,
+               no_dice_check, no_dual_confirmation, simple_prompt_ablation, conservative_dual,
+               skip_organ_presence_gate, strict_choice_prompt):
     """LabelCritic wrapper: compare two candidate masks and write a decision JSON."""
-    emit(run_labelcritic_compare(resolve_path(ct_image), resolve_path(mask_a), resolve_path(mask_b), organ, resolve_path(output_json), resolve_path(labelcritic_root), backend=backend, base_url=base_url, port=port, dry_run=dry_run))
+    emit(run_labelcritic_compare(
+        resolve_path(ct_image), resolve_path(mask_a), resolve_path(mask_b),
+        organ, resolve_path(output_json), resolve_path(labelcritic_root),
+        backend=backend, base_url=base_url, port=port, dry_run=dry_run,
+        no_dice_check=no_dice_check,
+        no_dual_confirmation=no_dual_confirmation,
+        simple_prompt_ablation=simple_prompt_ablation,
+        conservative_dual=conservative_dual,
+        skip_organ_presence_gate=skip_organ_presence_gate,
+        strict_choice_prompt=strict_choice_prompt,
+    ))
 
 
 @cli.command("run-loop")
 @click.option("--case-list", required=True, help="CSV with case_id,ct_path,annotation_folder[,report_path,clinical_path,pathology_path].")
 @click.option("--models", default="epai_20250421,vsmtrans", show_default=True, help="Comma-separated registry model keys.")
-@click.option("--organs", default="pancreas,liver,spleen,kidney_left,kidney_right,colon,duodenum,stomach,aorta,postcava", show_default=True)
+@click.option("--organs", default="student_373", show_default=True, help="Comma-separated organs, or student_373 to load the current 373 exact targets.")
+@click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True, help="Target config used when --organs=student_373.")
 @click.option("--registry", "registry_path", default="configs/model_registry.yaml", show_default=True)
 @click.option("--output", "output_folder", required=True)
 @click.option("--checkpoint-map-models/--no-checkpoint-map-models", default=False, show_default=True, help="Also include all organ-specific candidates from registry.")
 @click.option("--shapekit-root", default="third_party/ShapeKit-main", show_default=True)
 @click.option("--enable-shapekit/--no-enable-shapekit", default=True, show_default=True)
+@click.option("--debug-allow-no-shapekit", is_flag=True, default=False, help="Allow disabling ShapeKit for smoke/debug runs only.")
 @click.option("--enable-critic/--no-enable-critic", default=True, show_default=True)
 @click.option("--critic-backend", default="labelcritic", type=click.Choice(["stub", "labelcritic"]), show_default=True)
 @click.option("--critic-base-url", default="http://localhost", show_default=True, help="LabelCritic/vLLM host WITHOUT /v1; port is supplied by --critic-port.")
 @click.option("--critic-port", default=8000, type=int, show_default=True)
+@click.option("--labelcritic-no-dice-check", is_flag=True, default=False, help="Diagnostic only: force VLM comparison even when projections are similar.")
+@click.option("--labelcritic-no-dual-confirmation", is_flag=True, default=False, help="Diagnostic only: disable dual confirmation prompt.")
+@click.option("--labelcritic-simple-prompt-ablation", is_flag=True, default=False, help="Diagnostic only: use simpler prompt wording.")
+@click.option("--labelcritic-conservative-dual", is_flag=True, default=False, help="Diagnostic only: require stricter dual agreement.")
+@click.option("--labelcritic-skip-organ-presence-gate", is_flag=True, default=False, help="Diagnostic only: bypass organ-presence gate.")
+@click.option("--labelcritic-strict-choice-prompt", is_flag=True, default=False, help="Diagnostic only: force overlay 1/overlay 2/tie answer format.")
 @click.option("--vlm-threshold", default=0.5, type=float, show_default=True)
 @click.option("--accept-threshold", default=0.8, type=float, show_default=True)
 @click.option("--device", default=None)
 @click.option("--timeout-sec", default=1800, type=int, show_default=True)
 @click.option("--perf-tracker-path", default=None, help="Path to organ_model_performance.json for explore/exploit switching.")
 @click.option("--dry-run", is_flag=True, default=False)
-def run_loop_cmd(case_list, models, organs, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, dry_run):
+def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, dry_run):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
+    if not enable_shapekit and not dry_run and not debug_allow_no_shapekit:
+        fail({
+            "status": "failed",
+            "reason": (
+                "Formal non-dry-run E-step requires ShapeKit. Use --dry-run or "
+                "--debug-allow-no-shapekit only for smoke/debug checks."
+            ),
+            "teacher_meeting_requirement": "All selected outputs pass through ShapeKit in formal runs.",
+        })
     model_list = [x.strip() for x in models.replace(";", ",").split(",") if x.strip()]
-    organ_list = [x.strip() for x in organs.replace(";", ",").split(",") if x.strip()]
-    emit(run_multimodel_annotation_loop(resolve_path(case_list), resolve_path(output_folder), model_list, organ_list, resolve_path(registry_path), checkpoint_map_models, resolve_path(shapekit_root), enable_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, vlm_threshold, accept_threshold, dry_run, timeout_sec, device, perf_tracker_path=resolve_path(perf_tracker_path) if perf_tracker_path else None))
-
-
-@cli.command("em-loop")
-@click.option("--case-id", required=True, help="Unique case identifier.")
-@click.option("--ct-image", required=True, help="Path to CT image (.nii.gz).")
-@click.option("--annotation-folder", required=True, help="Folder with reference label masks (*.nii.gz).")
-@click.option("--output-folder", required=True, help="Output folder for predictions, annotations, metrics.")
-@click.option("--organs", default="pancreas,liver,spleen,kidney_left,kidney_right,aorta", show_default=True)
-@click.option("--num-rounds", default=2, type=int, show_default=True, help="Number of EM rounds.")
-@click.option("--vlm-backend", default="ollama", type=click.Choice(["ollama", "vllm", "stub"]), show_default=True)
-@click.option("--vlm-model", default="qwen2.5vl:7b", show_default=True)
-@click.option("--dsc-replace-threshold", default=0.0, type=float, show_default=True)
-@click.option("--dsc-vlm-threshold", default=0.5, type=float, show_default=True)
-@click.option("--fast/--no-fast", default=True, show_default=True)
-@click.option("--device", default=None, help="TotalSegmentator device (cpu/gpu).")
-@click.option("--postprocess", default="shapekit", type=click.Choice(["none", "shapekit"]), show_default=True,
-              help="ShapeKit anatomy-aware refinement after inference (default: on).")
-@click.option("--shapekit-root", default="third_party/ShapeKit-main", show_default=True)
-@click.option("--enable-mstep-training", is_flag=True, default=False, help="Enable real nnUNet v2 M-step training (requires GPU + nnUNet v2).")
-@click.option("--mstep-max-epochs", default=5, type=int, show_default=True)
-@click.option("--ct-source-root", default=None, help="Root folder containing CT images for M-step dataset preparation.")
-@click.option("--dry-run", is_flag=True, default=False)
-def em_loop_cmd(case_id, ct_image, annotation_folder, output_folder, organs,
-                num_rounds, vlm_backend, vlm_model, dsc_replace_threshold,
-                dsc_vlm_threshold, fast, device, postprocess, shapekit_root,
-                enable_mstep_training, mstep_max_epochs, ct_source_root, dry_run):
-    """Mini EM loop: inference → ShapeKit → Label Verifier → VLM → annotation update → M-step."""
-    organ_list = [x.strip() for x in organs.replace(";", ",").split(",") if x.strip()]
-    emit(run_em_loop(
-        case_id=case_id,
-        ct_image=resolve_path(ct_image),
-        annotation_folder=resolve_path(annotation_folder),
-        output_folder=resolve_path(output_folder),
-        organs=organ_list,
-        num_rounds=num_rounds,
-        vlm_backend=vlm_backend,
-        vlm_model=vlm_model,
-        dsc_replace_threshold=dsc_replace_threshold,
-        dsc_vlm_threshold=dsc_vlm_threshold,
-        fast=fast,
-        device=device,
-        postprocess=postprocess,
-        shapekit_root=resolve_path(shapekit_root),
-        ct_source_root=resolve_path(ct_source_root) if ct_source_root else None,
-        enable_mstep_training=enable_mstep_training,
-        mstep_max_epochs=mstep_max_epochs,
-        dry_run=dry_run,
+    organ_list = parse_organ_option(organs, target_config=target_config)
+    emit(run_multimodel_annotation_loop(
+        resolve_path(case_list), resolve_path(output_folder), model_list,
+        organ_list, resolve_path(registry_path), checkpoint_map_models,
+        resolve_path(shapekit_root), enable_shapekit, enable_critic,
+        critic_backend, critic_base_url, critic_port, vlm_threshold,
+        accept_threshold, dry_run, timeout_sec, device,
+        perf_tracker_path=resolve_path(perf_tracker_path) if perf_tracker_path else None,
+        labelcritic_options={
+            "no_dice_check": labelcritic_no_dice_check,
+            "no_dual_confirmation": labelcritic_no_dual_confirmation,
+            "simple_prompt_ablation": labelcritic_simple_prompt_ablation,
+            "conservative_dual": labelcritic_conservative_dual,
+            "skip_organ_presence_gate": labelcritic_skip_organ_presence_gate,
+            "strict_choice_prompt": labelcritic_strict_choice_prompt,
+        },
     ))
 
 
@@ -745,10 +918,10 @@ def itksnap_review_cmd(review_queue, ct_root, annotation_root, output_script, ma
 @click.option("--device", default="cuda", show_default=True)
 @click.option("--dry-run", is_flag=True, default=False)
 def vista3d_segment_cmd(ct_image, prompts, output_folder, vista3d_root, model_path, device, dry_run):
-    """使用 VISTA3D 统一学生模型进行语言提示式分割。
+    """Legacy/reference VISTA3D teacher-style prompt segmentation.
 
-    推理流程：text prompt → label_id → VISTA3D → 3D mask
-    支持同时分割多个器官（一次前向传播）。
+    This is not the current 373-organ 3D prompt student mainline. Use
+    voxtell-student-segment for the teacher-approved student path.
     """
     from .core.vista3d_student import VISTA3DStudent
     student = VISTA3DStudent(
@@ -761,6 +934,10 @@ def vista3d_segment_cmd(ct_image, prompts, output_folder, vista3d_root, model_pa
         prompts=[p.strip() for p in prompts.split(",")],
         output_dir=resolve_path(output_folder),
         dry_run=dry_run,
+    )
+    result["legacy_warning"] = (
+        "VISTA3D is kept as a teacher/reference/legacy component and does not "
+        "define the current 373-organ student target space."
     )
     emit(result)
 
@@ -781,10 +958,10 @@ def vista3d_segment_cmd(ct_image, prompts, output_folder, vista3d_root, model_pa
 def vista3d_finetune_cmd(pseudo_label_dir, ct_dir, target_organs, output_folder,
                           vista3d_root, model_path, learning_rate, max_epochs,
                           freeze_backbone, global_consolidation, device, dry_run):
-    """M-step：VISTA3D class-level continual fine-tuning。
+    """Legacy/reference VISTA3D continual fine-tuning helper.
 
-    默认冻结 SwinUNETR backbone，只更新 point_head / class_embedding。
-    使用 --global-consolidation 进行阶段性全局整合（小学习率，部分解冻 backbone）。
+    This command is kept for historical reproduction only. It is not the
+    current M-step for the teacher-approved 373-organ 3D prompt student.
     """
     from .core.vista3d_student import VISTA3DStudent
     student = VISTA3DStudent(
@@ -803,7 +980,105 @@ def vista3d_finetune_cmd(pseudo_label_dir, ct_dir, target_organs, output_folder,
         global_consolidation=global_consolidation,
         dry_run=dry_run,
     )
+    result["legacy_warning"] = (
+        "VISTA3D fine-tuning is a legacy/reference path. The current mainline "
+        "uses VoxTell-style 3D prompt student training over 373 exact organs."
+    )
     emit(result)
+
+
+@cli.command("voxtell-student-segment")
+@click.option("--ct-image", required=True, help="3D CT NIfTI path.")
+@click.option("--output-folder", required=True, help="Output directory for per-prompt 3D masks.")
+@click.option("--model-dir", required=True, help="VoxTell model directory containing plans.json and fold_0/checkpoint_final.pth.")
+@click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True)
+@click.option("--prompts", default=None, help="Optional comma-separated global organ names. Defaults to all configured 373 target organs.")
+@click.option("--text-encoding-model", default=None, help="Qwen embedding model name or local path. Defaults to local checkpoints/Qwen/Qwen3-Embedding-4B if present.")
+@click.option("--device", default="cuda", show_default=True)
+@click.option("--gpu", default=0, type=int, show_default=True)
+@click.option("--timeout-sec", default=1800, type=int, show_default=True)
+@click.option("--prompt-batch-size", default=16, type=int, show_default=True, help="Run prompts in batches to avoid loading all 373 prompts at once.")
+@click.option("--dry-run", is_flag=True, default=False)
+def voxtell_student_segment_cmd(ct_image, output_folder, model_dir, target_config, prompts, text_encoding_model, device, gpu, timeout_sec, prompt_batch_size, dry_run):
+    """New 3D prompt-based student inference.
+
+    This route keeps the CT as a 3D volume and uses free-text organ prompts. It
+    does not use VISTA3D 127-class label IDs.
+    """
+    from .core.voxtell_student import VoxTellStudent
+    prompt_list = [p.strip() for p in prompts.split(",") if p.strip()] if prompts else None
+    student = VoxTellStudent(
+        model_dir=resolve_path(model_dir),
+        device=device,
+        gpu=gpu,
+        target_config=resolve_path(target_config),
+        text_encoding_model=resolve_path(text_encoding_model) if text_encoding_model else None,
+    )
+    emit(student.segment(
+        ct_image=resolve_path(ct_image),
+        output_dir=resolve_path(output_folder),
+        prompts=prompt_list,
+        dry_run=dry_run,
+        timeout_sec=timeout_sec,
+        prompt_batch_size=prompt_batch_size,
+    ))
+
+
+@cli.command("voxtell-student-manifest")
+@click.option("--cases-root", required=True, help="Root containing merged case folders with segmentations/*.nii.gz.")
+@click.option("--output-manifest", required=True, help="Output JSON manifest path.")
+@click.option("--model-dir", required=True, help="VoxTell model directory; not loaded for manifest building.")
+@click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True)
+@click.option("--case-list", default=None, help="Optional CSV with case_id,ct_path to populate image paths.")
+@click.option("--require-images/--allow-missing-images", default=False, show_default=True)
+def voxtell_student_manifest_cmd(cases_root, output_manifest, model_dir, target_config, case_list, require_images):
+    """Build prompt/mask examples for the 3D prompt student M-step."""
+    from .core.voxtell_student import VoxTellStudent
+    student = VoxTellStudent(
+        model_dir=resolve_path(model_dir),
+        target_config=resolve_path(target_config),
+    )
+    emit(student.build_training_manifest(
+        cases_root=resolve_path(cases_root),
+        output_manifest=resolve_path(output_manifest),
+        case_list=resolve_path(case_list) if case_list else None,
+        require_images=require_images,
+    ))
+
+
+@cli.command("auto-fine-label-dashboard")
+@click.option("--run-output", required=True, help="run-loop output folder containing annotation_versions/.")
+@click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True)
+@click.option("--student-summary", default="", help="Optional student_inference_summary.json.")
+@click.option("--failure-json", default="", help="Optional student_failure_cases.json.")
+@click.option("--output-dir", default="", help="Default: <run-output>/dashboards.")
+def auto_fine_label_dashboard_cmd(run_output, target_config, student_summary, failure_json, output_dir):
+    """Build 373-row organ/student auto fine-label dashboards."""
+    import subprocess, sys, json as _json
+    script = resolve_path("scripts/build_auto_fine_label_dashboard.py")
+    cmd = [
+        sys.executable,
+        str(script),
+        "--run-output",
+        str(resolve_path(run_output)),
+        "--target-config",
+        str(resolve_path(target_config)),
+    ]
+    if student_summary:
+        cmd.extend(["--student-summary", str(resolve_path(student_summary))])
+    if failure_json:
+        cmd.extend(["--failure-json", str(resolve_path(failure_json))])
+    if output_dir:
+        cmd.extend(["--output-dir", str(resolve_path(output_dir))])
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    try:
+        data = _json.loads(proc.stdout.strip() or "{}")
+    except Exception:
+        data = {"status": "failed", "stdout": proc.stdout}
+    data["return_code"] = proc.returncode
+    if proc.stderr:
+        data["stderr_tail"] = proc.stderr[-4000:]
+    emit(data)
 
 
 @cli.command("build-teacher-map")

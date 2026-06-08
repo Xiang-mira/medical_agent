@@ -1,0 +1,267 @@
+{
+  "_description": "Maps each TotalSegmentator subtask to the global organ subset routed to it (reverse-derived from configs/organ_routing_from_xlsx.json). Used by totalseg_runner to call: TotalSegmentator -i <ct> -o <out> --task <subtask>. organ names are global routing names; TotalSegmentator output filenames are the per-organ standard names (aligned to global names at stage4 via model_label_aliases).",
+  "_source": "configs/organ_routing_from_xlsx.json",
+  "subtasks": {
+    "appendicular_bones": {
+      "task": "appendicular_bones",
+      "routing_aliases": [
+        "Totalsegmentator (appendicular_bones)"
+      ],
+      "organs": [
+        "carpal",
+        "fibula",
+        "metacarpal",
+        "metatarsal",
+        "patella",
+        "phalanges_feet",
+        "phalanges_hand",
+        "radius",
+        "tarsal",
+        "tibia",
+        "ulna"
+      ],
+      "num_organs": 11,
+      "license_required": true,
+      "license_note": "Academic license required. Register at https://backend.totalsegmentator.com/license-academic/ then run: totalseg_set_license -l <key>"
+    },
+    "body": {
+      "task": "body",
+      "routing_aliases": [
+        "Totalsegmentator (body)",
+        "Totalsegmentator(body)"
+      ],
+      "organs": [
+        "body",
+        "body_extremities",
+        "body_trunc",
+        "skin"
+      ],
+      "num_organs": 4,
+      "_available_outputs": [
+        "body_trunc",
+        "body_extremities"
+      ],
+      "_unavailable": [
+        "body",
+        "skin"
+      ],
+      "_note": "TS body task class_map only outputs body_trunc and body_extremities; global organs 'body' and 'skin' will always be empty/missing from this subtask"
+    },
+    "brain_structures": {
+      "task": "brain_structures",
+      "routing_aliases": [
+        "Totalsegmentator (brain_structures)"
+      ],
+      "organs": [
+        "brain_ventricle",
+        "brainstem",
+        "caudate_nucleus",
+        "central_sulcus",
+        "cerebellum",
+        "frontal_lobe",
+        "insular_cortex",
+        "internal_capsule",
+        "lentiform_nucleus",
+        "occipital_lobe",
+        "parietal_lobe",
+        "septum_pellucidum",
+        "subarachnoid_space",
+        "temporal_lobe",
+        "thalamus",
+        "venous_sinuses"
+      ],
+      "num_organs": 16,
+      "license_required": true,
+      "license_note": "Academic license required. Register at https://backend.totalsegmentator.com/license-academic/ then run: totalseg_set_license -l <key>"
+    },
+    "coronary_arteries": {
+      "task": "coronary_arteries",
+      "routing_aliases": [
+        "Totalsegmentator (coronary_arteries)"
+      ],
+      "organs": [
+        "coronary_artery"
+      ],
+      "num_organs": 1,
+      "license_required": true,
+      "license_note": "Academic license required. Register at https://backend.totalsegmentator.com/license-academic/ then run: totalseg_set_license -l <key>"
+    },
+    "head_glands_cavities": {
+      "task": "head_glands_cavities",
+      "routing_aliases": [
+        "Totalsegmentator (head_glands_cavities)"
+      ],
+      "organs": [
+        "auditory_canal_left",
+        "auditory_canal_right",
+        "eye_lens_left",
+        "eye_lens_right",
+        "hard_palate",
+        "hypopharynx",
+        "nasal_cavity_left",
+        "nasal_cavity_right",
+        "nasopharynx",
+        "optic_nerve_left",
+        "optic_nerve_right",
+        "oropharynx",
+        "parotid_gland_left",
+        "parotid_gland_right",
+        "soft_palate",
+        "submandibular_gland_left",
+        "submandibular_gland_right"
+      ],
+      "num_organs": 17
+    },
+    "head_muscles": {
+      "task": "head_muscles",
+      "routing_aliases": [
+        "Totalsegmentator (head_muscles)"
+      ],
+      "organs": [
+        "digastric_left",
+        "digastric_right",
+        "lateral_pterygoid_left",
+        "lateral_pterygoid_right",
+        "masseter_left",
+        "masseter_right",
+        "medial_pterygoid_left",
+        "medial_pterygoid_right",
+        "temporalis_left",
+        "temporalis_right",
+        "tongue"
+      ],
+      "num_organs": 11
+    },
+    "headneck_bones_vessels": {
+      "task": "headneck_bones_vessels",
+      "routing_aliases": [
+        "Totalsegmentator (headneck_bones_vessels)",
+        "Totalsegmentator(headneck_bones_vessels)"
+      ],
+      "organs": [
+        "cricoid_cartilage",
+        "hyoid",
+        "internal_carotid_artery_left",
+        "internal_carotid_artery_right",
+        "internal_jugular_vein_left",
+        "internal_jugular_vein_right",
+        "styloid_process_left",
+        "styloid_process_right",
+        "thyroid_cartilage",
+        "zygomatic_arch_left",
+        "zygomatic_arch_right"
+      ],
+      "num_organs": 11
+    },
+    "headneck_muscles": {
+      "task": "headneck_muscles",
+      "routing_aliases": [
+        "Totalsegmentator (headneck_muscles)"
+      ],
+      "organs": [
+        "anterior_scalene_left",
+        "anterior_scalene_right",
+        "inferior_pharyngeal_constrictor",
+        "levator_scapulae_left",
+        "levator_scapulae_right",
+        "middle_pharyngeal_constrictor",
+        "middle_scalene_left",
+        "middle_scalene_right",
+        "platysma_left",
+        "platysma_right",
+        "posterior_scalene_left",
+        "posterior_scalene_right",
+        "prevertebral_left",
+        "prevertebral_right",
+        "sterno_thyroid_left",
+        "sterno_thyroid_right",
+        "sternocleidomastoid_left",
+        "sternocleidomastoid_right",
+        "thyrohyoid_left",
+        "thyrohyoid_right",
+        "trapezius_left",
+        "trapezius_right"
+      ],
+      "num_organs": 22
+    },
+    "heartchambers_highres": {
+      "task": "heartchambers_highres",
+      "routing_aliases": [
+        "Totalsegmentator (heartchambers_highres)"
+      ],
+      "organs": [
+        "pulmonary_artery"
+      ],
+      "num_organs": 1,
+      "license_required": true,
+      "license_note": "Academic license required. Register at https://backend.totalsegmentator.com/license-academic/ then run: totalseg_set_license -l <key>"
+    },
+    "liver_segments": {
+      "task": "liver_segments",
+      "routing_aliases": [
+        "Totalsegmentator (liver_segments)"
+      ],
+      "organs": [
+        "liver_segment_1",
+        "liver_segment_2",
+        "liver_segment_3",
+        "liver_segment_4",
+        "liver_segment_5",
+        "liver_segment_6",
+        "liver_segment_7",
+        "liver_segment_8"
+      ],
+      "num_organs": 8
+    },
+    "lung_vessels": {
+      "task": "lung_vessels",
+      "routing_aliases": [
+        "Totalsegmentator (lung_vessels)"
+      ],
+      "organs": [
+        "lung_trachea_bronchia",
+        "lung_vessels"
+      ],
+      "num_organs": 2
+    },
+    "oculomotor_muscles": {
+      "task": "oculomotor_muscles",
+      "routing_aliases": [
+        "Totalsegmentator (oculomotor_muscles)"
+      ],
+      "organs": [
+        "inferior_oblique_muscle_left",
+        "inferior_oblique_muscle_right",
+        "inferior_rectus_muscle_left",
+        "inferior_rectus_muscle_right",
+        "lateral_rectus_muscle_left",
+        "lateral_rectus_muscle_right",
+        "levator_palpebrae_superioris_left",
+        "levator_palpebrae_superioris_right",
+        "medial_rectus_muscle_left",
+        "medial_rectus_muscle_right",
+        "superior_oblique_muscle_left",
+        "superior_oblique_muscle_right",
+        "superior_rectus_muscle_left",
+        "superior_rectus_muscle_right"
+      ],
+      "num_organs": 14
+    },
+    "total": {
+      "task": "total",
+      "routing_aliases": [
+        "Totalsegmentator(total)"
+      ],
+      "organs": [
+        "inferior_vena_cava",
+        "rib_cartilage",
+        "small_bowel"
+      ],
+      "num_organs": 3
+    }
+  },
+  "summary": {
+    "num_subtasks": 13,
+    "num_organs_total": 121
+  }
+}

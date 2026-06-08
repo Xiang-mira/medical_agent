@@ -1,0 +1,241 @@
+{
+  "version": 2,
+  "note": "Local label name -> global organ name mapping. Only non-trivial aliases listed; direct matches fall back automatically. _pathology_ignore: labels produced by model but not in global organ space. _not_in_routing: model produces these but routing table assigns them to other models.",
+  "models": {
+    "cads551": {
+      "local_to_global": {
+        "gallbladder": "gall_bladder",
+        "lung_upper_lobe_left": "lung_upper_left_lobe",
+        "lung_lower_lobe_left": "lung_lower_left_lobe",
+        "lung_upper_lobe_right": "lung_upper_right_lobe",
+        "lung_middle_lobe_right": "lung_middle_right_lobe",
+        "lung_lower_lobe_right": "lung_lower_right_lobe"
+      }
+    },
+    "cads553": {
+      "local_to_global": {
+        "urinary_bladder": "bladder",
+        "iliac_artery_left": "common_iliac_artery_left",
+        "iliac_artery_right": "common_iliac_artery_right",
+        "iliac_vena_left": "common_iliac_vein_left",
+        "iliac_vena_right": "common_iliac_vein_right"
+      },
+      "_note": "small_bowel is direct match (global small_bowel routed to CADS553); intestine is separate global organ routed only to VSmTrans"
+    },
+    "moose888": {
+      "local_to_global": {
+        "portal_splenic_vein": "portal_vein_and_splenic_vein"
+      }
+    },
+    "epai_20250421": {
+      "local_to_global": {
+        "celiac_aa": "celiac_aa (celiac_artery)"
+      },
+      "_pathology_ignore": ["pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"],
+      "_note": "veins is direct match to global 'veins' (routed exclusively to ePAI); postcava is direct match"
+    },
+    "vista3d": {
+      "local_to_global": {
+        "portal vein and splenic vein": "portal_vein_and_splenic_vein",
+        "lung upper left lobe": "lung_upper_left_lobe",
+        "lung lower left lobe": "lung_lower_left_lobe",
+        "lung upper right lobe": "lung_upper_right_lobe",
+        "lung middle right lobe": "lung_middle_right_lobe",
+        "lung lower right lobe": "lung_lower_right_lobe",
+        "vertebrae L5": "vertebrae_L5",
+        "vertebrae L4": "vertebrae_L4",
+        "vertebrae L3": "vertebrae_L3",
+        "vertebrae L2": "vertebrae_L2",
+        "vertebrae L1": "vertebrae_L1",
+        "vertebrae T12": "vertebrae_T12",
+        "vertebrae T11": "vertebrae_T11",
+        "vertebrae T10": "vertebrae_T10",
+        "vertebrae T9": "vertebrae_T9",
+        "vertebrae T8": "vertebrae_T8",
+        "vertebrae T7": "vertebrae_T7",
+        "vertebrae T6": "vertebrae_T6",
+        "vertebrae T5": "vertebrae_T5",
+        "vertebrae T4": "vertebrae_T4",
+        "vertebrae T3": "vertebrae_T3",
+        "vertebrae T2": "vertebrae_T2",
+        "vertebrae T1": "vertebrae_T1",
+        "vertebrae C7": "vertebrae_C7",
+        "vertebrae C6": "vertebrae_C6",
+        "vertebrae C5": "vertebrae_C5",
+        "vertebrae C4": "vertebrae_C4",
+        "vertebrae C3": "vertebrae_C3",
+        "vertebrae C2": "vertebrae_C2",
+        "vertebrae C1": "vertebrae_C1",
+        "vertebrae S1": "vertebrae_S1",
+        "iliac artery left": "iliac_artery_left",
+        "iliac artery right": "iliac_artery_right",
+        "iliac vena left": "iliac_vena_left",
+        "iliac vena right": "iliac_vena_right",
+        "humerus left": "humerus_left",
+        "humerus right": "humerus_right",
+        "scapula left": "scapula_left",
+        "scapula right": "scapula_right",
+        "clavicula left": "clavicula_left",
+        "clavicula right": "clavicula_right",
+        "hip left": "hip_left",
+        "hip right": "hip_right",
+        "gluteus maximus left": "gluteus_maximus_left",
+        "gluteus maximus right": "gluteus_maximus_right",
+        "gluteus medius left": "gluteus_medius_left",
+        "gluteus medius right": "gluteus_medius_right",
+        "gluteus minimus left": "gluteus_minimus_left",
+        "gluteus minimus right": "gluteus_minimus_right",
+        "autochthon left": "autochthon_left",
+        "autochthon right": "autochthon_right",
+        "iliopsoas left": "iliopsoas_left",
+        "iliopsoas right": "iliopsoas_right",
+        "atrial appendage left": "atrial_appendage_left",
+        "brachiocephalic trunk": "brachiocephalic_trunk",
+        "brachiocephalic vein left": "brachiocephalic_vein_left",
+        "brachiocephalic vein right": "brachiocephalic_vein_right",
+        "common carotid artery left": "common_carotid_artery_left",
+        "common carotid artery right": "common_carotid_artery_right",
+        "costal cartilages": "costal_cartilages",
+        "pulmonary vein": "pulmonary_vein",
+        "spinal cord": "spinal_cord",
+        "subclavian artery left": "subclavian_artery_left",
+        "subclavian artery right": "subclavian_artery_right",
+        "superior vena cava": "superior_vena_cava",
+        "thyroid gland": "thyroid_gland"
+      },
+      "_pathology_ignore": [
+        "_lung tumor",
+        "_pancreatic tumor",
+        "_hepatic tumor",
+        "_colon cancer primaries",
+        "_bone lesion"
+      ],
+      "_not_in_routing": [
+        "bone",
+        "postcava",
+        "colon",
+        "intestine",
+        "bladder",
+        "duodenum",
+        "esophagus",
+        "stomach",
+        "hepatic_vessel",
+        "left kidney cyst",
+        "right kidney cyst"
+      ]
+    },
+    "cads556": {
+      "local_to_global": {
+        "bowel_bag": "colostomy_bag",
+        "sigmoid": "sigmoid_colon",
+        "left_mammary_gland": "mammary_gland_left",
+        "right_mammary_gland": "mammary_gland_right",
+        "right psoas major": "psoas_major_muscle_right",
+        "left psoas major": "psoas_major_muscle_left",
+        "right rectus abdominis": "rectus_abdominis_muscle_right",
+        "left rectus abdominis": "rectus_abdominis_muscle_left"
+      }
+    },
+    "cads557": {
+      "local_to_global": {
+        "csf": "cerebrospinal_fluid",
+        "eye balls": "eyeball",
+        "head muscles": "muscle_of_head",
+        "white matter": "white_matter",
+        "gray matter": "gray_matter",
+        "compact bone": "compact_bone",
+        "spongy bone": "spongy_bone"
+      }
+    },
+    "cads558": {
+      "local_to_global": {
+        "OAR_A_Carotid_L": "carotid_artery_left",
+        "OAR_A_Carotid_R": "carotid_artery_right",
+        "OAR_Arytenoid": "arytenoid_cartilage",
+        "OAR_Bone_Mandible": "mandible",
+        "OAR_Brainstem": "brainstem",
+        "OAR_BuccalMucosa": "buccal_mucosa",
+        "OAR_Cavity_Oral": "oral_cavity",
+        "OAR_Cochlea_L": "cochlear_left",
+        "OAR_Cochlea_R": "cochlear_right",
+        "OAR_Cricopharyngeus": "cricopharyngeus",
+        "OAR_Esophagus_S": "cervical_esophagus",
+        "OAR_Eye_AL": "anterior_eyeball_segment_left",
+        "OAR_Eye_AR": "anterior_eyeball_segment_right",
+        "OAR_Eye_PL": "posterior_eyeball_segment_left",
+        "OAR_Eye_PR": "posterior_eyeball_segment_right",
+        "OAR_Glnd_Lacrimal_L": "lacrimal_gland_left",
+        "OAR_Glnd_Lacrimal_R": "lacrimal_gland_right",
+        "OAR_Glnd_Submand_L": "submandibular_gland_left",
+        "OAR_Glnd_Submand_R": "submandibular_gland_right",
+        "OAR_Glnd_Thyroid": "thyroid_gland",
+        "OAR_Glottis": "glottis",
+        "OAR_Larynx_SG": "supraglottis",
+        "OAR_Lips": "both_lips",
+        "OAR_OpticChiasm": "optic_chiasm",
+        "OAR_OpticNrv_L": "optic_nerve_left",
+        "OAR_OpticNrv_R": "optic_nerve_right",
+        "OAR_Parotid_L": "parotid_gland_left",
+        "OAR_Parotid_R": "parotid_gland_right",
+        "OAR_Pituitary": "pituitary_gland"
+      }
+    },
+    "cads559": {
+      "local_to_global": {
+        "subcutaneous_tissue": "subcutaneous_adipose_tissue",
+        "glands": "gland_structure",
+        "breast_implant": "prosthetic_breast_implant"
+      }
+    },
+    "moose666": {
+      "local_to_global": {
+        "clavicle_left": "clavicula_left",
+        "clavicle_right": "clavicula_right"
+      }
+    },
+    "saros_nnunet": {
+      "local_to_global": {
+        "subcutaneous_tissue": "subcutaneous_adipose_tissue",
+        "bone": "bones",
+        "breast_implant": "prosthetic_breast_implant",
+        "thyroid_glands": "thyroid_gland"
+      },
+      "skip_global_organs": {
+        "arm_left": "SAROS output labels are coarse tissue/region classes and do not contain a precise arm_left mask.",
+        "arm_right": "SAROS output labels are coarse tissue/region classes and do not contain a precise arm_right mask.",
+        "head": "SAROS output labels are coarse tissue/region classes and do not contain a precise head mask.",
+        "intermuscular_adipose_tissue": "SAROS output labels are coarse tissue/region classes and do not contain this adipose-tissue subtype.",
+        "leg_left": "SAROS output labels are coarse tissue/region classes and do not contain a precise leg_left mask.",
+        "leg_right": "SAROS output labels are coarse tissue/region classes and do not contain a precise leg_right mask.",
+        "skeletal_muscle": "SAROS output label muscle is not used as a hard alias for skeletal_muscle without an approved approximation policy.",
+        "visceral_adipose_tissue": "SAROS output labels are coarse tissue/region classes and do not contain this adipose-tissue subtype."
+      },
+      "_note": "submandibular_glands is direct match to global 'submandibular_glands' (routed to SAROS nnUNet). The skip_global_organs entries are intentionally skipped per user-approved policy: no coarse-label approximation and no pseudo-label fabrication."
+    },
+    "totalsegmentator": {
+      "local_to_global": {
+        "ventricle": "brain_ventricle",
+        "coronary_arteries": "coronary_artery",
+        "lung_airways": "lung_trachea_bronchia",
+        "lung_arteries": "lung_vessels",
+        "lung_veins": "lung_vessels",
+        "costal_cartilages": "rib_cartilage",
+        "gallbladder": "gall_bladder"
+      },
+      "_note": "costal_cartilages in TS(total) -> global rib_cartilage (global costal_cartilages is a separate organ covered by VISTA3D); lung_arteries + lung_veins both union into global lung_vessels"
+    },
+    "unest": {
+      "local_to_global": {
+        "kidney cortex": "kidney_cortex",
+        "medulla": "kidney_medulla",
+        "pelvicalyceal system": "kidney_pelvicalyceal_system"
+      },
+      "_note": "Source: UNEST metadata.json channel_def. Labels use lowercase with spaces."
+    },
+    "daps": {
+      "local_to_global": {},
+      "_pending_verification": true,
+      "_note": "Drive doc confirms DAP label mapping was never found upstream. Verify local label names once checkpoint_best.pth is downloaded and a test run is complete."
+    }
+  }
+}

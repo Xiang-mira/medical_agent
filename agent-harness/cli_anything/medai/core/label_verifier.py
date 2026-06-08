@@ -141,17 +141,18 @@ def verify_annotation(
     dsc_vlm_threshold: float = 0.5,
     dsc_accept_threshold: float = 0.8,
 ) -> dict:
-    """Compare reference/current annotation vs. model prediction for one organ.
+    """Compare a prior/current pseudo reference vs. model prediction for one organ.
 
-    Teacher-task thresholds:
-      DSC >= 0.80        -> accept
-      0.50 <= DSC < 0.80 -> uncertain / manual sanity check recommended
-      DSC < 0.50         -> LabelCritic/VLM review
-      DSC = 0 with empty current annotation but non-empty prediction -> replacement candidate
+    The project has no expert fine-label set by default. DSC here is therefore
+    pseudo-label/reference consistency, not true segmentation accuracy.
     """
     result: dict = {
         "stage": "label_verifier",
         "organ": organ,
+        "metric_family": "pseudo_consistency",
+        "metric_scope": "prediction_vs_prior_or_selected_pseudo_reference",
+        "ground_truth_status": "pseudo_label_candidate",
+        "accuracy_warning": "DSC is pseudo-label consistency unless the caller explicitly supplies expert fine labels.",
         "dsc_replace_threshold": dsc_replace_threshold,
         "dsc_vlm_threshold": dsc_vlm_threshold,
         "dsc_accept_threshold": dsc_accept_threshold,
@@ -169,7 +170,7 @@ def verify_annotation(
     result["model_prediction_exists"] = pred_exists
 
     if not pred_exists and not ann_exists:
-        result.update({"status": "failed", "decision": "review_queue", "dice": None, "quality_bucket": "both_missing", "reason": "Both reference and prediction are missing."})
+        result.update({"status": "failed", "decision": "review_queue", "dice": None, "quality_bucket": "both_missing", "reason": "Both pseudo reference and prediction are missing."})
         return result
 
     if not pred_exists:
@@ -177,7 +178,7 @@ def verify_annotation(
         return result
 
     if not ann_exists:
-        result.update({"status": "warning", "decision": "auto_replace_candidate", "quality_bucket": "no_reference", "reason": "No current/reference annotation; prediction becomes candidate.", "dice": None})
+        result.update({"status": "warning", "decision": "auto_replace_candidate", "quality_bucket": "no_reference", "reason": "No prior pseudo reference; prediction becomes pseudo-label candidate.", "dice": None})
         return result
 
     dice = _dice(ann_path, pred_path)
@@ -197,7 +198,7 @@ def verify_annotation(
     ann_nonempty = not ann_empty
 
     if dice == 0.0 and pred_nonempty and ann_empty:
-        result.update({"status": "warning", "decision": "auto_replace_candidate", "quality_bucket": "empty_reference_nonempty_prediction", "reason": "Current/reference annotation is empty but prediction is non-empty."})
+        result.update({"status": "warning", "decision": "auto_replace_candidate", "quality_bucket": "empty_reference_nonempty_prediction", "reason": "Prior pseudo reference is empty but prediction is non-empty."})
     elif dice == 0.0 and pred_nonempty and ann_nonempty:
         result.update({"status": "warning", "decision": "send_to_vlm_label_expert", "quality_bucket": "critical_low_dice", "reason": "DSC=0 and both masks are non-empty; requires LabelCritic/VLM comparison."})
     elif dice < dsc_vlm_threshold:

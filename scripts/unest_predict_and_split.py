@@ -38,6 +38,7 @@ def main() -> int:
     ap.add_argument('--output', required=True)
     ap.add_argument('--unest-root',
                     default='checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation')
+    ap.add_argument('--per-model-dir', default=None, help='Per-model contract output dir for combined_labels.nii.gz and local_labels.json')
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
@@ -45,8 +46,10 @@ def main() -> int:
     output = Path(args.output).resolve()
     seg_dir = output / 'segmentations'
     unest_root = Path(args.unest_root).resolve()
+    per_model_dir = Path(args.per_model_dir).resolve() if args.per_model_dir else output
     output.mkdir(parents=True, exist_ok=True)
     seg_dir.mkdir(parents=True, exist_ok=True)
+    per_model_dir.mkdir(parents=True, exist_ok=True)
 
     summary = {
         'wrapper': 'unest',
@@ -129,11 +132,20 @@ def main() -> int:
             for p in raw_outputs:
                 shutil.copy2(p, seg_dir / p.name)
 
+        # Write per_model contract artifacts.
+        shutil.copy2(combined, per_model_dir / 'combined_labels.nii.gz')
+        local_labels = {v: k for k, v in LABEL_MAP.items()}  # {int_id: name} → {name: int_id}
+        (per_model_dir / 'local_labels.json').write_text(
+            json.dumps({name: int_id for int_id, name in LABEL_MAP.items()}, indent=2, sort_keys=True),
+            encoding='utf-8',
+        )
+
         masks = list(seg_dir.glob('*.nii.gz'))
         status = 'success' if masks else 'failed'
         print(json.dumps({
             **summary, 'status': status,
             'segmentation_output': str(seg_dir),
+            'per_model_dir': str(per_model_dir),
             'num_masks': len(masks),
         }, indent=2))
         return 0 if status == 'success' else 3

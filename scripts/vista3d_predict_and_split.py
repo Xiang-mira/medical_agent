@@ -10,6 +10,7 @@ def main() -> int:
     ap.add_argument('--output', required=True)
     ap.add_argument('--vista-root', default='third_party/VISTA3D-Inference-Pipeline-master')
     ap.add_argument('--label-map', default=None)
+    ap.add_argument('--per-model-dir', default=None, help='Per-model contract output dir for combined_labels.nii.gz and local_labels.json')
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
@@ -17,8 +18,10 @@ def main() -> int:
     output = Path(args.output).resolve()
     seg_dir = output / 'segmentations'
     vista_root = Path(args.vista_root).resolve()
+    per_model_dir = Path(args.per_model_dir).resolve() if args.per_model_dir else output
     output.mkdir(parents=True, exist_ok=True)
     seg_dir.mkdir(parents=True, exist_ok=True)
+    per_model_dir.mkdir(parents=True, exist_ok=True)
 
     label_map = (
         Path(args.label_map).resolve()
@@ -126,6 +129,9 @@ def main() -> int:
             # Combined label map — split into per-organ masks
             combined = output / 'combined_labels.nii.gz'
             shutil.copy2(candidates[0], combined)
+            # Copy to per_model_dir as well
+            if per_model_dir != output:
+                shutil.copy2(candidates[0], per_model_dir / 'combined_labels.nii.gz')
             split_cmd = [
                 sys.executable,
                 str(Path(__file__).resolve().parent / 'split_combined_labelmap.py'),
@@ -142,11 +148,21 @@ def main() -> int:
             (output / 'split_stdout.log').write_text(split.stdout or '', encoding='utf-8')
             (output / 'split_stderr.log').write_text(split.stderr or '', encoding='utf-8')
 
+        # Write local_labels.json (label_name -> int_id) from label map file.
+        try:
+            raw_labels = json.loads(label_map.read_text(encoding='utf-8'))
+            # label_map format: {name: int_id} — filter out background (id=0) and non-int values.
+            local_labels = {k: v for k, v in raw_labels.items() if isinstance(v, int) and v != 0}
+            (per_model_dir / 'local_labels.json').write_text(json.dumps(local_labels, indent=2, sort_keys=True), encoding='utf-8')
+        except Exception:
+            pass
+
         masks = list(seg_dir.glob('*.nii.gz'))
         status = 'success' if masks else 'failed'
         print(json.dumps({
             **summary, 'status': status,
             'segmentation_output': str(seg_dir),
+            'per_model_dir': str(per_model_dir),
             'num_masks': len(masks),
         }, indent=2))
         return 0 if status == 'success' else 3

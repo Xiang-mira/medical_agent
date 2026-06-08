@@ -2,284 +2,39 @@ schema_version: '1.0'
 generated_from: D:\Desktop\medai_agent_loop_task2_final_v14_windows_safe\medai_v14\configs\class_checkpoint_map.xlsx
 checkpoint_root: checkpoints
 models:
-  airrc:
-    name: airrc
+  cads551:
+    name: CADS Dataset551_Totalseg251 nnUNet
     type: segmentation
     source: class_checkpoint_map.xlsx
     covered_organs:
-    - airway_wall
-    - lung_pulmonary_arteries
-    - lung_pulmonary_veins
-    status: ready_if_checkpoint_folder_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Checkpoint found in nnUNet_private Dataset1380_AirRC.
-    runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
-    dataset_id: 1380
-    trainer: nnUNetTrainer
-    plans: nnUNetResEncUNetLPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
-    private_checkpoint: true
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: trainable_candidate_for_airway_and_lung_vessels
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1380
-    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC
-    mstep_reason: AirRC checkpoint is now available via nnUNet_private.
-  atlasnet:
-    name: ATLAS-Net nnUNet v2 abdominal 25-class model
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - adrenal_gland_left
-    - adrenal_gland_right
-    - aorta
-    - colon
-    - common_bile_duct
-    - duodenum
-    - gall_bladder
-    - inferior_vena_cava
-    - kidney_left
-    - kidney_right
-    - liver
-    - pancreas
-    - pancreatic_cyst
-    - pancreatic_duct
-    - pancreatic_pdac
-    - pancreatic_pnet
-    - portal_vein_and_splenic_vein
-    - renal_vein_left
-    - renal_vein_right
-    - small_intestine
     - spleen
-    - stomach
-    - superior_mesenteric_artery
-    status: ready_if_atlasnet_checkpoint_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: ATLAS-Net model card from teacher's 'Another version of ShapeKit.docx'
-      is integrated. It covers 25 abdominal organ/tumor labels and expects Linux/CUDA/nnUNet
-      v2 plus downloaded ATLAS-Net weights.
-    runner: command_template
-    checkpoint_path: checkpoints/ATLAS-Net
-    label_map_path: configs/atlasnet_label_map.json
-    command_template: python scripts/atlasnet_predict_and_split.py --image {image}
-      --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path}
-    private_checkpoint: false
-    source_code_path: docs/ATLAS-Net_model_card_from_teacher.docx
-    trainable: yes_if_atlasnet_nnunet_training_state_present
-    mstep_role: conditional_trainable_abdominal_25_class_backend
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1002
-    mstep_init_from: checkpoints/ATLAS-Net
-    mstep_reason: ATLAS-Net is described as an nnUNet v2 abdominal model; fine-tuning
-      requires downloaded weights and nnUNet-compatible training files.
-  atm:
-    name: atm
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - airway_tree
-    status: ready_if_checkpoint_folder_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Checkpoint found in nnUNet_private Dataset1370_ATM.
-    runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
-    dataset_id: 1370
-    trainer: nnUNetTrainer
-    plans: nnUNetResEncUNetLPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
-    private_checkpoint: true
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: trainable_candidate_for_airway_tree
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1370
-    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM
-    mstep_reason: ATM checkpoint is now available via nnUNet_private.
-  cads:
-    name: CADS abdominal nnUNet Dataset551
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - abdominal_cavity
-    - adrenal_gland_left
-    - adrenal_gland_right
-    - anterior_eyeball_segment_left
-    - anterior_eyeball_segment_right
-    - aorta
-    - arytenoid_cartilage
-    - bladder
-    - blood
-    - bones
-    - both_lips
-    - brain
-    - brainstem
-    - buccal_mucosa
-    - carotid_artery_left
-    - carotid_artery_right
-    - cerebrospinal_fluid
-    - cervical_esophagus
-    - clavicula_left
-    - clavicula_right
-    - cochlear_left
-    - cochlear_right
-    - colon
-    - colostomy_bag
-    - common_iliac_artery_left
-    - common_iliac_artery_right
-    - common_iliac_vein_left
-    - common_iliac_vein_right
-    - compact_bone
-    - cricopharyngeus
-    - duodenum
-    - esophagus
-    - eyeball
-    - face
-    - femur_left
-    - femur_right
-    - gall_bladder
-    - gland_structure
-    - glottis
-    - gluteus_maximus_left
-    - gluteus_maximus_right
-    - gluteus_medius_left
-    - gluteus_medius_right
-    - gluteus_minimus_left
-    - gluteus_minimus_right
-    - gray_matter
-    - heart
-    - heart_atrium_left
-    - heart_atrium_right
-    - heart_myocardium
-    - heart_ventricle_left
-    - heart_ventricle_right
-    - hip_left
-    - hip_right
-    - humerus_left
-    - humerus_right
-    - iliopsoas_left
-    - iliopsoas_right
-    - inferior_vena_cava
-    - kidney_left
     - kidney_right
-    - lacrimal_gland_left
-    - lacrimal_gland_right
-    - larynx
+    - kidney_left
+    - gallbladder
     - liver
-    - lung_lower_left_lobe
-    - lung_lower_right_lobe
-    - lung_middle_right_lobe
-    - lung_upper_left_lobe
-    - lung_upper_right_lobe
-    - mammary_gland_left
-    - mammary_gland_right
-    - mandible
-    - mediastinum
-    - muscle
-    - muscle_of_head
-    - optic_chiasm
-    - optic_nerve_left
-    - optic_nerve_right
-    - oral_cavity
-    - pancreas
-    - parotid_gland_left
-    - parotid_gland_right
-    - pericardium
-    - pituitary_gland
-    - portal_vein_and_splenic_vein
-    - posterior_eyeball_segment_left
-    - posterior_eyeball_segment_right
-    - prostate
-    - prosthetic_breast_implant
-    - psoas_major_muscle_left
-    - psoas_major_muscle_right
-    - pulmonary_artery
-    - rectum
-    - rectus_abdominis_muscle_left
-    - rectus_abdominis_muscle_right
-    - rib_left_1
-    - rib_left_10
-    - rib_left_11
-    - rib_left_12
-    - rib_left_2
-    - rib_left_3
-    - rib_left_4
-    - rib_left_5
-    - rib_left_6
-    - rib_left_7
-    - rib_left_8
-    - rib_left_9
-    - rib_right_1
-    - rib_right_10
-    - rib_right_11
-    - rib_right_12
-    - rib_right_2
-    - rib_right_3
-    - rib_right_4
-    - rib_right_5
-    - rib_right_6
-    - rib_right_7
-    - rib_right_8
-    - rib_right_9
-    - sacrum
-    - scalp
-    - scapula_left
-    - scapula_right
-    - seminal_vesicle
-    - sigmoid_colon
-    - small_bowel
-    - spinal_canal
-    - spinal_cord
-    - spleen
-    - spongy_bone
-    - sternum
     - stomach
-    - subcutaneous_adipose_tissue
-    - submandibular_gland_left
-    - submandibular_gland_right
-    - supraglottis
-    - thoracic_cavity
-    - thyroid_gland
-    - trachea
-    - vertebrae_c1
-    - vertebrae_c2
-    - vertebrae_c3
-    - vertebrae_c4
-    - vertebrae_c5
-    - vertebrae_c6
-    - vertebrae_c7
-    - vertebrae_l1
-    - vertebrae_l2
-    - vertebrae_l3
-    - vertebrae_l4
-    - vertebrae_l5
-    - vertebrae_t1
-    - vertebrae_t10
-    - vertebrae_t11
-    - vertebrae_t12
-    - vertebrae_t2
-    - vertebrae_t3
-    - vertebrae_t4
-    - vertebrae_t5
-    - vertebrae_t6
-    - vertebrae_t7
-    - vertebrae_t8
-    - vertebrae_t9
-    - white_matter
+    - aorta
+    - inferior_vena_cava
+    - portal_vein_and_splenic_vein
+    - pancreas
+    - adrenal_gland_right
+    - adrenal_gland_left
+    - lung_upper_lobe_left
+    - lung_lower_lobe_left
+    - lung_upper_lobe_right
+    - lung_middle_lobe_right
+    - lung_lower_lobe_right
     status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS551
     output_layout: case_id/segmentations/*.nii.gz
-    notes: 'Dataset551 checkpoint is now available. All 9 CADS datasets (551-559) are
-      present with checkpoint_final.pth. CADS covers 150+ organs across abdominal,
-      head-neck, brain, OAR, and body-region tasks.'
+    notes: CADS series Dataset551_Totalseg251. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
     runner: command_template
     checkpoint_path: checkpoints/CADS_series/CADS_series
     dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset551_Totalseg251/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
@@ -290,100 +45,796 @@ models:
     command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
       --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
-    trainable: yes_if_nnunet_checkpoint_present
-    mstep_role: trainable_candidate_for_broad_abdominal_organs
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1551
-    mstep_init_from: checkpoints/CADS_series/CADS_series/Dataset551_Totalseg251
-    mstep_reason: CADS is exposed as an nnUNet-style checkpoint family and covers
-      many abdominal structures; fine-tuning requires its complete training state/checkpoint
-      layout.
-  dap:
-    name: dap
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset551_Totalseg251 is provided in the project Google Drive
+      under CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads552:
+    name: CADS Dataset552_Totalseg252 nnUNet
     type: segmentation
     source: class_checkpoint_map.xlsx
     covered_organs:
-    - artery_brachiocephalic
-    - artery_common_carotid_left
-    - artery_common_carotid_right
-    - artery_internal_carotid_left
-    - artery_internal_carotid_right
-    - artery_subclavian_left
-    - artery_subclavian_right
+    - vertebrae_L5
+    - vertebrae_L4
+    - vertebrae_L3
+    - vertebrae_L2
+    - vertebrae_L1
+    - vertebrae_T12
+    - vertebrae_T11
+    - vertebrae_T10
+    - vertebrae_T9
+    - vertebrae_T8
+    - vertebrae_T7
+    - vertebrae_T6
+    - vertebrae_T5
+    - vertebrae_T4
+    - vertebrae_T3
+    - vertebrae_T2
+    - vertebrae_T1
+    - vertebrae_C7
+    - vertebrae_C6
+    - vertebrae_C5
+    - vertebrae_C4
+    - vertebrae_C3
+    - vertebrae_C2
+    - vertebrae_C1
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS552
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset552_Totalseg252. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset552_Totalseg252/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 552
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset552_Totalseg252 is provided in the project Google Drive
+      under CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads553:
+    name: CADS Dataset553_Totalseg253 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - esophagus
+    - trachea
+    - heart_myocardium
+    - heart_atrium_left
+    - heart_ventricle_left
+    - heart_atrium_right
+    - heart_ventricle_right
+    - pulmonary_artery
+    - brain
+    - iliac_artery_left
+    - iliac_artery_right
+    - iliac_vena_left
+    - iliac_vena_right
+    - small_bowel
+    - duodenum
+    - colon
+    - urinary_bladder
+    - face
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS553
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset553_Totalseg253. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset553_Totalseg253/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 553
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset553_Totalseg253 is provided in the project Google Drive
+      under CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads554:
+    name: CADS Dataset554_Totalseg254 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - humerus_left
+    - humerus_right
+    - scapula_left
+    - scapula_right
+    - clavicula_left
+    - clavicula_right
+    - femur_left
+    - femur_right
+    - hip_left
+    - hip_right
+    - sacrum
+    - gluteus_maximus_left
+    - gluteus_maximus_right
+    - gluteus_medius_left
+    - gluteus_medius_right
+    - gluteus_minimus_left
+    - gluteus_minimus_right
+    - autochthon_left
+    - autochthon_right
+    - iliopsoas_left
+    - iliopsoas_right
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS554
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset554_Totalseg254. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset554_Totalseg254/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 554
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset554_Totalseg254 is provided in the project Google Drive
+      under CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads555:
+    name: CADS Dataset555_Totalseg255 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - rib_left_1
+    - rib_left_2
+    - rib_left_3
+    - rib_left_4
+    - rib_left_5
+    - rib_left_6
+    - rib_left_7
+    - rib_left_8
+    - rib_left_9
+    - rib_left_10
+    - rib_left_11
+    - rib_left_12
+    - rib_right_1
+    - rib_right_2
+    - rib_right_3
+    - rib_right_4
+    - rib_right_5
+    - rib_right_6
+    - rib_right_7
+    - rib_right_8
+    - rib_right_9
+    - rib_right_10
+    - rib_right_11
+    - rib_right_12
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS555
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset555_Totalseg255. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset555_Totalseg255/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 555
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset555_Totalseg255 is provided in the project Google Drive
+      under CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads556:
+    name: CADS Dataset556_GC256 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - spinal_canal
+    - larynx
+    - heart
+    - bowel_bag
+    - sigmoid
+    - rectum
+    - prostate
+    - seminal_vesicle
+    - left_mammary_gland
+    - right_mammary_gland
+    - sternum
+    - right psoas major
+    - left psoas major
+    - right rectus abdominis
+    - left rectus abdominis
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS556
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset556_GC256. Private Drive nnUNet checkpoint using run_CADS.sh
+      parameters; covered_organs are raw local dataset.json labels and are mapped
+      through model_label_aliases where needed. This route is distinct from the official
+      TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset556_GC256/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 556
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset556_GC256 is provided in the project Google Drive under
+      CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads557:
+    name: CADS Dataset557_Brain257 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - white matter
+    - gray matter
+    - csf
+    - scalp
+    - eye balls
+    - compact bone
+    - spongy bone
+    - blood
+    - head muscles
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS557
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset557_Brain257. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset557_Brain257/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 557
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset557_Brain257 is provided in the project Google Drive under
+      CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads558:
+    name: CADS Dataset558_OAR258 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - OAR_A_Carotid_L
+    - OAR_A_Carotid_R
+    - OAR_Arytenoid
+    - OAR_Bone_Mandible
+    - OAR_Brainstem
+    - OAR_BuccalMucosa
+    - OAR_Cavity_Oral
+    - OAR_Cochlea_L
+    - OAR_Cochlea_R
+    - OAR_Cricopharyngeus
+    - OAR_Esophagus_S
+    - OAR_Eye_AL
+    - OAR_Eye_AR
+    - OAR_Eye_PL
+    - OAR_Eye_PR
+    - OAR_Glnd_Lacrimal_L
+    - OAR_Glnd_Lacrimal_R
+    - OAR_Glnd_Submand_L
+    - OAR_Glnd_Submand_R
+    - OAR_Glnd_Thyroid
+    - OAR_Glottis
+    - OAR_Larynx_SG
+    - OAR_Lips
+    - OAR_OpticChiasm
+    - OAR_OpticNrv_L
+    - OAR_OpticNrv_R
+    - OAR_Parotid_L
+    - OAR_Parotid_R
+    - OAR_Pituitary
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS558
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset558_OAR258. Private Drive nnUNet checkpoint using run_CADS.sh
+      parameters; covered_organs are raw local dataset.json labels and are mapped
+      through model_label_aliases where needed. This route is distinct from the official
+      TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset558_OAR258/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 558
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset558_OAR258 is provided in the project Google Drive under
+      CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  cads559:
+    name: CADS Dataset559_Saros259 nnUNet
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - subcutaneous_tissue
+    - muscle
+    - abdominal_cavity
+    - thoracic_cavity
+    - bones
+    - glands
+    - pericardium
+    - breast_implant
+    - mediastinum
+    - spinal_cord
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: cads
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - CADS559
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: CADS series Dataset559_Saros259. Private Drive nnUNet checkpoint using
+      run_CADS.sh parameters; covered_organs are raw local dataset.json labels and
+      are mapped through model_label_aliases where needed. This route is distinct
+      from the official TotalSegmentator CLI/license path.
+    runner: command_template
+    checkpoint_path: checkpoints/CADS_series/CADS_series
+    dataset_json_path: checkpoints/CADS_series/CADS_series/Dataset559_Saros259/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 559
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+    distribution_route: private_drive_nnunet_checkpoint
+    provenance_note: Dataset559_Saros259 is provided in the project Google Drive under
+      CADS_series and is run with the Drive run_CADS.sh nnUNetv2_predict parameters.
+      The Totalseg string in some dataset names denotes a TotalSeg-derived/local label-set
+      naming convention, not the public official TotalSegmentator package.
+    license_note: Do not treat this CADS private checkpoint as official TotalSegmentator
+      CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
+      are routed only through the separate `totalsegmentator` registry entry and official
+      CLI/license filtering.
+  moose666:
+    name: MOOSE3.0 peripheral bones nnUNet Dataset666
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - carpal_left
+    - carpal_right
+    - clavicle_left
+    - clavicle_right
+    - femur_left
+    - femur_right
+    - fibula_left
+    - fibula_right
+    - fingers_left
+    - fingers_right
+    - humerus_left
+    - humerus_right
+    - metacarpal_left
+    - metacarpal_right
+    - metatarsal_left
+    - metatarsal_right
+    - patella_left
+    - patella_right
+    - radius_left
+    - radius_right
+    - scapula_left
+    - scapula_right
+    - skull
+    - tarsal_left
+    - tarsal_right
+    - tibia_left
+    - tibia_right
+    - toes_left
+    - toes_right
+    - ulna_left
+    - ulna_right
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: moose
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - MOOSE3.0 (clin_ct_peripheral_bones)
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: MOOSE3.0 peripheral-bones task (Dataset666). plans=nnUNetPlans per local
+      weight dir.
+    runner: command_template
+    checkpoint_path: checkpoints/MOOSE_series/MOOSE_series
+    dataset_json_path: checkpoints/MOOSE_series/MOOSE_series/Dataset666_Peripheral-Bones/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 666
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  moose888:
+    name: MOOSE3.0 cardiac nnUNet Dataset888
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - heart_myocardium
+    - heart_atrium_left
+    - heart_atrium_right
+    - heart_ventricle_left
+    - heart_ventricle_right
+    - aorta
+    - iliac_artery_left
+    - iliac_artery_right
+    - iliac_vena_left
+    - iliac_vena_right
+    - inferior_vena_cava
+    - portal_splenic_vein
+    - pulmonary_artery
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: moose
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - MOOSE3.0 (clin_ct_cardiac)
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: MOOSE3.0 cardiac task (Dataset888). plans=nnUNetPlans per local weight
+      dir.
+    runner: command_template
+    checkpoint_path: checkpoints/MOOSE_series/MOOSE_series
+    dataset_json_path: checkpoints/MOOSE_series/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 888
+    trainer: nnUNetTrainerNoMirroring
+    plans: nnUNetPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  nnunet_private:
+    name: Private AbdomenAtlas nnUNet Dataset224
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - aorta
+    - gall_bladder
+    - kidney_left
+    - kidney_right
+    - postcava
+    - spleen
+    - stomach
+    - adrenal_gland_left
+    - adrenal_gland_right
+    - bladder
+    - celiac_trunk
+    - colon
+    - duodenum
+    - esophagus
+    - femur_left
+    - femur_right
+    - hepatic_vessel
+    - intestine
+    - lung_left
+    - lung_right
+    - portal_vein_and_splenic_vein
+    - prostate
+    - rectum
+    - liver_segment_1
+    - liver_segment_2
+    - liver_segment_3
+    - liver_segment_4
+    - liver_segment_5
+    - liver_segment_6
+    - liver_segment_7
+    - liver_segment_8
+    - pancreas_head
+    - pancreas_body
+    - pancreas_tail
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: type1
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - Dataset224_AbdomenAtlas1.1
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Private AbdomenAtlas organ model (Dataset224).
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 224
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  saros_nnunet:
+    name: Private SAROS nnUNet Dataset1345
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - subcutaneous_tissue
+    - muscle
+    - abdominal_cavity
+    - thoracic_cavity
+    - bone
+    - parotid_glands
+    - pericardium
+    - breast_implant
+    - mediastinum
+    - brain
+    - spinal_cord
+    - thyroid_glands
+    - submandibular_glands
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: type1
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - SAROS nnUNet
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: SAROS body-region model (Dataset1345).
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1345
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  atm:
+    name: ATM airway nnUNet Dataset1370
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - airway_tree
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: type1
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - ATM
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: ATM airway tree model (Dataset1370).
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1370
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  airrc:
+    name: AirRC airway/vessel nnUNet Dataset1380
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - airway_tree
+    - airway_wall
+    - lung_pulmonary_arteries
+    - lung_pulmonary_veins
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: type1
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - AirRC
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: AirRC airway wall + pulmonary vessels (Dataset1380).
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1380
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  lvp:
+    name: LVP liver vessel nnUNet Dataset1381 (formerly vsnet)
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - liver_hepatic_vein
+    - liver_portal_vein
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: type1
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - LVP
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: LVP liver hepatic/portal vein model (Dataset1381). Was vsnet.
+    runner: command_template
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1381_LVP/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1381
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+    private_checkpoint: true
+  daps:
+    name: DAPS nnUNet Dataset1347
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - fat
+    - mediastinal_tissue
+    - gonads
+    - uterocervix
+    - uterus
     - breast_left
     - breast_right
+    - thyroid_left
+    - thyroid_right
+    - thymus
+    - sternum_corpus
+    - heart_atrium_left
+    - heart_tissue
+    - heart_atrium_right
+    - heart_myocardium
+    - heart_ventricle_left
+    - heart_ventricle_right
     - bronchus
     - cheek_left
     - cheek_right
     - eyeball_left
     - eyeball_right
-    - fat
-    - gonads
-    - heart_atrium_left
-    - heart_atrium_right
-    - heart_myocardium
-    - heart_tissue
-    - heart_ventricle_left
-    - heart_ventricle_right
-    - inferior_vena_cava
-    - internal_jugular_vein_left
-    - internal_jugular_vein_right
-    - mediastinal_tissue
-    - pulmonary_artery
-    - rib_cartilage
-    - skin
-    - small_bowel
-    - spinal_canal
-    - sternum_corpus
+    - artery_common_carotid_right
+    - artery_common_carotid_left
     - sternum_manubrium
-    - thymus
-    - thyroid_left
-    - thyroid_right
-    - uterocervix
-    - uterus
-    status: template
+    - artery_internal_carotid_right
+    - artery_internal_carotid_left
+    - artery_brachiocephalic
+    - artery_subclavian_right
+    - artery_subclavian_left
+    status: ready
+    enabled: true
+    recipe: type1
+    checkpoint_name: checkpoint_best
+    routing_aliases:
+    - DAPS
     output_layout: case_id/segmentations/*.nii.gz
-    notes: Template retained; the lightweight export did not include a runnable script
-      for this family.
+    notes: DAPS 30-organ thorax/mediastinum model. dataset.json extracted from checkpoint.
+      Labels are direct global-name matches (no aliases needed).
     runner: command_template
-    checkpoint_path: checkpoints/dap
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
+    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
+    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1347_DAPS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
+    dataset_id: 1347
+    trainer: nnUNetTrainer
+    plans: nnUNetResEncUNetLPlans
+    folds: all
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
-  duke:
-    name: duke
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - muscle_fat
-    - skeletal_muscle
-    - subcutaneous_adipose_tissue
-    - visceral_adipose_tissue
-    status: template
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
-    runner: command_template
-    checkpoint_path: checkpoints/duke
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
-    private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
   epai_20250421:
-    name: ePAI qchen76 2025-04-21 / Dataset1017 25-class abdomen-pancreas model
+    name: ePAI qchen76 2025-04-21 / Dataset1339 25-class abdomen-pancreas model
     type: segmentation
     source: class_checkpoint_map.xlsx
     covered_organs:
@@ -413,6 +864,11 @@ models:
     - pancreatic_cyst
     - pancreatic_pnet
     status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: type2
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - ePAI
     output_layout: case_id/segmentations/*.nii.gz
     notes: Verified against qchen76_2025_0421.tar.gz. Dataset1017_ePAI_3MM has background
       plus 25 foreground organ/duct/tumor labels. ePAI source is bundled and patched
@@ -427,7 +883,7 @@ models:
       portal_vein_and_splenic_vein: veins
     checkpoint_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres
     dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
-    dataset_id: 1017
+    dataset_id: 1339
     trainer: nnUNetTrainer
     plans: nnUNetPlans
     folds: all
@@ -435,26 +891,18 @@ models:
       --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_root}
       --dataset-json {dataset_json_path} --model-folder {checkpoint_path} --workdir
       third_party/ePAI-main/train --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds} --checkpoint-name checkpoint_final.pth --output-label-mode
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth --output-label-mode
       all_organs
     private_checkpoint: true
     source_code_path: third_party/ePAI-main
     all_organ_patch: scripts/patch_epai_enable_all_organs.py
-    trainable: yes_if_nnunet_checkpoint_present
-    mstep_role: primary_trainable_for_pancreas_and_pancreatic_tumor_and_candidate_for_25_class_abdominal_organs
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1939
-    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI
-    mstep_reason: ePAI qchen76_2025_0421 is the teacher-specified 25-class abdominal
-      organ/duct/tumor checkpoint and is nnUNet-style, so it is the preferred M-step
-      target for PanTS pancreas tasks and a candidate for related organ refinement.
-  epai_finetuned:
-    name: ePAI finetuned (M-step round1, 50 epochs, 9-class)
+  vsmtrans:
+    name: VSmTrans BDMAP nnUNet Dataset001
     type: segmentation
-    source: mstep_output
+    source: class_checkpoint_map.xlsx
     covered_organs:
     - aorta
-    - duodenum
+    - gall_bladder
     - kidney_left
     - kidney_right
     - liver
@@ -462,185 +910,70 @@ models:
     - postcava
     - spleen
     - stomach
-    status: ready_if_checkpoint_folder_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Fine-tuned from scratch on 12 annotated PanTS cases, 50 epochs, nnUNetTrainer_fast_50epochs.
-      Covers 9 abdominal organs. Use alongside epai_20250421 for Round 2 comparison.
-    runner: command_template
-    checkpoint_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results/Dataset1939_MedAI_epai_20250421/nnUNetTrainer_fast_50epochs__nnUNetPlans__3d_fullres
-    nnunet_results_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results
-    dataset_json_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results/Dataset1939_MedAI_epai_20250421/nnUNetTrainer_fast_50epochs__nnUNetPlans__3d_fullres/dataset.json
-    dataset_id: 1939
-    trainer: nnUNetTrainer_fast_50epochs
-    plans: nnUNetPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {nnunet_results_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds} --use-python-api
-    private_checkpoint: false
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_backend: nnunetv2_finetune
-  goacc:
-    name: goacc
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - vertebrae_c1
-    - vertebrae_c2
-    - vertebrae_c3
-    - vertebrae_c4
-    - vertebrae_c5
-    - vertebrae_c6
-    - vertebrae_c7
-    - vertebrae_l1
-    - vertebrae_l2
-    - vertebrae_l3
-    - vertebrae_l4
-    - vertebrae_l5
-    - vertebrae_s1
-    - vertebrae_t1
-    - vertebrae_t10
-    - vertebrae_t11
-    - vertebrae_t12
-    - vertebrae_t2
-    - vertebrae_t3
-    - vertebrae_t4
-    - vertebrae_t5
-    - vertebrae_t6
-    - vertebrae_t7
-    - vertebrae_t8
-    - vertebrae_t9
-    status: template
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Template retained; the lightweight export did not include a runnable script
-      for this family.
-    runner: command_template
-    checkpoint_path: checkpoints/goacc
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
-    private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
-  mock_seg:
-    name: Local mock segmentation wrapper
-    type: segmentation
-    runner: command_template
-    status: ready
-    private_checkpoint: false
-    covered_organs:
-    - liver
-    - pancreas
-    - spleen
-    - kidney_left
-    - kidney_right
-    - aorta
-    - postcava
-    command_template: python third_party/mock_model/mock_seg_infer.py --image {image}
-      --output {output} --case-id {case_id}
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Synthetic smoke-test backend only. Use it to validate the CLI loop before
-      real GPU checkpoints are available.
-    trainable: 'no'
-    mstep_role: dry_run_only
-    mstep_backend: none
-    mstep_reason: Synthetic mock model for pipeline dry-runs only.
-  moose:
-    name: MOOSE available cardiac/vascular nnUNet Dataset888
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - vertebrae_c1
-    - vertebrae_c2
-    - vertebrae_c3
-    - vertebrae_c4
-    - vertebrae_c5
-    - vertebrae_c6
-    - vertebrae_c7
-    - vertebrae_l1
-    - vertebrae_l2
-    - vertebrae_l3
-    - vertebrae_l4
-    - vertebrae_l5
-    - vertebrae_t1
-    - vertebrae_t10
-    - vertebrae_t11
-    - vertebrae_t12
-    - vertebrae_t2
-    - vertebrae_t3
-    - vertebrae_t4
-    - vertebrae_t5
-    - vertebrae_t6
-    - vertebrae_t7
-    - vertebrae_t8
-    - vertebrae_t9
-    status: partial_ready_if_checkpoint_folder_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: The lightweight export only exposed MOOSE Dataset666/888. Dataset888 is
-      useful for aorta/vascular structures; not a full abdominal organ model.
-    runner: command_template
-    checkpoint_path: checkpoints/MOOSE_series/MOOSE_series
-    dataset_json_path: checkpoints/MOOSE_series/MOOSE_series/Dataset888_Cardiac/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
-    dataset_id: 888
-    trainer: nnUNetTrainerNoMirroring
-    plans: nnUNetPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
-    private_checkpoint: true
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: conditional_trainable_candidate_for_moose_tasks
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1888
-    mstep_init_from: checkpoints/MOOSE_series/MOOSE_series/Dataset888_Cardiac
-    mstep_reason: MOOSE is treated as nnUNet-style only when the corresponding full
-      dataset/checkpoint is present; the current lightweight export exposes limited
-      runnable structure.
-  moose3_0:
-    name: MOOSE3.0 full-body nnUNet Dataset666 (multi-organ)
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
     - adrenal_gland_left
     - adrenal_gland_right
-    - aorta
-    - arms
-    - autochthon_left
-    - autochthon_right
     - bladder
-    - brain
-    - carpal_left
-    - carpal_right
-    - clavicula_left
-    - clavicula_right
+    - celiac_trunk
     - colon
     - duodenum
     - esophagus
     - femur_left
     - femur_right
-    - fibula_left
-    - fibula_right
-    - fingers_left
-    - fingers_right
-    - gall_bladder
+    - hepatic_vessel
+    - intestine
+    - lung_left
+    - lung_right
+    - portal_vein_and_splenic_vein
+    - prostate
+    - rectum
+    status: ready_if_checkpoint_folder_present
+    enabled: true
+    recipe: vsmtrans
+    checkpoint_name: checkpoint_final
+    routing_aliases:
+    - VSmTrans
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: VSmTrans BDMAP (Dataset001), fold_0 only. self-contained nnunetv2.
+    runner: command_template
+    checkpoint_path: checkpoints/VSmTrans/VSmTrans/nnUNet_results
+    dataset_json_path: checkpoints/VSmTrans/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 1
+    trainer: nnUNetTrainer
+    plans: nnUNetPlans
+    folds: '0'
+    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth --workdir
+      third_party/VSmTrans_lightweight/nnUNet
+    private_checkpoint: true
+    source_code_path: third_party/VSmTrans_lightweight
+  vista3d:
+    name: VISTA3D Inference Pipeline
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - airway
+    - aorta
+    - atrial_appendage_left
+    - autochthon_left
+    - autochthon_right
+    - brachiocephalic_trunk
+    - brachiocephalic_vein_left
+    - brachiocephalic_vein_right
+    - brain
+    - clavicula_left
+    - clavicula_right
+    - common_carotid_artery_left
+    - common_carotid_artery_right
+    - costal_cartilages
     - gluteus_maximus_left
     - gluteus_maximus_right
     - gluteus_medius_left
     - gluteus_medius_right
     - gluteus_minimus_left
     - gluteus_minimus_right
-    - head
-    - heart_atrium_left
-    - heart_atrium_right
-    - heart_myocardium
-    - heart_ventricle_left
-    - heart_ventricle_right
+    - heart
     - hip_left
     - hip_right
     - humerus_left
@@ -651,27 +984,14 @@ models:
     - iliac_vena_right
     - iliopsoas_left
     - iliopsoas_right
-    - inferior_vena_cava
-    - kidney_left
-    - kidney_right
-    - legs
-    - liver
+    - kidney
+    - lung
     - lung_lower_left_lobe
     - lung_lower_right_lobe
     - lung_middle_right_lobe
     - lung_upper_left_lobe
     - lung_upper_right_lobe
-    - metacarpal_left
-    - metacarpal_right
-    - metatarsal_left
-    - metatarsal_right
-    - pancreas
-    - patella_left
-    - patella_right
-    - portal_vein_and_splenic_vein
     - pulmonary_vein
-    - radius_left
-    - radius_right
     - rib_left_1
     - rib_left_10
     - rib_left_11
@@ -699,162 +1019,95 @@ models:
     - sacrum
     - scapula_left
     - scapula_right
-    - skeletal_muscle
     - skull
-    - small_bowel
-    - spleen
+    - spinal_cord
     - sternum
-    - stomach
-    - subcutaneous_adipose_tissue
-    - tarsal_left
-    - tarsal_right
-    - thyrohyoid_left
-    - thyrohyoid_right
-    - tibia_left
-    - tibia_right
-    - toes_left
-    - toes_right
+    - subclavian_artery_left
+    - subclavian_artery_right
+    - superior_vena_cava
+    - thyroid_gland
     - trachea
-    - ulna_left
-    - ulna_right
-    - visceral_adipose_tissue
-    status: partial_ready_if_checkpoint_folder_present
+    - vertebrae_c1
+    - vertebrae_c2
+    - vertebrae_c3
+    - vertebrae_c4
+    - vertebrae_c5
+    - vertebrae_c6
+    - vertebrae_c7
+    - vertebrae_l1
+    - vertebrae_l2
+    - vertebrae_l3
+    - vertebrae_l4
+    - vertebrae_l5
+    - vertebrae_s1
+    - vertebrae_t1
+    - vertebrae_t10
+    - vertebrae_t11
+    - vertebrae_t12
+    - vertebrae_t2
+    - vertebrae_t3
+    - vertebrae_t4
+    - vertebrae_t5
+    - vertebrae_t6
+    - vertebrae_t7
+    - vertebrae_t8
+    - vertebrae_t9
+    status: ready_if_vista3d_env_and_checkpoint_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: 'MOOSE3.0 covers full-body organs (Dataset666) and is DISTINCT from MOOSE
-      (Dataset888_Cardiac). Set checkpoint_path to checkpoints/MOOSE_series/Dataset666_*
-      once the teacher provides MOOSE3.0 weights. Currently shares Dataset888 path as
-      placeholder; update dataset_id and dataset_json_path when MOOSE3.0 checkpoint arrives.'
+    notes: Full source is bundled under third_party/VISTA3D-Inference-Pipeline-master.
+      Real inference requires MONAI bundle/checkpoint download and a GPU environment;
+      output is standardized to segmentations/*.nii.gz.
     runner: command_template
-    checkpoint_path: checkpoints/MOOSE_series/MOOSE_series
-    dataset_json_path: checkpoints/MOOSE_series/MOOSE_series/Dataset666_Peripheral-Bones/nnUNetTrainerNoMirroring__nnUNetPlans__3d_fullres/dataset.json
-    dataset_id: 666
-    trainer: nnUNetTrainerNoMirroring
-    plans: nnUNetPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
-    private_checkpoint: true
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: conditional_trainable_candidate_for_moose3_tasks
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1889
-    mstep_init_from: checkpoints/MOOSE_series/MOOSE_series/Dataset666_Peripheral-Bones
-    mstep_reason: MOOSE3.0 uses Dataset666 (full-body organs), not Dataset888 (cardiac).
-      Fine-tuning requires the complete MOOSE3.0 checkpoint/training state.
-  nnunet_private:
-    name: Private AbdomenAtlas nnUNet Dataset224
+    checkpoint_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
+    label_map_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master/label_mappings/label_dict_127_abdomenAtlas3-1.json
+    command_template: python scripts/vista3d_predict_and_split.py --image {image}
+      --output {case_output} --vista-root {checkpoint_path} --label-map {label_map_path}
+    private_checkpoint: false
+    source_code_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
+    trainable: conditional_monai_bundle_finetune
+    mstep_role: foundation_candidate_and_optional_monai_bundle_finetune_backend
+    mstep_backend: monai_bundle_finetune
+    mstep_dataset_id: 3101
+    mstep_init_from: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
+    mstep_reason: VISTA3D is integrated as a high-resource foundation segmentation
+      candidate and the bundled pipeline contains MONAI bundle training/fine-tuning/continual-learning
+      configs (configs/train.json, train_continual.json, multi_gpu_train.json, scripts/trainer.py).
+      Fine-tuning requires a VISTA3D checkpoint, datalist, MONAI environment, and
+      sufficient GPU memory; this is not a from-scratch reproduction of the original
+      foundation model.
+    enabled: true
+    recipe: vista3d
+    checkpoint_name: model.pt
+    routing_aliases:
+    - VISTA3D
+  unest:
+    name: UNEST renalStructures segmentation
     type: segmentation
     source: class_checkpoint_map.xlsx
     covered_organs:
-    - aorta
-    - colon
-    - duodenum
-    - kidney_left
-    - kidney_right
-    - liver
-    - pancreas
-    - postcava
-    - spleen
-    - stomach
-    status: ready_if_checkpoint_folder_present
+    - kidney_cortex
+    - kidney_medulla
+    - kidney_pelvicalyceal_system
+    status: ready_if_unest_checkpoint_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: Private AbdomenAtlas organ model from Drive export; useful as an organ-mask
-      candidate.
+    notes: UNEST run_UNEST.sh and configs from the teacher Drive lightweight export
+      are bundled. Real inference requires the actual UNEST model/checkpoint environment.
     runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset224_AbdomenAtlas1.1/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
-    dataset_id: 224
-    trainer: nnUNetTrainer
-    plans: nnUNetResEncUNetLPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
+    checkpoint_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
+    command_template: python scripts/unest_predict_and_split.py --image {image} --output
+      {case_output} --unest-root {checkpoint_path}
     private_checkpoint: true
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: private_abdominal_organ_trainable_backend
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1224
-    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset224_AbdomenAtlas1.1
-    mstep_reason: Private AbdomenAtlas nnUNet is a natural trainable backend for organ-mask
-      refinement if the lab's full checkpoint/training layout is mounted.
-  pedro:
-    name: pedro
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - liver_segment_1
-    - liver_segment_2
-    - liver_segment_3
-    - liver_segment_4
-    - liver_segment_5
-    - liver_segment_6
-    - liver_segment_7
-    - liver_segment_8
-    - pancreas_body
-    - pancreas_head
-    - pancreas_tail
-    status: template
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
-    runner: command_template
-    checkpoint_path: checkpoints/pedro
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
-    private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
-  saros_nnunet:
-    name: Private SAROS nnUNet Dataset1345
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - abdominal_cavity
-    - arm_left
-    - arm_right
-    - head
-    - intermuscular_adipose_tissue
-    - leg_left
-    - leg_right
-    - mediastinum
-    - muscle
-    - parotid_glands
-    - pericardium
-    - skeletal_muscle
-    - subcutaneous_adipose_tissue
-    - submandibular_glands
-    - thoracic_cavity
-    - visceral_adipose_tissue
-    status: ready_if_checkpoint_folder_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: SAROS body-region model; not the first choice for PanTS organ refinement.
-    runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1345_SAROS/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
-    dataset_id: 1345
-    trainer: nnUNetTrainer
-    plans: nnUNetResEncUNetLPlans
-    folds: all
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
-    private_checkpoint: true
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: conditional_trainable_body_region_backend
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 2345
-    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1345_SAROS
-    mstep_reason: SAROS is a private nnUNet-style model but not the first-choice PanTS
-      pancreas target.
+    source_code_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
+    trainable: external_script_required
+    mstep_role: kidney_substructure_inference_candidate
+    mstep_backend: external_training_required
+    mstep_reason: UNEST is task-specific for renal structures. The lightweight export
+      contains a run script, not a complete training wrapper.
+    enabled: true
+    recipe: unest
+    checkpoint_name: null
+    routing_aliases:
+    - UNEST
   totalsegmentator:
     name: TotalSegmentator
     type: segmentation
@@ -998,108 +1251,144 @@ models:
       This supports a TotalSegmentator-style nnUNet M-step plan, but it does not fully
       reproduce the released TotalSegmentator v2 model because the official v2 training
       used additional non-public data.
-  unest:
-    name: UNEST renalStructures segmentation
+    enabled: true
+    recipe: totalseg
+    checkpoint_name: null
+    routing_aliases:
+    - Totalsegmentator (appendicular_bones)
+    - Totalsegmentator (body)
+    - Totalsegmentator (brain_structures)
+    - Totalsegmentator (coronary_arteries)
+    - Totalsegmentator (head_glands_cavities)
+    - Totalsegmentator (head_muscles)
+    - Totalsegmentator (headneck_bones_vessels)
+    - Totalsegmentator (headneck_muscles)
+    - Totalsegmentator (heartchambers_highres)
+    - Totalsegmentator (liver_segments)
+    - Totalsegmentator (lung_vessels)
+    - Totalsegmentator (oculomotor_muscles)
+    - Totalsegmentator(body)
+    - Totalsegmentator(headneck_bones_vessels)
+    - Totalsegmentator(total)
+  atlasnet:
+    name: ATLAS-Net nnUNet v2 abdominal 25-class model
     type: segmentation
     source: class_checkpoint_map.xlsx
     covered_organs:
-    - kidney_cortex
-    - kidney_medulla
-    - kidney_pelvicalyceal_system
-    status: ready_if_unest_checkpoint_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: UNEST run_UNEST.sh and configs from the teacher Drive lightweight export
-      are bundled. Real inference requires the actual UNEST model/checkpoint environment.
-    runner: command_template
-    checkpoint_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
-    command_template: python scripts/unest_predict_and_split.py --image {image} --output
-      {case_output} --unest-root {checkpoint_path}
-    private_checkpoint: true
-    source_code_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
-    trainable: external_script_required
-    mstep_role: kidney_substructure_inference_candidate
-    mstep_backend: external_training_required
-    mstep_reason: UNEST is task-specific for renal structures. The lightweight export
-      contains a run script, not a complete training wrapper.
-  vista3d:
-    name: VISTA3D Inference Pipeline
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - airway
+    - adrenal_gland_left
+    - adrenal_gland_right
     - aorta
-    - atrial_appendage_left
-    - autochthon_left
-    - autochthon_right
-    - brachiocephalic_trunk
-    - brachiocephalic_vein_left
-    - brachiocephalic_vein_right
-    - brain
-    - clavicula_left
-    - clavicula_right
-    - common_carotid_artery_left
-    - common_carotid_artery_right
-    - costal_cartilages
-    - gluteus_maximus_left
-    - gluteus_maximus_right
-    - gluteus_medius_left
-    - gluteus_medius_right
-    - gluteus_minimus_left
-    - gluteus_minimus_right
-    - heart
-    - hip_left
-    - hip_right
-    - humerus_left
-    - humerus_right
-    - iliac_artery_left
-    - iliac_artery_right
-    - iliac_vena_left
-    - iliac_vena_right
-    - iliopsoas_left
-    - iliopsoas_right
-    - kidney
-    - lung
-    - lung_lower_left_lobe
-    - lung_lower_right_lobe
-    - lung_middle_right_lobe
-    - lung_upper_left_lobe
-    - lung_upper_right_lobe
-    - pulmonary_vein
-    - rib_left_1
-    - rib_left_10
-    - rib_left_11
-    - rib_left_12
-    - rib_left_2
-    - rib_left_3
-    - rib_left_4
-    - rib_left_5
-    - rib_left_6
-    - rib_left_7
-    - rib_left_8
-    - rib_left_9
-    - rib_right_1
-    - rib_right_10
-    - rib_right_11
-    - rib_right_12
-    - rib_right_2
-    - rib_right_3
-    - rib_right_4
-    - rib_right_5
-    - rib_right_6
-    - rib_right_7
-    - rib_right_8
-    - rib_right_9
-    - sacrum
-    - scapula_left
-    - scapula_right
-    - skull
-    - spinal_cord
-    - sternum
-    - subclavian_artery_left
-    - subclavian_artery_right
-    - superior_vena_cava
-    - thyroid_gland
-    - trachea
+    - colon
+    - common_bile_duct
+    - duodenum
+    - gall_bladder
+    - inferior_vena_cava
+    - kidney_left
+    - kidney_right
+    - liver
+    - pancreas
+    - pancreatic_cyst
+    - pancreatic_duct
+    - pancreatic_pdac
+    - pancreatic_pnet
+    - portal_vein_and_splenic_vein
+    - renal_vein_left
+    - renal_vein_right
+    - small_intestine
+    - spleen
+    - stomach
+    - superior_mesenteric_artery
+    status: ignored
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: ATLAS-Net model card from teacher's 'Another version of ShapeKit.docx'
+      is integrated. It covers 25 abdominal organ/tumor labels and expects Linux/CUDA/nnUNet
+      v2 plus downloaded ATLAS-Net weights.
+    runner: command_template
+    checkpoint_path: checkpoints/ATLAS-Net
+    label_map_path: configs/atlasnet_label_map.json
+    command_template: python scripts/atlasnet_predict_and_split.py --image {image}
+      --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path}
+    private_checkpoint: false
+    source_code_path: docs/ATLAS-Net_model_card_from_teacher.docx
+    trainable: yes_if_atlasnet_nnunet_training_state_present
+    mstep_role: conditional_trainable_abdominal_25_class_backend
+    mstep_backend: nnunetv2_finetune
+    mstep_dataset_id: 1002
+    mstep_init_from: checkpoints/ATLAS-Net
+    mstep_reason: ATLAS-Net is described as an nnUNet v2 abdominal model; fine-tuning
+      requires downloaded weights and nnUNet-compatible training files.
+    enabled: false
+    recipe: null
+    checkpoint_name: null
+    routing_aliases: []
+  duke:
+    name: duke
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - muscle_fat
+    - skeletal_muscle
+    - subcutaneous_adipose_tissue
+    - visceral_adipose_tissue
+    status: ignored
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/duke
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+    enabled: false
+    recipe: null
+    checkpoint_name: null
+    routing_aliases: []
+  pedro:
+    name: pedro
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
+    - liver_segment_1
+    - liver_segment_2
+    - liver_segment_3
+    - liver_segment_4
+    - liver_segment_5
+    - liver_segment_6
+    - liver_segment_7
+    - liver_segment_8
+    - pancreas_body
+    - pancreas_head
+    - pancreas_tail
+    status: ignored
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Command template may need editing after the real checkpoint folder and
+      original inference script are available.
+    runner: command_template
+    checkpoint_path: checkpoints/pedro
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+    enabled: false
+    recipe: null
+    checkpoint_name: null
+    routing_aliases: []
+  goacc:
+    name: goacc
+    type: segmentation
+    source: class_checkpoint_map.xlsx
+    covered_organs:
     - vertebrae_c1
     - vertebrae_c2
     - vertebrae_c3
@@ -1125,109 +1414,89 @@ models:
     - vertebrae_t7
     - vertebrae_t8
     - vertebrae_t9
-    status: ready_if_vista3d_env_and_checkpoint_present
+    status: ignored
     output_layout: case_id/segmentations/*.nii.gz
-    notes: Full source is bundled under third_party/VISTA3D-Inference-Pipeline-master.
-      Real inference requires MONAI bundle/checkpoint download and a GPU environment;
-      output is standardized to segmentations/*.nii.gz.
+    notes: Template retained; the lightweight export did not include a runnable script
+      for this family.
     runner: command_template
-    checkpoint_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
-    label_map_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master/label_mappings/label_dict_127_abdomenAtlas3-1.json
-    command_template: python scripts/vista3d_predict_and_split.py --image {image}
-      --output {case_output} --vista-root {checkpoint_path} --label-map {label_map_path}
-    private_checkpoint: false
-    source_code_path: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
-    trainable: conditional_monai_bundle_finetune
-    mstep_role: foundation_candidate_and_optional_monai_bundle_finetune_backend
-    mstep_backend: monai_bundle_finetune
-    mstep_dataset_id: 3101
-    mstep_init_from: checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master
-    mstep_reason: VISTA3D is integrated as a high-resource foundation segmentation
-      candidate and the bundled pipeline contains MONAI bundle training/fine-tuning/continual-learning
-      configs (configs/train.json, train_continual.json, multi_gpu_train.json, scripts/trainer.py).
-      Fine-tuning requires a VISTA3D checkpoint, datalist, MONAI environment, and
-      sufficient GPU memory; this is not a from-scratch reproduction of the original
-      foundation model.
-  vsmtrans:
-    name: VSmTrans BDMAP nnUNet Dataset001
+    checkpoint_path: checkpoints/goacc
+    command_template: python wrappers/{model_key}_infer.py --image {image} --output
+      {output} --checkpoint {checkpoint_path}
+    private_checkpoint: true
+    trainable: unknown_template_only
+    mstep_role: template_only_until_real_script_arrives
+    mstep_backend: none
+    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
+      runnable inference/training script or checkpoint folder was available in the
+      lightweight export.
+    enabled: false
+    recipe: null
+    checkpoint_name: null
+    routing_aliases: []
+  mock_seg:
+    name: Local mock segmentation wrapper
     type: segmentation
-    source: class_checkpoint_map.xlsx
+    runner: command_template
+    status: ready
+    private_checkpoint: false
     covered_organs:
-    - bladder
-    - celiac_trunk
-    - colon
+    - liver
+    - pancreas
+    - spleen
+    - kidney_left
+    - kidney_right
+    - aorta
+    - postcava
+    command_template: python third_party/mock_model/mock_seg_infer.py --image {image}
+      --output {output} --case-id {case_id}
+    output_layout: case_id/segmentations/*.nii.gz
+    notes: Synthetic smoke-test backend only. Use it to validate the CLI loop before
+      real GPU checkpoints are available.
+    trainable: 'no'
+    mstep_role: dry_run_only
+    mstep_backend: none
+    mstep_reason: Synthetic mock model for pipeline dry-runs only.
+    enabled: true
+    recipe: mock
+    checkpoint_name: null
+    routing_aliases: []
+  epai_finetuned:
+    name: ePAI finetuned (M-step round1, 50 epochs, 9-class)
+    type: segmentation
+    source: mstep_output
+    covered_organs:
+    - aorta
     - duodenum
-    - esophagus
-    - femur_left
-    - femur_right
-    - gall_bladder
-    - hepatic_vessel
-    - intestine
     - kidney_left
     - kidney_right
     - liver
-    - lung_left
-    - lung_right
     - pancreas
-    - portal_vein_and_splenic_vein
     - postcava
-    - prostate
-    - rectum
     - spleen
     - stomach
     status: ready_if_checkpoint_folder_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: VSmTrans README, predict_script.py, bounding_boxes.py and nnUNet lightweight
-      source are included. Real inference requires the actual VSmTrans/nnUNet checkpoint
-      folder.
+    notes: Fine-tuned from scratch on 12 annotated PanTS cases, 50 epochs, nnUNetTrainer_fast_50epochs.
+      Covers 9 abdominal organs. Use alongside epai_20250421 for Round 2 comparison.
     runner: command_template
-    checkpoint_path: checkpoints/VSmTrans/VSmTrans/nnUNet_results
-    dataset_json_path: checkpoints/VSmTrans/VSmTrans/nnUNet_results/Dataset001_BDMAP/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
-    dataset_id: 1
-    trainer: nnUNetTrainer
+    checkpoint_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results/Dataset1939_MedAI_epai_20250421/nnUNetTrainer_fast_50epochs__nnUNetPlans__3d_fullres
+    nnunet_results_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results
+    dataset_json_path: outputs/mstep_round1_20260517_195010/nnunet_update__epai_20250421/nnUNet_results/Dataset1939_MedAI_epai_20250421/nnUNetTrainer_fast_50epochs__nnUNetPlans__3d_fullres/dataset.json
+    dataset_id: 1939
+    trainer: nnUNetTrainer_fast_50epochs
     plans: nnUNetPlans
-    folds: '0'
-    command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
-      --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds} --workdir third_party/VSmTrans_lightweight/nnUNet
-    private_checkpoint: true
-    source_code_path: third_party/VSmTrans_lightweight
-    trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: trainable_candidate_for_abdominal_organs
-    mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1001
-    mstep_init_from: checkpoints/VSmTrans/VSmTrans/nnUNet_results/Dataset001_BDMAP
-    mstep_reason: VSmTrans is routed to abdominal organs; fine-tuning is possible
-      only if its nnUNet-compatible training state and environment are available.
-  vsnet:
-    name: vsnet
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - liver_hepatic_vein
-    - liver_portal_vein
-    status: ready_if_checkpoint_folder_present
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Checkpoint found in nnUNet_private Dataset1381_LVP (liver vein portal).
-    runner: command_template
-    checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
-    dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1381_LVP/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
-    dataset_id: 1381
-    trainer: nnUNetTrainer
-    plans: nnUNetResEncUNetLPlans
     folds: all
     command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
-      --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
+      --output {case_output} --dataset-id {dataset_id} --nnunet-results {nnunet_results_path}
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds}
-    private_checkpoint: true
+      3d_fullres --folds {folds} --use-python-api
+    private_checkpoint: false
     trainable: yes_if_full_nnunet_training_state_present
-    mstep_role: trainable_candidate_for_liver_vessels
     mstep_backend: nnunetv2_finetune
-    mstep_dataset_id: 1381
-    mstep_init_from: checkpoints/nnUNet_private/nnUNet_private/Dataset1381_LVP
-    mstep_reason: VSNet/LVP checkpoint is now available via nnUNet_private.
+    enabled: true
+    recipe: type2
+    checkpoint_name: checkpoint_final
+    routing_aliases: []
 organ_to_models:
   abdominal_cavity:
   - cads

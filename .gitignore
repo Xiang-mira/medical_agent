@@ -70,3 +70,6 @@ Thumbs.db
 .env.*
 secrets.json
 credentials.json
+
+# Third-party VoxTell repo (has its own .git; download per README §10)
+third_party/VoxTell/

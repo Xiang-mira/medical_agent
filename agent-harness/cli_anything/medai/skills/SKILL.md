@@ -51,16 +51,6 @@ medai-cli --json vlm-label-expert \
   --vlm-backend ollama \
   --vlm-model qwen2.5vl:7b
 
-# EM Loop (dry-run safe)
-medai-cli --json em-loop \
-  --case-id CASE_ID \
-  --ct-image ct.nii.gz \
-  --annotation-folder ref/segmentations \
-  --output-folder outputs/em_out \
-  --organs pancreas,liver \
-  --vlm-backend stub \
-  --dry-run
-
 # RadThinking trace check
 medai-cli --json radthinking-check --patient-folder data/radthinking_demo/patient_001
 
