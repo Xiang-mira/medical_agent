@@ -385,6 +385,56 @@ class TestProjectionBuilder:
         assert "output_folder" in result
 
 
+# ─── Test 7b : Multi-teacher label fusion ────────────────────────────────────
+
+class TestLabelFusion:
+    def test_staple_consensus_of_three_masks(self, tmp_path):
+        from cli_anything.medai.core.label_fusion import fuse_candidate_masks
+
+        cube = np.zeros((16, 16, 16), dtype=np.uint8)
+        cube[4:10, 4:10, 4:10] = 1
+        a = _make_nii(cube, tmp_path / "a.nii.gz")
+        b = _make_nii(cube, tmp_path / "b.nii.gz")           # agrees with A
+        c = _make_nii(np.zeros((16, 16, 16), dtype=np.uint8), tmp_path / "c.nii.gz")  # empty outlier
+
+        out = tmp_path / "fused.nii.gz"
+        meta = fuse_candidate_masks([a, b, c], out, method="auto")
+        assert meta["status"] == "success"
+        assert meta["method"] in {"staple", "weighted_vote"}
+        assert out.exists()
+        # 2/3 raters agree on the cube → consensus must be non-empty and bounded by the union.
+        import nibabel as nib
+        fused = np.asanyarray(nib.load(str(out)).dataobj) > 0
+        assert 0 < int(fused.sum()) <= int(cube.sum())
+
+    def test_weighted_vote_follows_weights(self, tmp_path):
+        from cli_anything.medai.core.label_fusion import fuse_candidate_masks
+
+        hi = np.zeros((16, 16, 16), dtype=np.uint8); hi[2:6, 2:6, 2:6] = 1
+        lo = np.zeros((16, 16, 16), dtype=np.uint8); lo[10:14, 10:14, 10:14] = 1   # disjoint
+        a = _make_nii(hi, tmp_path / "hi.nii.gz")
+        b = _make_nii(lo, tmp_path / "lo.nii.gz")
+
+        out = tmp_path / "fused.nii.gz"
+        meta = fuse_candidate_masks([a, b], out, weights=[0.9, 0.1], method="weighted_vote")
+        assert meta["status"] == "success" and meta["method"] == "weighted_vote"
+        import nibabel as nib
+        fused = np.asanyarray(nib.load(str(out)).dataobj) > 0
+        # Only the high-weight region clears the 0.5 threshold.
+        assert fused[2:6, 2:6, 2:6].all()
+        assert not fused[10:14, 10:14, 10:14].any()
+
+    def test_single_input_is_copied(self, tmp_path):
+        from cli_anything.medai.core.label_fusion import fuse_candidate_masks
+
+        cube = np.zeros((8, 8, 8), dtype=np.uint8); cube[2:5, 2:5, 2:5] = 1
+        a = _make_nii(cube, tmp_path / "a.nii.gz")
+        out = tmp_path / "fused.nii.gz"
+        meta = fuse_candidate_masks([a, tmp_path / "missing.nii.gz"], out, method="auto")
+        assert meta["status"] == "single"
+        assert out.exists()
+
+
 # ─── Test 8 : Teacher meeting pipeline contract ──────────────────────────────
 
 class TestTeacherMeetingPipeline:
@@ -525,6 +575,7 @@ class TestTeacherMeetingPipeline:
             dry_run=False,
             resume=True,
             timeout_sec=30,
+            enable_fusion=False,  # this contract test targets the pick-one + shapekit-fallback plumbing
         )
 
         assert infer_calls, "resume must continue incomplete raw-only cases"
@@ -555,6 +606,51 @@ class TestTeacherMeetingPipeline:
         assert "shapekit_not_success" in gap_types
         resume_reasons = [row["reason"] for row in result["resume_audit"]]
         assert "selection_metadata_missing" in resume_reasons
+
+    def test_multimodel_loop_adds_fusion_candidate_for_multi_teacher_organ(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+        import csv as _csv
+
+        ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
+        case_list = tmp_path / "cases.csv"
+        case_list.write_text("case_id,ct_path,annotation_folder\ncase_001,%s,\n" % ct, encoding="utf-8")
+        out = tmp_path / "out"
+
+        def fake_infer(ct_image, output_folder, model_key, **kwargs):
+            seg = Path(output_folder) / "case_001" / "segmentations"
+            seg.mkdir(parents=True, exist_ok=True)
+            if model_key == "teacher_a":
+                _make_nii(_sphere_mask(shape=(16, 16, 16), radius=4), seg / "liver.nii.gz")
+                _make_nii(_sphere_mask(shape=(16, 16, 16), radius=3), seg / "pancreas.nii.gz")
+            if model_key == "teacher_b":
+                _make_nii(_sphere_mask(shape=(16, 16, 16), radius=5), seg / "liver.nii.gz")
+            return {
+                "stage": "registered_infer", "status": "success", "model_key": model_key,
+                "segmentation_output": str(seg), "num_masks": len(list(seg.glob("*.nii.gz"))),
+            }
+
+        monkeypatch.setattr(ml, "run_registered_model", fake_infer)
+
+        result = ml.run_multimodel_annotation_loop(
+            case_list=case_list, output_folder=out,
+            models=["teacher_a", "teacher_b"], organs=["liver", "pancreas"],
+            enable_critic=False, enable_shapekit=False, dry_run=False, resume=False,
+            timeout_sec=30,  # enable_fusion defaults to True
+        )
+        assert result["status"] == "success"
+        with open(out / "dice_metrics.csv") as f:
+            rows = list(_csv.DictReader(f))
+        liver_models = {r["model"] for r in rows if r["organ"] == "liver"}
+        pancreas_models = {r["model"] for r in rows if r["organ"] == "pancreas"}
+        # Two teachers for liver -> a fusion_consensus candidate is added and competes.
+        assert "fusion_consensus" in liver_models
+        assert {"teacher_a", "teacher_b"} <= liver_models
+        # Single teacher for pancreas -> no fusion (needs >=2 candidates).
+        assert "fusion_consensus" not in pancreas_models
+        # The fused consensus mask is written and auditable in selection metadata.
+        sel = json.loads((out / "annotation_versions" / "case_001" / "selection_metadata.json").read_text(encoding="utf-8"))
+        liver_sel = next(r for r in sel["selection_rows"] if r["organ"] == "liver")
+        assert "fusion_consensus" in liver_sel["candidate_models"]
 
     def test_failure_mining_preserves_labelcritic_and_review_context(self, tmp_path):
         import importlib.util

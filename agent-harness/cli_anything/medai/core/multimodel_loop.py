@@ -8,6 +8,7 @@ from typing import Any
 
 from .json_utils import write_json
 from .auto_fine_label import build_label_passport, passport_path_for_mask
+from .label_fusion import fuse_candidate_masks
 from .label_verifier import verify_annotation
 from .labelcritic_wrapper import run_labelcritic_compare
 from .mstep_runner import build_training_manifest, write_mstep_config
@@ -826,6 +827,24 @@ def _select_candidate(
     }
 
 
+def _fusion_weight(tracker: OrganModelPerformance | None, organ: str, model: str) -> float:
+    """Reliability weight for one (organ, model) in weighted-vote fusion.
+
+    Uses the tracker's mean pseudo-consistency DSC when available (round 2+);
+    falls back to equal weight (1.0) during exploration / round 1. A small floor
+    keeps a currently-low-scoring teacher contributing rather than vanishing.
+    """
+    if tracker is None:
+        return 1.0
+    try:
+        stats = tracker.get_stats(organ, model)
+    except Exception:
+        stats = None
+    if stats and stats.get("n_cases", 0) >= 1:
+        return max(float(stats.get("mean_dice", 0.0)), 0.05)
+    return 1.0
+
+
 def run_multimodel_annotation_loop(
     case_list: str | Path,
     output_folder: str | Path,
@@ -848,6 +867,8 @@ def run_multimodel_annotation_loop(
     resume: bool = True,
     preseeded_model_dirs: dict[str, Path] | None = None,
     labelcritic_options: dict[str, Any] | None = None,
+    enable_fusion: bool = True,
+    fusion_method: str = "auto",
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -1094,6 +1115,74 @@ def run_multimodel_annotation_loop(
                 # Update performance tracker with this (organ, model, pseudo-consistency Dice) observation.
                 if tracker and dice is not None and not dry_run:
                     tracker.update(organ, model_key, float(dice))
+
+            # Multi-teacher consensus fusion: when >=2 eligible teacher
+            # candidates exist for this organ, fuse them (STAPLE / reliability-
+            # weighted vote) into a consensus mask that then competes as its own
+            # candidate. This denoises individual teacher errors automatically.
+            if enable_fusion and not dry_run:
+                fuse_inputs = [
+                    c for c in candidates
+                    if c.get("candidate_exists") and c.get("eligible_for_labelcritic", True) and not c.get("is_fusion")
+                ]
+                if len(fuse_inputs) >= 2:
+                    fused_path = case_refined / "fusion" / case_id / "segmentations" / f"{organ}.nii.gz"
+                    fusion_meta = fuse_candidate_masks(
+                        [c["prediction"] for c in fuse_inputs],
+                        fused_path,
+                        weights=[_fusion_weight(tracker, organ, c["model"]) for c in fuse_inputs],
+                        reference_image=ct,
+                        method=fusion_method,
+                    )
+                    if fusion_meta.get("status") == "success" and fused_path.exists():
+                        fused_qc = _compute_candidate_qc(
+                            ct=ct, mask=fused_path, organ=organ,
+                            reference=current_ref if current_ref_exists else None,
+                        )
+                        fv = verify_annotation(
+                            current_ref if current_ref_exists else None, fused_path, organ,
+                            dsc_replace_threshold=0.0, dsc_vlm_threshold=vlm_threshold,
+                        )
+                        fused_row = {
+                            "case_id": case_id,
+                            "organ": organ,
+                            "model": "fusion_consensus",
+                            "prediction": str(fused_path),
+                            "pre_shapekit_prediction": str(fused_path),
+                            "reference": str(current_ref) if current_ref else "",
+                            "reference_role": "prior_or_selected_pseudo_reference" if current_ref_exists else "none",
+                            "metric_family": "pseudo_consistency",
+                            "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
+                            "ground_truth_status": "pseudo_label_candidate",
+                            "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
+                            "dice": fv.get("dice"),
+                            "pseudo_consistency_dice": fv.get("dice"),
+                            "decision": fv.get("decision"),
+                            "status": fv.get("status"),
+                            "reason": fv.get("reason"),
+                            "reference_quality_bucket": fv.get("quality_bucket"),
+                            "candidate_exists": True,
+                            "alias_match": "fusion_consensus",
+                            "candidate_shapekit_status": "fusion_consensus",
+                            "candidate_shapekit_reason": f"{fusion_meta.get('method')} of {fusion_meta.get('n_inputs')} candidates",
+                            "candidate_shapekit_report": {},
+                            "candidate_qc": fused_qc,
+                            "candidate_qc_status": fused_qc.get("status"),
+                            "candidate_qc_score": fused_qc.get("score"),
+                            "candidate_qc_flags": fused_qc.get("flags", []),
+                            "eligible_for_labelcritic": fused_qc.get("eligible_for_labelcritic", True),
+                            "is_fusion": True,
+                            "fusion_method": fusion_meta.get("method"),
+                            "fusion_inputs": [c["model"] for c in fuse_inputs],
+                            "fusion_weights": fusion_meta.get("weights"),
+                        }
+                        dice_rows.append(fused_row)
+                        # Prepend so the consensus is the incumbent in pairwise
+                        # LabelCritic selection (a teacher must beat it to win).
+                        if fused_row.get("eligible_for_labelcritic", True):
+                            candidates.insert(0, fused_row)
+                        else:
+                            candidates.append(fused_row)
 
             selected, selection = _select_candidate(
                 ct=ct,
