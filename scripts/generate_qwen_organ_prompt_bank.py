@@ -257,8 +257,8 @@ def validate_response(
         *(prompt for values in accepted.values() for prompt in values),
     ]
     for category in PROMPT_BANK_CATEGORIES:
-        if not isinstance(values, list):
         values = response.get(category)
+        if not isinstance(values, list):
             rejected.append({"category": category, "text": None, "reasons": ["missing_or_non_list_category"]})
             continue
         for value in values:

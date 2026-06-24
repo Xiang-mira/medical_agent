@@ -1,201 +1,171 @@
-# MedAI Agent Loop – Multi-Model Medical Annotation Refinement
+# MedAI Agent Loop
 
-This repository implements a registry-driven medical image annotation refinement workflow for abdominal CT segmentation. It starts from selected PanTS/PAINTS tumor cases, runs one or more segmentation teacher models, normalizes model outputs into `segmentations/*.nii.gz`, evaluates predictions against available annotations, optionally sends uncertain masks to LabelCritic/VLM review, writes updated annotation artifacts, and prepares a selected-model-aware M-step for the next E-step round.
+Registry-driven, multi-model pseudo-label refinement for 3D medical image
+segmentation. The current mainline builds a strict 373-target organ label space,
+runs teacher models through hierarchical ROI inference, scores and fuses
+pseudo-label evidence with AutoLabelCore, and trains a VoxTell-style
+prompt-conditioned 3D student across EM rounds.
 
-The code is designed for PanTS/PAINTS 50-case debugging first, then extension to larger cohorts when real checkpoints, data, and GPU environments are available.
+> **Reporting boundary**
+>
+> Existing masks in the case manifests are treated as prior pseudo references or
+> weak labels, not expert ground truth. Unless a separately verified expert-label
+> path is configured, Dice/DSC values in this repository are
+> **pseudo-consistency metrics**, not anatomical accuracy or expert-label
+> performance.
 
-Current student direction: keep CT as 3D volumes and use a VoxTell-style
-3D prompt-based student over 373 exact organ prompts. VISTA3D remains a teacher
-or legacy/reference student backend only; its 127-label space must not limit the
-system target space.
-
-## What this project does
-
-```text
-1. Prepare local checkpoints and PanTS/PAINTS CT data
-2. Inspect or rebuild the model registry
-3. Select or validate 50 tumor-positive PanTS/PAINTS cases
-4. Run E-step Round 1 with selected segmentation models
-5. Normalize model outputs into segmentations/*.nii.gz
-6. Treat any existing masks as prior pseudo references, not expert ground truth
-7. Keep teacher outputs as auditable pseudo-label candidates for 373 targets
-8. Run candidate ShapeKit, candidate QC, then LabelCritic selection for competing masks
-9. Queue low-confidence, QC-failed, ShapeKit-fallback, or conflicting masks for review
-10. Build/run the 3D prompt-based student M-step when the trainer/checkpoint is configured
-11. Run a later E-step round and compare metrics with convergence-table
-```
-
-Intended loop:
+## Current architecture
 
 ```text
-PanTS/PAINTS selected cases
-        |
-        v
-Model registry chooses candidate teachers per organ
-        |
-        v
-E-step: ePAI / VSmTrans / TotalSegmentator / VISTA3D / private nnUNet-style entries
-        |
-        v
-Mask normalization + candidate ShapeKit
-        |
-        v
-Candidate QC gate: geometry, empty mask, volume, connected components
-        |
-        v
-AutoLabelCore scores all eligible post-ShapeKit candidates; LabelCritic is an optional bounded tie-break signal for supported organs
-        |
-        v
-Pseudo-reference consistency checks when prior masks exist
-All targets: teacher-derived pseudo-label candidates and surrogate checks
-        |
-        v
-Annotation update + review queue + RadThinking-style traces + training_manifest.json
-        |
-        v
-M-step: prepare or run VoxTell-style 3D prompt student training
-        |
-        v
-Updated checkpoint can be returned to the next E-step candidate pool if training succeeds
+PanTS / PAINTS CT volumes and prior pseudo references
+                         |
+                         v
+373 exact canonical targets + organ taxonomy + model registry
+                         |
+                         v
+Major organs: full-volume teacher inference
+Child targets: parent-mask ROI inference and full-geometry restoration
+                         |
+                         v
+ShapeKit -> structural QC -> exact-identity validation
+                         |
+                         v
+AutoLabelCore evidence scoring and family-balanced candidate fusion
+                         |
+                         +----> LabelCritic bounded tie-break (supported cases)
+                         |
+                         v
+A/B hard labels + optional C soft labels + auditable rejected/provisional labels
+                         |
+                         v
+VoxTell-style 3D prompt student M-step
+                         |
+                         v
+Student inference, next E-step, convergence check, early stop
 ```
 
-## 1. Prerequisites
+The formal teacher pool currently contains 21 Drive-aligned registry routes plus
+the separate official TotalSegmentator route. Auxiliary, legacy, and
+developer-only entries also exist in the registry; `mock_seg` is never a formal
+teacher.
 
-Use a Linux machine or GPU server with:
+## Design rules
 
-- Python environment that can run this repository's CLI.
-- NVIDIA GPU for real model inference/training.
-- CUDA-compatible PyTorch / nnUNet v2 environment for nnUNet-style models such as ePAI.
-- MONAI/VISTA3D environment if using VISTA3D fine-tuning.
-- VoxTell-style 3D prompt student dependencies/checkpoint if using the new
-  prompt-based student route.
-- Local PanTS/PAINTS CT data in NIfTI format (`.nii.gz`).
-- Local checkpoints for private or large models you want to run.
-- Optional LabelCritic/VLM server on `localhost:8000` for real visual review.
+- **Exact organ identity:** every comparison, fusion, critic decision, dashboard
+  row, and training item is keyed by `(case_id, canonical_id)`.
+  `liver`, `liver_segment_1`, `pancreas`, and `pancreas_head` are distinct
+  targets. Parent masks define ROIs only and cannot substitute for child masks.
+- **Hierarchical inference:** major organs run first. Child structures run inside
+  parent-mask ROIs with a configurable physical margin and are restored to the
+  original CT geometry. A missing parent blocks its children instead of silently
+  falling back to full-volume child inference.
+- **Independent evidence:** correlated checkpoints are collapsed into explicit
+  evidence families before confidence scoring and fusion.
+- **QC is a gate, not proof of accuracy:** geometry, non-empty-mask, containment,
+  connected-component, and volume checks can reject a candidate but do not turn
+  it into expert-validated truth.
+- **Auditable automation:** selection records retain evidence components,
+  conflicts, missing evidence, grades, model lineage, critic signals, and
+  training weights.
+- **Safe shared-GPU behavior:** the resource gate skips work when GPUs are busy.
+  The formal runner does not stop a shared vLLM process unless explicitly given
+  ownership through `MEDAI_MANAGE_OWN_VLLM=1`.
 
-`--dry-run`, `mock_seg`, and `--critic-backend stub` remain in the code only for developer smoke tests and offline command validation. They are disabled for formal experiments: do not use or report dry-run, mock, or stub outputs as project results.
-
-## 2. Required local files
-
-Large/private files are not bundled. Place them locally as needed:
+## Repository layout
 
 ```text
-checkpoints/
-  qchen76_2025_0421/
-    nnUNetTrainer__nnUNetPlans__3d_fullres/
-      dataset.json
-      plans.json
-      fold_all/checkpoint_final.pth
-  CADS_series/
-  MOOSE_series/
-  nnUNet_private/
-  UNEST/
-  VSmTrans/
-  ATLAS-Net/
-    nnUNet_results/Dataset001_ATLASNet/
-      nnUNetTrainer__nnUNetPlans__3d_fullres/
-        dataset.json
-        plans.json
-        fold_all/checkpoint_final.pth
-third_party/PanTS-main/data/
-  ImageTr/
-  LabelTr/
+agent-harness/
+  cli_anything/medai/
+    medai_cli.py                 JSON-oriented command-line interface
+    core/
+      multimodel_loop.py         E-step orchestration and artifact writing
+      hierarchical_roi.py       parent-first ROI planning and restoration
+      organ_taxonomy.py          canonical identity and hierarchy utilities
+      auto_label_core.py         evidence scoring, grading, and fusion
+      labelcritic_wrapper.py     bounded pairwise VLM comparison
+      voxtell_student.py         prompt-student manifests and inference
+configs/
+  model_registry.yaml            model routes, checkpoints, and capabilities
+  organ_taxonomy.json            strict parent/child taxonomy
+  student_3d_prompt_target_organs.json
+                                  373 exact formal targets and prompt metadata
+  autolabel_core.yaml            evidence weights, thresholds, and grades
+  teacher_branch_map.yaml        teacher branch routing
+data_manifest/                   case manifests
+scripts/
+  run_em_training.py             single formal multi-round EM entry point
+  train_voxtell_prompt_student.py
+  build_organ_taxonomy.py
+  audit_organ_identity.py
+  audit_organ_mappings.py
+  check_gpu_resources.py
+docs/                            architecture, policy, audit, and run notes
 ```
 
-The main 50-case manifest used by the current workflow is:
+Large datasets, checkpoints, and generated outputs are intentionally not bundled
+with the repository.
+
+## Prerequisites
+
+- Linux and Python 3.
+- NVIDIA GPU and CUDA-compatible PyTorch for real inference/training.
+- Model-specific environments for nnUNet v2, MONAI/VISTA3D, VoxTell, or other
+  registered teachers used in a run.
+- Local CT volumes and masks in NIfTI format (`.nii.gz`).
+- Local checkpoints matching `configs/model_registry.yaml`.
+- ShapeKit under `third_party/ShapeKit-main` for formal E-steps.
+- A LabelCritic-compatible VLM endpoint, normally at
+  `http://localhost:8000`, when critic support is enabled.
+
+`--dry-run`, `mock_seg`, critic `stub`, and explicit debug bypasses are for
+smoke testing only. Do not include their results in formal experiment reports.
+
+## Installation and basic checks
+
+From the repository root:
+
+```bash
+pip install -e agent-harness
+python run_medai_cli.py --json doctor
+python run_medai_cli.py --json model-inventory
+```
+
+Before any GPU smoke test, inference, or benchmark:
+
+```bash
+PYTHONPATH=agent-harness python scripts/check_gpu_resources.py
+```
+
+The command returns `skipped_resource_busy` instead of interfering with another
+GPU process.
+
+## Data and checkpoints
+
+The default formal case manifest is:
 
 ```text
 data_manifest/case_list_50_tumor.csv
 ```
 
-Each row should point to a CT file and an annotation folder. The CLI expects PanTS/ShapeKit-style masks under `segmentations/*.nii.gz`.
-
-### Install and run ATLAS-Net
-
-ATLAS-Net is a public CC BY 4.0 nnUNet v2 checkpoint. Clone it into the registry's
-expected checkpoint location without committing its large weights to this repository:
-
-```bash
-git lfs install
-git clone https://huggingface.co/Koushik45048545309/Atlas-Net checkpoints/ATLAS-Net
-pip install nnunetv2
-```
-
-Run it through the same JSON CLI and output contract as the other registered models:
-
-```bash
-python run_medai_cli.py --json infer \
-  --model atlasnet \
-  --image /path/to/ct.nii.gz \
-  --output outputs/atlasnet_case \
-  --case-id case_001 \
-  --device cuda:0
-```
-
-The normalized masks are written to
-`outputs/atlasnet_case/case_001/segmentations/*.nii.gz`; the combined label map,
-local label map, and run metadata are written under
-`outputs/atlasnet_case/case_001/per_model/atlasnet/`.
-
-## 3. Install and verify the CLI
-
-From the repository root:
-
-```bash
-cd /path/to/medical_agent
-pip install -e agent-harness
-```
-
-Verify that the CLI can load:
-
-```bash
-python run_medai_cli.py --json doctor
-```
-
-## 4. Inspect the model registry
-
-The workflow is registry-driven. The registry maps organs to candidate model families and records conditional M-step trainability metadata.
-
-Inspect available models:
-
-```bash
-python run_medai_cli.py --json model-inventory
-```
-
-Check candidate models for specific organs:
-
-```bash
-python run_medai_cli.py --json registry-candidates \
-  --organs pancreas,liver,aorta,pancreatic_duct,kidney_cortex
-```
-
-Ask the router which model should be primary/auxiliary for each organ:
-
-```bash
-python run_medai_cli.py --json route-models \
-  --organs pancreas,liver,aorta,kidney_cortex
-```
-
-The current registry includes model keys such as:
+Each CSV row must contain:
 
 ```text
-airrc, atlasnet, atm, cads, dap, duke, epai_20250421, epai_finetuned,
-goacc, mock_seg, moose, moose3_0, nnunet_private, pedro, saros_nnunet,
-totalsegmentator, unest, vista3d, vsmtrans, vsnet
+case_id,ct_path,annotation_folder
 ```
 
-`mock_seg` is a developer-only smoke-test entry. It is not part of formal experiments and must not be reported as a real segmentation teacher.
+Optional report, clinical, and pathology fields are supported by the CLI.
+`annotation_folder` should contain PanTS/ShapeKit-style
+`segmentations/*.nii.gz` masks. These masks remain prior pseudo references
+unless independently verified as expert labels.
 
-## 5. Validate or select the 50 tumor cases
-
-If `data_manifest/case_list_50_tumor.csv` already exists, validate it:
+Validate the manifest:
 
 ```bash
 python scripts/validate_case_list_50.py \
   --case-list data_manifest/case_list_50_tumor.csv
 ```
 
-If you need to regenerate the manifest from a downloaded PanTS folder:
+Or select a 50-case PanTS subset:
 
 ```bash
 python run_medai_cli.py --json pants-select-50 \
@@ -205,18 +175,70 @@ python run_medai_cli.py --json pants-select-50 \
   --num-cases 50
 ```
 
-The selector/validator checks that selected cases have usable CT paths, label folders, required organ masks, and non-empty pancreatic lesion/tumor masks unless smoke-test options are explicitly used.
+Typical local checkpoint roots include:
 
-## 6. Run E-step Round 1
+```text
+checkpoints/
+  qchen76_2025_0421/
+  CADS_series/
+  MOOSE_series/
+  nnUNet_private/
+  VSmTrans/
+  VISTA3D-Inference-Pipeline-master/
+  ATLAS-Net/
+  VoxTell/voxtell_v1.1/
+  Qwen/Qwen3-Embedding-4B/
+```
 
-Example real run:
+Always use the paths and dataset metadata recorded in the registry rather than
+assuming that two checkpoints with similar names share a label space.
+
+## Rebuild and audit the organ identity layer
+
+`configs/class_checkpoint_map_updates.xlsx` is the source workbook for the
+current hierarchy. Rebuild and audit it on CPU:
+
+```bash
+CUDA_VISIBLE_DEVICES='' PYTHONPATH=agent-harness \
+  python scripts/build_organ_taxonomy.py
+
+CUDA_VISIBLE_DEVICES='' PYTHONPATH=agent-harness \
+  python scripts/audit_organ_mappings.py
+
+CUDA_VISIBLE_DEVICES='' PYTHONPATH=agent-harness \
+  python scripts/audit_organ_identity.py
+```
+
+Unknown or ambiguous mappings are blocked. Legacy records without exact
+source-label provenance are marked `legacy_unverified` and excluded from strict
+M-step manifests.
+
+Inspect registry coverage and routing:
+
+```bash
+python run_medai_cli.py --json registry-candidates \
+  --organs pancreas,liver,aorta,pancreatic_duct,kidney_cortex
+
+python run_medai_cli.py --json route-models \
+  --organs pancreas,liver,aorta,pancreatic_duct,kidney_cortex
+
+python run_medai_cli.py --json validate-373-target
+```
+
+## Run one E-step
+
+The default `run-loop` target is `student_373`, and the default teacher
+inference mode is `hierarchical_roi`.
 
 ```bash
 python run_medai_cli.py --json run-loop \
   --case-list data_manifest/case_list_50_tumor.csv \
-  --models epai_20250421,vsmtrans \
-  --organs pancreas,liver,spleen,kidney_left,kidney_right,aorta,postcava,duodenum,stomach \
-  --output outputs/run_pants50_round1 \
+  --models cads551,moose666,epai_20250421,vsmtrans,totalsegmentator \
+  --organs student_373 \
+  --target-config configs/student_3d_prompt_target_organs.json \
+  --output outputs/round1 \
+  --teacher-inference-mode hierarchical_roi \
+  --roi-margin-mm 20 \
   --enable-shapekit \
   --enable-critic \
   --critic-backend labelcritic \
@@ -224,183 +246,132 @@ python run_medai_cli.py --json run-loop \
   --critic-port 8000
 ```
 
-For a developer-only offline command check, use a separate test output folder and do not include the results in formal metrics:
+For each case, major organs are inferred first. Child tasks use parent ROIs and
+are restored to the original CT grid. Compatible crops may be merged to avoid
+reloading the same checkpoint, but each child keeps an independent anatomical
+support box. At least 95% of a merged-crop prediction must remain inside that
+support; otherwise only that child is rerun on its independent ROI.
 
-```bash
-python run_medai_cli.py --json run-loop \
-  --case-list data_manifest/case_list_50_tumor.csv \
-  --models mock_seg \
-  --organs pancreas,liver,aorta \
-  --output outputs/dry_run_multimodel \
-  --dry-run
+Primary teachers run first and backups are used when required. Round 2 and later
+may reuse a valid Round 1 hierarchical teacher cache; student inference is
+rerun after every M-step because the student checkpoint changes.
+
+### E-step selection flow
+
+1. Normalize teacher outputs to exact canonical NIfTI masks.
+2. Run ShapeKit when enabled.
+3. Apply structural and geometry QC.
+4. Collapse correlated models into evidence families.
+5. Score available evidence with AutoLabelCore.
+6. Fuse eligible candidates with family-balanced weights.
+7. Use LabelCritic only as a bounded tie-break signal for supported organs.
+8. Assign a grade and training weight.
+9. Write selections, review/audit rows, manifests, and run summaries.
+
+The default `configs/autolabel_core.yaml` policy uses A/B labels as hard
+training targets. C labels have zero hard-label weight and may be used only
+through the explicitly supported VoxTell soft-target path. Provisional and
+rejected labels remain auditable with zero training weight.
+
+The optional LongTailCritic is disabled by default. It learns synthetic
+structural corruptions from high-quality multi-family seeds; its
+`structural_corruption_probability` is not a segmentation-accuracy score.
+
+## Expected E-step artifacts
+
+```text
+outputs/round1/
+  run_summary.json
+  inference_results.json
+  dice_metrics.csv                 pseudo-consistency where references exist
+  round_metrics.csv
+  training_manifest.json
+  review_queue.jsonl               audit queue; not a mandatory acceptance gate
+  auto_arbitration_log.jsonl
+  vlm_decisions.jsonl
+  pseudo_label_gap_report.json
+  pseudo_label_gap_report.csv
+  shapekit_report.json
+  annotation_versions/
+  cases/
+    <case_id>/
+      hierarchical_inference_plan.json
+      hierarchical_predictions/
+      pseudo_label_selection.json
 ```
 
-### Current E-step behavior
+The per-case selection file is the main audit record. The root
+`training_manifest.json` is the handoff to the M-step.
 
-For every case and every requested model, the loop:
-
-1. Loads the CT path and current annotation folder from the case-list CSV.
-2. Runs the selected registry model wrapper.
-3. Converts each model's output into a normalized `segmentations/*.nii.gz` folder.
-4. Runs candidate-level ShapeKit when enabled, falling back to the original candidate if ShapeKit is unsupported or fails.
-5. Runs candidate QC on the post-ShapeKit-or-fallback mask before the LabelCritic pool is formed.
-6. Computes pseudo-consistency DICE/DSC only when prior pseudo-reference masks exist.
-7. Applies the consistency gate as a routing signal, not as accuracy:
-   - `DICE >= 0.8`: strong agreement with prior pseudo reference.
-   - `0.5 <= DICE < 0.8`: uncertain, keep for review.
-   - `DICE < 0.5`: send to LabelCritic/VLM if enabled.
-8. Keeps candidate masks for requested organs without usable prior pseudo references as pseudo-label candidates.
-9. Lets LabelCritic compare only QC-eligible competing candidates; hard QC failures are excluded and written to review/gap metadata.
-10. Writes annotation versions, review queues, VLM decisions, routing metadata, and a training manifest.
-
-Important implementation note: `run_multimodel_annotation_loop` runs ShapeKit on each teacher/student candidate before LabelCritic comparison when `--enable-shapekit` is active, then applies candidate QC before the LabelCritic pool is formed. LabelCritic therefore compares post-ShapeKit candidates that pass hard structural checks. Unsupported or failed candidate post-processing falls back to that candidate's original mask, records `shapekit_status`, and writes review/gap metadata to `pseudo_label_gap_report.json/csv`. Candidate QC records empty masks, CT geometry mismatches, suspicious reference-volume ratios, and connected-component anomalies; hard failures are excluded from LabelCritic comparison, while review-level anomalies remain eligible but are flagged in selection metadata, manifests, and gap reports. These checks are pseudo-label consistency controls, not human-verified accuracy.
-
-## 7. No Fine-Label Assumption
-
-The default project assumption is that no JHU expert fine-label set is available. This is not a blocker; it is the point of the project. The system is designed to build a reviewed pseudo-label dataset from multiple teacher candidates, candidate ShapeKit, candidate QC, LabelCritic selection, and later student competition.
-
-If a case list contains an `annotation_folder`, those masks are treated as prior/current pseudo references or imported weak labels. They may be used for consistency checks, volume sanity checks, and review routing, but they are not counted as expert ground truth.
-
-Therefore every default metric is labeled as `metric_family=pseudo_consistency` and every training item keeps `ground_truth_status=pseudo_label_candidate`. Dice/DSC numbers mean overlap with a pseudo reference or selected pseudo label. They do not mean anatomical accuracy.
-
-Future expert-label evaluation can be added only through an explicit separate path, such as `--fine-label-root` in the failure-mining script. Until that path is configured with real expert labels, reports must not use phrases like true accuracy, ground-truth DSC, or expert-label performance.
-
-### AutoLabelCore v2 (373 targets)
-
-`configs/autolabel_core.yaml` defines the universal evidence scorer used for all
-373 formal prompt targets. Structural QC is a rejection gate rather than
-positive accuracy evidence. Correlated checkpoints are collapsed into explicit
-`evidence_family` groups, candidate fusion is family-balanced, and model history
-is updated only through leave-one-evidence-family-out observations. The legacy
-candidate-vs-current-pseudo-reference `mean_dice` tracker is read-only and is
-not used for v2 routing.
-
-Each selected label records `evidence_confidence`, its six evidence components,
-missing evidence, independent-family count, conflict, decision status and target
-type. A/B labels are hard training targets; C labels are soft only for the
-VoxTell probability-target path; provisional/rejected labels remain auditable
-with zero training weight. LabelCritic is an optional bounded tie-break signal
-for supported organs and its absence never reduces confidence.
-
-Audit the configuration and freeze a rollout baseline with:
+Audit or rescore AutoLabelCore results:
 
 ```bash
 python scripts/audit_autolabel_core.py \
-  --selection outputs/<run>/pseudo_label_selection.json \
-  --output outputs/<run>/autolabel_core_baseline.json
+  --selection outputs/round1/cases/<case_id>/pseudo_label_selection.json \
+  --output outputs/round1/cases/<case_id>/autolabel_core_audit.json
+
+python scripts/rescore_autolabel_v3.py --help
 ```
 
-The optional LongTailCritic learns only synthetic structural corruptions from
-A-grade multi-family seeds. Its output is named
-`structural_corruption_probability`; it is not a segmentation-accuracy score.
+## Formal multi-round EM run
 
-## 8. Expected E-step output
-
-A full `run-loop` output folder can contain:
-
-```text
-outputs/run_pants50_round1/
-  dice_metrics.csv              # pseudo-consistency DICE when prior pseudo references exist
-  round_metrics.csv             # aggregated round metrics
-  inference_results.json        # raw inference status/result records
-  review_queue.jsonl            # flagged masks (now auto-arbitrated; optional human audit)
-  auto_arbitration_log.jsonl    # automated VLM absolute-grade verdicts (de-human acceptance gate)
-  vlm_decisions.jsonl           # LabelCritic/VLM decisions when enabled
-  report_supervision.jsonl      # report supervision records when available
-  annotation_versions/          # accepted or updated annotation versions
-  cases/                        # per-case working artifacts
-  critic/                       # LabelCritic artifacts when the real critic runs
-  patient_traces.jsonl          # RadThinking-style structured/template traces when produced
-  training_manifest.json        # cases/masks used by the M-step
-  shapekit_report.json          # run-level index of per-case ShapeKit reports
-  pseudo_label_gap_report.json  # missing/fallback/unsupported pseudo-label rows
-  pseudo_label_gap_report.csv
-  mstep_config.json             # selected M-step configuration
-  mstep_model_routing.json      # selected primary/auxiliary model routing for M-step decisions
-  run_summary.json              # machine-readable summary
-```
-
-The most important file for the next stage is:
-
-```text
-outputs/run_pants50_round1/training_manifest.json
-```
-
-## 9. Run selected-model-aware M-step
-
-The M-step does not blindly train a generic model. It prepares or runs an update for the selected target model family when the required training state and environment exist.
-
-Example ePAI update:
+`scripts/run_em_training.py` is the single formal end-to-end entry point. It
+drives the registry-based teacher pool, hierarchical E-step, pseudo-label
+selection, VoxTell M-step, student evaluation, cache reuse, and convergence
+stopping.
 
 ```bash
-python run_medai_cli.py --json mstep-update \
-  --training-manifest outputs/run_pants50_round1/training_manifest.json \
-  --output-folder outputs/mstep_round1 \
-  --target-model epai_20250421 \
-  --ct-source-root third_party/PanTS-main/data \
-  --pretrained-weights checkpoints/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_all/checkpoint_final.pth
-```
+export PYTHONPATH="$PWD/agent-harness:${PYTHONPATH:-}"
+export MEDAI_CASE_LIST="$PWD/data_manifest/case_list_50_tumor.csv"
+export MEDAI_OUTPUT_ROOT="$PWD/outputs/formal_em_$(date +%Y%m%d_%H%M%S)"
 
-Dry-run before spending GPU time:
+export MEDAI_NUM_ROUNDS=3
+export MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt
+export MEDAI_TEACHER_INFERENCE_MODE=hierarchical_roi
+export MEDAI_ROI_MARGIN_MM=20
+export MEDAI_CANDIDATE_MODE=route_pruned_with_competition
 
-```bash
-python run_medai_cli.py --json mstep-update \
-  --training-manifest outputs/run_pants50_round1/training_manifest.json \
-  --output-folder outputs/mstep_round1_dryrun \
-  --target-model epai_20250421 \
-  --ct-source-root third_party/PanTS-main/data \
-  --dry-run
-```
-
-M-step dry-run writes a training plan such as `mstep_training_plan.json`. Real training writes `mstep_training_result.json` and only reports an updated checkpoint if the backend actually creates a `checkpoint_*.pth` file under the expected result folder.
-
-## 10. Conditional M-step backends
-
-The registry includes selected-model-aware trainability metadata:
-
-- `epai_20250421` is the preferred trainable target for pancreas / pancreatic duct / pancreatic tumor tasks when its nnUNet-compatible checkpoint and training state are mounted.
-- The following models are conditional M-step targets when their compatible training state exists:
-  - `cads`
-  - `moose`
-  - `moose3_0`
-  - `vsmtrans`
-  - `nnunet_private`
-  - `saros_nnunet`
-  - `atlasnet`
-- `totalsegmentator` is a public E-step baseline and has a conditional TotalSegmentator-style public nnUNet recipe entry. This does not claim to reproduce the official released TotalSegmentator model, because official training used additional non-public data.
-- `vista3d` is a high-resource foundation candidate with a conditional MONAI bundle fine-tuning backend when the VISTA3D checkpoint, datalist, MONAI environment, and GPU resources are available.
-- `unest` and template/private families remain inference or external-training candidates unless their original training recipes are provided.
-- `mock_seg` is not trainable and is developer-only smoke-test infrastructure, not a formal teacher model.
-
-The default full EM training script now uses `MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt`.
-It builds `outputs/round*/mstep/voxtell_prompt_student_manifest.json` from prompt/mask
-pairs for the accepted 373 exact organs. If `MEDAI_VOXTELL_TRAIN_CMD` is not
-configured, the script stops at a manifest-ready state and does not fabricate a
-checkpoint or student DSC metrics. Set `MEDAI_STUDENT_BACKEND=vista3d_legacy`
-only for old 127-label VISTA3D reproduction runs.
-
-Download the official VoxTell v1.1 checkpoint to the server:
-
-```bash
-python - <<'PY'
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id="mrokuss/VoxTell",
-    allow_patterns=["voxtell_v1.1/*", "*.json"],
-    local_dir="/home/teacher1/JHU-project1/medical_agent/checkpoints/VoxTell",
-)
-PY
-```
-
-The project fine-tuning command is:
-
-```bash
-export MEDAI_VOXTELL_MODEL_DIR=/home/teacher1/JHU-project1/medical_agent/checkpoints/VoxTell/voxtell_v1.1
-export MEDAI_TEXT_ENCODING_MODEL=/home/teacher1/JHU-project1/medical_agent/checkpoints/Qwen/Qwen3-Embedding-4B
+export MEDAI_ENABLE_SHAPEKIT=1
+export MEDAI_ENABLE_CRITIC=1
+export MEDAI_VOXTELL_MODEL_DIR="$PWD/checkpoints/VoxTell/voxtell_v1.1"
+export MEDAI_TEXT_ENCODING_MODEL="$PWD/checkpoints/Qwen/Qwen3-Embedding-4B"
 export MEDAI_VOXTELL_TRAIN_CMD='python scripts/train_voxtell_prompt_student.py'
+
+python scripts/run_em_training.py
 ```
 
-For a quick trainer path check:
+Important environment controls:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MEDAI_NUM_ROUNDS` | `3` | Maximum EM rounds |
+| `MEDAI_STUDENT_BACKEND` | `voxtell_style_3d_prompt` | Current 373-target student |
+| `MEDAI_TEACHER_INFERENCE_MODE` | `hierarchical_roi` | Parent-first teacher inference |
+| `MEDAI_ROI_MARGIN_MM` | `20` | Physical margin around parent masks |
+| `MEDAI_INFER_TIMEOUT_SEC` | `3600` | Per-teacher inference timeout |
+| `MEDAI_ENABLE_SHAPEKIT` | enabled | Formal mask post-processing requirement |
+| `MEDAI_ENABLE_CRITIC` | enabled | LabelCritic support |
+| `MEDAI_CONVERGENCE_AUTOSTOP` | enabled | Stop when student change stabilizes |
+| `MEDAI_CONVERGENCE_DSC_DELTA` | `0.01` | Round-over-round stop threshold |
+| `MEDAI_CONVERGENCE_MIN_ROUNDS` | `2` | Minimum rounds before early stop |
+| `MEDAI_MANAGE_OWN_VLLM` | disabled | Permit control of this run's own VLM process |
+
+Formal runs require ShapeKit and LabelCritic unless a smoke/debug-only bypass is
+explicitly enabled. The runner records its environment and preflight state in
+the output tree. When convergence criteria are met it writes
+`convergence_stop.json`.
+
+`vista3d_legacy` remains available only for reproducing the old 127-label
+student path and requires `MEDAI_ALLOW_VISTA3D_LEGACY=1`. It is not the current
+373-target mainline.
+
+## VoxTell prompt student
+
+The student consumes 3D CT volumes and exact organ prompts. Qwen is a frozen text
+encoder: pooled prompt embeddings condition the trainable VoxTell image/decoder
+path through cross-attention and multi-scale mask fusion.
+
+Quick trainer validation:
 
 ```bash
 python scripts/train_voxtell_prompt_student.py \
@@ -410,175 +381,117 @@ python scripts/train_voxtell_prompt_student.py \
   --dry-run
 ```
 
-VoxTell's official inference writes files as `ct_<prompt>.nii.gz`; the MedAI
-wrapper also standardizes successful outputs to `<organ>.nii.gz` so the next
-E-step can inject `student_predictions/<case_id>/<organ>.nii.gz` as candidates.
+The prompt cache records the text-model identity, prompt hash, cache format, and
+encoder policy to prevent accidental reuse across incompatible Qwen models or
+prompt sets.
 
-Student failure mining reports `metric_family=pseudo_consistency` by default:
-student masks are compared with selected pseudo labels, not expert labels. When
-JHU expert fine labels become available, pass `--fine-label-root` to
-`scripts/mine_student_failure_cases.py` to generate the reserved
-`fine_label_eval_*` outputs and true `student_vs_expert_fine_label` metrics.
+### Negative prompts
 
-Example developer-only backend dry-runs:
+A missing organ mask is not evidence that the organ is absent. Negative samples
+may come only from:
+
+- non-medical absent objects;
+- out-of-scan anatomy supported by scan-coverage metadata; or
+- explicitly confirmed absent anatomy in case metadata.
+
+Arbitrary missing targets, low-confidence teacher outputs, and prior student
+empty masks are not valid negatives. See
+[VoxTell negative prompt policy](docs/VOXTELL_NEGATIVE_PROMPT_POLICY.md).
+
+## Selected-model-aware M-step
+
+For model-family experiments outside the default VoxTell EM route:
 
 ```bash
 python run_medai_cli.py --json mstep-update \
-  --training-manifest outputs/run_pants50_round1/training_manifest.json \
-  --output-folder outputs/mstep_totalseg \
-  --target-model totalsegmentator \
-  --dry-run
-
-python run_medai_cli.py --json mstep-update \
-  --training-manifest outputs/run_pants50_round1/training_manifest.json \
-  --output-folder outputs/mstep_vista3d \
-  --target-model vista3d \
-  --dry-run
+  --training-manifest outputs/round1/training_manifest.json \
+  --output-folder outputs/mstep_epai \
+  --target-model epai_20250421 \
+  --ct-source-root third_party/PanTS-main/data \
+  --pretrained-weights checkpoints/qchen76_2025_0421/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_all/checkpoint_final.pth
 ```
 
-## 11. Run E-step Round 2 and compare metrics
+Trainability is conditional on the registry entry, compatible training state,
+checkpoint metadata, model dependencies, and available resources. A dry run
+writes a plan; it does not prove that training occurred or that a checkpoint was
+created.
 
-After M-step produces a usable checkpoint, run another E-step with the same case list and compare metrics:
+## Verification
+
+Run the CPU-focused tests and audits before a formal GPU job:
 
 ```bash
-python run_medai_cli.py --json run-loop \
-  --case-list data_manifest/case_list_50_tumor.csv \
-  --models epai_20250421,vsmtrans \
-  --organs pancreas,liver,spleen,kidney_left,kidney_right,aorta,postcava,duodenum,stomach \
-  --output outputs/run_pants50_round2 \
-  --enable-shapekit \
-  --enable-critic \
-  --critic-backend labelcritic \
-  --critic-base-url http://localhost \
-  --critic-port 8000
+PYTHONPATH=agent-harness pytest -q \
+  agent-harness/tests/test_autolabel_core.py \
+  agent-harness/tests/test_hierarchical_identity.py \
+  agent-harness/tests/test_atlasnet_integration.py
+
+PYTHONPATH=agent-harness python scripts/verify_final_v9_integrity.py
+PYTHONPATH=agent-harness python scripts/audit_373_organ_routing.py
+PYTHONPATH=agent-harness python scripts/audit_teacher_readiness.py
 ```
 
-Build a convergence table:
+Useful CLI checks:
 
 ```bash
-python run_medai_cli.py --json convergence-table \
-  --round-csvs outputs/run_pants50_round1/round_metrics.csv,outputs/run_pants50_round2/round_metrics.csv
+python run_medai_cli.py --json doctor
+python run_medai_cli.py --json validate-373-target
+python run_medai_cli.py --json model-inventory
+python run_medai_cli.py --json registry-candidates \
+  --organs pancreas,liver,aorta,pancreatic_duct
 ```
 
-Across rounds, compare pseudo-consistency trends, student-vs-selected-pseudo-label overlap, failure counts, QC flags, ShapeKit fallback rates, and LabelCritic/manual review burden. Do not describe these trends as true accuracy improvements.
+## Manual review and derived samples
 
-## 12. Formal multi-round EM orchestration
-
-There is exactly one formal orchestration entry point for the full multi-round EM
-experiment: `scripts/run_em_training.py`. It is configured entirely through
-`MEDAI_*` environment variables (student backend, number of rounds, ShapeKit /
-LabelCritic gates, VoxTell model dir, output root) and drives the registry-based
-teacher pool, the E-step (`run_multimodel_annotation_loop`), and the M-step.
-
-Minimal formal launch (start the vLLM/LabelCritic server first, then):
-
-```bash
-export MEDAI_OUTPUT_ROOT="$PWD/outputs/formal_pants50_em_$(date +%Y%m%d_%H%M%S)"
-export MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt
-export MEDAI_ENABLE_SHAPEKIT=1
-export MEDAI_ENABLE_CRITIC=1
-export MEDAI_NUM_ROUNDS=3
-export MEDAI_VOXTELL_MODEL_DIR="$PWD/checkpoints/VoxTell/voxtell_v1.1"
-export MEDAI_TEXT_ENCODING_MODEL="$PWD/checkpoints/Qwen/Qwen3-Embedding-4B"
-export MEDAI_VOXTELL_TRAIN_CMD='python scripts/train_voxtell_prompt_student.py'
-export PYTHONPATH="$PWD/agent-harness:${PYTHONPATH:-}"
-
-python scripts/run_em_training.py
-```
-
-Each run records the exact environment + server preflight it used in
-`outputs/<run>/run_formal_em.sh`, which doubles as a reproducibility record.
-
-The loop self-cleans and self-stops without a human: each round's pseudo-labels
-are weighted by an auto-reliability score (low-reliability and gate-rejected
-labels are down-weighted or skipped during student training), and the EM loop
-stops early once the student's round-over-round pseudo-consistency change drops
-below `MEDAI_CONVERGENCE_DSC_DELTA` (default 0.01, after `MEDAI_CONVERGENCE_MIN_ROUNDS`),
-writing `outputs/<run>/convergence_stop.json`. Disable with
-`MEDAI_CONVERGENCE_AUTOSTOP=0`.
-
-The standalone CLI commands (`run-loop`, `mstep-update`, `convergence-table`,
-etc.) remain available as building blocks for inspecting or rerunning a single
-stage; they are not separate end-to-end orchestrators.
-
-## 13. Optional manual review with ITK-SNAP
-
-Manual review is **optional**. The E-step runs an automated arbitration gate over
-every flagged organ (selection fallbacks, low pseudo-consistency, QC-flagged, and
-single-teacher cases), recording a machine verdict in `auto_arbitration_log.jsonl`,
-so `review_queue.jsonl` is an audit trail rather than a required human step.
-
-The gate is deliberately **conservative**: empty masks are deterministically
-rejected (grade 0.0), and a pick is only auto-rejected/auto-swapped when the VLM
-absolute grade is confidently bad (`<= arbitration_reject_grade`, default 0.2).
-This is because absolute single-mask VLM grading (e.g. Qwen2-VL-7B) is only a
-coarse safety net — it reliably flags empty/garbage masks but is unreliable at
-finer judgments — so it is treated as advisory and never overrides the more
-reliable fusion + LabelCritic-pairwise selection on borderline cases. If you
-still want to spot-check, generate ITK-SNAP commands for flagged cases:
+Human review is optional and remains an audit path rather than a hidden
+acceptance requirement:
 
 ```bash
 python run_medai_cli.py --json itksnap-review \
-  --review-queue outputs/run_pants50_round1/review_queue.jsonl \
-  --output-script outputs/run_pants50_round1/open_itksnap_review.sh \
+  --review-queue outputs/round1/review_queue.jsonl \
+  --output-script outputs/round1/open_itksnap_review.sh \
   --max-cases 10
-```
 
-Run the generated script locally on a workstation with ITK-SNAP installed to inspect CT, current annotation, and candidate masks.
-
-## 14. Build teacher-facing samples
-
-To export per-case samples with candidate masks, DICE scores, VLM decision, final annotation, and RadThinking-style traces:
-
-```bash
 python run_medai_cli.py --json build-samples \
-  --run-output outputs/run_pants50_round1 \
-  --output-jsonl outputs/run_pants50_round1/case_samples.jsonl
+  --run-output outputs/round1 \
+  --output-jsonl outputs/round1/case_samples.jsonl
 ```
 
-`patient_traces.jsonl` and sample traces are rule-based structured traces with deterministic template narrative fields. They should be reported as structured audit traces, not as validated VLM-authored clinical reasoning.
+Rule-based RadThinking-style traces are structured audit artifacts. They must not
+be presented as validated clinical reasoning.
 
-## 15. Minimal verification
+## Reporting checklist
 
-```bash
-python scripts/verify_final_v4_integrity.py
-python run_medai_cli.py --json registry-candidates \
-  --organs pancreas,liver,aorta,pancreatic_duct,kidney_cortex
-```
+When presenting results:
 
-Expected behavior: the CLI returns JSON, registry lookups succeed, ePAI appears for its supported 25-class labels when configured, and `mock_seg` is excluded from formal candidate lists.
+1. State whether reference masks are expert labels, weak labels, or pseudo
+   references.
+2. Label default Dice/DSC as `pseudo_consistency`.
+3. Report exact target coverage and missing/blocked organs.
+4. Separate structural QC, LabelCritic decisions, and model agreement from
+   anatomical accuracy.
+5. Preserve evidence family, canonical organ identity, source-label provenance,
+   ShapeKit status, grade, and training weight.
+6. Exclude dry-run, mock, stub, legacy-unverified, and resource-skipped records
+   from formal metrics.
+7. Claim an updated student checkpoint only when real training produced and
+   validated an inference-compatible checkpoint.
 
-## 16. Real run sequence
+## Further documentation
 
-```bash
-python scripts/validate_case_list_50.py \
-  --case-list data_manifest/case_list_50_tumor.csv
+- [Hierarchical ROI and strict organ identity](docs/HIERARCHICAL_ROI_AND_ORGAN_IDENTITY.md)
+- [Multi-model routing architecture](docs/ARCHITECTURE_multimodel_routing.md)
+- [Auto fine-label and VoxTell implementation](docs/AUTO_FINE_LABEL_373_VOXTELL_IMPLEMENTATION.md)
+- [VoxTell/Qwen text encoder architecture](docs/VOXTELL_QWEN_TEXT_ENCODER_ARCHITECTURE.md)
+- [VoxTell negative prompt policy](docs/VOXTELL_NEGATIVE_PROMPT_POLICY.md)
+- [Selected-model-aware M-step](docs/SELECTED_MODEL_AWARE_MSTEP_V7.md)
+- [Model inventory and trainability](docs/MODEL_INVENTORY_AND_TRAINABILITY_V7.md)
+- [Command cheatsheet](docs/COMMAND_CHEATSHEET.md)
 
-python run_medai_cli.py --json run-loop \
-  --case-list data_manifest/case_list_50_tumor.csv \
-  --models totalsegmentator,epai_20250421,cads,vsmtrans,nnunet_private \
-  --organs pancreas,pancreatic_lesion,liver,spleen,kidney_left,kidney_right,colon,duodenum,stomach,aorta,postcava \
-  --output outputs/run_pants50_real \
-  --enable-shapekit \
-  --enable-critic \
-  --critic-backend labelcritic \
-  --critic-base-url http://localhost \
-  --critic-port 8000
-```
+## License and data governance
 
-For formal runs, do not use `--dry-run`, `mock_seg`, or `--critic-backend stub`. Those paths remain developer-only and must not be included in reported metrics or LabelCritic/VLM results.
-
-## 17. Registry and reporting scope
-
-Model and organ coverage are registry-driven. The current registry contains 20 model entries, including one developer-only mock smoke-test entry. Excluding the mock entry and template-only placeholders, 15 model families are real or conditionally runnable depending on local checkpoints and environment setup. The registry maps 389 organ/task keys under `organ_to_models`, 388 of which currently have at least one candidate model; the non-mock model entries cover 388 unique organ/task names through their `covered_organs` lists.
-
-The formal reporting scope assumes no expert ground truth. Case manifest annotation folders are prior pseudo references only. Organs with usable prior masks may get pseudo-consistency DSC/DICE; organs without prior masks rely on teacher competition, QC, ShapeKit status, LabelCritic decisions, teacher overlap, and volume/shape sanity checks. None of these should be reported as human-verified ground-truth DSC.
-
-The repository also includes a 127-organ VISTA3D-label-mapped teacher branch map and a 358-organ all-teacher list for specific workflows. These are separate target sets and should not be reported as universal ground-truth or performance counts.
-
-The file `outputs/organ_model_performance.json` is a run-derived performance tracker rather than a registry definition. In the current checkout it records aggregate statistics for 23 organs and 9 model/student keys, and should be cited only as tracker state for the runs that produced it.
-
-See also:
-
-- `docs/SELECTED_MODEL_AWARE_MSTEP_V7.md`
-- `docs/MODEL_INVENTORY_AND_TRAINABILITY_V7.md`
+This repository integrates code paths and model families with different
+licenses and data-use conditions. Review the license, citation, checkpoint, and
+dataset terms for every enabled component before redistribution or deployment.
+Do not commit private clinical data, protected health information, or
+non-redistributable model weights.
