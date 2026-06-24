@@ -8,12 +8,14 @@
     "adrenal_gland_left": [
       "ePAI",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "adrenal_gland_right": [
       "ePAI",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "airway": [
       "VISTA3D"
@@ -168,10 +170,12 @@
       "Totalsegmentator (brain_structures)"
     ],
     "cbd_stent": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "celiac_aa (celiac_artery)": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "celiac_trunk": [
       "VSmTrans"
@@ -220,7 +224,8 @@
       "CADS556"
     ],
     "common_bile_duct": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "common_carotid_artery_left": [
       "VISTA3D"
@@ -265,7 +270,8 @@
       "VSmTrans",
       "ePAI",
       "CADS553",
-      "MOOSE3.0 (clin_ct_digestive)"
+      "MOOSE3.0 (clin_ct_digestive)",
+      "Dataset001_ATLASNet"
     ],
     "esophagus": [
       "VSmTrans",
@@ -324,7 +330,8 @@
     "gall_bladder": [
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "gland_structure": [
       "CADS559"
@@ -484,7 +491,8 @@
     "inferior_vena_cava": [
       "Totalsegmentator(total)",
       "CADS551",
-      "MOOSE3.0 (clin_ct_cardiac)"
+      "MOOSE3.0 (clin_ct_cardiac)",
+      "Dataset001_ATLASNet"
     ],
     "insular_cortex": [
       "Totalsegmentator (brain_structures)"
@@ -508,7 +516,8 @@
       "Totalsegmentator(headneck_bones_vessels)"
     ],
     "intestine": [
-      "VSmTrans"
+      "VSmTrans",
+      "Dataset001_ATLASNet"
     ],
     "kidney": [
       "VISTA3D"
@@ -519,7 +528,8 @@
     "kidney_left": [
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "kidney_medulla": [
       "UNEST"
@@ -530,7 +540,8 @@
     "kidney_right": [
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "lacrimal_gland_left": [
       "CADS558"
@@ -580,7 +591,8 @@
     "liver": [
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "liver_hepatic_vein": [
       "LVP"
@@ -775,7 +787,8 @@
       "VSmTrans",
       "CADS551",
       "ePAI",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "pancreas_body": [
       "Dataset224_AbdomenAtlas1.1"
@@ -787,7 +800,8 @@
       "Dataset224_AbdomenAtlas1.1"
     ],
     "pancreatic_duct": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "parietal_lobe": [
       "Totalsegmentator (brain_structures)"
@@ -834,7 +848,8 @@
     "portal_vein_and_splenic_vein": [
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_cardiac)"
+      "MOOSE3.0 (clin_ct_cardiac)",
+      "Dataset001_ATLASNet"
     ],
     "postcava": [
       "VSmTrans"
@@ -898,10 +913,12 @@
       "CADS556"
     ],
     "renal_vein_left": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "renal_vein_right": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "rib_cartilage": [
       "Totalsegmentator(total)"
@@ -1083,7 +1100,8 @@
     "spleen": [
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)"
+      "MOOSE3.0 (clin_ct_organs)",
+      "Dataset001_ATLASNet"
     ],
     "spongy_bone": [
       "CADS557"
@@ -1149,7 +1167,8 @@
       "SAROS nnUNet"
     ],
     "superior_mesenteric_artery": [
-      "ePAI"
+      "ePAI",
+      "Dataset001_ATLASNet"
     ],
     "superior_oblique_muscle_left": [
       "Totalsegmentator (oculomotor_muscles)"

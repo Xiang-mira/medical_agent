@@ -35,6 +35,14 @@ def find_totalseg_executable() -> str | None:
     return shutil.which("TotalSegmentator") or shutil.which("totalsegmentator")
 
 
+def _timeout_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def build_totalseg_command(image_path: str | Path, output_dir: str | Path, fast: bool = True, task: str | None = None, roi_preset: str = "shapekit_abdomen", roi_subset: str | None = None, device: str | None = None, statistics: bool = False, preview: bool = False) -> list[str]:
     exe = find_totalseg_executable() or "TotalSegmentator"
     cmd = [exe, "-i", str(image_path), "-o", str(output_dir)]
@@ -59,7 +67,7 @@ def build_totalseg_command(image_path: str | Path, output_dir: str | Path, fast:
     return cmd
 
 
-def run_totalsegmentator(image_path: str, output_folder: str, case_id: str | None = None, fast: bool = True, task: str | None = None, roi_preset: str = "shapekit_abdomen", roi_subset: str | None = None, device: str | None = None, statistics: bool = False, preview: bool = False, dry_run: bool = False, timeout_sec: int = 600) -> dict:
+def run_totalsegmentator(image_path: str, output_folder: str, case_id: str | None = None, fast: bool = True, task: str | None = None, roi_preset: str = "shapekit_abdomen", roi_subset: str | None = None, device: str | None = None, statistics: bool = False, preview: bool = False, dry_run: bool = False, timeout_sec: int | None = None) -> dict:
     image = Path(image_path).resolve()
     if case_id is None:
         case_id = image.parent.name or image.stem
@@ -75,7 +83,7 @@ def run_totalsegmentator(image_path: str, output_folder: str, case_id: str | Non
         completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec)
     except subprocess.TimeoutExpired as exc:
         timed_out = True
-        completed = subprocess.CompletedProcess(cmd, returncode=124, stdout=(exc.stdout or ""), stderr=(exc.stderr or "") + f"\n[totalseg_runner] Timeout after {timeout_sec}s.")
+        completed = subprocess.CompletedProcess(cmd, returncode=124, stdout=_timeout_text(exc.stdout), stderr=_timeout_text(exc.stderr) + f"\n[totalseg_runner] Timeout after {timeout_sec}s.")
     elapsed = time.time() - start
     masks = sorted([p.name for p in seg_out.glob("*.nii.gz")]) if seg_out.exists() else []
     status = "timed_out" if timed_out else ("success" if completed.returncode == 0 and masks else "failed")
@@ -92,7 +100,7 @@ def run_totalseg_with_contract(
     fast: bool = True,
     device: str | None = None,
     dry_run: bool = False,
-    timeout_sec: int = 1800,
+    timeout_sec: int | None = None,
     case_id: str = "unknown",
 ) -> dict:
     """Run TotalSegmentator across all subtasks and write the per_model output contract.
@@ -133,13 +141,18 @@ def run_totalseg_with_contract(
         cmd = build_totalseg_command(image, st_seg_dir, fast, subtask, "none", None, device)
         timed_out = False
         st_start = time.time()
-        try:
-            completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec)
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            completed = subprocess.CompletedProcess(cmd, 124, stdout=(exc.stdout or ""), stderr=(exc.stderr or "") + f"\n[totalseg_runner] Subtask {subtask} timeout after {timeout_sec}s.")
+        existing_masks = sorted(st_seg_dir.glob("*.nii.gz"))
+        if existing_masks:
+            completed = subprocess.CompletedProcess(cmd, 0, stdout="[totalseg_runner] reused cached subtask masks", stderr="")
+            st_masks = existing_masks
+        else:
+            try:
+                completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec)
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                completed = subprocess.CompletedProcess(cmd, 124, stdout=_timeout_text(exc.stdout), stderr=_timeout_text(exc.stderr) + f"\n[totalseg_runner] Subtask {subtask} timeout after {timeout_sec}s.")
+            st_masks = sorted(st_seg_dir.glob("*.nii.gz")) if st_seg_dir.exists() else []
         st_elapsed = time.time() - st_start
-        st_masks = sorted(st_seg_dir.glob("*.nii.gz")) if st_seg_dir.exists() else []
         st_status = "timed_out" if timed_out else ("success" if completed.returncode == 0 and st_masks else "failed")
         subtask_results[subtask] = {"status": st_status, "runtime_sec": round(st_elapsed, 3), "return_code": completed.returncode, "num_masks": len(st_masks)}
         for mask_path in st_masks:

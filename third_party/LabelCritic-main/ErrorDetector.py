@@ -4,6 +4,7 @@ except Exception:
     def display(*args, **kwargs):
         return None
 import os
+import json
 import random
 import requests
 from PIL import Image
@@ -21,6 +22,7 @@ except:
 import tempfile
 import shutil
 import copy
+from pathlib import Path
 import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor
 import csv
@@ -435,6 +437,47 @@ DescriptionsED={
     "stomach":StomachDescriptionED,
     "pancreas":PancreasDescriptionED,
     "gall_bladder":GallbladderDescriptionED}
+
+
+def _default_prompt_bank_config_path():
+    env_path = os.environ.get("MEDAI_PROMPT_TARGET_CONFIG")
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parents[2] / "configs" / "student_3d_prompt_target_organs.json"
+
+
+def _prompt_bank_description_for_organ(organ):
+    """Load organ-specific CT/anatomy guidance from the project prompt-bank manifest."""
+    try:
+        doc = json.loads(_default_prompt_bank_config_path().read_text(encoding="utf-8"))
+        entry = (doc.get("organ_prompt_bank", {}) or {}).get(organ)
+        if not isinstance(entry, dict):
+            return None
+        aliases = ", ".join(entry.get("aliases") or [organ.replace("_", " ")])
+        landmarks = ", ".join(entry.get("landmarks") or [])
+        return (
+            "When evaluating and comparing the overlays, consider the following organ-specific CT information:\n"
+            f"a) Target names and synonyms: {aliases}.\n"
+            f"b) Expected location: {entry.get('region')}.\n"
+            f"c) CT appearance: {entry.get('ct_appearance')}.\n"
+            f"d) Nearby structures and exclusion landmarks: {landmarks}.\n"
+        )
+    except Exception:
+        return None
+
+
+def _organ_description(organ_descriptions, organ):
+    if organ in organ_descriptions:
+        return organ_descriptions[organ]
+    prompt_bank_description = _prompt_bank_description_for_organ(organ)
+    if prompt_bank_description:
+        return prompt_bank_description
+    name = organ.replace("_", " ").replace("gall bladder", "gallbladder")
+    return (
+        "When evaluating and comparing the overlays, use the target organ name, "
+        f"its expected CT location, shape, boundaries, and adjacent structures for the {name}. "
+        "Penalize overlays that clearly mark a different structure or extend far outside the expected anatomic region.\n"
+    )
 
 StomachDescriptionEDShapeless="""When evaluating and comparing the overlays, consider only the overlay unity and location, do NOT consider its shape:
 a) Unity: The stomach red overlay should be a single connected structure. If it has multiple structures or small disconnected parts, the overlay has a big error.
@@ -1237,7 +1280,7 @@ def ErrorDetectionLMDeployZeroShot(clean, y,
     #organ should be present in image. Let's evaluate the label y
     #Analyze image
     if not simple_prompt_ablation:
-        text=instructions % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}+organ_descriptions[organ]
+        text=instructions % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}+_organ_description(organ_descriptions, organ)
     else:
         text='The image I am sending you is a frontal projection of a CT scan, which looks like and is oriented like an AP X-ray. It has a red overlay representing the ' +organ.replace('_',' ').replace('gall bladder','gallbladder')+'. Considering the organ shape and position, evaluate if the red overlay is a good or a bad annotation for the '+organ.replace('_',' ').replace('gall bladder','gallbladder')+'. Justify your answer.'
     imgs=[y]
@@ -1330,7 +1373,7 @@ def ErrorDetectionLMDeployFewShot(clean, y, good_examples,bad_examples,
     #organ should be present in image. Let's evaluate the label y
     #create few shot prompt
     if isinstance(organ_descriptions, dict):
-        organ_description=organ_descriptions[organ]
+        organ_description=_organ_description(organ_descriptions, organ)
     
 
     if len(good_examples)==1 and len(bad_examples)==0:
@@ -3248,16 +3291,17 @@ def Prompt3MessagesSepFiguresLMDeploy(clean, y1, y2,
     
     
     text_y1 = text_y1 % {'organ': organ.replace('_',' '), 'number': 1} 
-    if isinstance(organ_descriptions[organ], list):
-        text_y1 += organ_descriptions[organ][0]
+    organ_description = _organ_description(organ_descriptions, organ)
+    if isinstance(organ_description, list):
+        text_y1 += organ_description[0]
     else:
-        text_y1 += organ_descriptions[organ]
+        text_y1 += organ_description
 
     text_y2 = text_y2 % {'organ': organ.replace('_',' '), 'number': 2} 
-    if isinstance(organ_descriptions[organ], list):
-        text_y2 += organ_descriptions[organ][1]
+    if isinstance(organ_description, list):
+        text_y2 += organ_description[1]
     else:
-        text_y2 += organ_descriptions[organ]
+        text_y2 += organ_description
 
     if save_memory:
         conversation=[]
@@ -3419,16 +3463,17 @@ def Prompt3MessagesSepFiguresLMDeployDualConfirmation(clean, y1, y2,
     
     
     text_y1 = text_y1 % {'organ': organ.replace('_',' '), 'number': 1} 
-    if isinstance(organ_descriptions[organ], list):
-        text_y1 += organ_descriptions[organ][0]
+    organ_description = _organ_description(organ_descriptions, organ)
+    if isinstance(organ_description, list):
+        text_y1 += organ_description[0]
     else:
-        text_y1 += organ_descriptions[organ]
+        text_y1 += organ_description
 
     text_y2 = text_y2 % {'organ': organ.replace('_',' '), 'number': 2} 
-    if isinstance(organ_descriptions[organ], list):
-        text_y2 += organ_descriptions[organ][1]
+    if isinstance(organ_description, list):
+        text_y2 += organ_description[1]
     else:
-        text_y2 += organ_descriptions[organ]
+        text_y2 += organ_description
 
     if save_memory:
         conversation=[]
@@ -4411,10 +4456,10 @@ def Prompt4MessagesSepFiguresLMDeploy(clean, y1, y2,
     
     
     text_y1 = text_y1 % {'organ': organ.replace('_',' '), 'number': 1} 
-    text_y1 += organ_descriptions[organ]
+    text_y1 += _organ_description(organ_descriptions, organ)
 
     text_y2 = text_y2 % {'organ': organ.replace('_',' '), 'number': 2} 
-    text_y2 += organ_descriptions[organ]
+    text_y2 += _organ_description(organ_descriptions, organ)
 
     if save_memory:
         conversation=[]

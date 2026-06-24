@@ -1185,3 +1185,41 @@ vertebrae_t9:
   - point_head
   update_mode: class_continual
   vista3d_label_id: 41
+liver_segment_1: &liver_segment_route
+  fallback_teachers:
+  - totalsegmentator
+  freeze_backbone: true
+  teacher_model: nnunet_private
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 0
+liver_segment_2: *liver_segment_route
+liver_segment_3: *liver_segment_route
+liver_segment_4: *liver_segment_route
+liver_segment_5: *liver_segment_route
+liver_segment_6: *liver_segment_route
+liver_segment_7: *liver_segment_route
+liver_segment_8: *liver_segment_route
+pancreas_head: &pancreas_subregion_route
+  fallback_teachers: []
+  freeze_backbone: true
+  teacher_model: nnunet_private
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 0
+pancreas_body: *pancreas_subregion_route
+pancreas_tail: *pancreas_subregion_route
+liver_portal_vein: &liver_vessel_route
+  fallback_teachers: []
+  freeze_backbone: true
+  teacher_model: lvp
+  trainable_scope:
+  - class_embedding
+  - point_head
+  update_mode: class_continual
+  vista3d_label_id: 0
+liver_hepatic_vein: *liver_vessel_route

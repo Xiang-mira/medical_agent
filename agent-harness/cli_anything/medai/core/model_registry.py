@@ -251,6 +251,8 @@ def parse_checkpoint_map(path: str | Path) -> dict[str, Any]:
         ckpt_idx = header.index("checkpoint")
     except ValueError:
         ckpt_idx = 1 if len(header) > 1 else 0
+    major_idx = next((i for i, value in enumerate(header) if value.startswith("major_organ")), None)
+    parent_idx = header.index("primary_organ_involved") if "primary_organ_involved" in header else None
 
     organ_records: list[dict[str, Any]] = []
     coverage: dict[str, list[str]] = defaultdict(list)
@@ -267,6 +269,8 @@ def parse_checkpoint_map(path: str | Path) -> dict[str, Any]:
         record = {
             "organ": organ,
             "organ_display": organ_raw.strip(),
+            "major_organ": row[major_idx].strip() if major_idx is not None and major_idx < len(row) else "",
+            "primary_organ_involved": row[parent_idx].strip() if parent_idx is not None and parent_idx < len(row) else "",
             "checkpoint": checkpoint_raw,
             "candidate_models": model_keys,
             "candidate_model_names": families,
@@ -332,8 +336,6 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
                 "celiac_aa_celiac_artery": "celiac_aa",
                 "inferior_vena_cava": "postcava",
                 "small_intestine": "intestine",
-                "portal_splenic_veins": "veins",
-                "portal_vein_and_splenic_vein": "veins",
             },
             "checkpoint_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres",
             "dataset_json_path": f"{checkpoint_root}/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json",
@@ -351,13 +353,14 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
         base.update({
             "name": "ATLAS-Net nnUNet v2 abdominal 25-class model",
             "runner": "command_template",
-            "status": "ready_if_atlasnet_checkpoint_present",
+            "status": "ready_if_checkpoint_folder_present",
             "checkpoint_path": f"{checkpoint_root}/ATLAS-Net",
             "label_map_path": "configs/atlasnet_label_map.json",
-            "command_template": "python scripts/atlasnet_predict_and_split.py --image {image} --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path}",
+            "command_template": "python scripts/atlasnet_predict_and_split.py --image {image} --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path} --device \"{device}\"",
             "private_checkpoint": False,
-            "source_code_path": "docs/ATLAS-Net_model_card_from_teacher.docx",
-            "notes": "ATLAS-Net model card from teacher's 'Another version of ShapeKit.docx' is integrated. It covers 25 abdominal organ/tumor labels and expects Linux/CUDA/nnUNet v2 plus downloaded ATLAS-Net weights.",
+            "source_code_path": "https://huggingface.co/Koushik45048545309/Atlas-Net",
+            "license": "CC-BY-4.0",
+            "notes": "Public ATLAS-Net nnUNet v2 checkpoint from Hugging Face. It covers 25 abdominal organ/duct/tumor labels and expects Linux, an NVIDIA GPU, CUDA 11.7+, and nnUNet v2.",
         })
     elif key == "cads":
         base.update({
@@ -490,7 +493,7 @@ def build_registry_dict(checkpoint_map: str | Path, checkpoint_root: str = "chec
     # ATLAS-Net came from the teacher's 'Another version of ShapeKit' model card,
     # not always from the checkpoint map rows. Keep it as a first-class candidate.
     models.setdefault("atlasnet", _default_model_entry("atlasnet", [
-        "aorta", "adrenal_gland_left", "adrenal_gland_right", "common_bile_duct", "colon", "duodenum", "gall_bladder", "inferior_vena_cava", "kidney_left", "kidney_right", "liver", "pancreas", "pancreatic_duct", "superior_mesenteric_artery", "small_intestine", "spleen", "stomach", "portal_vein_and_splenic_vein", "renal_vein_left", "renal_vein_right", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"
+        "aorta", "adrenal_gland_left", "adrenal_gland_right", "common_bile_duct", "celiac_aa (celiac_artery)", "colon", "duodenum", "gall_bladder", "inferior_vena_cava", "kidney_left", "kidney_right", "liver", "pancreas", "pancreatic_duct", "superior_mesenteric_artery", "intestine", "spleen", "stomach", "portal_vein_and_splenic_vein", "renal_vein_left", "renal_vein_right", "cbd_stent", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"
     ], checkpoint_root))
     organ_to_models: dict[str, list[str]] = {}
     for rec in parsed["organs"]:
@@ -499,12 +502,16 @@ def build_registry_dict(checkpoint_map: str | Path, checkpoint_root: str = "chec
             if "mock_seg" not in models_for_organ:
                 models_for_organ.append("mock_seg")
         organ_to_models[rec["organ"]] = models_for_organ
+    from .organ_taxonomy import build_taxonomy
+
+    taxonomy = build_taxonomy(parsed["organs"], checkpoint_map)
     registry = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "generated_from": str(Path(checkpoint_map).resolve()),
         "checkpoint_root": checkpoint_root,
         "models": dict(sorted(models.items())),
         "organ_to_models": dict(sorted(organ_to_models.items())),
+        "organ_taxonomy": taxonomy,
         "notes": [
             "Do not commit private checkpoints to a public repository.",
             "Edit command_template for private models after inspecting each original inference script.",
@@ -529,12 +536,14 @@ def write_registry(checkpoint_map: str | Path, output_yaml: str | Path, output_c
         csv_path = Path(output_csv).resolve()
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         with csv_path.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["organ", "organ_display", "checkpoint", "candidate_models", "candidate_model_names"])
+            writer = csv.DictWriter(f, fieldnames=["organ", "organ_display", "major_organ", "primary_organ_involved", "checkpoint", "candidate_models", "candidate_model_names"])
             writer.writeheader()
             for rec in built["parsed"]["organs"]:
                 writer.writerow({
                     "organ": rec["organ"],
                     "organ_display": rec["organ_display"],
+                    "major_organ": rec.get("major_organ", ""),
+                    "primary_organ_involved": rec.get("primary_organ_involved", ""),
                     "checkpoint": rec["checkpoint"],
                     "candidate_models": ",".join(rec["candidate_models"]),
                     "candidate_model_names": ",".join(rec["candidate_model_names"]),
@@ -557,7 +566,12 @@ def load_registry(path: str | Path) -> dict[str, Any]:
         raise FileNotFoundError(f"model registry not found: {p}")
     text = p.read_text(encoding="utf-8")
     if yaml:
-        return yaml.safe_load(text)
+        registry = yaml.safe_load(text)
+        # AutoLabelCore v2 requires a conservative evidence-lineage contract.
+        # Enrich legacy registries at read time so generated registry files stay
+        # backward compatible while every formal run sees the required fields.
+        from .auto_label_core import enrich_registry_lineage
+        return enrich_registry_lineage(registry)
     raise ImportError(
         "PyYAML is required to load the model registry. "
         "Install it with: pip install pyyaml>=6.0"

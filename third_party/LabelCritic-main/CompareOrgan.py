@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import subprocess
 import uuid
@@ -102,12 +103,55 @@ def compare_organ(ct_path, mask1_path, mask2_path, organ,base_url,
     return best_path
 
 
+def compare_organ_batch(manifest_path, default_base_url, default_port="8000", default_log_file="./comparison_summary.log"):
+    """Run multiple CompareOrgan jobs in one Python process.
+
+    Manifest format:
+    {"items": [{"ct": ..., "mask1": ..., "mask2": ..., "organ": ...,
+                 "base_output": ..., "base_csv": ..., "run_id": ...,
+                 "base_url": ..., "port": ..., "log_file": ...,
+                 "no_dice_check": true, ...}]}
+    """
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        doc = json.load(f)
+    items = doc.get("items", doc if isinstance(doc, list) else [])
+    results = []
+    for idx, item in enumerate(items, start=1):
+        try:
+            best = compare_organ(
+                item["ct"], item["mask1"], item["mask2"], item["organ"],
+                item.get("base_url", default_base_url),
+                base_output=item.get("base_output", "./comparison_results"),
+                base_csv=item.get("base_csv", "./results"),
+                port=str(item.get("port", default_port)),
+                log_file=item.get("log_file", default_log_file),
+                run_id=item.get("run_id"),
+                no_dice_check=bool(item.get("no_dice_check", False)),
+                no_dual_confirmation=bool(item.get("no_dual_confirmation", False)),
+                simple_prompt_ablation=bool(item.get("simple_prompt_ablation", False)),
+                conservative_dual=bool(item.get("conservative_dual", False)),
+                skip_organ_presence_gate=bool(item.get("skip_organ_presence_gate", False)),
+                strict_choice_prompt=bool(item.get("strict_choice_prompt", False)),
+            )
+            results.append({"index": idx, "status": "success", "best": best, "organ": item.get("organ"), "run_id": item.get("run_id")})
+        except Exception as exc:
+            results.append({"index": idx, "status": "failed", "reason": str(exc), "organ": item.get("organ"), "run_id": item.get("run_id")})
+            if bool(doc.get("fail_fast", False)):
+                raise
+    output_json = doc.get("output_json")
+    if output_json:
+        with open(output_json, "w", encoding="utf-8") as f:
+            json.dump({"status": "success", "num_items": len(items), "results": results}, f, ensure_ascii=False, indent=2)
+    return results
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compare two segmentation masks using vLLM and log the result.")
-    parser.add_argument("--ct", required=True, help="Path to CT volume (.nii.gz)")
-    parser.add_argument("--mask1", required=True, help="Path to segmentation directory for model 1")
-    parser.add_argument("--mask2", required=True, help="Path to segmentation directory for model 2")
-    parser.add_argument("--organ", required=True, help="Organ name (e.g. aorta, pancreas)")
+    parser.add_argument("--batch_manifest", default=None, help="Optional JSON manifest for batched comparisons")
+    parser.add_argument("--ct", required=False, help="Path to CT volume (.nii.gz)")
+    parser.add_argument("--mask1", required=False, help="Path to segmentation directory for model 1")
+    parser.add_argument("--mask2", required=False, help="Path to segmentation directory for model 2")
+    parser.add_argument("--organ", required=False, help="Organ name (e.g. aorta, pancreas)")
     parser.add_argument("--base_output", default="./comparison_results", help="Base folder for projection results")
     parser.add_argument("--base_csv", default="./results", help="Base folder for CSV results")
     parser.add_argument("--port", default="8000", help="API server port (vLLM)")
@@ -122,6 +166,13 @@ if __name__ == "__main__":
     parser.add_argument("--strict_choice_prompt", action="store_true", default=False, help="Diagnostic only: use forced-choice prompt")
 
     args = parser.parse_args()
+
+    if args.batch_manifest:
+        compare_organ_batch(args.batch_manifest, args.base_url, default_port=args.port, default_log_file=args.log_file)
+        raise SystemExit(0)
+    missing = [name for name in ("ct", "mask1", "mask2", "organ") if getattr(args, name) is None]
+    if missing:
+        parser.error("missing required arguments for single compare: " + ", ".join(missing))
 
     best = compare_organ(
         args.ct, args.mask1, args.mask2, args.organ, args.base_url,

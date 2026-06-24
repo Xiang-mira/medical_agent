@@ -217,6 +217,7 @@ def main() -> int:
         timeout_sec=args.timeout_sec,
         device="cuda",
         resume=False,
+        teacher_inference_mode="hierarchical_roi",
         preseeded_model_dirs=preseeded,
         labelcritic_options={
             "no_dice_check": args.labelcritic_no_dice_check,

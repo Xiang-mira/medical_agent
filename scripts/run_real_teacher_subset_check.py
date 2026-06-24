@@ -71,6 +71,7 @@ def main() -> int:
         timeout_sec=args.timeout_sec,
         device="cuda",
         resume=False,
+        teacher_inference_mode="hierarchical_roi",
     )
 
     manifest_path = estep_dir / "training_manifest.json"

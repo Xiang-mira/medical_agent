@@ -72,6 +72,13 @@ def _find_local_name_for_global(
         direct_candidates.insert(0, reverse_supported[global_organ])
 
     aliases_map = (model_aliases.get("local_to_global", {}) or {})
+    mapping_types = model_aliases.get("mapping_types", {}) or {}
+    approved_union_locals = [
+        str(local_name) for local_name, mapped_global in aliases_map.items()
+        if mapped_global == global_organ and mapping_types.get(local_name) == "approved_union"
+    ]
+    if approved_union_locals:
+        return (global_organ, "approved_union") if global_organ in available_set else (None, "approved_union_incomplete")
     reverse_manual = {str(v): str(k) for k, v in aliases_map.items()}
     if global_organ in reverse_manual:
         direct_candidates.insert(0, reverse_manual[global_organ])
@@ -95,6 +102,34 @@ def _find_local_name_for_global(
             return local_name, "supported_alias"
 
     return None, "unresolved"
+
+
+def _materialize_approved_union(seg_dir: Path, global_organ: str, model_aliases: dict[str, Any]) -> dict[str, Any] | None:
+    aliases_map = model_aliases.get("local_to_global", {}) or {}
+    mapping_types = model_aliases.get("mapping_types", {}) or {}
+    local_names = [
+        str(local_name) for local_name, mapped_global in aliases_map.items()
+        if mapped_global == global_organ and mapping_types.get(local_name) == "approved_union"
+    ]
+    if not local_names:
+        return None
+    paths = [seg_dir / f"{name}.nii.gz" for name in local_names]
+    missing = [name for name, path in zip(local_names, paths) if not path.exists()]
+    if missing:
+        return {"status": "incomplete", "local_names": local_names, "missing": missing}
+    nib, np = _load_nifti()
+    from nibabel.processing import resample_from_to
+
+    base = nib.load(str(paths[0]))
+    union = np.zeros(base.shape, dtype=np.uint8)
+    for path in paths:
+        image = nib.load(str(path))
+        if image.shape != base.shape or not _affine_close(image.affine, base.affine):
+            image = resample_from_to(image, base, order=0)
+        union |= (np.asanyarray(image.dataobj) > 0).astype(np.uint8)
+    output = seg_dir / f"{global_organ}.nii.gz"
+    nib.save(nib.Nifti1Image(union, base.affine, base.header), str(output))
+    return {"status": "success", "local_names": local_names, "output": str(output)}
 
 
 def merge_case_segmentations(
@@ -160,6 +195,18 @@ def merge_case_segmentations(
                 })
                 selected = "skipped"
                 break
+            union_status = _materialize_approved_union(seg_dir, organ, model_aliases)
+            if union_status and union_status.get("status") != "success":
+                missing_masks.append({
+                    "organ": organ,
+                    "model_key": model_key,
+                    "reason": "Approved union is missing required components",
+                    "union_status": union_status,
+                })
+                continue
+            if union_status:
+                available_files = sorted(seg_dir.glob("*.nii.gz"))
+                available_names = [p.name[:-7] for p in available_files]
             local_name, match_mode = _find_local_name_for_global(organ, available_names, model_aliases, model_entry)
             if not local_name:
                 missing_masks.append({

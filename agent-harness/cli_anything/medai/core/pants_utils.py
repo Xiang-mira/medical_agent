@@ -166,6 +166,10 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _organ_from_mask_name(path: Path) -> str:
+    return path.name[:-7] if path.name.endswith(".nii.gz") else path.stem
+
+
 def import_pants_case(
     pants_root: str | Path,
     case_id: str,
@@ -208,10 +212,13 @@ def import_pants_files(
     report = Path(report_path).resolve() if report_path else None
     scan_id = scan_id or source_case_id or patient_id
     patient_root = Path(output_root).resolve() / patient_id
+    standard_image = patient_root / "image.nii.gz"
+    standard_seg_dir = patient_root / "segmentations"
     scan_dir = patient_root / "scans" / scan_id
     ref_dir = patient_root / "reference_labels" / scan_id / "segmentations"
     if not ct.exists():
         return {"status": "failed", "operation": "pants-import-files", "reason": "ct path does not exist", "ct": str(ct)}
+    _copy_if_exists(ct, standard_image)
     _copy_if_exists(ct, scan_dir / "ct.nii.gz")
     # We do not try to extract the PDF report text automatically here. Keep provenance and a placeholder text file.
     if report and report.exists() and report.suffix.lower() == ".txt":
@@ -225,16 +232,43 @@ def import_pants_files(
         "note": "Minimal clinical metadata placeholder. Replace with PanTS metadata.xlsx fields if needed.",
     })
     copied_masks = []
+    mapping_rows = []
     if copy_labels and label_dir and label_dir.exists():
         ref_dir.mkdir(parents=True, exist_ok=True)
+        standard_seg_dir.mkdir(parents=True, exist_ok=True)
         for m in sorted(label_dir.glob("*.nii.gz")):
             shutil.copy2(m, ref_dir / m.name)
+            shutil.copy2(m, standard_seg_dir / m.name)
             copied_masks.append(m.name)
+            organ = _organ_from_mask_name(m)
+            mapping_rows.append({
+                "teacher_target_id": None,
+                "teacher_output_name": organ,
+                "teacher_output_file": m.name,
+                "canonical_organ_name": organ,
+                "student_target_id": None,
+                "mapping_status": "filename_is_canonical_organ_name",
+            })
+    _write_json(patient_root / "label_mapping.json", {
+        "case_id": patient_id,
+        "source_dataset": "PanTS",
+        "source_case_id": source_case_id or patient_id,
+        "layout": "bdmap_pants_style_binary_masks",
+        "image": str(standard_image),
+        "segmentations": str(standard_seg_dir),
+        "mapping_layers": [
+            "teacher target ID / output name",
+            "canonical organ name",
+            "student target ID",
+        ],
+        "note": "PanTS-style source masks are stored one binary mask per canonical organ. Student IDs are assigned later from the student target config, not copied from teacher labels.",
+        "mappings": mapping_rows,
+    })
     _write_json(patient_root / "metadata.json", {
         "patient_id": patient_id,
         "source_dataset": "PanTS",
         "source_case_id": source_case_id or patient_id,
-        "layout": "RadThinking-style one-scan patient folder imported from PanTS case.",
+        "layout": "BDMAP/PanTS-style case folder with image.nii.gz and segmentations/*.nii.gz; legacy scans/ is kept only for older CLI workflows.",
         "source_note": source_note,
     })
     _write_json(patient_root / "pathology.json", {
@@ -246,13 +280,25 @@ def import_pants_files(
     return {
         "status": "success",
         "operation": "pants-import-files",
+        "case_folder": str(patient_root),
         "patient_folder": str(patient_root),
+        "standard_layout": {
+            "style": "bdmap_pants",
+            "case_folder": str(patient_root),
+            "image": str(standard_image),
+            "segmentations": str(standard_seg_dir) if copied_masks else None,
+            "label_mapping": str(patient_root / "label_mapping.json"),
+        },
         "scan_id": scan_id,
-        "ct_copied_to": str(scan_dir / "ct.nii.gz"),
+        "ct_copied_to": str(standard_image),
+        "legacy_ct_copied_to": str(scan_dir / "ct.nii.gz"),
         "reference_label_folder": str(ref_dir) if copied_masks else None,
+        "segmentation_folder": str(standard_seg_dir) if copied_masks else None,
+        "label_mapping": str(patient_root / "label_mapping.json"),
         "num_reference_masks": len(copied_masks),
         "sample_reference_masks": copied_masks[:30],
         "next_steps": [
+            f"python -m scripts.train_voxtell_prompt_student --manifest <manifest built from {patient_root}> --dry-run",
             f"python run_medai_cli.py --json radthinking-check --patient-folder {patient_root}",
             f"python run_medai_cli.py --json agent-loop --patient-folder {patient_root} --output-folder outputs/{patient_id}_agent_loop --backend totalseg --postprocess shapekit --shapekit-root third_party/ShapeKit-main --fast --organ pancreas --expected-organs pancreas,liver,aorta,postcava",
         ],

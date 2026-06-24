@@ -23,8 +23,6 @@ ORGAN_ALIASES = {
     "celiac_aa_celiac_artery": "celiac_aa",
     "inferior_vena_cava": "postcava",
     "small_intestine": "intestine",
-    "portal_splenic_veins": "veins",
-    "portal_vein_and_splenic_vein": "veins",
 }
 
 

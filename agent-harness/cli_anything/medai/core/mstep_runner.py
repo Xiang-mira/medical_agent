@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .auto_fine_label import grade_to_training_weight
+from .auto_label_core import ACCEPTED_SCORING_SCHEMA_VERSIONS
 from .json_utils import write_json
+from .organ_taxonomy import normalize_canonical_id
 
 
 def _quality_status(review_flags: Any, quality_flags: Any) -> str:
@@ -67,10 +69,12 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
     root = Path(updated_annotations_root).resolve()
     out = Path(output_manifest).resolve()
     rows: list[dict[str, Any]] = []
+    excluded_identity_rows: list[dict[str, Any]] = []
+    excluded_training_rows: list[dict[str, Any]] = []
     if root.exists():
         for case_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
             seg_dir = case_dir / "updated"
-            if not seg_dir.exists():
+            if not seg_dir.exists() or not any(seg_dir.glob("*.nii.gz")):
                 seg_dir = case_dir / "segmentations"
             selection_index = _load_case_selection_index(root, case_dir.name)
             for mask in sorted(seg_dir.glob("*.nii.gz")):
@@ -78,6 +82,38 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                 if organs and organ not in organs:
                     continue
                 meta = selection_index.get(organ, {})
+                identity_status = str(meta.get("identity_status") or "legacy_unverified")
+                requested_canonical_id = normalize_canonical_id(meta.get("requested_canonical_id"))
+                resolved_canonical_id = normalize_canonical_id(meta.get("resolved_canonical_id"))
+                organ_canonical_id = normalize_canonical_id(organ)
+                if identity_status == "valid" and (
+                    requested_canonical_id != organ_canonical_id or resolved_canonical_id != organ_canonical_id
+                ):
+                    identity_status = "identity_mismatch"
+                    meta = {
+                        **meta,
+                        "identity_mismatch_reasons": [
+                            *(meta.get("identity_mismatch_reasons", []) or []),
+                            "manifest_organ_canonical_id_mismatch",
+                        ],
+                    }
+                if identity_status != "valid":
+                    excluded_identity_rows.append({
+                        "case_id": case_dir.name,
+                        "organ": organ,
+                        "mask_path": str(mask.resolve()),
+                        "identity_status": identity_status,
+                        "identity_mismatch_reasons": meta.get("identity_mismatch_reasons", ["missing_identity_provenance"]),
+                    })
+                    continue
+                grade_value = str(meta.get("grade") or "C").upper()
+                training_weight_value = float(meta.get("training_weight", grade_to_training_weight(grade_value)) or 0.0)
+                distillation_eligible_value = meta.get("distillation_eligible", training_weight_value > 0.0)
+                scoring_schema_version = str(meta.get("scoring_schema_version") or "legacy")
+                schema_supported = scoring_schema_version in ACCEPTED_SCORING_SCHEMA_VERSIONS
+                if not schema_supported:
+                    training_weight_value = 0.0
+                    distillation_eligible_value = False
                 row: dict[str, Any] = {
                     "case_id": case_dir.name,
                     "dataset_type": "auto_fine_label_dataset",
@@ -118,14 +154,64 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                     "label_maturity_level": meta.get("label_maturity_level"),
                     "auto_fine_label_status": meta.get("auto_fine_label_status", "auto_fine_label_candidate" if meta else "machine_label_candidate"),
                     "auto_fine_label_reliability_score": meta.get("auto_fine_label_reliability_score"),
-                    "grade": meta.get("grade", "D"),
-                    "training_weight": float(meta.get("training_weight", grade_to_training_weight(meta.get("grade", "D")))),
+                    "estimated_reliability": meta.get("estimated_reliability", meta.get("evidence_confidence")),
+                    "evidence_confidence": meta.get("evidence_confidence"),
+                    "evidence_scores": meta.get("evidence_scores", {}),
+                    "missing_evidence": meta.get("missing_evidence", []),
+                    "decision_status": meta.get("decision_status"),
+                    "decision_reasons": meta.get("decision_reasons", []),
+                    "target_type": meta.get("target_type", "hard"),
+                    "probability_mask_path": meta.get("probability_mask_path"),
+                    "voxel_uncertainty_path": meta.get("voxel_uncertainty_path"),
+                    "independent_family_count": meta.get("independent_family_count", 0),
+                    "family_membership": meta.get("family_membership", {}),
+                    "scoring_schema_version": scoring_schema_version,
+                    "grade": grade_value,
+                    "training_weight": training_weight_value,
+                    "distillation_eligible": distillation_eligible_value,
+                    "distillation_exclusion_reason": meta.get("distillation_exclusion_reason"),
                     "label_passport_path": meta.get("label_passport_path"),
                     "review_flags": meta.get("review_flags", []),
                     "quality_flags": meta.get("quality_flags", []),
                     "quality_status": meta.get("quality_status") or _quality_status(meta.get("review_flags", []), meta.get("quality_flags", [])),
                     "source_metadata_available": bool(meta),
+                    "requested_canonical_id": meta.get("requested_canonical_id"),
+                    "source_local_label": meta.get("source_local_label"),
+                    "resolved_canonical_id": meta.get("resolved_canonical_id"),
+                    "comparison_family": meta.get("comparison_family"),
+                    "parent_ids": meta.get("parent_ids", []),
+                    "mapping_type": meta.get("mapping_type"),
+                    "mapping_source": meta.get("mapping_source"),
+                    "identity_status": identity_status,
                 }
+                grade = str(row.get("grade") or "D").upper()
+                training_weight = float(row.get("training_weight") or 0.0)
+                if grade == "D" or training_weight <= 0.0 or row.get("distillation_eligible") is False:
+                    exclusion_reason = row.get("distillation_exclusion_reason")
+                    if not exclusion_reason:
+                        if row.get("scoring_schema_version") not in ACCEPTED_SCORING_SCHEMA_VERSIONS:
+                            exclusion_reason = "unsupported_scoring_schema_requires_rescoring"
+                        elif grade == "D":
+                            exclusion_reason = "grade_D_or_zero_weight"
+                        elif training_weight <= 0.0:
+                            exclusion_reason = "training_weight_zero"
+                        else:
+                            exclusion_reason = "distillation_eligible_false"
+                    excluded_training_rows.append({
+                        "case_id": case_dir.name,
+                        "organ": organ,
+                        "mask_path": str(mask.resolve()),
+                        "grade": grade,
+                        "training_weight": training_weight,
+                        "distillation_eligible": row.get("distillation_eligible"),
+                        "distillation_exclusion_reason": exclusion_reason,
+                        "exclusion_category": exclusion_reason.split(":", 1)[0],
+                        "identity_status": identity_status,
+                        "selected_candidate_qc_status": row.get("selected_candidate_qc_status"),
+                        "selected_candidate_qc_flags": row.get("selected_candidate_qc_flags", []),
+                        "shapekit_status": row.get("shapekit_status"),
+                    })
+                    continue
                 rows.append(row)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.suffix.lower() == ".csv":
@@ -136,7 +222,22 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
             writer.writerows([{k: _csv_safe(v) for k, v in row.items()} for row in rows])
     else:
         write_json(out, rows)
-    return {"stage": "mstep_manifest", "status": "success", "updated_annotations_root": str(root), "output_manifest": str(out), "num_items": len(rows), "sample_items": rows[:20]}
+    exclusion_path = out.with_name(out.stem + ".identity_exclusions.json")
+    write_json(exclusion_path, excluded_identity_rows)
+    training_exclusion_path = out.with_name(out.stem + ".training_exclusions.json")
+    write_json(training_exclusion_path, excluded_training_rows)
+    return {
+        "stage": "mstep_manifest",
+        "status": "success",
+        "updated_annotations_root": str(root),
+        "output_manifest": str(out),
+        "num_items": len(rows),
+        "identity_exclusions": str(exclusion_path),
+        "num_identity_exclusions": len(excluded_identity_rows),
+        "training_exclusions": str(training_exclusion_path),
+        "num_training_exclusions": len(excluded_training_rows),
+        "sample_items": rows[:20],
+    }
 
 
 def write_mstep_config(output_config: str | Path, training_manifest: str | Path, base_model: str = "nnunet_or_epai", notes: str | None = None) -> dict[str, Any]:
@@ -181,6 +282,10 @@ def _prepare_nnunet_dataset(
 
     case_masks: dict[str, list[dict]] = {}
     for r in rows:
+        # nnUNet consumes discrete labels only. Soft/provisional targets are
+        # reserved for the VoxTell probability-target training path.
+        if str(r.get("target_type") or "hard") != "hard":
+            continue
         cid = r.get("case_id", "")
         if cid:
             case_masks.setdefault(cid, []).append(r)
@@ -626,7 +731,14 @@ def _filter_manifest_for_target_model(training_manifest: str | Path, output_mani
             rows = list(csv.DictReader(f))
     else:
         rows = json.loads(inp.read_text(encoding="utf-8")) if inp.exists() else []
+    supports_soft = "voxtell" in str(target_model).lower() or "prompt_student" in str(target_model).lower()
+    excluded_soft = [r for r in rows if str(r.get("target_type") or "hard") != "hard" and not supports_soft]
+    if not supports_soft:
+        rows = [r for r in rows if str(r.get("target_type") or "hard") == "hard"]
     for r in rows:
+        if supports_soft and str(r.get("target_type") or "hard") == "soft" and r.get("probability_mask_path"):
+            r["mask"] = r["probability_mask_path"]
+            r["mask_path"] = r["probability_mask_path"]
         r["target_model"] = target_model
         r.setdefault("mstep_scope", "selected_model_family")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -637,7 +749,7 @@ def _filter_manifest_for_target_model(training_manifest: str | Path, output_mani
             w.writeheader(); w.writerows(rows)
     else:
         write_json(out, rows)
-    return {"stage": "target_model_manifest", "status": "success", "input_manifest": str(inp), "output_manifest": str(out), "target_model": target_model, "num_items": len(rows)}
+    return {"stage": "target_model_manifest", "status": "success", "input_manifest": str(inp), "output_manifest": str(out), "target_model": target_model, "num_items": len(rows), "num_soft_or_provisional_excluded": len(excluded_soft)}
 
 
 def run_model_specific_mstep_update(

@@ -33,7 +33,9 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path("/home/teacher1/JHU-project1/medical_agent")
-CASE_LIST    = PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"
+CASE_LIST    = Path(os.getenv("MEDAI_CASE_LIST", PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"))
+if not CASE_LIST.is_absolute():
+    CASE_LIST = PROJECT_ROOT / CASE_LIST
 _OUTPUT_ROOT_ENV = os.getenv("MEDAI_OUTPUT_ROOT")
 OUTPUT_ROOT  = Path(_OUTPUT_ROOT_ENV).expanduser() if _OUTPUT_ROOT_ENV else PROJECT_ROOT / "outputs"
 if not OUTPUT_ROOT.is_absolute():
@@ -49,11 +51,14 @@ PERF_TRACKER  = OUTPUT_ROOT / "organ_model_performance.json"
 STUDENT_BACKEND = os.getenv("MEDAI_STUDENT_BACKEND", "voxtell_style_3d_prompt")
 PROMPT_TARGET_CONFIG = PROJECT_ROOT / "configs/student_3d_prompt_target_organs.json"
 VOXTELL_MODEL_DIR = Path(os.getenv("MEDAI_VOXTELL_MODEL_DIR", PROJECT_ROOT / "checkpoints/VoxTell/voxtell_v1.1"))
-VOXTELL_TRAIN_CMD = os.getenv("MEDAI_VOXTELL_TRAIN_CMD", "").strip()
 VOXTELL_TEXT_ENCODING_MODEL = Path(os.getenv("MEDAI_TEXT_ENCODING_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen3-Embedding-4B"))
+DEFAULT_VOXTELL_TRAIN_CMD = f'"{sys.executable}" "{PROJECT_ROOT / "scripts/train_voxtell_prompt_student.py"}"'
+VOXTELL_TRAIN_CMD = os.getenv("MEDAI_VOXTELL_TRAIN_CMD", DEFAULT_VOXTELL_TRAIN_CMD).strip()
+ENABLE_VOXTELL_TRAINING = env_bool("MEDAI_ENABLE_VOXTELL_TRAINING", default=True)
 
 QWEN_MODEL    = PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"
 VLLM_BASE_URL = "http://localhost:8000"
+MANAGE_OWN_VLLM = env_bool("MEDAI_MANAGE_OWN_VLLM", default=False)
 
 # Current formal teacher pool: 21 Drive-aligned models plus the separate
 # official TotalSegmentator route. Keep these as concrete registry keys, not
@@ -98,8 +103,9 @@ CONSOLIDATION_EPOCHS   = 50    # 全局整合也需要足够 epoch
 LEARNING_RATE          = 5e-5
 CONSOLIDATION_LR       = 5e-6
 
-# 单个模型推理 timeout（秒）。CADS/VISTA3D 约 3-5 分钟/case，10分钟足够
-INFER_TIMEOUT_SEC = 600
+# 单个 teacher 推理 timeout（秒）。正式共享 GPU 环境可能排队/低利用率，
+# 不能再用 600s 硬切导致被动中断；可用 MEDAI_INFER_TIMEOUT_SEC 覆盖。
+INFER_TIMEOUT_SEC = int(os.getenv("MEDAI_INFER_TIMEOUT_SEC", "3600"))
 
 # ShapeKit：老师会议要求正式 pseudo-label 生成中所有 selected outputs 都要过 ShapeKit。
 # 只有显式 fast-smoke/debug 时才关闭。
@@ -118,6 +124,10 @@ DEBUG_ALLOW_NO_LABELCRITIC = (
     env_bool("MEDAI_DEBUG_ALLOW_NO_LABELCRITIC", default=False)
     or env_bool("MEDAI_FAST_SMOKE", default=False)
 )
+CANDIDATE_MODE = os.getenv("MEDAI_CANDIDATE_MODE", "route_pruned_with_competition").strip() or "route_pruned_with_competition"
+TEACHER_INFERENCE_MODE = os.getenv("MEDAI_TEACHER_INFERENCE_MODE", "hierarchical_roi").strip() or "hierarchical_roi"
+ROI_MARGIN_MM = float(os.getenv("MEDAI_ROI_MARGIN_MM", "20"))
+
 CRITIC_BACKEND  = "labelcritic"
 LABELCRITIC_OPTIONS = {
     "no_dice_check": env_bool("MEDAI_LABELCRITIC_NO_DICE_CHECK", default=False),
@@ -139,6 +149,12 @@ def log(msg: str):
         f.write(line + "\n")
 
 
+def load_case_rows() -> list[dict]:
+    import csv as _csv
+    with open(CASE_LIST, encoding="utf-8-sig") as f:
+        return list(_csv.DictReader(f))
+
+
 def check_vllm_server() -> bool:
     """检查 vLLM server 是否在线"""
     try:
@@ -150,30 +166,33 @@ def check_vllm_server() -> bool:
 
 
 def stop_vllm_for_mstep():
-    """M-step 前停止 vLLM server 释放显存（只杀 vLLM 进程，不影响其他 GPU 进程）"""
+    """Optionally stop only this experiment's own vLLM server before M-step."""
+    if not MANAGE_OWN_VLLM:
+        log("  跳过 vLLM 停止：MEDAI_MANAGE_OWN_VLLM 未开启，避免影响共享 GPU 上别人的任务")
+        return {"status": "skipped", "reason": "MEDAI_MANAGE_OWN_VLLM_not_enabled"}
     import subprocess as _sp
-    # 只杀 vLLM 相关进程，不能用 nvidia-smi 杀所有 GPU 进程（会误杀训练进程）
-    r = _sp.run(["pgrep", "-f", "vllm"], capture_output=True, text=True)
-    pids = [p for p in r.stdout.strip().split() if p]
-    if pids:
-        for pid in pids:
-            _sp.run(["kill", "-9", pid], check=False)
-        import time as _t; _t.sleep(5)
-    # 也通过进程名杀 VLLM::EngineCore
-    _sp.run("ps aux | grep -i 'VLLM\\|vllm' | grep -v grep | awk '{print $2}' | xargs -r kill -9",
-            shell=True, capture_output=True)
-    import time as _t; _t.sleep(3)
-    used = _sp.run("nvidia-smi --query-gpu=memory.used --format=csv,noheader",
-                   shell=True, capture_output=True, text=True).stdout.strip()
-    log(f"  vLLM 已停止，GPU 显存使用: {used}")
+    screen_name = os.getenv("MEDAI_VLLM_SCREEN", "vllm_server")
+    _sp.run(["screen", "-S", screen_name, "-X", "quit"], check=False, capture_output=True, text=True)
+    import time as _t
+    _t.sleep(5)
+    used = _sp.run(
+        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader"],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    log(f"  已请求停止本实验 vLLM screen={screen_name}，GPU 显存使用: {used}")
+    return {"status": "requested_stop", "screen": screen_name, "gpu_memory_used": used}
 
 
 def restart_vllm_after_mstep():
-    """M-step 后在后台重启 vLLM server"""
+    """Optionally restart this experiment's own vLLM server after M-step."""
+    if not MANAGE_OWN_VLLM:
+        log("  跳过 vLLM 重启：MEDAI_MANAGE_OWN_VLLM 未开启，保持共享 GPU 状态不变")
+        return False
     try:
         import subprocess
+        screen_name = os.getenv("MEDAI_VLLM_SCREEN", "vllm_server")
         vllm_cmd = (
-            f"screen -dmS vllm_server bash -c '"
+            f"screen -dmS {screen_name} bash -c '"
             f"cd {PROJECT_ROOT} && "
             f"python -m vllm.entrypoints.openai.api_server "
             f"--model {QWEN_MODEL} "
@@ -183,8 +202,7 @@ def restart_vllm_after_mstep():
             f"'"
         )
         subprocess.run(vllm_cmd, shell=True, check=False)
-        log("  vLLM 已在后台重启 (screen: vllm_server)")
-        # 等待启动
+        log(f"  vLLM 已在后台重启 (screen: {screen_name})")
         import time as _t
         for i in range(30):
             _t.sleep(5)
@@ -200,19 +218,39 @@ def restart_vllm_after_mstep():
 
 def completed_cases(round_idx: int) -> set:
     """Return case_ids with complete E-step artifacts, not just raw outputs."""
-    cases_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "cases"
     annotations_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "annotation_versions"
-    if not cases_dir.exists():
+    if not annotations_dir.exists():
         return set()
     done = set()
-    for case_dir in cases_dir.iterdir():
+    for case_dir in annotations_dir.iterdir():
         if not case_dir.is_dir():
             continue
         selection_meta = case_dir / "selection_metadata.json"
-        updated_dir = annotations_dir / case_dir.name / "updated"
+        updated_dir = case_dir / "updated"
+        hierarchy_manifest = (
+            OUTPUT_ROOT / f"round{round_idx}" / "estep" / "cases" /
+            case_dir.name / "hierarchical_inference_plan.json"
+        )
+        if TEACHER_INFERENCE_MODE == "hierarchical_roi" and not _valid_hierarchical_manifest(hierarchy_manifest):
+            continue
         if selection_meta.exists() and updated_dir.exists() and any(updated_dir.glob("*.nii.gz")):
             done.add(case_dir.name)
     return done
+
+
+def _valid_hierarchical_manifest(path: Path) -> bool:
+    """True only for a current hierarchical ROI manifest, not stale full-volume artifacts."""
+    if not path.exists():
+        return False
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return bool(
+        manifest.get("teacher_inference_mode") == "hierarchical_roi"
+        and manifest.get("hierarchical_plan_cache_key")
+        and manifest.get("hierarchical_plan_cache_key_sha256")
+    )
 
 
 def load_student_target_organs() -> list[str]:
@@ -275,26 +313,46 @@ def _round_selected_pseudo_label_root(round_idx: int) -> Path:
 
 
 def _round_teacher_cache_dirs(round_idx: int) -> dict[str, Path]:
-    """Return teacher raw-prediction roots from an earlier E-step.
+    """Return teacher prediction roots from an earlier E-step.
 
     Round 2+ must reuse Round 1 teacher candidates instead of rerunning the
-    full teacher pool. Each returned path is the base consumed by
-    _resolve_preseeded_case_dir: <base>/<case_id>/segmentations/*.nii.gz.
+    teacher pool. Under the hierarchical ROI pipeline, the reusable teacher
+    candidates live in:
+
+        cases/<case_id>/hierarchical_predictions/<teacher>/segmentations
+
+    not in the legacy full-volume raw_predictions tree.  Reusing the legacy
+    tree here would reintroduce whole-CT child predictions into later rounds.
     """
     cache: dict[str, Path] = {}
     cases_root = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "cases"
     if not cases_root.exists():
         return cache
-    for teacher in ALL_TEACHERS:
-        teacher_ready = False
-        for case_dir in cases_root.iterdir():
-            teacher_root = case_dir / "raw_predictions" / teacher / case_dir.name
-            summary = teacher_root / "inference_summary.json"
-            seg_dir = teacher_root / "segmentations"
-            if summary.exists() or (seg_dir.exists() and any(seg_dir.glob("*.nii.gz"))):
-                teacher_ready = True
-                break
-        if teacher_ready:
+    teacher_names: set[str] = set()
+    for case_dir in cases_root.iterdir():
+        if not case_dir.is_dir():
+            continue
+        if TEACHER_INFERENCE_MODE == "hierarchical_roi":
+            manifest = case_dir / "hierarchical_inference_plan.json"
+            if not _valid_hierarchical_manifest(manifest):
+                continue
+            pred_root = case_dir / "hierarchical_predictions"
+            for teacher_dir in pred_root.glob("*"):
+                seg_dir = teacher_dir / "segmentations"
+                if seg_dir.exists() and any(seg_dir.glob("*.nii.gz")):
+                    teacher_names.add(teacher_dir.name)
+        else:
+            for teacher in ALL_TEACHERS:
+                teacher_root = case_dir / "raw_predictions" / teacher / case_dir.name
+                summary = teacher_root / "inference_summary.json"
+                seg_dir = teacher_root / "segmentations"
+                if summary.exists() or (seg_dir.exists() and any(seg_dir.glob("*.nii.gz"))):
+                    teacher_names.add(teacher)
+    if TEACHER_INFERENCE_MODE == "hierarchical_roi":
+        for teacher in sorted(teacher_names):
+            cache[teacher] = cases_root / "{case_id}" / "hierarchical_predictions" / teacher / "segmentations"
+    else:
+        for teacher in sorted(teacher_names):
             cache[teacher] = cases_root / "{case_id}" / "raw_predictions" / teacher
     return cache
 
@@ -311,11 +369,12 @@ def run_estep(round_idx: int) -> dict:
     """
     log(f"=== Round {round_idx} E-step 开始 ===")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep"
+    expected_cases = len(load_case_rows())
 
     # 检查断点续跑
     done = completed_cases(round_idx)
     if done:
-        log(f"  断点续跑：已完成 {len(done)}/50 个 case，跳过这些 case")
+        log(f"  断点续跑：已完成 {len(done)}/{expected_cases} 个 case，跳过这些 case")
 
     # 检查 vLLM server
     vllm_ok = check_vllm_server()
@@ -348,7 +407,12 @@ def run_estep(round_idx: int) -> dict:
     models_to_run = list(ALL_TEACHERS)
     if round_idx > 1:
         teacher_cache = _round_teacher_cache_dirs(1)
-        missing_teacher_cache = sorted(set(ALL_TEACHERS) - set(teacher_cache))
+        if TEACHER_INFERENCE_MODE == "hierarchical_roi":
+            missing_teacher_cache = []
+            if not teacher_cache:
+                missing_teacher_cache = ["no_hierarchical_teacher_cache_found"]
+        else:
+            missing_teacher_cache = sorted(set(ALL_TEACHERS) - set(teacher_cache))
         if missing_teacher_cache:
             raise RuntimeError(
                 "Round 2+ requires Round 1 teacher cache so teachers are not rerun. "
@@ -366,15 +430,22 @@ def run_estep(round_idx: int) -> dict:
             log(f"  上一轮 selected pseudo labels 不存在，跳过注入: {prev_selected_dir}")
 
         prev_pred_dir = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions"
-        if prev_pred_dir.exists() and any(prev_pred_dir.iterdir()):
+        prev_mstep_result = OUTPUT_ROOT / f"round{round_idx - 1}" / "mstep" / "voxtell_prompt_mstep_result.json"
+        prev_student_eligible = False
+        if prev_mstep_result.exists():
+            try:
+                prev_student_eligible = bool(json.loads(prev_mstep_result.read_text(encoding="utf-8")).get("checkpoint_eligible_for_next_round"))
+            except Exception:
+                prev_student_eligible = False
+        if prev_student_eligible and prev_pred_dir.exists() and any(prev_pred_dir.iterdir()):
             preseeded["student_prev"] = prev_pred_dir
-            log(f"  注入上一轮 student 预测参与竞争: {prev_pred_dir}")
+            log(f"  注入上一轮合格 student 预测参与竞争: {prev_pred_dir}")
         else:
-            log(f"  上一轮 student 预测不存在，跳过注入: {prev_pred_dir}")
+            log(f"  上一轮 student 预测未通过质量门槛或不存在，跳过注入: {prev_pred_dir}")
 
     log(f"  待推理模型: {len(models_to_run)}个, 候选teacher总数: {len(ALL_TEACHERS)}个, 器官: {len(organ_list)}个, "
         f"Student backend: {STUDENT_BACKEND}, "
-        f"待处理 case: {50 - len(done)}/50, "
+        f"待处理 case: {max(expected_cases - len(done), 0)}/{expected_cases}, "
         f"ShapeKit: {'开' if ENABLE_SHAPEKIT else '关'}, "
         f"LabelCritic: {'开' if enable_critic else '关'}"
         + (f", preseeded: {','.join(preseeded.keys())}" if preseeded else ""))
@@ -382,9 +453,9 @@ def run_estep(round_idx: int) -> dict:
         log(f"  LabelCritic diagnostic options: {LABELCRITIC_OPTIONS}")
 
     # 如果所有 case 都完成了，直接返回成功
-    if len(done) >= 50:
+    if len(done) >= expected_cases:
         log("  所有 case 已完成，跳过 E-step")
-        return {"status": "success", "num_cases": 50, "total_updated": 0, "skipped": True}
+        return {"status": "success", "num_cases": expected_cases, "total_updated": 0, "skipped": True}
 
     result = run_multimodel_annotation_loop(
         case_list=CASE_LIST,
@@ -406,6 +477,9 @@ def run_estep(round_idx: int) -> dict:
         resume=True,
         preseeded_model_dirs=preseeded if preseeded else None,
         labelcritic_options=LABELCRITIC_OPTIONS,
+        candidate_mode=CANDIDATE_MODE,
+        teacher_inference_mode=TEACHER_INFERENCE_MODE,
+        roi_margin_mm=ROI_MARGIN_MM,
     )
 
     status = result.get("status", "unknown")
@@ -420,13 +494,20 @@ def run_estep(round_idx: int) -> dict:
 def build_vista3d_dataset(round_idx: int) -> Path:
     """
     将 E-step 的 pseudo-label 转换为 VISTA3D continual fine-tuning 格式。
-    优先级：真实标注 > E-step selected pseudo label > OrganModelPerformance 最优 teacher > yaml 配置 teacher。
+    优先级：导入弱标签 > E-step selected pseudo label > v2 estimated-reliability teacher > yaml 配置 teacher。
 
     This is a legacy VISTA3D/127-label reproduction helper. It is guarded by
     `MEDAI_ALLOW_VISTA3D_LEGACY=1` and is not the current 373-organ mainline.
     """
     import yaml, nibabel as nib, numpy as np, csv
-    perf_tracker_path = PERF_TRACKER
+    estimated_tracker = PERF_TRACKER.with_name(PERF_TRACKER.stem + ".estimated_v2.json")
+    perf_tracker_path = estimated_tracker if estimated_tracker.exists() else None
+    if perf_tracker_path is None and PERF_TRACKER.exists():
+        try:
+            if json.loads(PERF_TRACKER.read_text()).get("schema_version") == "estimated_model_reliability_v2":
+                perf_tracker_path = PERF_TRACKER
+        except Exception:
+            perf_tracker_path = None
 
     log(f"构建 VISTA3D 训练数据集...")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
@@ -476,7 +557,8 @@ def build_vista3d_dataset(round_idx: int) -> Path:
 
                 mask_path = None
 
-                # 1. 真实标注优先
+                # 1. Imported annotation folders are weak/prior pseudo labels in
+                # this project; they are never described as expert truth.
                 if ann_folder and ann_folder.exists():
                     real = ann_folder / f"{organ}.nii.gz"
                     if real.exists():
@@ -493,19 +575,22 @@ def build_vista3d_dataset(round_idx: int) -> Path:
                         mask_path = selected_cand
                         case_selected_used += 1
 
-                # 3. E-step 最优 teacher 输出
-                # 优先用 OrganModelPerformance tracker 里 DSC 最高的 teacher
+                # 3. E-step estimated-reliability teacher output
+                # Prefer the v2 leave-one-family-out estimated reliability. The
+                # legacy pseudo-reference mean_dice tracker is intentionally ignored.
                 if mask_path is None:
                     teacher = info.get("teacher_model", "")
                     fallbacks = info.get("fallback_teachers", [])
-                    # 如果 tracker 存在，动态选该 organ 实际 DSC 最高的 teacher
+                    # If the v2 tracker exists, rank by leave-one-family-out
+                    # estimated reliability, never by true/legacy DSC.
                     if perf_tracker_path and perf_tracker_path.exists():
                         try:
                             import json as _json
                             perf = _json.loads(perf_tracker_path.read_text())
-                            if organ in perf:
-                                ranked = sorted(perf[organ].items(),
-                                                key=lambda x: x[1].get("mean_dice", 0), reverse=True)
+                            organ_rows = (perf.get("organs") or {}).get(organ, {})
+                            if organ_rows:
+                                ranked = sorted(organ_rows.items(),
+                                                key=lambda x: x[1].get("mean_estimated_reliability", 0), reverse=True)
                                 dynamic_order = [t for t, _ in ranked if t != "student_prev"]
                                 # 合并：tracker 排序 + yaml fallback 补充
                                 all_teachers = dynamic_order + [t for t in [teacher] + fallbacks
@@ -518,7 +603,10 @@ def build_vista3d_dataset(round_idx: int) -> Path:
                         all_teachers = [teacher] + fallbacks
 
                     for t in all_teachers:
-                        cand = estep_dir / case_id / "raw_predictions" / t / case_id / "segmentations" / f"{organ}.nii.gz"
+                        if TEACHER_INFERENCE_MODE == "hierarchical_roi":
+                            cand = estep_dir / case_id / "hierarchical_predictions" / t / "segmentations" / f"{organ}.nii.gz"
+                        else:
+                            cand = estep_dir / case_id / "raw_predictions" / t / case_id / "segmentations" / f"{organ}.nii.gz"
                         if cand.exists():
                             mask_path = cand
                             break
@@ -576,11 +664,13 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
         target_config=PROMPT_TARGET_CONFIG,
         device="cuda",
     )
+    prev_student_root = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions" if round_idx > 1 else None
     manifest = student.build_training_manifest(
         cases_root=cases_root,
         output_manifest=manifest_path,
         case_list=CASE_LIST,
         require_images=True,
+        student_prediction_root=prev_student_root if prev_student_root and prev_student_root.exists() else None,
     )
     log(
         f"3D prompt manifest 完成: items={manifest.get('num_items', 0)}, "
@@ -650,31 +740,429 @@ def run_mstep(round_idx: int, datalist_path: Path, global_consolidation: bool = 
     return result
 
 
+def _mask_nonempty(path: Path) -> bool:
+    try:
+        import nibabel as nib
+        import numpy as np
+        if not path.exists():
+            return False
+        return bool((np.asanyarray(nib.load(str(path)).dataobj) > 0).sum() > 0)
+    except Exception:
+        return False
+
+
+def _dice_for_masks(pred_path: Path, ref_path: Path) -> tuple[float | None, bool, bool, str | None]:
+    try:
+        import nibabel as nib
+        import numpy as np
+        if not pred_path.exists() or not ref_path.exists():
+            return None, False, _mask_nonempty(ref_path), "missing_mask"
+        pred = np.asanyarray(nib.load(str(pred_path)).dataobj) > 0
+        ref = np.asanyarray(nib.load(str(ref_path)).dataobj) > 0
+        if pred.shape != ref.shape:
+            return None, bool(pred.sum() > 0), bool(ref.sum() > 0), "shape_mismatch"
+        pred_nonempty = bool(pred.sum() > 0)
+        ref_nonempty = bool(ref.sum() > 0)
+        denom = int(pred.sum()) + int(ref.sum())
+        if denom == 0:
+            return 1.0, pred_nonempty, ref_nonempty, None
+        return float(2 * int((pred & ref).sum()) / denom), pred_nonempty, ref_nonempty, None
+    except Exception as exc:
+        return None, False, _mask_nonempty(ref_path), str(exc)
+
+
+def _manifest_positive_refs(manifest_path: Path | None, case_id: str, organs: list[str]) -> dict[str, Path]:
+    if not manifest_path or not manifest_path.exists():
+        return {}
+    try:
+        doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    refs: dict[str, Path] = {}
+    for item in doc.get("items", []):
+        if item.get("case_id") != case_id or item.get("supervision_type") != "positive":
+            continue
+        organ = str(item.get("organ") or "")
+        if organ not in organs or organ in refs:
+            continue
+        if item.get("is_prompt_variant"):
+            continue
+        mask = Path(str(item.get("mask") or item.get("mask_path") or ""))
+        if mask.exists():
+            refs[organ] = mask
+    return refs
+
+
+def run_voxtell_student_sanity_check(round_idx: int, model_dir: Path, manifest_path: Path | None = None) -> dict:
+    """Run a minimal post-M-step VoxTell student inference contract check."""
+    out_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
+    result_path = out_dir / "voxtell_student_sanity_check.json"
+    expected_plans = model_dir / "plans.json"
+    expected_ckpt = model_dir / "fold_0" / "checkpoint_final.pth"
+    base: dict = {
+        "stage": "voxtell_student_post_mstep_sanity_check",
+        "round": round_idx,
+        "model_dir": str(model_dir),
+        "plans": str(expected_plans),
+        "checkpoint": str(expected_ckpt),
+        "manifest_path": str(manifest_path) if manifest_path else None,
+        "status": "pending",
+    }
+    if not expected_plans.exists() or not expected_ckpt.exists():
+        base.update({"status": "skipped", "reason": "inference-compatible VoxTell model dir is incomplete"})
+        result_path.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
+        return base
+
+    import csv as csv_mod
+    cases = []
+    with open(CASE_LIST, encoding="utf-8-sig") as f:
+        for row in csv_mod.DictReader(f):
+            raw_ct = (row.get("ct_path") or row.get("image") or "").strip()
+            if not raw_ct:
+                continue
+            ct_path = Path(raw_ct)
+            if ct_path.exists() and ct_path.is_file():
+                cases.append({"case_id": row.get("case_id") or ct_path.stem, "ct_path": ct_path})
+    if not cases:
+        base.update({"status": "failed", "reason": "no case with an existing CT path found for sanity check"})
+        result_path.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
+        return base
+
+    configured = [p.strip() for p in os.getenv("MEDAI_VOXTELL_SANITY_PROMPTS", "liver,spleen,pancreas,kidney_left,aorta").split(",") if p.strip()]
+    targets = load_student_target_organs()
+    prompts = [p for p in configured if p in targets]
+    if len(prompts) < 5:
+        prompts.extend([p for p in targets if p not in prompts][: 5 - len(prompts)])
+    prompts = prompts[:5]
+
+    from cli_anything.medai.core.voxtell_student import VoxTellStudent
+
+    case = cases[0]
+    sanity_dir = out_dir / "voxtell_student_sanity_check_outputs" / str(case["case_id"])
+    sanity_dir.mkdir(parents=True, exist_ok=True)
+    student = VoxTellStudent(model_dir=model_dir, target_config=PROMPT_TARGET_CONFIG, device="cuda")
+    started = time.time()
+    result = student.segment(
+        ct_image=case["ct_path"],
+        output_dir=sanity_dir,
+        prompts=prompts,
+        dry_run=False,
+        timeout_sec=1800,
+        prompt_batch_size=5,
+    )
+
+    mask_checks = []
+    non_nan_ok = True
+    readable = 0
+    empty = 0
+    try:
+        import nibabel as nib
+        import numpy as np
+        ref_shape = tuple(nib.load(str(case["ct_path"])).shape[:3])
+        for organ in prompts:
+            project_mask = sanity_dir / f"{organ}.nii.gz"
+            official_mask = Path(result.get("official_output_masks", {}).get(organ, ""))
+            item = {
+                "organ": organ,
+                "project_mask": str(project_mask),
+                "official_mask": str(official_mask) if str(official_mask) else None,
+                "project_mask_exists": project_mask.exists(),
+                "official_mask_exists": official_mask.exists() if str(official_mask) else False,
+                "shape_ok": False,
+                "non_nan": False,
+                "empty_mask": None,
+            }
+            if project_mask.exists():
+                img = nib.load(str(project_mask))
+                arr = np.asanyarray(img.dataobj)
+                item["shape"] = [int(x) for x in arr.shape[:3]]
+                item["shape_ok"] = tuple(arr.shape[:3]) == ref_shape
+                item["non_nan"] = not bool(np.isnan(arr).any())
+                item["empty_mask"] = bool((arr > 0).sum() == 0)
+                readable += 1
+                empty += 1 if item["empty_mask"] else 0
+                non_nan_ok = non_nan_ok and bool(item["non_nan"])
+            else:
+                non_nan_ok = False
+            mask_checks.append(item)
+    except Exception as exc:
+        base.update({"status": "failed", "reason": f"sanity mask inspection failed: {exc}", "inference_result": result})
+        result_path.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
+        return base
+
+    official_ok = all(x["official_mask_exists"] for x in mask_checks)
+    project_ok = all(x["project_mask_exists"] for x in mask_checks)
+    shape_ok = all(x["shape_ok"] for x in mask_checks)
+    empty_ratio = round(empty / len(mask_checks), 4) if mask_checks else 1.0
+    max_empty_ratio = float(os.getenv("MEDAI_SANITY_MAX_EMPTY_RATIO", "0.8"))
+    min_nonempty_positive = int(os.getenv("MEDAI_SANITY_MIN_NONEMPTY_POSITIVES", "1"))
+    refs = _manifest_positive_refs(manifest_path, str(case["case_id"]), prompts)
+    positive_ref_organs = [organ for organ, ref in refs.items() if _mask_nonempty(ref)]
+    nonempty_positive_predictions = sum(
+        1 for item in mask_checks
+        if item["organ"] in positive_ref_organs and item.get("empty_mask") is False
+    )
+    if positive_ref_organs:
+        positive_nonempty_ok = nonempty_positive_predictions >= min_nonempty_positive
+    else:
+        positive_nonempty_ok = (len(mask_checks) - empty) >= min_nonempty_positive
+    empty_ratio_ok = empty_ratio <= max_empty_ratio
+    status = "success" if (
+        result.get("status") in {"success", "partial_success"}
+        and project_ok and official_ok and shape_ok and non_nan_ok
+        and empty_ratio_ok and positive_nonempty_ok
+    ) else "failed"
+    base.update({
+        "status": status,
+        "case_id": case["case_id"],
+        "ct_path": str(case["ct_path"]),
+        "prompts": prompts,
+        "output_dir": str(sanity_dir),
+        "runtime_sec": round(time.time() - started, 3),
+        "inference_status": result.get("status"),
+        "readable_masks": readable,
+        "empty_masks": empty,
+        "empty_mask_ratio": empty_ratio,
+        "max_empty_mask_ratio": max_empty_ratio,
+        "empty_ratio_ok": empty_ratio_ok,
+        "positive_reference_organs": positive_ref_organs,
+        "nonempty_positive_predictions": nonempty_positive_predictions,
+        "min_nonempty_positive_predictions": min_nonempty_positive,
+        "positive_nonempty_ok": positive_nonempty_ok,
+        "official_outputs_ok": official_ok,
+        "project_outputs_ok": project_ok,
+        "shape_ok": shape_ok,
+        "non_nan_ok": non_nan_ok,
+        "mask_checks": mask_checks,
+        "inference_result_path": str(sanity_dir / "voxtell_student_result.json"),
+    })
+    result_path.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
+    return base
+
+
+def _select_quality_gate_items(manifest_path: Path, max_cases: int, max_prompts: int) -> dict[str, list[dict]]:
+    try:
+        doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    candidates = []
+    grade_rank = {"A": 0, "B": 1, "C": 2, "D": 3}
+    allowed_grades = {
+        g.strip().upper()
+        for g in os.getenv("MEDAI_STUDENT_QUALITY_GRADES", "A,B").split(",")
+        if g.strip()
+    }
+    min_weight = float(os.getenv("MEDAI_STUDENT_QUALITY_MIN_WEIGHT", "0.5"))
+    seen: set[tuple[str, str]] = set()
+    for item in doc.get("items", []):
+        if item.get("supervision_type") != "positive" or item.get("is_prompt_variant"):
+            continue
+        grade = str(item.get("grade") or "C").upper()
+        if allowed_grades and grade not in allowed_grades:
+            continue
+        try:
+            if float(item.get("training_weight") or 0.0) < min_weight:
+                continue
+        except Exception:
+            continue
+        case_id = str(item.get("case_id") or "")
+        organ = str(item.get("organ") or "")
+        mask = Path(str(item.get("mask") or item.get("mask_path") or ""))
+        image = Path(str(item.get("image") or item.get("ct_path") or ""))
+        if not case_id or not organ or (case_id, organ) in seen or not image.exists() or not mask.exists() or not _mask_nonempty(mask):
+            continue
+        seen.add((case_id, organ))
+        candidates.append({**item, "_grade_rank": grade_rank.get(str(item.get("grade") or "C").upper(), 2)})
+    candidates.sort(key=lambda x: (x["_grade_rank"], -float(x.get("training_weight") or 0.0), str(x.get("case_id")), str(x.get("organ"))))
+    grouped: dict[str, list[dict]] = {}
+    for item in candidates:
+        if item["case_id"] not in grouped and len(grouped) >= max_cases:
+            continue
+        bucket = grouped.setdefault(item["case_id"], [])
+        if len(bucket) < max_prompts:
+            bucket.append(item)
+    return grouped
+
+
+def _student_quality_organ_group(organ: str) -> str:
+    name = organ.lower()
+    if any(token in name for token in ("duct", "stent", "bronch", "airway", "trachea")):
+        return "duct_or_small_tubular"
+    if any(token in name for token in ("artery", "vein", "vessel", "aorta", "cava", "portal", "postcava")):
+        return "vessel"
+    if any(token in name for token in ("body", "liver", "spleen", "kidney", "lung", "heart", "bladder", "pancreas", "stomach", "colon", "brain")):
+        return "large_or_common_organ"
+    return "difficult_or_low_confidence"
+
+
+def _mean(values: list[float]) -> float:
+    return float(sum(values) / len(values)) if values else 0.0
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    vals = sorted(values)
+    mid = len(vals) // 2
+    if len(vals) % 2:
+        return float(vals[mid])
+    return float((vals[mid - 1] + vals[mid]) / 2.0)
+
+def run_voxtell_student_quality_gate(round_idx: int, model_dir: Path, manifest_path: Path) -> dict:
+    out_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
+    result_path = out_dir / "voxtell_student_quality_gate.json"
+    max_cases = int(os.getenv("MEDAI_STUDENT_MINI_EVAL_CASES", "3"))
+    max_prompts = int(os.getenv("MEDAI_STUDENT_MINI_EVAL_PROMPTS", "8"))
+    min_mean_dsc = float(os.getenv("MEDAI_STUDENT_MIN_MEAN_DSC", "0.20"))
+    min_recall = float(os.getenv("MEDAI_STUDENT_MIN_NONEMPTY_RECALL", "0.50"))
+    grouped = _select_quality_gate_items(manifest_path, max_cases, max_prompts)
+    base = {
+        "stage": "voxtell_student_quality_gate",
+        "round": round_idx,
+        "model_dir": str(model_dir),
+        "manifest_path": str(manifest_path),
+        "max_cases": max_cases,
+        "max_prompts_per_case": max_prompts,
+        "min_mean_dsc": min_mean_dsc,
+        "min_nonempty_recall": min_recall,
+    }
+    if not grouped:
+        base.update({"status": "failed", "reason": "no eligible nonempty positive manifest items for mini consistency eval"})
+        result_path.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
+        return base
+
+    from cli_anything.medai.core.voxtell_student import VoxTellStudent
+
+    student = VoxTellStudent(model_dir=model_dir, target_config=PROMPT_TARGET_CONFIG, device="cuda")
+    eval_rows = []
+    pred_nonempty = 0
+    ref_nonempty = 0
+    dscs = []
+    for case_id, items in grouped.items():
+        image = Path(str(items[0].get("image") or items[0].get("ct_path")))
+        organs = [str(item["organ"]) for item in items]
+        case_out = out_dir / "voxtell_student_quality_gate_outputs" / case_id
+        case_out.mkdir(parents=True, exist_ok=True)
+        infer = student.segment(image, case_out, prompts=organs, dry_run=False, timeout_sec=1800, prompt_batch_size=max(1, len(organs)))
+        for item in items:
+            organ = str(item["organ"])
+            pred_path = case_out / f"{organ}.nii.gz"
+            ref_path = Path(str(item.get("mask") or item.get("mask_path")))
+            dsc, pred_has, ref_has, reason = _dice_for_masks(pred_path, ref_path)
+            if ref_has:
+                ref_nonempty += 1
+            if pred_has:
+                pred_nonempty += 1
+            if dsc is not None:
+                dscs.append(dsc)
+            eval_rows.append({
+                "case_id": case_id,
+                "organ": organ,
+                "organ_group": _student_quality_organ_group(organ),
+                "prompt": item.get("prompt"),
+                "grade": item.get("grade"),
+                "training_weight": item.get("training_weight"),
+                "reference_mask": str(ref_path),
+                "prediction_mask": str(pred_path),
+                "dsc": dsc,
+                "prediction_nonempty": pred_has,
+                "reference_nonempty": ref_has,
+                "status": infer.get("status"),
+                "skip_reason": reason,
+            })
+    mean_dsc = _mean(dscs)
+    median_dsc = _median(dscs)
+    nonempty_recall = float(pred_nonempty / ref_nonempty) if ref_nonempty else 0.0
+    status = "success" if mean_dsc >= min_mean_dsc and nonempty_recall >= min_recall else "failed"
+    organ_dscs: dict[str, list[float]] = {}
+    group_dscs: dict[str, list[float]] = {}
+    for row in eval_rows:
+        dsc = row.get("dsc")
+        if isinstance(dsc, (int, float)):
+            organ_dscs.setdefault(str(row.get("organ")), []).append(float(dsc))
+            group_dscs.setdefault(str(row.get("organ_group")), []).append(float(dsc))
+    organ_summary = [
+        {
+            "organ": organ,
+            "n": len(values),
+            "mean_dsc": round(_mean(values), 6),
+            "median_dsc": round(_median(values), 6),
+            "empty_failure_count": sum(
+                1 for row in eval_rows
+                if row.get("organ") == organ and row.get("reference_nonempty") and not row.get("prediction_nonempty")
+            ),
+        }
+        for organ, values in sorted(organ_dscs.items())
+    ]
+    group_summary = {
+        group: {
+            "n": len(values),
+            "mean_dsc": round(_mean(values), 6),
+            "median_dsc": round(_median(values), 6),
+        }
+        for group, values in sorted(group_dscs.items())
+    }
+    empty_failure_count = sum(1 for row in eval_rows if row.get("reference_nonempty") and not row.get("prediction_nonempty"))
+    base.update({
+        "status": status,
+        "num_evaluations": len(eval_rows),
+        "mean_dsc": round(mean_dsc, 6),
+        "median_dsc": round(median_dsc, 6),
+        "nonempty_recall": round(nonempty_recall, 6),
+        "empty_failure_count": empty_failure_count,
+        "empty_failure_rate": round(float(empty_failure_count / ref_nonempty), 6) if ref_nonempty else 0.0,
+        "reference_nonempty": ref_nonempty,
+        "prediction_nonempty": pred_nonempty,
+        "organ_group_summary": group_summary,
+        "organ_summary": organ_summary,
+        "top10_organs": sorted(organ_summary, key=lambda x: x["mean_dsc"], reverse=True)[:10],
+        "bottom10_organs": sorted(organ_summary, key=lambda x: x["mean_dsc"])[:10],
+        "evaluations": eval_rows,
+        "accuracy_warning": "Pseudo-consistency only; this is not expert-label accuracy.",
+    })
+    result_path.write_text(json.dumps(base, indent=2, ensure_ascii=False), encoding="utf-8")
+    return base
+
+
 def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consolidation: bool = False) -> dict:
     """Run or plan the VoxTell-style 3D prompt student M-step.
 
     The upstream VoxTell release provides inference code but no ready project
-    fine-tuning script. If MEDAI_VOXTELL_TRAIN_CMD is unset, we stop after
-    producing the prompt/mask manifest and do not fabricate a checkpoint.
+    fine-tuning script. This project supplies scripts/train_voxtell_prompt_student.py
+    as the default M-step trainer, so a formal run should produce a real
+    inference-compatible checkpoint unless MEDAI_ENABLE_VOXTELL_TRAINING=0.
     """
     log(f"=== Round {round_idx} 3D prompt student M-step 开始 ===")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
+    out_dir.mkdir(parents=True, exist_ok=True)
     result_path = out_dir / "voxtell_prompt_mstep_result.json"
 
     with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
+    eligible_items = int(manifest.get("num_distillation_eligible_items", 0) or 0)
+    if eligible_items <= 0:
+        eligible_items = sum(
+            1
+            for item in manifest.get("items", [])
+            if item.get("distillation_eligible") is not False
+            and float(item.get("training_weight") or 0.0) > 0.0
+        )
+    training_disabled = (not ENABLE_VOXTELL_TRAINING) or not VOXTELL_TRAIN_CMD
     result = {
         "stage": "voxtell_style_3d_prompt_mstep",
-        "status": "pending" if VOXTELL_TRAIN_CMD else "manifest_ready",
-        "training_status": "manifest_ready_no_trainer" if not VOXTELL_TRAIN_CMD else "pending",
+        "status": "manifest_ready" if training_disabled else "pending",
+        "training_status": "manifest_ready_training_disabled" if training_disabled else "pending",
         "student_backend": STUDENT_BACKEND,
         "manifest_path": str(manifest_path),
         "num_items": manifest.get("num_items", 0),
         "num_cases": manifest.get("num_cases", 0),
+        "num_distillation_eligible_items": eligible_items,
         "target_config": str(PROMPT_TARGET_CONFIG),
         "target_organs": len(load_student_target_organs()),
         "model_dir": str(VOXTELL_MODEL_DIR),
+        "train_cmd": VOXTELL_TRAIN_CMD,
+        "trainer_enabled": ENABLE_VOXTELL_TRAINING,
         "finetuned_checkpoint": None,
         "note": (
             "3D prompt-based student uses prompt/mask pairs and does not use "
@@ -682,16 +1170,26 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         ),
     }
 
-    if not VOXTELL_TRAIN_CMD:
+    if eligible_items <= 0:
+        result.update({
+            "status": "failed",
+            "training_status": "failed_no_distillation_items",
+            "reason": "No distillation-eligible prompt/mask items with positive training_weight are available.",
+        })
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        log("3D prompt M-step 失败：没有可用于蒸馏训练的正权重样本。")
+        return result
+
+    if training_disabled:
         result["reason"] = (
-            "MEDAI_VOXTELL_TRAIN_CMD is not configured. Manifest is ready; "
-            "real training requires a project fine-tuning command around VoxTellModel. "
-            "The EM loop must stop here instead of pretending that a student "
-            "checkpoint was trained."
+            "VoxTell training is explicitly disabled. Manifest is ready, but no "
+            "student checkpoint will be produced until MEDAI_ENABLE_VOXTELL_TRAINING=1 "
+            "and MEDAI_VOXTELL_TRAIN_CMD points to a trainer."
         )
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=2, ensure_ascii=False)
-        log("3D prompt M-step 已生成 manifest；未配置真实训练命令，因此暂停 EM，不生成 checkpoint。")
+        log("3D prompt M-step 已生成 manifest；VoxTell training 被显式关闭，因此不生成 checkpoint。")
         return result
 
     stop_vllm_for_mstep()
@@ -730,6 +1228,10 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
     finetuned_checkpoint = Path(train_result.get("finetuned_checkpoint", out_dir / "model_finetune.pth"))
     has_inference_model = (inference_model_dir / "plans.json").exists() and inference_checkpoint.exists()
     has_finetuned_checkpoint = finetuned_checkpoint.exists()
+    trained_items = int(train_result.get("num_manifest_items") or 0)
+    total_items = int(manifest.get("num_items") or 0)
+    max_steps = int(train_result.get("max_steps") or 0)
+    pilot_short_training = bool((trained_items and total_items and trained_items < total_items) or max_steps > 0)
     result.update({
         "training_status": "completed" if proc.returncode == 0 else "failed",
         "status": "success" if proc.returncode == 0 and has_inference_model else "failed",
@@ -738,9 +1240,34 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "finetuned_checkpoint": str(finetuned_checkpoint) if has_finetuned_checkpoint else None,
         "inference_model_dir": str(inference_model_dir) if has_inference_model else None,
         "inference_checkpoint": str(inference_checkpoint) if has_inference_model else None,
+        "pilot_short_training": pilot_short_training,
+        "pilot_trained_manifest_items": trained_items or None,
+        "pilot_max_steps": max_steps or None,
+        "mean_effective_loss_weight": train_result.get("mean_effective_loss_weight"),
+        "effective_loss_weight_range": train_result.get("effective_loss_weight_range"),
         "stdout_tail": (proc.stdout or "")[-4000:],
         "stderr_tail": (proc.stderr or "")[-4000:],
     })
+    result["checkpoint_eligible_for_next_round"] = False
+    if result["status"] == "success" and has_inference_model:
+        result["sanity_check"] = run_voxtell_student_sanity_check(round_idx, inference_model_dir, manifest_path)
+        if result["sanity_check"].get("status") == "success":
+            result["quality_gate"] = run_voxtell_student_quality_gate(round_idx, inference_model_dir, manifest_path)
+        if result.get("sanity_check", {}).get("status") != "success":
+            result["status"] = "failed"
+            result["training_status"] = "completed_sanity_failed"
+        elif result.get("quality_gate", {}).get("status") != "success":
+            result["status"] = "failed"
+            result["training_status"] = "completed_quality_gate_failed"
+        elif pilot_short_training:
+            result["training_status"] = "completed_pilot_quality_gated"
+            result["checkpoint_eligible_for_next_round"] = False
+            result["formal_round2_recommendation"] = (
+                "Pilot checkpoint passed automatic gates but was trained on a capped subset; "
+                "run full M-step before formal Round2 competition."
+            )
+        else:
+            result["checkpoint_eligible_for_next_round"] = True
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     restart_vllm_after_mstep()
@@ -893,6 +1420,7 @@ def save_round_predictions(round_idx: int):
             cases.append(row)
 
     saved = 0
+    results = []
     for case in cases:
         ct_path = Path(case["ct_path"])
         case_id = case["case_id"]
@@ -902,6 +1430,16 @@ def save_round_predictions(round_idx: int):
         # 跳过已完成的（有任意 mask 即视为完成）
         if case_pred_dir.exists() and any(case_pred_dir.glob("*.nii.gz")):
             saved += 1
+            cached_result = case_pred_dir / "voxtell_student_result.json"
+            if cached_result.exists():
+                try:
+                    item = json.loads(cached_result.read_text(encoding="utf-8"))
+                except Exception:
+                    item = {"status": "skipped_existing", "output_dir": str(case_pred_dir)}
+            else:
+                item = {"status": "skipped_existing", "output_dir": str(case_pred_dir)}
+            item["case_id"] = case_id
+            results.append(item)
             continue
         case_pred_dir.mkdir(parents=True, exist_ok=True)
         result = student.segment(
@@ -928,10 +1466,39 @@ def save_prompt_student_predictions(round_idx: int):
     pred_dir.mkdir(parents=True, exist_ok=True)
 
     finetuned_model_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_finetuned_model"
-    if (finetuned_model_dir / "plans.json").exists() and (finetuned_model_dir / "fold_0" / "checkpoint_final.pth").exists():
+    mstep_result_path = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json"
+    allow_base = os.getenv("MEDAI_ALLOW_BASE_VOXTELL_INFERENCE", "0").strip().lower() in {"1", "true", "yes", "on"}
+    mstep_result = {}
+    if mstep_result_path.exists():
+        try:
+            mstep_result = json.loads(mstep_result_path.read_text(encoding="utf-8"))
+        except Exception:
+            mstep_result = {}
+    has_finetuned = (finetuned_model_dir / "plans.json").exists() and (finetuned_model_dir / "fold_0" / "checkpoint_final.pth").exists()
+    eligible = bool(mstep_result.get("checkpoint_eligible_for_next_round"))
+    if has_finetuned and eligible:
         model_dir = finetuned_model_dir
-    else:
+        checkpoint_status = "finetuned"
+        eligible_for_competition = True
+    elif allow_base:
         model_dir = VOXTELL_MODEL_DIR
+        checkpoint_status = "not_distilled_student"
+        eligible_for_competition = False
+    else:
+        summary = {
+            "stage": "voxtell_3d_prompt_student_inference_summary",
+            "status": "skipped_no_eligible_checkpoint",
+            "round": round_idx,
+            "model_dir": str(finetuned_model_dir),
+            "checkpoint_status": "missing_or_quality_gate_failed",
+            "checkpoint_eligible_for_next_round": False,
+            "eligible_for_competition": False,
+            "mstep_result_path": str(mstep_result_path),
+            "reason": "No quality-gated finetuned VoxTell student checkpoint; base fallback is disabled for formal runs.",
+        }
+        (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        log("3D prompt student 推理跳过：没有通过质量门槛的 finetuned checkpoint。")
+        return summary
 
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
     import csv as csv_mod
@@ -949,6 +1516,7 @@ def save_prompt_student_predictions(round_idx: int):
             cases.append(row)
 
     saved = 0
+    results = []
     for case in cases:
         ct_path = Path(case["ct_path"])
         case_id = case["case_id"]
@@ -957,6 +1525,16 @@ def save_prompt_student_predictions(round_idx: int):
         case_pred_dir = pred_dir / case_id
         if case_pred_dir.exists() and any(case_pred_dir.glob("*.nii.gz")):
             saved += 1
+            cached_result = case_pred_dir / "voxtell_student_result.json"
+            if cached_result.exists():
+                try:
+                    item = json.loads(cached_result.read_text(encoding="utf-8"))
+                except Exception:
+                    item = {"status": "skipped_existing", "output_dir": str(case_pred_dir)}
+            else:
+                item = {"status": "skipped_existing", "output_dir": str(case_pred_dir)}
+            item["case_id"] = case_id
+            results.append(item)
             continue
         case_pred_dir.mkdir(parents=True, exist_ok=True)
         result = student.segment(
@@ -966,12 +1544,29 @@ def save_prompt_student_predictions(round_idx: int):
             dry_run=not model_dir.exists(),
             timeout_sec=1800,
         )
+        result["case_id"] = case_id
+        results.append(result)
         if result.get("status") == "success":
             saved += 1
             log(f"  {case_id}: ✓ {result.get('num_masks', 0)}/{len(all_organs)} masks")
         else:
             log(f"  {case_id}: {result.get('status')} ({result.get('reason', 'see result json')})")
 
+    summary = {
+        "stage": "voxtell_3d_prompt_student_inference_summary",
+        "status": "success" if saved == len(cases) else "partial_success",
+        "round": round_idx,
+        "model_dir": str(model_dir),
+        "checkpoint_status": checkpoint_status,
+        "checkpoint_eligible_for_next_round": eligible_for_competition,
+        "eligible_for_competition": eligible_for_competition,
+        "num_cases": len(cases),
+        "num_cases_success": saved,
+        "target_organs": len(all_organs),
+        "results": results,
+        "accuracy_warning": "Student pseudo-consistency outputs are not expert ground-truth accuracy.",
+    }
+    (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     log(f"3D prompt student 推理阶段完成/计划完成: {saved}/{len(cases)} 个 case")
 
 
@@ -1032,13 +1627,64 @@ def _student_manifest_weight_summary(round_idx: int) -> dict:
     }
 
 
+def build_round_label_scoring_dashboard(round_idx: int) -> dict:
+    """Build the formal all-organ label scoring dashboard for a completed E-step."""
+    run_output = OUTPUT_ROOT / f"round{round_idx}" / "estep"
+    output_dir = run_output / "dashboards"
+    cmd = [
+        sys.executable,
+        str(PROJECT_ROOT / "scripts/build_auto_fine_label_dashboard.py"),
+        "--run-output",
+        str(run_output),
+        "--target-config",
+        str(PROMPT_TARGET_CONFIG),
+        "--output-dir",
+        str(output_dir),
+    ]
+    student_summary = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions" / "student_inference_summary.json"
+    if student_summary.exists():
+        cmd.extend(["--student-summary", str(student_summary)])
+    failure_json = OUTPUT_ROOT / "final_analysis" / "failure_mining" / "student_failure_cases.json"
+    if failure_json.exists():
+        cmd.extend(["--failure-json", str(failure_json)])
+
+    proc = subprocess.run(
+        cmd,
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    try:
+        data = json.loads((proc.stdout or "").strip() or "{}")
+    except Exception:
+        data = {"status": "failed", "stdout_tail": (proc.stdout or "")[-2000:]}
+    data.update({
+        "stage": "round_label_scoring_dashboard",
+        "round": round_idx,
+        "return_code": proc.returncode,
+        "output_dir": str(output_dir),
+        "organ_capability_dashboard": str(output_dir / "organ_capability_dashboard.csv"),
+        "case_organ_label_scores": str(output_dir / "case_organ_label_scores.csv"),
+    })
+    if proc.stderr:
+        data["stderr_tail"] = proc.stderr[-4000:]
+    log(
+        "Label scoring dashboard: "
+        f"status={data.get('status')}, rows={data.get('rows')}, output={output_dir}"
+    )
+    return data
+
+
 def main():
     ensure_current_student_backend_allowed()
     ensure_formal_teacher_pool_registered()
     ensure_formal_quality_gates()
     log("=" * 60)
     log("EM Loop 训练 v2（断点续跑 + vLLM LabelCritic + 3D prompt student）")
-    log(f"  轮数: {NUM_ROUNDS}, Teacher: {len(ALL_TEACHERS)}个, Case: 50")
+    log(f"  轮数: {NUM_ROUNDS}, Teacher: {len(ALL_TEACHERS)}个, Case: {len(load_case_rows())}")
+    log(f"  Case list: {CASE_LIST}")
     log(f"  Student backend: {STUDENT_BACKEND}")
     if STUDENT_BACKEND == "voxtell_style_3d_prompt":
         log(f"  Prompt target organs: {len(load_student_target_organs())}")
@@ -1071,6 +1717,7 @@ def main():
         if estep_result.get("status") == "failed":
             log(f"E-step 失败，跳过 Round {round_idx}")
             continue
+        label_scoring_dashboard = build_round_label_scoring_dashboard(round_idx)
 
         # 构建训练数据
         dataset_path = build_student_dataset(round_idx)
@@ -1081,22 +1728,23 @@ def main():
 
         if (
             STUDENT_BACKEND == "voxtell_style_3d_prompt"
-            and mstep_result.get("training_status") == "manifest_ready_no_trainer"
+            and str(mstep_result.get("training_status", "")).startswith("manifest_ready")
         ):
-            log("3D prompt student 训练器尚未配置：已生成训练 manifest，本次在 M-step 暂停，避免进入未训练 student 的后续轮次。")
+            log("3D prompt student 未生成 checkpoint：已生成训练 manifest，但训练被禁用或未完成，本次暂停避免进入未训练 student 的后续轮次。")
             round_elapsed = time.time() - round_start
             summary = {
                 "round": round_idx,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "estep_status": estep_result.get("status"),
-                "mstep_status": "manifest_ready_no_trainer",
+                "mstep_status": mstep_result.get("training_status", "manifest_ready"),
                 "student_backend": STUDENT_BACKEND,
                 "mstep_type": "global_consolidation" if is_consolidation else "local_update",
                 "finetuned_checkpoint": None,
                 "metrics": {
                     "status": "skipped",
-                    "reason": "prompt student manifest is ready but no real trainer/checkpoint is configured",
+                    "reason": mstep_result.get("reason", "prompt student manifest is ready but no checkpoint was produced"),
                 },
+                "label_scoring_dashboard": label_scoring_dashboard,
                 "round_elapsed_hours": round(round_elapsed / 3600, 2),
             }
             summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1129,6 +1777,7 @@ def main():
                 "mstep_type": "global_consolidation" if is_consolidation else "local_update",
                 "finetuned_checkpoint": None,
                 "metrics": {},
+                "label_scoring_dashboard": label_scoring_dashboard,
                 "round_elapsed_hours": round((time.time() - round_start) / 3600, 2),
             }
             summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1138,12 +1787,12 @@ def main():
 
         if (
             STUDENT_BACKEND == "voxtell_style_3d_prompt"
-            and mstep_result.get("training_status") == "manifest_ready_no_trainer"
+            and str(mstep_result.get("training_status", "")).startswith("manifest_ready")
         ):
-            log("3D prompt student 训练器尚未配置，本轮跳过 student 推理和 pseudo-consistency 评估，避免伪指标。")
+            log("3D prompt student 没有可用 checkpoint，本轮跳过 student 推理和 pseudo-consistency 评估，避免伪指标。")
             round_metrics = {
                 "status": "skipped",
-                "reason": "prompt student manifest is ready but no real trainer/checkpoint is configured",
+                "reason": mstep_result.get("reason", "prompt student manifest is ready but no checkpoint was produced"),
             }
         else:
             # 先保存 student 推理结果，再评估（评估依赖 student_predictions）
@@ -1172,6 +1821,7 @@ def main():
                 "top5_organs": round_metrics.get("top5_organs", []),
                 "bottom5_organs": round_metrics.get("bottom5_organs", []),
             },
+            "label_scoring_dashboard": label_scoring_dashboard,
             "round_elapsed_hours": round(round_elapsed / 3600, 2),
         }
         summary["reliability_weights"] = _student_manifest_weight_summary(round_idx)

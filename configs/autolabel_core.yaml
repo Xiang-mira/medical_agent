@@ -1,0 +1,84 @@
+schema_version: '3.0'
+formal_target_config: configs/student_3d_prompt_target_organs.json
+missing_evidence_policy: normalize_available
+single_teacher_grade_cap: C
+single_teacher_with_oof_grade_cap: B
+
+evidence_weights:
+  family_consensus: 0.25
+  ct_support: 0.20
+  anatomy_plausibility: 0.15
+  perturbation_stability: 0.15
+  cross_round_stability: 0.10
+  loo_model_reliability: 0.05
+  teacher_student_oof: 0.10
+
+thresholds:
+  grade_a: 0.85
+  grade_b: 0.65
+  grade_c: 0.35
+  high_family_agreement_dice: 0.80
+  severe_family_conflict_dice: 0.30
+  close_candidate_margin: 0.05
+  decisive_candidate_margin: 0.10
+  parent_containment: 0.95
+  single_family_confidence_cap: 0.64
+  labelcritic_tiebreak_cap: 0.03
+
+training_weights:
+  A: 1.0
+  B: 0.5
+  C: 0.0
+  D: 0.0
+
+soft_labels:
+  enabled: true
+  threshold: 0.5
+  c_grade_training_weight: 0.1
+  supported_backends: [voxtell_prompt_student]
+
+tta:
+  enabled: true
+  risk_triggered_only: true
+  transforms: [crop_margin, spacing_resample, intensity_window]
+  allow_lr_flip_with_prompt_swap: false
+
+oof_promotion:
+  folds: 5
+  teacher_student_dice: 0.85
+  cross_round_stability: 0.90
+  perturbation_stability: 0.85
+  ct_support: 0.60
+  anatomy_plausibility: 0.95
+
+longtail_critic:
+  enabled: false
+  model_path: outputs/longtail_critic/longtail_critic_model.json
+  candidate_ranking_penalty_weight: 0.10
+  confidence_penalty_cap: 0.05
+
+reliability:
+  schema_version: estimated_model_reliability_v2
+  min_other_evidence_families: 2
+  family_prior_strength: 20
+  organ_model_prior_strength: 10
+  observation_weights:
+    dice: 0.60
+    nsd: 0.20
+    ct_support: 0.10
+    anatomy_plausibility: 0.10
+
+# Conservative independence groups. Unknown models are assigned their own
+# explicit model key by the loader and are reported as unreviewed lineage.
+evidence_family_rules:
+  cads: [cads, cads551, cads552, cads553, cads554, cads555, cads556, cads557, cads558, cads559]
+  totalsegmentator: [totalsegmentator]
+  vista3d: [vista3d, vista3d_student]
+  moose: [moose, moose3_0]
+  epai: [epai, epai_20250421]
+  vsmtrans: [vsmtrans]
+  atlasnet: [atlasnet]
+  unest: [unest]
+  saros_nnunet: [saros_nnunet]
+  nnunet_private: [nnunet_private]
+  voxtell_student: [voxtell, voxtell_student, prompt_student, student]

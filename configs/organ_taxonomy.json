@@ -1,0 +1,5680 @@
+{
+  "schema_version": "1.0",
+  "source_xlsx": "/home/teacher1/JHU-project1/medical_agent/configs/class_checkpoint_map_updates.xlsx",
+  "source_sha256": "1b2e43d9652af3500f858beceac4423bf32ba25e13fb0090a7cffd35e77a1e80",
+  "source_modified_utc": "2026-06-20T02:04:10.359148+00:00",
+  "num_organs": 384,
+  "comparison_families": [
+    "other_noncomparable",
+    "sub_organ",
+    "vessel_or_small_structure",
+    "whole_organ"
+  ],
+  "organs": {
+    "abdominal_cavity": {
+      "canonical_id": "abdominal_cavity",
+      "display_name": "abdominal_cavity",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads559",
+        "saros_nnunet"
+      ],
+      "primary_teacher": "cads559",
+      "backup_teachers": [
+        "saros_nnunet"
+      ]
+    },
+    "adrenal_gland_left": {
+      "canonical_id": "adrenal_gland_left",
+      "display_name": "adrenal_gland_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "epai_20250421",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "adrenal_gland_right": {
+      "canonical_id": "adrenal_gland_right",
+      "display_name": "adrenal_gland_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "epai_20250421",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "airway": {
+      "canonical_id": "airway",
+      "display_name": "airway",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "airway_tree": {
+      "canonical_id": "airway_tree",
+      "display_name": "airway_tree",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "airway"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "atm"
+      ],
+      "primary_teacher": "atm",
+      "backup_teachers": []
+    },
+    "airway_wall": {
+      "canonical_id": "airway_wall",
+      "display_name": "airway_wall",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "airway"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "airrc"
+      ],
+      "primary_teacher": "airrc",
+      "backup_teachers": []
+    },
+    "anterior_eyeball_segment_left": {
+      "canonical_id": "anterior_eyeball_segment_left",
+      "display_name": "anterior_eyeball_segment_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "anterior_eyeball_segment_right": {
+      "canonical_id": "anterior_eyeball_segment_right",
+      "display_name": "anterior_eyeball_segment_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "anterior_scalene_left": {
+      "canonical_id": "anterior_scalene_left",
+      "display_name": "anterior_scalene_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "anterior_scalene_right": {
+      "canonical_id": "anterior_scalene_right",
+      "display_name": "anterior_scalene_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "aorta": {
+      "canonical_id": "aorta",
+      "display_name": "aorta",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "arm_left": {
+      "canonical_id": "arm_left",
+      "display_name": "arm_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "arms"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "arm_right": {
+      "canonical_id": "arm_right",
+      "display_name": "arm_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "arms"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "arms": {
+      "canonical_id": "arms",
+      "display_name": "arms",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "moose3_0"
+      ],
+      "primary_teacher": "moose3_0",
+      "backup_teachers": []
+    },
+    "artery_brachiocephalic": {
+      "canonical_id": "artery_brachiocephalic",
+      "display_name": "artery_brachiocephalic",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "artery_common_carotid_left": {
+      "canonical_id": "artery_common_carotid_left",
+      "display_name": "artery_common_carotid_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "artery_common_carotid_right": {
+      "canonical_id": "artery_common_carotid_right",
+      "display_name": "artery_common_carotid_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "artery_internal_carotid_left": {
+      "canonical_id": "artery_internal_carotid_left",
+      "display_name": "artery_internal_carotid_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "artery_internal_carotid_right": {
+      "canonical_id": "artery_internal_carotid_right",
+      "display_name": "artery_internal_carotid_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "artery_subclavian_left": {
+      "canonical_id": "artery_subclavian_left",
+      "display_name": "artery_subclavian_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "artery_subclavian_right": {
+      "canonical_id": "artery_subclavian_right",
+      "display_name": "artery_subclavian_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "arytenoid_cartilage": {
+      "canonical_id": "arytenoid_cartilage",
+      "display_name": "arytenoid_cartilage",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "larynx"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "atrial_appendage_left": {
+      "canonical_id": "atrial_appendage_left",
+      "display_name": "atrial_appendage_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "auditory_canal_left": {
+      "canonical_id": "auditory_canal_left",
+      "display_name": "auditory_canal_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "auditory_canal_right": {
+      "canonical_id": "auditory_canal_right",
+      "display_name": "auditory_canal_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "autochthon_left": {
+      "canonical_id": "autochthon_left",
+      "display_name": "autochthon_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "autochthon_right": {
+      "canonical_id": "autochthon_right",
+      "display_name": "autochthon_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "bladder": {
+      "canonical_id": "bladder",
+      "display_name": "bladder",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads553"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads553"
+      ]
+    },
+    "blood": {
+      "canonical_id": "blood",
+      "display_name": "blood",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "body": {
+      "canonical_id": "body",
+      "display_name": "body",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "body_extremities": {
+      "canonical_id": "body_extremities",
+      "display_name": "body_extremities",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "body"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "body_trunc": {
+      "canonical_id": "body_trunc",
+      "display_name": "body_trunc",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "body"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "bones": {
+      "canonical_id": "bones",
+      "display_name": "bones",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads559"
+      ],
+      "primary_teacher": "cads559",
+      "backup_teachers": []
+    },
+    "both_lips": {
+      "canonical_id": "both_lips",
+      "display_name": "both_lips",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "oral_cavity"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "brachiocephalic_trunk": {
+      "canonical_id": "brachiocephalic_trunk",
+      "display_name": "brachiocephalic_trunk",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "brachiocephalic_vein_left": {
+      "canonical_id": "brachiocephalic_vein_left",
+      "display_name": "brachiocephalic_vein_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "brachiocephalic_vein_right": {
+      "canonical_id": "brachiocephalic_vein_right",
+      "display_name": "brachiocephalic_vein_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "brain": {
+      "canonical_id": "brain",
+      "display_name": "brain",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads553"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads553"
+      ]
+    },
+    "brain_ventricle": {
+      "canonical_id": "brain_ventricle",
+      "display_name": "brain_ventricle",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "brainstem": {
+      "canonical_id": "brainstem",
+      "display_name": "brainstem",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "breast_left": {
+      "canonical_id": "breast_left",
+      "display_name": "breast_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "breast_right": {
+      "canonical_id": "breast_right",
+      "display_name": "breast_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "bronchus": {
+      "canonical_id": "bronchus",
+      "display_name": "bronchus",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "buccal_mucosa": {
+      "canonical_id": "buccal_mucosa",
+      "display_name": "buccal_mucosa",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "oral_cavity"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "carotid_artery_left": {
+      "canonical_id": "carotid_artery_left",
+      "display_name": "carotid_artery_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "carotid_artery_right": {
+      "canonical_id": "carotid_artery_right",
+      "display_name": "carotid_artery_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "carpal": {
+      "canonical_id": "carpal",
+      "display_name": "carpal",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "carpal_left": {
+      "canonical_id": "carpal_left",
+      "display_name": "carpal_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "carpal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "carpal_right": {
+      "canonical_id": "carpal_right",
+      "display_name": "carpal_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "carpal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "caudate_nucleus": {
+      "canonical_id": "caudate_nucleus",
+      "display_name": "caudate_nucleus",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "cbd_stent": {
+      "canonical_id": "cbd_stent",
+      "display_name": "cbd_stent",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "celiac_aa_celiac_artery": {
+      "canonical_id": "celiac_aa_celiac_artery",
+      "display_name": "celiac_aa (celiac_artery)",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": []
+    },
+    "celiac_trunk": {
+      "canonical_id": "celiac_trunk",
+      "display_name": "celiac_trunk",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vsmtrans"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": []
+    },
+    "central_sulcus": {
+      "canonical_id": "central_sulcus",
+      "display_name": "central_sulcus",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "cerebellum": {
+      "canonical_id": "cerebellum",
+      "display_name": "cerebellum",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "cerebrospinal_fluid": {
+      "canonical_id": "cerebrospinal_fluid",
+      "display_name": "cerebrospinal_fluid",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "cervical_esophagus": {
+      "canonical_id": "cervical_esophagus",
+      "display_name": "cervical_esophagus",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "esophagus"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "cheek_left": {
+      "canonical_id": "cheek_left",
+      "display_name": "cheek_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "face"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "cheek_right": {
+      "canonical_id": "cheek_right",
+      "display_name": "cheek_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "face"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "clavicula_left": {
+      "canonical_id": "clavicula_left",
+      "display_name": "clavicula_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "clavicula_right": {
+      "canonical_id": "clavicula_right",
+      "display_name": "clavicula_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "cochlear_left": {
+      "canonical_id": "cochlear_left",
+      "display_name": "cochlear_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "cochlear_right": {
+      "canonical_id": "cochlear_right",
+      "display_name": "cochlear_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "colon": {
+      "canonical_id": "colon",
+      "display_name": "colon",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "epai_20250421",
+        "vsmtrans",
+        "cads553",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "vsmtrans",
+        "cads553",
+        "atlasnet"
+      ]
+    },
+    "colostomy_bag": {
+      "canonical_id": "colostomy_bag",
+      "display_name": "colostomy_bag",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "colon"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "common_bile_duct": {
+      "canonical_id": "common_bile_duct",
+      "display_name": "common_bile_duct",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "common_carotid_artery_left": {
+      "canonical_id": "common_carotid_artery_left",
+      "display_name": "common_carotid_artery_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "common_carotid_artery_right": {
+      "canonical_id": "common_carotid_artery_right",
+      "display_name": "common_carotid_artery_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "common_iliac_artery_left": {
+      "canonical_id": "common_iliac_artery_left",
+      "display_name": "common_iliac_artery_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads553"
+      ],
+      "primary_teacher": "cads553",
+      "backup_teachers": []
+    },
+    "common_iliac_artery_right": {
+      "canonical_id": "common_iliac_artery_right",
+      "display_name": "common_iliac_artery_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads553"
+      ],
+      "primary_teacher": "cads553",
+      "backup_teachers": []
+    },
+    "common_iliac_vein_left": {
+      "canonical_id": "common_iliac_vein_left",
+      "display_name": "common_iliac_vein_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads553"
+      ],
+      "primary_teacher": "cads553",
+      "backup_teachers": []
+    },
+    "common_iliac_vein_right": {
+      "canonical_id": "common_iliac_vein_right",
+      "display_name": "common_iliac_vein_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads553"
+      ],
+      "primary_teacher": "cads553",
+      "backup_teachers": []
+    },
+    "compact_bone": {
+      "canonical_id": "compact_bone",
+      "display_name": "compact_bone",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "coronary_artery": {
+      "canonical_id": "coronary_artery",
+      "display_name": "coronary_artery",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "costal_cartilages": {
+      "canonical_id": "costal_cartilages",
+      "display_name": "costal_cartilages",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "cricoid_cartilage": {
+      "canonical_id": "cricoid_cartilage",
+      "display_name": "cricoid_cartilage",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "larynx"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "cricopharyngeus": {
+      "canonical_id": "cricopharyngeus",
+      "display_name": "cricopharyngeus",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "digastric_left": {
+      "canonical_id": "digastric_left",
+      "display_name": "digastric_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "digastric_right": {
+      "canonical_id": "digastric_right",
+      "display_name": "digastric_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "duodenum": {
+      "canonical_id": "duodenum",
+      "display_name": "duodenum",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "epai_20250421",
+        "vsmtrans",
+        "cads553",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "vsmtrans",
+        "cads553",
+        "atlasnet"
+      ]
+    },
+    "esophagus": {
+      "canonical_id": "esophagus",
+      "display_name": "esophagus",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads553"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads553"
+      ]
+    },
+    "eye_lens_left": {
+      "canonical_id": "eye_lens_left",
+      "display_name": "eye_lens_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "eye_lens_right": {
+      "canonical_id": "eye_lens_right",
+      "display_name": "eye_lens_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "eyeball": {
+      "canonical_id": "eyeball",
+      "display_name": "eyeball",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "eyeball_left": {
+      "canonical_id": "eyeball_left",
+      "display_name": "eyeball_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "eyeball_right": {
+      "canonical_id": "eyeball_right",
+      "display_name": "eyeball_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "face": {
+      "canonical_id": "face",
+      "display_name": "face",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads553"
+      ],
+      "primary_teacher": "cads553",
+      "backup_teachers": []
+    },
+    "fat": {
+      "canonical_id": "fat",
+      "display_name": "fat",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "femur_left": {
+      "canonical_id": "femur_left",
+      "display_name": "femur_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "femur_right": {
+      "canonical_id": "femur_right",
+      "display_name": "femur_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "fibula": {
+      "canonical_id": "fibula",
+      "display_name": "fibula",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "fibula_left": {
+      "canonical_id": "fibula_left",
+      "display_name": "fibula_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "fibula"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "fibula_right": {
+      "canonical_id": "fibula_right",
+      "display_name": "fibula_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "fibula"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "fingers_left": {
+      "canonical_id": "fingers_left",
+      "display_name": "fingers_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "arms"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "fingers_right": {
+      "canonical_id": "fingers_right",
+      "display_name": "fingers_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "arms"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "frontal_lobe": {
+      "canonical_id": "frontal_lobe",
+      "display_name": "frontal_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "gall_bladder": {
+      "canonical_id": "gall_bladder",
+      "display_name": "gall_bladder",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "gland_structure": {
+      "canonical_id": "gland_structure",
+      "display_name": "gland_structure",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads559"
+      ],
+      "primary_teacher": "cads559",
+      "backup_teachers": []
+    },
+    "glottis": {
+      "canonical_id": "glottis",
+      "display_name": "glottis",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "larynx"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "gluteus_maximus_left": {
+      "canonical_id": "gluteus_maximus_left",
+      "display_name": "gluteus_maximus_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "gluteus_maximus_right": {
+      "canonical_id": "gluteus_maximus_right",
+      "display_name": "gluteus_maximus_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "gluteus_medius_left": {
+      "canonical_id": "gluteus_medius_left",
+      "display_name": "gluteus_medius_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "gluteus_medius_right": {
+      "canonical_id": "gluteus_medius_right",
+      "display_name": "gluteus_medius_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "gluteus_minimus_left": {
+      "canonical_id": "gluteus_minimus_left",
+      "display_name": "gluteus_minimus_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "gluteus_minimus_right": {
+      "canonical_id": "gluteus_minimus_right",
+      "display_name": "gluteus_minimus_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "gonads": {
+      "canonical_id": "gonads",
+      "display_name": "gonads",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "gray_matter": {
+      "canonical_id": "gray_matter",
+      "display_name": "gray_matter",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "hard_palate": {
+      "canonical_id": "hard_palate",
+      "display_name": "hard_palate",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "oral_cavity"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "head": {
+      "canonical_id": "head",
+      "display_name": "head",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "heart": {
+      "canonical_id": "heart",
+      "display_name": "heart",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads556"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads556"
+      ]
+    },
+    "heart_atrium_left": {
+      "canonical_id": "heart_atrium_left",
+      "display_name": "heart_atrium_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps",
+        "cads553",
+        "moose888"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": [
+        "cads553",
+        "moose888"
+      ]
+    },
+    "heart_atrium_right": {
+      "canonical_id": "heart_atrium_right",
+      "display_name": "heart_atrium_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps",
+        "cads553",
+        "moose888"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": [
+        "cads553",
+        "moose888"
+      ]
+    },
+    "heart_myocardium": {
+      "canonical_id": "heart_myocardium",
+      "display_name": "heart_myocardium",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps",
+        "cads553",
+        "moose888"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": [
+        "cads553",
+        "moose888"
+      ]
+    },
+    "heart_tissue": {
+      "canonical_id": "heart_tissue",
+      "display_name": "heart_tissue",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "heart_ventricle_left": {
+      "canonical_id": "heart_ventricle_left",
+      "display_name": "heart_ventricle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps",
+        "cads553",
+        "moose888"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": [
+        "cads553",
+        "moose888"
+      ]
+    },
+    "heart_ventricle_right": {
+      "canonical_id": "heart_ventricle_right",
+      "display_name": "heart_ventricle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps",
+        "cads553",
+        "moose888"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": [
+        "cads553",
+        "moose888"
+      ]
+    },
+    "hepatic_vessel": {
+      "canonical_id": "hepatic_vessel",
+      "display_name": "hepatic_vessel",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vsmtrans"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": []
+    },
+    "hip_left": {
+      "canonical_id": "hip_left",
+      "display_name": "hip_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "hip_right": {
+      "canonical_id": "hip_right",
+      "display_name": "hip_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "humerus_left": {
+      "canonical_id": "humerus_left",
+      "display_name": "humerus_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "humerus_right": {
+      "canonical_id": "humerus_right",
+      "display_name": "humerus_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "hyoid": {
+      "canonical_id": "hyoid",
+      "display_name": "hyoid",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "hypopharynx": {
+      "canonical_id": "hypopharynx",
+      "display_name": "hypopharynx",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "iliac_artery_left": {
+      "canonical_id": "iliac_artery_left",
+      "display_name": "iliac_artery_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "moose888",
+        "cads553"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "moose888",
+        "cads553"
+      ]
+    },
+    "iliac_artery_right": {
+      "canonical_id": "iliac_artery_right",
+      "display_name": "iliac_artery_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "moose888",
+        "cads553"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "moose888",
+        "cads553"
+      ]
+    },
+    "iliac_vena_left": {
+      "canonical_id": "iliac_vena_left",
+      "display_name": "iliac_vena_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "moose888",
+        "cads553"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "moose888",
+        "cads553"
+      ]
+    },
+    "iliac_vena_right": {
+      "canonical_id": "iliac_vena_right",
+      "display_name": "iliac_vena_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "moose888",
+        "cads553"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "moose888",
+        "cads553"
+      ]
+    },
+    "iliopsoas_left": {
+      "canonical_id": "iliopsoas_left",
+      "display_name": "iliopsoas_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "iliopsoas_right": {
+      "canonical_id": "iliopsoas_right",
+      "display_name": "iliopsoas_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "inferior_oblique_muscle_left": {
+      "canonical_id": "inferior_oblique_muscle_left",
+      "display_name": "inferior_oblique_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "inferior_oblique_muscle_right": {
+      "canonical_id": "inferior_oblique_muscle_right",
+      "display_name": "inferior_oblique_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "inferior_pharyngeal_constrictor": {
+      "canonical_id": "inferior_pharyngeal_constrictor",
+      "display_name": "inferior_pharyngeal_constrictor",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "inferior_rectus_muscle_left": {
+      "canonical_id": "inferior_rectus_muscle_left",
+      "display_name": "inferior_rectus_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "inferior_rectus_muscle_right": {
+      "canonical_id": "inferior_rectus_muscle_right",
+      "display_name": "inferior_rectus_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "inferior_vena_cava": {
+      "canonical_id": "inferior_vena_cava",
+      "display_name": "inferior_vena_cava",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads551",
+        "moose888",
+        "atlasnet"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads551",
+        "moose888",
+        "atlasnet"
+      ]
+    },
+    "insular_cortex": {
+      "canonical_id": "insular_cortex",
+      "display_name": "insular_cortex",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "intermuscular_adipose_tissue": {
+      "canonical_id": "intermuscular_adipose_tissue",
+      "display_name": "intermuscular_adipose_tissue",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "fat"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "internal_capsule": {
+      "canonical_id": "internal_capsule",
+      "display_name": "internal_capsule",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "internal_carotid_artery_left": {
+      "canonical_id": "internal_carotid_artery_left",
+      "display_name": "internal_carotid_artery_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "internal_carotid_artery_right": {
+      "canonical_id": "internal_carotid_artery_right",
+      "display_name": "internal_carotid_artery_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "internal_jugular_vein_left": {
+      "canonical_id": "internal_jugular_vein_left",
+      "display_name": "internal_jugular_vein_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "internal_jugular_vein_right": {
+      "canonical_id": "internal_jugular_vein_right",
+      "display_name": "internal_jugular_vein_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "intestine": {
+      "canonical_id": "intestine",
+      "display_name": "intestine",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "kidney": {
+      "canonical_id": "kidney",
+      "display_name": "kidney",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "kidney_cortex": {
+      "canonical_id": "kidney_cortex",
+      "display_name": "kidney_cortex",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "unest"
+      ],
+      "primary_teacher": "unest",
+      "backup_teachers": []
+    },
+    "kidney_left": {
+      "canonical_id": "kidney_left",
+      "display_name": "kidney_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "kidney_medulla": {
+      "canonical_id": "kidney_medulla",
+      "display_name": "kidney_medulla",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "unest"
+      ],
+      "primary_teacher": "unest",
+      "backup_teachers": []
+    },
+    "kidney_pelvicalyceal_system": {
+      "canonical_id": "kidney_pelvicalyceal_system",
+      "display_name": "kidney_pelvicalyceal_system",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "unest"
+      ],
+      "primary_teacher": "unest",
+      "backup_teachers": []
+    },
+    "kidney_right": {
+      "canonical_id": "kidney_right",
+      "display_name": "kidney_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "lacrimal_gland_left": {
+      "canonical_id": "lacrimal_gland_left",
+      "display_name": "lacrimal_gland_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "lacrimal_gland_right": {
+      "canonical_id": "lacrimal_gland_right",
+      "display_name": "lacrimal_gland_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "larynx": {
+      "canonical_id": "larynx",
+      "display_name": "larynx",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "lateral_pterygoid_left": {
+      "canonical_id": "lateral_pterygoid_left",
+      "display_name": "lateral_pterygoid_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "lateral_pterygoid_right": {
+      "canonical_id": "lateral_pterygoid_right",
+      "display_name": "lateral_pterygoid_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "lateral_rectus_muscle_left": {
+      "canonical_id": "lateral_rectus_muscle_left",
+      "display_name": "lateral_rectus_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "lateral_rectus_muscle_right": {
+      "canonical_id": "lateral_rectus_muscle_right",
+      "display_name": "lateral_rectus_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "leg_left": {
+      "canonical_id": "leg_left",
+      "display_name": "leg_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "legs"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "leg_right": {
+      "canonical_id": "leg_right",
+      "display_name": "leg_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "legs"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "legs": {
+      "canonical_id": "legs",
+      "display_name": "legs",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "moose3_0"
+      ],
+      "primary_teacher": "moose3_0",
+      "backup_teachers": []
+    },
+    "lentiform_nucleus": {
+      "canonical_id": "lentiform_nucleus",
+      "display_name": "lentiform_nucleus",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "levator_palpebrae_superioris_left": {
+      "canonical_id": "levator_palpebrae_superioris_left",
+      "display_name": "levator_palpebrae_superioris_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "levator_palpebrae_superioris_right": {
+      "canonical_id": "levator_palpebrae_superioris_right",
+      "display_name": "levator_palpebrae_superioris_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "levator_scapulae_left": {
+      "canonical_id": "levator_scapulae_left",
+      "display_name": "levator_scapulae_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "levator_scapulae_right": {
+      "canonical_id": "levator_scapulae_right",
+      "display_name": "levator_scapulae_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "liver": {
+      "canonical_id": "liver",
+      "display_name": "liver",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "liver_hepatic_vein": {
+      "canonical_id": "liver_hepatic_vein",
+      "display_name": "liver_hepatic_vein",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "lvp"
+      ],
+      "primary_teacher": "lvp",
+      "backup_teachers": []
+    },
+    "liver_portal_vein": {
+      "canonical_id": "liver_portal_vein",
+      "display_name": "liver_portal_vein",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "lvp"
+      ],
+      "primary_teacher": "lvp",
+      "backup_teachers": []
+    },
+    "liver_segment_1": {
+      "canonical_id": "liver_segment_1",
+      "display_name": "liver_segment_1",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_2": {
+      "canonical_id": "liver_segment_2",
+      "display_name": "liver_segment_2",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_3": {
+      "canonical_id": "liver_segment_3",
+      "display_name": "liver_segment_3",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_4": {
+      "canonical_id": "liver_segment_4",
+      "display_name": "liver_segment_4",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_5": {
+      "canonical_id": "liver_segment_5",
+      "display_name": "liver_segment_5",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_6": {
+      "canonical_id": "liver_segment_6",
+      "display_name": "liver_segment_6",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_7": {
+      "canonical_id": "liver_segment_7",
+      "display_name": "liver_segment_7",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "liver_segment_8": {
+      "canonical_id": "liver_segment_8",
+      "display_name": "liver_segment_8",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private",
+        "totalsegmentator"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": [
+        "totalsegmentator"
+      ]
+    },
+    "lung": {
+      "canonical_id": "lung",
+      "display_name": "lung",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "lung_left": {
+      "canonical_id": "lung_left",
+      "display_name": "lung_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": []
+    },
+    "lung_lower_left_lobe": {
+      "canonical_id": "lung_lower_left_lobe",
+      "display_name": "lung_lower_left_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads551"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads551"
+      ]
+    },
+    "lung_lower_right_lobe": {
+      "canonical_id": "lung_lower_right_lobe",
+      "display_name": "lung_lower_right_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads551"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads551"
+      ]
+    },
+    "lung_middle_right_lobe": {
+      "canonical_id": "lung_middle_right_lobe",
+      "display_name": "lung_middle_right_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads551"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads551"
+      ]
+    },
+    "lung_pulmonary_arteries": {
+      "canonical_id": "lung_pulmonary_arteries",
+      "display_name": "lung_pulmonary_arteries",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "airrc"
+      ],
+      "primary_teacher": "airrc",
+      "backup_teachers": []
+    },
+    "lung_pulmonary_veins": {
+      "canonical_id": "lung_pulmonary_veins",
+      "display_name": "lung_pulmonary_veins",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "airrc"
+      ],
+      "primary_teacher": "airrc",
+      "backup_teachers": []
+    },
+    "lung_right": {
+      "canonical_id": "lung_right",
+      "display_name": "lung_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": []
+    },
+    "lung_trachea_bronchia": {
+      "canonical_id": "lung_trachea_bronchia",
+      "display_name": "lung_trachea_bronchia",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "lung_upper_left_lobe": {
+      "canonical_id": "lung_upper_left_lobe",
+      "display_name": "lung_upper_left_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads551"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads551"
+      ]
+    },
+    "lung_upper_right_lobe": {
+      "canonical_id": "lung_upper_right_lobe",
+      "display_name": "lung_upper_right_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads551"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads551"
+      ]
+    },
+    "lung_vessels": {
+      "canonical_id": "lung_vessels",
+      "display_name": "lung_vessels",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "mammary_gland_left": {
+      "canonical_id": "mammary_gland_left",
+      "display_name": "mammary_gland_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "breast_left"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "mammary_gland_right": {
+      "canonical_id": "mammary_gland_right",
+      "display_name": "mammary_gland_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "breast_right"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "mandible": {
+      "canonical_id": "mandible",
+      "display_name": "mandible",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "masseter_left": {
+      "canonical_id": "masseter_left",
+      "display_name": "masseter_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "masseter_right": {
+      "canonical_id": "masseter_right",
+      "display_name": "masseter_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "medial_pterygoid_left": {
+      "canonical_id": "medial_pterygoid_left",
+      "display_name": "medial_pterygoid_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "medial_pterygoid_right": {
+      "canonical_id": "medial_pterygoid_right",
+      "display_name": "medial_pterygoid_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "medial_rectus_muscle_left": {
+      "canonical_id": "medial_rectus_muscle_left",
+      "display_name": "medial_rectus_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "medial_rectus_muscle_right": {
+      "canonical_id": "medial_rectus_muscle_right",
+      "display_name": "medial_rectus_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "mediastinal_tissue": {
+      "canonical_id": "mediastinal_tissue",
+      "display_name": "mediastinal_tissue",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "mediastinum"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "mediastinum": {
+      "canonical_id": "mediastinum",
+      "display_name": "mediastinum",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "saros_nnunet",
+        "cads559"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": [
+        "cads559"
+      ]
+    },
+    "metacarpal": {
+      "canonical_id": "metacarpal",
+      "display_name": "metacarpal",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "metacarpal_left": {
+      "canonical_id": "metacarpal_left",
+      "display_name": "metacarpal_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "metacarpal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "metacarpal_right": {
+      "canonical_id": "metacarpal_right",
+      "display_name": "metacarpal_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "metacarpal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "metatarsal": {
+      "canonical_id": "metatarsal",
+      "display_name": "metatarsal",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "metatarsal_left": {
+      "canonical_id": "metatarsal_left",
+      "display_name": "metatarsal_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "metatarsal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "metatarsal_right": {
+      "canonical_id": "metatarsal_right",
+      "display_name": "metatarsal_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "metatarsal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "middle_pharyngeal_constrictor": {
+      "canonical_id": "middle_pharyngeal_constrictor",
+      "display_name": "middle_pharyngeal_constrictor",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "middle_scalene_left": {
+      "canonical_id": "middle_scalene_left",
+      "display_name": "middle_scalene_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "middle_scalene_right": {
+      "canonical_id": "middle_scalene_right",
+      "display_name": "middle_scalene_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "muscle": {
+      "canonical_id": "muscle",
+      "display_name": "muscle",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "saros_nnunet",
+        "cads559"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": [
+        "cads559"
+      ]
+    },
+    "muscle_fat": {
+      "canonical_id": "muscle_fat",
+      "display_name": "muscle_fat",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "fat"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "duke"
+      ],
+      "primary_teacher": "duke",
+      "backup_teachers": []
+    },
+    "muscle_of_head": {
+      "canonical_id": "muscle_of_head",
+      "display_name": "muscle_of_head",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "nasal_cavity_left": {
+      "canonical_id": "nasal_cavity_left",
+      "display_name": "nasal_cavity_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "nasal_cavity_right": {
+      "canonical_id": "nasal_cavity_right",
+      "display_name": "nasal_cavity_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "nasopharynx": {
+      "canonical_id": "nasopharynx",
+      "display_name": "nasopharynx",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "occipital_lobe": {
+      "canonical_id": "occipital_lobe",
+      "display_name": "occipital_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "optic_chiasm": {
+      "canonical_id": "optic_chiasm",
+      "display_name": "optic_chiasm",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "optic_nerve_left": {
+      "canonical_id": "optic_nerve_left",
+      "display_name": "optic_nerve_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "optic_nerve_right": {
+      "canonical_id": "optic_nerve_right",
+      "display_name": "optic_nerve_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "oral_cavity": {
+      "canonical_id": "oral_cavity",
+      "display_name": "oral_cavity",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "oropharynx": {
+      "canonical_id": "oropharynx",
+      "display_name": "oropharynx",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "pancreas": {
+      "canonical_id": "pancreas",
+      "display_name": "pancreas",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "epai_20250421",
+        "atlasnet"
+      ]
+    },
+    "pancreas_body": {
+      "canonical_id": "pancreas_body",
+      "display_name": "pancreas_body",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "pancreas"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": []
+    },
+    "pancreas_head": {
+      "canonical_id": "pancreas_head",
+      "display_name": "pancreas_head",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "pancreas"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": []
+    },
+    "pancreas_tail": {
+      "canonical_id": "pancreas_tail",
+      "display_name": "pancreas_tail",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "pancreas"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "nnunet_private"
+      ],
+      "primary_teacher": "nnunet_private",
+      "backup_teachers": []
+    },
+    "pancreatic_duct": {
+      "canonical_id": "pancreatic_duct",
+      "display_name": "pancreatic_duct",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "pancreas"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "parietal_lobe": {
+      "canonical_id": "parietal_lobe",
+      "display_name": "parietal_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "parotid_gland_left": {
+      "canonical_id": "parotid_gland_left",
+      "display_name": "parotid_gland_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "parotid_glands"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "parotid_gland_right": {
+      "canonical_id": "parotid_gland_right",
+      "display_name": "parotid_gland_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "parotid_glands"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "parotid_glands": {
+      "canonical_id": "parotid_glands",
+      "display_name": "parotid_glands",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "patella": {
+      "canonical_id": "patella",
+      "display_name": "patella",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "patella_left": {
+      "canonical_id": "patella_left",
+      "display_name": "patella_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "patella"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "patella_right": {
+      "canonical_id": "patella_right",
+      "display_name": "patella_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "patella"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "pericardium": {
+      "canonical_id": "pericardium",
+      "display_name": "pericardium",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "heart"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "saros_nnunet",
+        "cads559"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": [
+        "cads559"
+      ]
+    },
+    "phalanges_feet": {
+      "canonical_id": "phalanges_feet",
+      "display_name": "phalanges_feet",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "phalanges_hand": {
+      "canonical_id": "phalanges_hand",
+      "display_name": "phalanges_hand",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "pituitary_gland": {
+      "canonical_id": "pituitary_gland",
+      "display_name": "pituitary_gland",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "platysma_left": {
+      "canonical_id": "platysma_left",
+      "display_name": "platysma_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "platysma_right": {
+      "canonical_id": "platysma_right",
+      "display_name": "platysma_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "portal_vein_and_splenic_vein": {
+      "canonical_id": "portal_vein_and_splenic_vein",
+      "display_name": "portal_vein_and_splenic_vein",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "liver"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "moose888",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "moose888",
+        "atlasnet"
+      ]
+    },
+    "postcava": {
+      "canonical_id": "postcava",
+      "display_name": "postcava",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vsmtrans"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": []
+    },
+    "posterior_eyeball_segment_left": {
+      "canonical_id": "posterior_eyeball_segment_left",
+      "display_name": "posterior_eyeball_segment_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "posterior_eyeball_segment_right": {
+      "canonical_id": "posterior_eyeball_segment_right",
+      "display_name": "posterior_eyeball_segment_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "posterior_scalene_left": {
+      "canonical_id": "posterior_scalene_left",
+      "display_name": "posterior_scalene_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "posterior_scalene_right": {
+      "canonical_id": "posterior_scalene_right",
+      "display_name": "posterior_scalene_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "prevertebral_left": {
+      "canonical_id": "prevertebral_left",
+      "display_name": "prevertebral_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "prevertebral_right": {
+      "canonical_id": "prevertebral_right",
+      "display_name": "prevertebral_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "prostate": {
+      "canonical_id": "prostate",
+      "display_name": "prostate",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads556"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads556"
+      ]
+    },
+    "prosthetic_breast_implant": {
+      "canonical_id": "prosthetic_breast_implant",
+      "display_name": "prosthetic_breast_implant",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "breast_left",
+        "breast_right"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads559"
+      ],
+      "primary_teacher": "cads559",
+      "backup_teachers": []
+    },
+    "psoas_major_muscle_left": {
+      "canonical_id": "psoas_major_muscle_left",
+      "display_name": "psoas_major_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "psoas_major_muscle_right": {
+      "canonical_id": "psoas_major_muscle_right",
+      "display_name": "psoas_major_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "pulmonary_artery": {
+      "canonical_id": "pulmonary_artery",
+      "display_name": "pulmonary_artery",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads553"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads553"
+      ]
+    },
+    "pulmonary_vein": {
+      "canonical_id": "pulmonary_vein",
+      "display_name": "pulmonary_vein",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "lung"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "moose888"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "moose888"
+      ]
+    },
+    "radius": {
+      "canonical_id": "radius",
+      "display_name": "radius",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "radius_left": {
+      "canonical_id": "radius_left",
+      "display_name": "radius_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "radius"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "radius_right": {
+      "canonical_id": "radius_right",
+      "display_name": "radius_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "radius"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "rectum": {
+      "canonical_id": "rectum",
+      "display_name": "rectum",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads556"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads556"
+      ]
+    },
+    "rectus_abdominis_muscle_left": {
+      "canonical_id": "rectus_abdominis_muscle_left",
+      "display_name": "rectus_abdominis_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "rectus_abdominis_muscle_right": {
+      "canonical_id": "rectus_abdominis_muscle_right",
+      "display_name": "rectus_abdominis_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "renal_vein_left": {
+      "canonical_id": "renal_vein_left",
+      "display_name": "renal_vein_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "renal_vein_right": {
+      "canonical_id": "renal_vein_right",
+      "display_name": "renal_vein_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "kidney"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "rib_cartilage": {
+      "canonical_id": "rib_cartilage",
+      "display_name": "rib_cartilage",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "rib_left_1": {
+      "canonical_id": "rib_left_1",
+      "display_name": "rib_left_1",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_10": {
+      "canonical_id": "rib_left_10",
+      "display_name": "rib_left_10",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_11": {
+      "canonical_id": "rib_left_11",
+      "display_name": "rib_left_11",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_12": {
+      "canonical_id": "rib_left_12",
+      "display_name": "rib_left_12",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_2": {
+      "canonical_id": "rib_left_2",
+      "display_name": "rib_left_2",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_3": {
+      "canonical_id": "rib_left_3",
+      "display_name": "rib_left_3",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_4": {
+      "canonical_id": "rib_left_4",
+      "display_name": "rib_left_4",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_5": {
+      "canonical_id": "rib_left_5",
+      "display_name": "rib_left_5",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_6": {
+      "canonical_id": "rib_left_6",
+      "display_name": "rib_left_6",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_7": {
+      "canonical_id": "rib_left_7",
+      "display_name": "rib_left_7",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_8": {
+      "canonical_id": "rib_left_8",
+      "display_name": "rib_left_8",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_left_9": {
+      "canonical_id": "rib_left_9",
+      "display_name": "rib_left_9",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_1": {
+      "canonical_id": "rib_right_1",
+      "display_name": "rib_right_1",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_10": {
+      "canonical_id": "rib_right_10",
+      "display_name": "rib_right_10",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_11": {
+      "canonical_id": "rib_right_11",
+      "display_name": "rib_right_11",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_12": {
+      "canonical_id": "rib_right_12",
+      "display_name": "rib_right_12",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_2": {
+      "canonical_id": "rib_right_2",
+      "display_name": "rib_right_2",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_3": {
+      "canonical_id": "rib_right_3",
+      "display_name": "rib_right_3",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_4": {
+      "canonical_id": "rib_right_4",
+      "display_name": "rib_right_4",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_5": {
+      "canonical_id": "rib_right_5",
+      "display_name": "rib_right_5",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_6": {
+      "canonical_id": "rib_right_6",
+      "display_name": "rib_right_6",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_7": {
+      "canonical_id": "rib_right_7",
+      "display_name": "rib_right_7",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_8": {
+      "canonical_id": "rib_right_8",
+      "display_name": "rib_right_8",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "rib_right_9": {
+      "canonical_id": "rib_right_9",
+      "display_name": "rib_right_9",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads555"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads555"
+      ]
+    },
+    "sacrum": {
+      "canonical_id": "sacrum",
+      "display_name": "sacrum",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554"
+      ]
+    },
+    "scalp": {
+      "canonical_id": "scalp",
+      "display_name": "scalp",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "skin"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "scapula_left": {
+      "canonical_id": "scapula_left",
+      "display_name": "scapula_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "scapula_right": {
+      "canonical_id": "scapula_right",
+      "display_name": "scapula_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads554",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads554",
+        "moose666"
+      ]
+    },
+    "seminal_vesicle": {
+      "canonical_id": "seminal_vesicle",
+      "display_name": "seminal_vesicle",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "septum_pellucidum": {
+      "canonical_id": "septum_pellucidum",
+      "display_name": "septum_pellucidum",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "sigmoid_colon": {
+      "canonical_id": "sigmoid_colon",
+      "display_name": "sigmoid_colon",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "colon"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "skeletal_muscle": {
+      "canonical_id": "skeletal_muscle",
+      "display_name": "skeletal_muscle",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "skin": {
+      "canonical_id": "skin",
+      "display_name": "skin",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "skull": {
+      "canonical_id": "skull",
+      "display_name": "skull",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "moose666"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "moose666"
+      ]
+    },
+    "small_bowel": {
+      "canonical_id": "small_bowel",
+      "display_name": "small_bowel",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "intestine"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads553"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads553"
+      ]
+    },
+    "soft_palate": {
+      "canonical_id": "soft_palate",
+      "display_name": "soft_palate",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "oral_cavity"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "spinal_canal": {
+      "canonical_id": "spinal_canal",
+      "display_name": "spinal_canal",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "cads556"
+      ],
+      "primary_teacher": "cads556",
+      "backup_teachers": []
+    },
+    "spinal_cord": {
+      "canonical_id": "spinal_cord",
+      "display_name": "spinal_cord",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d",
+        "cads559"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads559"
+      ]
+    },
+    "spleen": {
+      "canonical_id": "spleen",
+      "display_name": "spleen",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "spongy_bone": {
+      "canonical_id": "spongy_bone",
+      "display_name": "spongy_bone",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "sterno_thyroid_left": {
+      "canonical_id": "sterno_thyroid_left",
+      "display_name": "sterno_thyroid_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "sterno_thyroid_right": {
+      "canonical_id": "sterno_thyroid_right",
+      "display_name": "sterno_thyroid_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "sternocleidomastoid_left": {
+      "canonical_id": "sternocleidomastoid_left",
+      "display_name": "sternocleidomastoid_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "sternocleidomastoid_right": {
+      "canonical_id": "sternocleidomastoid_right",
+      "display_name": "sternocleidomastoid_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "sternum": {
+      "canonical_id": "sternum",
+      "display_name": "sternum",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads556"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads556"
+      ]
+    },
+    "sternum_corpus": {
+      "canonical_id": "sternum_corpus",
+      "display_name": "sternum_corpus",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "sternum"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "sternum_manubrium": {
+      "canonical_id": "sternum_manubrium",
+      "display_name": "sternum_manubrium",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "sternum"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "stomach": {
+      "canonical_id": "stomach",
+      "display_name": "stomach",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vsmtrans",
+        "cads551",
+        "atlasnet"
+      ],
+      "primary_teacher": "vsmtrans",
+      "backup_teachers": [
+        "cads551",
+        "atlasnet"
+      ]
+    },
+    "styloid_process_left": {
+      "canonical_id": "styloid_process_left",
+      "display_name": "styloid_process_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "styloid_process_right": {
+      "canonical_id": "styloid_process_right",
+      "display_name": "styloid_process_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "subarachnoid_space": {
+      "canonical_id": "subarachnoid_space",
+      "display_name": "subarachnoid_space",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "subclavian_artery_left": {
+      "canonical_id": "subclavian_artery_left",
+      "display_name": "subclavian_artery_left",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "subclavian_artery_right": {
+      "canonical_id": "subclavian_artery_right",
+      "display_name": "subclavian_artery_right",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "subcutaneous_adipose_tissue": {
+      "canonical_id": "subcutaneous_adipose_tissue",
+      "display_name": "subcutaneous_adipose_tissue",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "fat"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "saros_nnunet",
+        "cads559"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": [
+        "cads559"
+      ]
+    },
+    "submandibular_gland_left": {
+      "canonical_id": "submandibular_gland_left",
+      "display_name": "submandibular_gland_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "submandibular_glands"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "submandibular_gland_right": {
+      "canonical_id": "submandibular_gland_right",
+      "display_name": "submandibular_gland_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "submandibular_glands"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator",
+        "cads558"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "submandibular_glands": {
+      "canonical_id": "submandibular_glands",
+      "display_name": "submandibular_glands",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "superior_mesenteric_artery": {
+      "canonical_id": "superior_mesenteric_artery",
+      "display_name": "superior_mesenteric_artery",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "epai_20250421",
+        "atlasnet"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": [
+        "atlasnet"
+      ]
+    },
+    "superior_oblique_muscle_left": {
+      "canonical_id": "superior_oblique_muscle_left",
+      "display_name": "superior_oblique_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "superior_oblique_muscle_right": {
+      "canonical_id": "superior_oblique_muscle_right",
+      "display_name": "superior_oblique_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "superior_rectus_muscle_left": {
+      "canonical_id": "superior_rectus_muscle_left",
+      "display_name": "superior_rectus_muscle_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "superior_rectus_muscle_right": {
+      "canonical_id": "superior_rectus_muscle_right",
+      "display_name": "superior_rectus_muscle_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "eyeball"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "superior_vena_cava": {
+      "canonical_id": "superior_vena_cava",
+      "display_name": "superior_vena_cava",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "veins"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "supraglottis": {
+      "canonical_id": "supraglottis",
+      "display_name": "supraglottis",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "larynx"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads558"
+      ],
+      "primary_teacher": "cads558",
+      "backup_teachers": []
+    },
+    "tarsal": {
+      "canonical_id": "tarsal",
+      "display_name": "tarsal",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "tarsal_left": {
+      "canonical_id": "tarsal_left",
+      "display_name": "tarsal_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "tarsal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "tarsal_right": {
+      "canonical_id": "tarsal_right",
+      "display_name": "tarsal_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "tarsal"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "temporal_lobe": {
+      "canonical_id": "temporal_lobe",
+      "display_name": "temporal_lobe",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "temporalis_left": {
+      "canonical_id": "temporalis_left",
+      "display_name": "temporalis_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "temporalis_right": {
+      "canonical_id": "temporalis_right",
+      "display_name": "temporalis_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "thalamus": {
+      "canonical_id": "thalamus",
+      "display_name": "thalamus",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "thoracic_cavity": {
+      "canonical_id": "thoracic_cavity",
+      "display_name": "thoracic_cavity",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "saros_nnunet",
+        "cads559"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": [
+        "cads559"
+      ]
+    },
+    "thymus": {
+      "canonical_id": "thymus",
+      "display_name": "thymus",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "thyrohyoid_left": {
+      "canonical_id": "thyrohyoid_left",
+      "display_name": "thyrohyoid_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "thyrohyoid_right": {
+      "canonical_id": "thyrohyoid_right",
+      "display_name": "thyrohyoid_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "thyroid_cartilage": {
+      "canonical_id": "thyroid_cartilage",
+      "display_name": "thyroid_cartilage",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "larynx"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "thyroid_gland": {
+      "canonical_id": "thyroid_gland",
+      "display_name": "thyroid_gland",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads558"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads558"
+      ]
+    },
+    "thyroid_left": {
+      "canonical_id": "thyroid_left",
+      "display_name": "thyroid_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "thyroid_gland"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "thyroid_right": {
+      "canonical_id": "thyroid_right",
+      "display_name": "thyroid_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "thyroid_gland"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "tibia": {
+      "canonical_id": "tibia",
+      "display_name": "tibia",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "tibia_left": {
+      "canonical_id": "tibia_left",
+      "display_name": "tibia_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "tibia"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "tibia_right": {
+      "canonical_id": "tibia_right",
+      "display_name": "tibia_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "tibia"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "toes_left": {
+      "canonical_id": "toes_left",
+      "display_name": "toes_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "legs"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "toes_right": {
+      "canonical_id": "toes_right",
+      "display_name": "toes_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "legs"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "tongue": {
+      "canonical_id": "tongue",
+      "display_name": "tongue",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "trachea": {
+      "canonical_id": "trachea",
+      "display_name": "trachea",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads553"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads553"
+      ]
+    },
+    "trapezius_left": {
+      "canonical_id": "trapezius_left",
+      "display_name": "trapezius_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "trapezius_right": {
+      "canonical_id": "trapezius_right",
+      "display_name": "trapezius_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "muscle"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "ulna": {
+      "canonical_id": "ulna",
+      "display_name": "ulna",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "ulna_left": {
+      "canonical_id": "ulna_left",
+      "display_name": "ulna_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "ulna"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "ulna_right": {
+      "canonical_id": "ulna_right",
+      "display_name": "ulna_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "ulna"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "moose666"
+      ],
+      "primary_teacher": "moose666",
+      "backup_teachers": []
+    },
+    "uterocervix": {
+      "canonical_id": "uterocervix",
+      "display_name": "uterocervix",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "uterus"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "uterus": {
+      "canonical_id": "uterus",
+      "display_name": "uterus",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "daps"
+      ],
+      "primary_teacher": "daps",
+      "backup_teachers": []
+    },
+    "veins": {
+      "canonical_id": "veins",
+      "display_name": "veins",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "epai_20250421"
+      ],
+      "primary_teacher": "epai_20250421",
+      "backup_teachers": []
+    },
+    "venous_sinuses": {
+      "canonical_id": "venous_sinuses",
+      "display_name": "venous_sinuses",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "vessel_or_small_structure",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "vertebrae_c1": {
+      "canonical_id": "vertebrae_c1",
+      "display_name": "vertebrae_C1",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_c2": {
+      "canonical_id": "vertebrae_c2",
+      "display_name": "vertebrae_C2",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_c3": {
+      "canonical_id": "vertebrae_c3",
+      "display_name": "vertebrae_C3",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_c4": {
+      "canonical_id": "vertebrae_c4",
+      "display_name": "vertebrae_C4",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_c5": {
+      "canonical_id": "vertebrae_c5",
+      "display_name": "vertebrae_C5",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_c6": {
+      "canonical_id": "vertebrae_c6",
+      "display_name": "vertebrae_C6",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_c7": {
+      "canonical_id": "vertebrae_c7",
+      "display_name": "vertebrae_C7",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_l1": {
+      "canonical_id": "vertebrae_l1",
+      "display_name": "vertebrae_L1",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_l2": {
+      "canonical_id": "vertebrae_l2",
+      "display_name": "vertebrae_L2",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_l3": {
+      "canonical_id": "vertebrae_l3",
+      "display_name": "vertebrae_L3",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_l4": {
+      "canonical_id": "vertebrae_l4",
+      "display_name": "vertebrae_L4",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_l5": {
+      "canonical_id": "vertebrae_l5",
+      "display_name": "vertebrae_L5",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_s1": {
+      "canonical_id": "vertebrae_s1",
+      "display_name": "vertebrae_S1",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": []
+    },
+    "vertebrae_t1": {
+      "canonical_id": "vertebrae_t1",
+      "display_name": "vertebrae_T1",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t10": {
+      "canonical_id": "vertebrae_t10",
+      "display_name": "vertebrae_T10",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t11": {
+      "canonical_id": "vertebrae_t11",
+      "display_name": "vertebrae_T11",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t12": {
+      "canonical_id": "vertebrae_t12",
+      "display_name": "vertebrae_T12",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t2": {
+      "canonical_id": "vertebrae_t2",
+      "display_name": "vertebrae_T2",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t3": {
+      "canonical_id": "vertebrae_t3",
+      "display_name": "vertebrae_T3",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t4": {
+      "canonical_id": "vertebrae_t4",
+      "display_name": "vertebrae_T4",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t5": {
+      "canonical_id": "vertebrae_t5",
+      "display_name": "vertebrae_T5",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t6": {
+      "canonical_id": "vertebrae_t6",
+      "display_name": "vertebrae_T6",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t7": {
+      "canonical_id": "vertebrae_t7",
+      "display_name": "vertebrae_T7",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t8": {
+      "canonical_id": "vertebrae_t8",
+      "display_name": "vertebrae_T8",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "vertebrae_t9": {
+      "canonical_id": "vertebrae_t9",
+      "display_name": "vertebrae_T9",
+      "hierarchy_role": "major",
+      "parent_ids": [],
+      "comparison_family": "whole_organ",
+      "candidate_models": [
+        "vista3d",
+        "cads552",
+        "moose"
+      ],
+      "primary_teacher": "vista3d",
+      "backup_teachers": [
+        "cads552",
+        "moose"
+      ]
+    },
+    "visceral_adipose_tissue": {
+      "canonical_id": "visceral_adipose_tissue",
+      "display_name": "visceral_adipose_tissue",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "fat"
+      ],
+      "comparison_family": "other_noncomparable",
+      "candidate_models": [
+        "saros_nnunet"
+      ],
+      "primary_teacher": "saros_nnunet",
+      "backup_teachers": []
+    },
+    "white_matter": {
+      "canonical_id": "white_matter",
+      "display_name": "white_matter",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "brain"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "cads557"
+      ],
+      "primary_teacher": "cads557",
+      "backup_teachers": []
+    },
+    "zygomatic_arch_left": {
+      "canonical_id": "zygomatic_arch_left",
+      "display_name": "zygomatic_arch_left",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    },
+    "zygomatic_arch_right": {
+      "canonical_id": "zygomatic_arch_right",
+      "display_name": "zygomatic_arch_right",
+      "hierarchy_role": "child",
+      "parent_ids": [
+        "bones"
+      ],
+      "comparison_family": "sub_organ",
+      "candidate_models": [
+        "totalsegmentator"
+      ],
+      "primary_teacher": "totalsegmentator",
+      "backup_teachers": []
+    }
+  },
+  "validation": {
+    "status": "success",
+    "errors": []
+  },
+  "identity_policy": {
+    "comparison_key": [
+      "case_id",
+      "canonical_id"
+    ],
+    "parent_is_roi_only": true,
+    "cross_canonical_comparison_allowed": false,
+    "unknown_mapping_policy": "block"
+  }
+}

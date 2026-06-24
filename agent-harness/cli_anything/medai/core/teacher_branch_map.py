@@ -2,7 +2,7 @@
 
 This maps each organ to:
 - Its VISTA3D label_id (for language-prompt inference)
-- The best teacher model (for pseudo-label generation during E-step)
+- The configured primary teacher model (for pseudo-label candidate generation during E-step)
 - The trainable scope for M-step continual fine-tuning
 
 The map is used in two ways:
@@ -160,7 +160,7 @@ _TEACHER_MAP: dict[str, dict[str, Any]] = {
     "skull":               {"teacher": "vista3d",       "fallback": ["moose3_0"]},
     "sternum":             {"teacher": "vista3d",       "fallback": ["cads"]},
 }
-_DEFAULT_TEACHER: dict[str, Any] = {"teacher": "totalsegmentator", "fallback": ["vista3d"]}
+_UNRESOLVED_TEACHER: dict[str, Any] = {"teacher": None, "fallback": [], "status": "unresolved"}
 
 
 def text_to_label_id(prompt: str) -> int | None:
@@ -202,7 +202,7 @@ def texts_to_label_ids(prompts: list[str]) -> dict[str, int]:
 
 def get_teacher_for_organ(organ: str) -> dict[str, Any]:
     """Return teacher model info for a given organ."""
-    return _TEACHER_MAP.get(organ.lower(), _DEFAULT_TEACHER)
+    return _TEACHER_MAP.get(organ.lower(), _UNRESOLVED_TEACHER)
 
 
 def build_teacher_branch_map(output_yaml: str | Path) -> dict[str, Any]:
@@ -210,7 +210,7 @@ def build_teacher_branch_map(output_yaml: str | Path) -> dict[str, Any]:
 
     Each entry:
       vista3d_label_id: int        — VISTA3D class ID for inference
-      teacher_model: str           — best teacher for pseudo-label generation
+      teacher_model: str           — configured primary teacher for pseudo-label generation
       fallback_teachers: list[str] — fallback if primary teacher fails
       update_mode: str             — continual learning update strategy
       trainable_scope: list[str]   — VISTA3D modules to update in M-step
@@ -223,7 +223,7 @@ def build_teacher_branch_map(output_yaml: str | Path) -> dict[str, Any]:
     for organ, label_id in sorted(VISTA3D_LABEL_MAP.items()):
         if organ == "background" or label_id == 0:
             continue
-        teacher_info = _TEACHER_MAP.get(organ, _DEFAULT_TEACHER)
+        teacher_info = _TEACHER_MAP.get(organ, _UNRESOLVED_TEACHER)
         branch_map[organ] = {
             "vista3d_label_id": label_id,
             "teacher_model": teacher_info["teacher"],

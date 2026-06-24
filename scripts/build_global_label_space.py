@@ -110,7 +110,7 @@ def build_token_map(tokens):
             "UNEST": ("unest", True, None),
             "Dataset224_AbdomenAtlas1.1": ("nnunet_private", True, None),
             "Duke": (None, False, "决策:忽略不封装"),
-            "Dataset001_ATLASNet": (None, False, "决策:忽略不封装"),
+            "Dataset001_ATLASNet": ("atlasnet", True, None),
             "DAPS": ("daps", False, "weight not downloaded yet"),
         }
         if tok in simple:

@@ -85,6 +85,7 @@ def main() -> int:
         dry_run=False,
         timeout_sec=args.timeout_sec,
         resume=False,
+        teacher_inference_mode="hierarchical_roi",
     )
 
     voxtell_manifest = out / "voxtell_prompt_manifest.json"

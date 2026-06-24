@@ -175,26 +175,26 @@ def pants_find_case_cmd(pants_root: str, case_id: str, split: str):
 @cli.command("pants-import-case")
 @click.option("--pants-root", required=True, help="Path to PanTS repo root or PanTS/data folder.")
 @click.option("--case-id", required=True, help="PanTS case id, e.g., PanTS_00000001")
-@click.option("--output-root", required=True, help="Folder where the imported RadThinking-style patient folder will be created.")
+@click.option("--output-root", required=True, help="Folder where the imported BDMAP/PanTS-style case folder will be created.")
 @click.option("--split", default="auto", type=click.Choice(["auto", "train", "test"]), show_default=True)
 @click.option("--patient-id", default=None, help="Optional patient folder name. Defaults to case id.")
 @click.option("--scan-id", default=None, help="Optional scan id. Defaults to case id.")
 @click.option("--copy-labels/--no-copy-labels", default=True, show_default=True)
 def pants_import_case_cmd(pants_root: str, case_id: str, output_root: str, split: str, patient_id: str | None, scan_id: str | None, copy_labels: bool):
-    """Import one downloaded PanTS case into this CLI's RadThinking-style layout."""
+    """Import one downloaded PanTS case into the standard image.nii.gz + segmentations layout."""
     emit(import_pants_case(resolve_path(pants_root), case_id, resolve_path(output_root), split=split, patient_id=patient_id, scan_id=scan_id, copy_labels=copy_labels))
 
 
 @cli.command("pants-import-files")
 @click.option("--ct", "ct_path", required=True, help="Path to one real ct.nii.gz file.")
 @click.option("--label-folder", default=None, help="Optional folder containing reference masks, e.g., segmentations/*.nii.gz")
-@click.option("--output-root", required=True, help="Folder where the imported patient folder will be created.")
+@click.option("--output-root", required=True, help="Folder where the imported BDMAP/PanTS-style case folder will be created.")
 @click.option("--patient-id", required=True, help="Patient/case folder name to create.")
 @click.option("--scan-id", default=None, help="Optional scan id. Defaults to patient id.")
 @click.option("--report", "report_path", default=None, help="Optional report.txt or source report path.")
 @click.option("--copy-labels/--no-copy-labels", default=True, show_default=True)
 def pants_import_files_cmd(ct_path: str, label_folder: str | None, output_root: str, patient_id: str, scan_id: str | None, report_path: str | None, copy_labels: bool):
-    """Import any one PanTS-like CT case into this CLI layout, without requiring full PanTS download."""
+    """Import any one PanTS-like CT case into the standard image.nii.gz + segmentations layout."""
     emit(import_pants_files(resolve_path(ct_path), resolve_path(label_folder) if label_folder else None, resolve_path(output_root), patient_id=patient_id, scan_id=scan_id, report_path=resolve_path(report_path) if report_path else None, copy_labels=copy_labels))
 
 
@@ -261,7 +261,7 @@ def validate_373_target_cmd(target_config, organs, require_full_target):
 @click.option("--output-folder", "output_folder", default=None)
 @click.option("--output", "output_alias", default=None, help="Alias for --output-folder; kept for teacher-facing command examples.")
 @click.option("--case-id", default=None)
-@click.option("--model", "model_key", default=None, help="Registry model key, e.g. totalsegmentator, epai_20250421, vista3d, mock_seg.")
+@click.option("--model", "model_key", default=None, help="Registry model key, e.g. atlasnet, totalsegmentator, epai_20250421, vista3d, mock_seg.")
 @click.option("--registry", "registry_path", default="configs/model_registry.yaml", show_default=True)
 @click.option("--backend", default="totalseg", type=click.Choice(["totalseg", "custom"]), show_default=True)
 @click.option("--model-command", default=None)
@@ -762,8 +762,10 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--device", default=None)
 @click.option("--timeout-sec", default=1800, type=int, show_default=True)
 @click.option("--perf-tracker-path", default=None, help="Path to organ_model_performance.json for explore/exploit switching.")
+@click.option("--teacher-inference-mode", type=click.Choice(["full_volume", "hierarchical_roi"]), default="hierarchical_roi", show_default=True)
+@click.option("--roi-margin-mm", type=float, default=20.0, show_default=True)
 @click.option("--dry-run", is_flag=True, default=False)
-def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, dry_run):
+def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
     if not enable_shapekit and not dry_run and not debug_allow_no_shapekit:
         fail({
@@ -791,6 +793,8 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
             "skip_organ_presence_gate": labelcritic_skip_organ_presence_gate,
             "strict_choice_prompt": labelcritic_strict_choice_prompt,
         },
+        teacher_inference_mode=teacher_inference_mode,
+        roi_margin_mm=roi_margin_mm,
     ))
 
 

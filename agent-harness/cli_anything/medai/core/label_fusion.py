@@ -8,8 +8,9 @@ provides:
 - ``staple``        : SimpleITK STAPLE — estimates each rater's
                       sensitivity/specificity and produces a probabilistic
                       consensus. Does not use external weights (it learns them).
-- ``weighted_vote`` : reliability-weighted majority voting (numpy). Weights
-                      come from OrganModelPerformance mean DSC per (organ, model).
+- ``weighted_vote`` : reliability-weighted majority voting (numpy). V2 weights
+                      come from leave-one-evidence-family-out estimated
+                      reliability, never pseudo-reference mean DSC.
 - ``auto``          : try STAPLE, fall back to weighted_vote, then to the
                       single highest-weight candidate.
 
@@ -20,8 +21,64 @@ as a uint8 NIfTI and a metadata dict is returned for audit.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import shutil
 from pathlib import Path
 from typing import Any
+
+
+def _file_fingerprint(path: str | Path | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    try:
+        p = Path(path)
+        st = p.stat()
+        return {"path": str(p.resolve()), "size": int(st.st_size), "mtime_ns": int(st.st_mtime_ns)}
+    except Exception:
+        return None
+
+
+def _fusion_cache_key(
+    mask_paths: list[str | Path],
+    weights: list[float] | None,
+    reference_image: str | Path | None,
+    method: str,
+    vote_threshold: float,
+) -> tuple[str, dict[str, Any]]:
+    payload = {
+        "inputs": [_file_fingerprint(p) for p in mask_paths],
+        "weights": [round(float(w), 8) for w in weights] if weights is not None else None,
+        "reference": _file_fingerprint(reference_image),
+        "method": method,
+        "vote_threshold": float(vote_threshold),
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16], payload
+
+
+def _load_fusion_cache(cache_meta: Path, output_path: Path, cache_key: str) -> dict[str, Any] | None:
+    if not cache_meta.exists() or not output_path.exists():
+        return None
+    try:
+        meta = json.loads(cache_meta.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if meta.get("fusion_cache_key") != cache_key or meta.get("status") not in {"success", "single"}:
+        return None
+    meta = dict(meta)
+    meta["cache_status"] = "reused_fusion_cache"
+    meta["output"] = str(output_path)
+    return meta
+
+
+def _write_fusion_cache(cache_meta: Path, output_path: Path, meta: dict[str, Any], cache_key: str, payload: dict[str, Any]) -> None:
+    try:
+        cache_meta.parent.mkdir(parents=True, exist_ok=True)
+        cache_doc = {**meta, "fusion_cache_key": cache_key, "fusion_cache_payload": payload, "output": str(output_path)}
+        cache_meta.write_text(json.dumps(cache_doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _load_sitk():
@@ -83,6 +140,12 @@ def fuse_candidate_masks(
         meta.update({"status": "failed", "reason": "no input masks exist"})
         return meta
 
+    cache_key, cache_payload = _fusion_cache_key(existing, weights, reference_image, method, vote_threshold)
+    cache_meta = out.parent / ".fusion_cache" / f"{out.stem}_{cache_key}.json"
+    cached = _load_fusion_cache(cache_meta, out, cache_key)
+    if cached is not None:
+        return cached
+
     sitk = _load_sitk()
     if sitk is None:
         meta.update({"status": "failed", "reason": "SimpleITK not available"})
@@ -114,6 +177,7 @@ def fuse_candidate_masks(
         sitk.WriteImage(images[0], str(out))
         arr = sitk.GetArrayViewFromImage(images[0])
         meta.update({"status": "single", "method": "single_input", "fused_voxels": int((arr > 0).sum())})
+        _write_fusion_cache(cache_meta, out, meta, cache_key, cache_payload)
         return meta
 
     if weights is not None and len(weights) == len(existing):
@@ -153,4 +217,5 @@ def fuse_candidate_masks(
     sitk.WriteImage(fused, str(out))
     fused_voxels = int((sitk.GetArrayViewFromImage(fused) > 0).sum())
     meta.update({"status": "success", "method": used_method, "fused_voxels": fused_voxels})
+    _write_fusion_cache(cache_meta, out, meta, cache_key, cache_payload)
     return meta

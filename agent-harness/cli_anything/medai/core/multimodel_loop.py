@@ -1,23 +1,63 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import os
+import re
 import shutil
+import time
+import threading
 from pathlib import Path
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    import yaml
+except Exception:  # pragma: no cover
+    yaml = None
 
 from .json_utils import write_json
 from .auto_fine_label import build_label_passport, passport_path_for_mask
+from .auto_label_core import (
+    leave_one_family_out_observations,
+    score_candidate_set,
+    stable_case_fold,
+)
 from .label_fusion import fuse_candidate_masks
 from .label_verifier import verify_annotation
-from .labelcritic_wrapper import run_labelcritic_compare, run_labelcritic_grade
+from .labelcritic_wrapper import run_labelcritic_compare, run_labelcritic_compare_batch, run_labelcritic_grade, run_labelcritic_grade_batch
 from .mstep_runner import build_training_manifest, write_mstep_config
 from .model_registry import candidate_models_for_organs, load_registry, recommend_primary_models_for_organs
 from .organ_model_performance import OrganModelPerformance
 from .radthinking import build_reasoning_trace
 from .registered_infer import run_registered_model
-from .shapekit_runner import run_shapekit
+from .organ_taxonomy import identity_contract, load_taxonomy, taxonomy_entry, topological_order_organs
+from .hierarchical_roi import HIERARCHICAL_PIPELINE_VERSION, execute_roi_tasks, plan_roi_tasks, write_hierarchical_manifest
+from .shapekit_runner import run_shapekit, _SHAPEKIT_TARGET_REQUIREMENTS
 from .target_space import validate_formal_373_target_space
+
+
+def _file_sha256(path: str | Path | None) -> str | None:
+    if not path or not Path(path).exists():
+        return None
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _historical_reference_provenance(path: str | Path | None) -> dict[str, Any] | None:
+    if not path or not Path(path).exists():
+        return None
+    resolved = Path(path).resolve()
+    return {
+        "path": str(resolved),
+        "source_type": "historical_pseudo_label",
+        "version": "imported_annotation_v1",
+        "sha256": _file_sha256(resolved),
+    }
 
 
 def _read_case_list(path: Path) -> list[dict[str, str]]:
@@ -44,6 +84,36 @@ def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) ->
         w.writeheader(); w.writerows(rows)
 
 
+def _merge_case_timing_rows(cases: list[dict[str, str]], updated_root: Path, in_memory_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge resumed per-case timing files with rows collected in this process.
+
+    During resume, completed cases are skipped before the in-memory timing row is
+    appended. Without this merge, the final case_timing_breakdown.csv/json can be
+    overwritten with only the newly processed cases, or even an empty list.
+    """
+    by_case: dict[str, dict[str, Any]] = {}
+    for row in in_memory_rows:
+        case_id = str(row.get("case_id") or "")
+        if case_id:
+            by_case[case_id] = row
+
+    merged: list[dict[str, Any]] = []
+    for idx, case in enumerate(cases, start=1):
+        case_id = case.get("case_id") or Path(case.get("ct_path", f"case_{idx}")).parent.name
+        row = by_case.get(case_id)
+        timing_path = updated_root / case_id / "case_timing_breakdown.json"
+        if timing_path.exists():
+            try:
+                cached = json.loads(timing_path.read_text(encoding="utf-8"))
+                if isinstance(cached, dict) and cached.get("case_id"):
+                    row = cached
+            except Exception:
+                pass
+        if row:
+            merged.append(row)
+    return merged
+
+
 def _mask_path(seg_dir: Path, organ: str) -> Path:
     return seg_dir / f"{organ}.nii.gz"
 
@@ -53,6 +123,17 @@ def _load_model_label_aliases(root: Path) -> dict[str, Any]:
     if not path.exists():
         return {"models": {}}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_organ_taxonomy(root: Path) -> dict[str, Any]:
+    path = root / "configs" / "organ_taxonomy.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Strict organ taxonomy is required: {path}")
+    taxonomy = load_taxonomy(path)
+    validation = taxonomy.get("validation", {}) or {}
+    if validation.get("status") != "success":
+        raise ValueError(f"Organ taxonomy validation failed: {validation.get('errors', [])[:20]}")
+    return taxonomy
 
 
 def _load_target_space_policy(root: Path, requested_organs: list[str]) -> dict[str, Any]:
@@ -119,17 +200,218 @@ def _load_organ_prompts(root: Path) -> dict[str, str]:
     return {str(k): str(v) for k, v in (doc.get("organ_to_prompt", {}) or {}).items()}
 
 
+def _load_student_target_ids(root: Path) -> dict[str, Any]:
+    path = root / "configs" / "student_3d_prompt_target_organs.json"
+    if not path.exists():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return {str(k): v for k, v in (doc.get("organ_to_student_id", {}) or {}).items()}
+
+
+def _norm_organ_key(text: str) -> str:
+    text = str(text or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    return re.sub(r"_+", "_", text).strip("_")
+
+
+def _load_teacher_branch_map(root: Path) -> dict[str, Any]:
+    path = root / "configs" / "teacher_branch_map.yaml"
+    if not path.exists() or yaml is None:
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _resolve_routed_models(
+    registry: dict[str, Any],
+    organ: str,
+    branch_entry: dict[str, Any],
+    routed_candidates: list[str],
+) -> dict[str, Any]:
+    models = registry.get("models", {})
+    primary = str(branch_entry.get("teacher_model") or "").strip()
+    if primary not in models:
+        primary = routed_candidates[0] if routed_candidates else None
+
+    backup_teachers: list[str] = []
+    seen: set[str] = set()
+    for raw in branch_entry.get("fallback_teachers", []) or []:
+        key = str(raw or "").strip()
+        if key in models and key not in seen and key != primary:
+            backup_teachers.append(key)
+            seen.add(key)
+    for model_key in routed_candidates:
+        if model_key not in seen and model_key != primary:
+            backup_teachers.append(model_key)
+            seen.add(model_key)
+
+    competition_teachers = [m for m in routed_candidates if m not in {primary, *backup_teachers}]
+    route_confidence = "high" if primary else ("medium" if backup_teachers else "low")
+    return {
+        "organ": organ,
+        "primary_teacher": primary,
+        "backup_teachers": backup_teachers,
+        "competition_teachers": competition_teachers,
+        "route_confidence": route_confidence,
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+    }
+
+
+def _build_case_execution_plan(
+    *,
+    registry: dict[str, Any],
+    project_root: Path,
+    organs: list[str],
+    requested_models: list[str],
+    preseeded_model_dirs: dict[str, Path] | None,
+    candidate_mode: str,
+) -> dict[str, Any]:
+    branch_map = _load_teacher_branch_map(project_root)
+    routed = candidate_models_for_organs(registry, organs)
+    registry_models = registry.get("models", {}) or {}
+    requested_set = {str(m).strip() for m in (requested_models or []) if str(m).strip()}
+    requested_models_are_registry_keys = bool(requested_set) and all(m in registry_models for m in requested_set)
+    per_organ: dict[str, dict[str, Any]] = {}
+    teacher_run_list: list[str] = []
+    seen_teachers: set[str] = set()
+
+    for organ in organs:
+        norm = _norm_organ_key(organ)
+        branch_entry = branch_map.get(organ) or branch_map.get(norm) or {}
+        raw_routed_candidates = [str(m).strip() for m in routed.get(norm, []) if str(m).strip()]
+        if requested_set:
+            routed_candidates = [m for m in raw_routed_candidates if m in requested_set]
+        else:
+            routed_candidates = [m for m in raw_routed_candidates if m in registry_models]
+        route = _resolve_routed_models(
+            registry,
+            organ,
+            branch_entry if isinstance(branch_entry, dict) else {},
+            routed_candidates,
+        )
+        if requested_set and route.get("primary_teacher") not in requested_set:
+            route["primary_teacher"] = routed_candidates[0] if routed_candidates else None
+        route["backup_teachers"] = [
+            m for m in route.get("backup_teachers", [])
+            if not requested_set or m in requested_set
+        ]
+        route["competition_teachers"] = [
+            m for m in route.get("competition_teachers", [])
+            if not requested_set or m in requested_set
+        ]
+        if candidate_mode == "route_pruned":
+            route["competition_teachers"] = []
+        eligible = [
+            m for m in [
+                route.get("primary_teacher"),
+                *route.get("backup_teachers", []),
+                *route.get("competition_teachers", []),
+            ]
+            if m
+        ]
+        if not eligible and requested_models and not requested_models_are_registry_keys:
+            # Compatibility fallback for unit tests/ad-hoc custom model keys that
+            # are not in the formal registry. Formal route-aware runs must leave
+            # unmapped organs unresolved instead of expanding back to all teachers.
+            eligible = list(requested_models)
+        if candidate_mode == "formal_full_legacy":
+            eligible = list(requested_models)
+        route["eligible_teachers"] = eligible
+        route["grade_required_for_training"] = True
+        route["compare_required_when_conflict"] = True
+        route["compare_bypass_when_single_or_high_agreement"] = True
+        per_organ[organ] = route
+        for model_key in eligible:
+            if model_key not in seen_teachers:
+                teacher_run_list.append(model_key)
+                seen_teachers.add(model_key)
+
+    if candidate_mode == "formal_full_legacy":
+        teacher_run_list = list(requested_models)
+
+    return {
+        "candidate_mode": candidate_mode,
+        "organs": organs,
+        "teacher_run_list": teacher_run_list,
+        "preseeded_models": sorted((preseeded_model_dirs or {}).keys()),
+        "per_organ": per_organ,
+    }
+
+
+def _load_organ_task_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"organs": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"organs": {}}
+    if not isinstance(data, dict):
+        return {"organs": {}}
+    data.setdefault("organs", {})
+    return data
+
+
+def _record_organ_task_state(
+    state: dict[str, Any],
+    organ: str,
+    *,
+    status: str,
+    candidate_fingerprint: list[str] | None = None,
+    compare_used: bool | None = None,
+    grade_used: bool | None = None,
+) -> None:
+    organs = state.setdefault("organs", {})
+    row = dict(organs.get(organ, {}))
+    row["status"] = status
+    if candidate_fingerprint is not None:
+        row["candidate_fingerprint"] = candidate_fingerprint
+    if compare_used is not None:
+        row["labelcritic_compare_used"] = compare_used
+    if grade_used is not None:
+        row["labelcritic_grade_used"] = grade_used
+    organs[organ] = row
+
+
 def _candidate_mask_path(seg_dir: Path, organ: str, model_key: str, alias_config: dict[str, Any]) -> tuple[Path, str]:
     direct = _mask_path(seg_dir, organ)
+    model_aliases = ((alias_config.get("models", {}) or {}).get(model_key, {}) or {})
+    local_to_global = model_aliases.get("local_to_global", {}) or {}
+    mapping_types = model_aliases.get("mapping_types", {}) or {}
+    union_locals = [
+        str(local_name) for local_name, global_name in local_to_global.items()
+        if str(global_name) == organ and mapping_types.get(local_name) == "approved_union"
+    ]
+    if union_locals:
+        union_paths = [_mask_path(seg_dir, local_name) for local_name in union_locals]
+        if not all(path.exists() for path in union_paths):
+            return direct, "missing_approved_union_components"
+        try:
+            import nibabel as nib
+            import numpy as np
+            from nibabel.processing import resample_from_to
+
+            base = nib.load(str(union_paths[0]))
+            union = np.zeros(base.shape, dtype=np.uint8)
+            for path in union_paths:
+                image = nib.load(str(path))
+                if image.shape != base.shape or not np.allclose(image.affine, base.affine, atol=1e-4):
+                    image = resample_from_to(image, base, order=0)
+                union |= (np.asanyarray(image.dataobj) > 0).astype(np.uint8)
+            union_path = seg_dir / "_canonical_unions" / f"{organ}.nii.gz"
+            union_path.parent.mkdir(parents=True, exist_ok=True)
+            nib.save(nib.Nifti1Image(union, base.affine, base.header), str(union_path))
+            return union_path, "approved_union:" + "+".join(union_locals)
+        except Exception:
+            return direct, "invalid_approved_union_components"
     if direct.exists():
         return direct, "direct"
-
-    local_to_global = (
-        (alias_config.get("models", {}) or {})
-        .get(model_key, {})
-        .get("local_to_global", {})
-        or {}
-    )
     for local_name, global_name in local_to_global.items():
         if str(global_name) == organ:
             local_path = _mask_path(seg_dir, str(local_name))
@@ -139,11 +421,563 @@ def _candidate_mask_path(seg_dir: Path, organ: str, model_key: str, alias_config
     return direct, "missing"
 
 
+def _candidate_identity_contract(
+    *,
+    taxonomy: dict[str, Any],
+    alias_config: dict[str, Any],
+    organ: str,
+    model_key: str,
+    alias_match: str,
+    seg_dir: Path | None = None,
+) -> dict[str, Any]:
+    original_alias_match = alias_match
+    if alias_match.startswith("post_shapekit_missing_fallback:"):
+        alias_match = alias_match.split(":", 1)[1]
+    source_local_label = organ
+    resolved_organ = organ
+    mapping_type = "exact_synonym"
+    mapping_source = "canonical_filename"
+    provenance_path = seg_dir / "identity_provenance.json" if seg_dir is not None else None
+    if provenance_path is not None and provenance_path.exists():
+        try:
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            item = (provenance.get("organs", {}) or {}).get(organ)
+            if isinstance(item, dict):
+                source_labels = item.get("source_local_labels") or [item.get("source_local_label") or organ]
+                return identity_contract(
+                    taxonomy,
+                    organ,
+                    "+".join(str(x) for x in source_labels),
+                    str(item.get("resolved_canonical_id") or organ),
+                    mapping_type=str(item.get("mapping_type") or "exact_synonym"),
+                    mapping_source=str(provenance_path),
+                )
+        except Exception:
+            pass
+    if alias_match.startswith("local_alias:"):
+        source_local_label = alias_match.split(":", 1)[1]
+        model_aliases = ((alias_config.get("models", {}) or {}).get(model_key, {}) or {})
+        resolved_organ = str((model_aliases.get("local_to_global", {}) or {}).get(source_local_label, ""))
+        mapping_type = str((model_aliases.get("mapping_types", {}) or {}).get(source_local_label, "exact_synonym"))
+        mapping_source = "configs/model_label_aliases.json"
+    elif alias_match.startswith("approved_union:"):
+        source_local_label = alias_match.split(":", 1)[1]
+        resolved_organ = organ
+        mapping_type = "approved_union"
+        mapping_source = "configs/model_label_aliases.json"
+    elif alias_match == "missing" or alias_match.startswith("missing_") or alias_match.startswith("invalid_"):
+        entry = taxonomy_entry(taxonomy, organ)
+        return {
+            "requested_canonical_id": _norm_organ_key(organ),
+            "source_local_label": source_local_label,
+            "resolved_canonical_id": _norm_organ_key(organ),
+            "comparison_family": entry.get("comparison_family") if entry else None,
+            "parent_ids": list(entry.get("parent_ids", [])) if entry else [],
+            "mapping_type": "missing_mask",
+            "mapping_source": "missing_mask",
+            "identity_status": "missing_candidate",
+            "identity_mismatch_reasons": ["candidate_mask_missing"],
+            "alias_match": original_alias_match,
+        }
+    contract = identity_contract(
+        taxonomy,
+        organ,
+        source_local_label,
+        resolved_organ,
+        mapping_type=mapping_type,
+        mapping_source=mapping_source,
+    )
+    contract["alias_match"] = original_alias_match
+    return contract
+
+
+def _write_identity_provenance(seg_dir: Path, organ: str, contract: dict[str, Any]) -> None:
+    path = seg_dir / "identity_provenance.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"organs": {}}
+    except Exception:
+        doc = {"organs": {}}
+    doc.setdefault("organs", {})[organ] = {
+        "source_local_labels": [contract.get("source_local_label") or organ],
+        "resolved_canonical_id": contract.get("resolved_canonical_id") or organ,
+        "mapping_type": contract.get("mapping_type") or "exact_synonym",
+        "mapping_source": contract.get("mapping_source"),
+    }
+    write_json(path, doc)
+
+
+def _usable_binary_mask(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        return int((np.asanyarray(nib.load(str(path)).dataobj) > 0).sum()) > 10
+    except Exception:
+        return False
+
+
+def _hierarchical_plan_cache_key(
+    *,
+    requested_organs: list[str],
+    major_organs: list[str],
+    child_organs: list[str],
+    execution_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the semantic parts that make a hierarchical ROI cache reusable."""
+    per_organ = execution_plan.get("per_organ", {}) or {}
+    relevant_organs = sorted(set(requested_organs) | set(major_organs) | set(child_organs))
+    return {
+        "requested_organs": list(requested_organs),
+        "major_organs": list(major_organs),
+        "child_organs": list(child_organs),
+        "execution_plan": {
+            "candidate_mode": execution_plan.get("candidate_mode"),
+            "teacher_run_list": list(execution_plan.get("teacher_run_list", []) or []),
+            "preseeded_models": list(execution_plan.get("preseeded_models", []) or []),
+            "per_organ": {organ: per_organ.get(organ, {}) for organ in relevant_organs},
+        },
+    }
+
+
+def _stable_json_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _run_hierarchical_case_inference(
+    *,
+    ct: Path,
+    case_id: str,
+    case_raw: Path,
+    case_out: Path,
+    registry_path: str | Path,
+    execution_plan: dict[str, Any],
+    requested_organs: list[str],
+    taxonomy: dict[str, Any],
+    alias_config: dict[str, Any],
+    timeout_sec: int,
+    device: str | None,
+    dry_run: bool,
+    margin_mm: float,
+    preseeded_seg_dirs: dict[str, Path] | None = None,
+) -> dict[str, Any]:
+    registry_file = Path(registry_path).resolve()
+    registry_sha256 = hashlib.sha256(registry_file.read_bytes()).hexdigest() if registry_file.is_file() else None
+    per_organ = execution_plan.get("per_organ", {}) or {}
+    requested_set = set(requested_organs)
+    dependency_parents = {
+        parent
+        for organ in requested_organs
+        for parent in ((taxonomy_entry(taxonomy, organ) or {}).get("parent_ids", []) or [])
+    }
+    # Preserve requested/display IDs while consulting normalized taxonomy keys.
+    # Direct set membership against taxonomy["organs"] silently dropped targets
+    # such as vertebrae_L2 and celiac_aa (celiac_artery).
+    requested_major_organs = {
+        organ for organ in requested_organs
+        if (taxonomy_entry(taxonomy, organ) or {}).get("hierarchy_role") == "major"
+    }
+    major_organs = sorted(requested_major_organs | dependency_parents)
+    child_organs = sorted({
+        organ for organ in requested_organs
+        if (taxonomy_entry(taxonomy, organ) or {}).get("hierarchy_role") == "child"
+    })
+    cache_key = _hierarchical_plan_cache_key(
+        requested_organs=requested_organs,
+        major_organs=major_organs,
+        child_organs=child_organs,
+        execution_plan=execution_plan,
+    )
+    cache_key_sha256 = _stable_json_sha256(cache_key)
+    existing_manifest = case_out / "hierarchical_inference_plan.json"
+    if existing_manifest.exists() and not dry_run:
+        try:
+            cached = json.loads(existing_manifest.read_text(encoding="utf-8"))
+            ct_stat = ct.stat()
+            cached_ct = cached.get("ct_fingerprint", {}) or {}
+            cache_valid = (
+                cached.get("teacher_inference_mode") == "hierarchical_roi"
+                and cached.get("hierarchical_pipeline_version") == HIERARCHICAL_PIPELINE_VERSION
+                and cached.get("taxonomy_source_sha256") == taxonomy.get("source_sha256")
+                and cached.get("registry_sha256") == registry_sha256
+                and float(cached.get("margin_mm")) == float(margin_mm)
+                and cached.get("hierarchical_plan_cache_key_sha256") == cache_key_sha256
+                and (cached.get("hierarchical_plan_cache_key") or {}) == cache_key
+                and int(cached_ct.get("size", -1)) == int(ct_stat.st_size)
+                and int(cached_ct.get("mtime_ns", -1)) == int(ct_stat.st_mtime_ns)
+            )
+            for checkpoint in (cached.get("model_checkpoint_refs", {}) or {}).values():
+                resolved = checkpoint.get("resolved_path")
+                if not resolved:
+                    continue
+                checkpoint_path = Path(str(resolved))
+                current_mtime = checkpoint_path.stat().st_mtime_ns if checkpoint_path.exists() else None
+                if current_mtime != checkpoint.get("mtime_ns"):
+                    cache_valid = False
+                    break
+            cached_dirs = {
+                path.name: path / "segmentations"
+                for path in (case_out / "hierarchical_predictions").glob("*")
+                if path.is_dir() and (path / "segmentations").exists() and any((path / "segmentations").glob("*.nii.gz"))
+            }
+            if cache_valid and cached_dirs:
+                return {
+                    "model_seg_dirs": cached_dirs,
+                    "inference_results": [{
+                        "case_id": case_id,
+                        "status": "success",
+                        "cache_status": "reused_hierarchical_roi_cache",
+                        "teacher_inference_mode": "hierarchical_roi",
+                        "manifest": str(existing_manifest),
+                    }],
+                    "blocked": list(cached.get("blocked", [])),
+                    "manifest": str(existing_manifest),
+                }
+        except Exception:
+            pass
+
+    merged_root = case_out / "hierarchical_predictions"
+    merged_dirs: dict[str, Path] = {}
+    raw_results: list[dict[str, Any]] = []
+    full_runs: dict[str, tuple[dict[str, Any], Path]] = {}
+    parent_masks: dict[str, Path] = {}
+    blocked: list[dict[str, Any]] = []
+    major_resolution: list[dict[str, Any]] = []
+    hierarchy_qc_cache = _CaseMaskCache(max_arrays=48)
+
+    def hard_qc_usable(mask: Path, organ: str) -> tuple[bool, dict[str, Any]]:
+        qc = _compute_candidate_qc(ct=ct, mask=mask if mask.exists() else None, organ=organ, cache=hierarchy_qc_cache)
+        return bool(_usable_binary_mask(mask) and qc.get("status") != "fail"), qc
+
+    def merged_dir(model: str) -> Path:
+        path = merged_dirs.setdefault(model, merged_root / model / "segmentations")
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def run_full(model: str, target_organs: list[str]) -> tuple[dict[str, Any], Path]:
+        if model in full_runs:
+            return full_runs[model]
+        preseeded_seg_dir = (preseeded_seg_dirs or {}).get(model)
+        preseeded_summary: dict[str, Any] = {}
+        if preseeded_seg_dir is not None:
+            summary_candidates = [
+                preseeded_seg_dir / "inference_summary.json",
+                preseeded_seg_dir.parent / "inference_summary.json",
+            ]
+            for summary_path in summary_candidates:
+                if summary_path.exists():
+                    try:
+                        preseeded_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        preseeded_summary = {}
+                    break
+        completed_zero_output = bool(
+            preseeded_summary
+            and preseeded_summary.get("return_code") == 0
+            and not preseeded_summary.get("timed_out")
+        )
+        if (
+            not dry_run
+            and preseeded_seg_dir is not None
+            and preseeded_seg_dir.exists()
+            and (
+                any((preseeded_seg_dir / f"{organ}.nii.gz").exists() for organ in target_organs)
+                or completed_zero_output
+            )
+        ):
+            result = {
+                "status": "success",
+                "model_key": model,
+                "segmentation_output": str(preseeded_seg_dir),
+                "num_masks": sum(1 for _ in preseeded_seg_dir.glob("*.nii.gz")),
+                "cache_status": (
+                    "reused_preseeded_completed_zero_output"
+                    if completed_zero_output and not any((preseeded_seg_dir / f"{organ}.nii.gz").exists() for organ in target_organs)
+                    else "reused_preseeded_major_parent_cache"
+                ),
+                "teacher_inference_mode": "hierarchical_roi",
+                "inference_scope": "major_full_volume_parent_cache_only",
+                "requested_organs": target_organs,
+                "cache_policy": (
+                    "Only major-organ parent masks are reused from preseeded full-volume predictions; "
+                    "child/sub-organ masks are regenerated through hierarchical ROI."
+                ),
+            }
+            full_runs[model] = (result, preseeded_seg_dir)
+            raw_results.append({"case_id": case_id, "inference_scope": "major_full_volume_parent_cache_only", **result})
+            return result, preseeded_seg_dir
+        legacy_seg_dir = case_raw / model / case_id / "segmentations"
+        if (
+            not dry_run
+            and legacy_seg_dir.exists()
+            and any((legacy_seg_dir / f"{organ}.nii.gz").exists() for organ in target_organs)
+        ):
+            result = {
+                "status": "success",
+                "model_key": model,
+                "segmentation_output": str(legacy_seg_dir),
+                "num_masks": sum(1 for _ in legacy_seg_dir.glob("*.nii.gz")),
+                "cache_status": "reused_legacy_full_volume_major_parent_cache",
+                "teacher_inference_mode": "hierarchical_roi",
+                "inference_scope": "major_full_volume_parent_cache_only",
+                "requested_organs": target_organs,
+                "cache_policy": (
+                    "Only major-organ parent masks may be reused from legacy full-volume raw predictions; "
+                    "child/sub-organ masks are regenerated through hierarchical ROI."
+                ),
+            }
+            full_runs[model] = (result, legacy_seg_dir)
+            raw_results.append({"case_id": case_id, "inference_scope": "major_full_volume_parent_cache_only", **result})
+            return result, legacy_seg_dir
+        result = run_registered_model(
+            ct, case_raw / "hierarchical_full" / model, model, registry_path=registry_path, case_id=case_id,
+            dry_run=dry_run, timeout_sec=timeout_sec, device=device,
+            extra_context={"requested_organs": target_organs, "teacher_inference_mode": "hierarchical_roi", "inference_scope": "major_full_volume"},
+        )
+        result.setdefault("inference_scope", "major_full_volume")
+        seg_dir = Path(str(result.get("segmentation_output", case_raw / model / case_id / "segmentations")))
+        full_runs[model] = (result, seg_dir)
+        raw_results.append({"case_id": case_id, "inference_scope": "major_full_volume", **result})
+        return result, seg_dir
+
+    model_major_targets: dict[str, set[str]] = {}
+    for candidate_organ in major_organs:
+        candidate_route = per_organ.get(candidate_organ, {}) or {}
+        for candidate_model in [candidate_route.get("primary_teacher"), *candidate_route.get("backup_teachers", [])]:
+            if candidate_model:
+                model_major_targets.setdefault(str(candidate_model), set()).add(candidate_organ)
+    for organ in major_organs:
+        route = per_organ.get(organ, {}) or {}
+        ordered = [route.get("primary_teacher"), *route.get("backup_teachers", [])]
+        ordered = [str(x) for x in ordered if x]
+        # Repair policy: exhaust reusable major-parent masks across the route
+        # before launching any fresh full-volume teacher. This may prefer a
+        # cached backup over an uncached primary, while preserving route order
+        # within the cached and uncached groups.
+        ordered = sorted(
+            ordered,
+            key=lambda model: 0 if (
+                model in (preseeded_seg_dirs or {})
+                or (case_raw / model / case_id / "segmentations").exists()
+            ) else 1,
+        )
+        resolved = False
+        for model in ordered:
+            major_inference, seg_dir = run_full(model, sorted(model_major_targets.get(model, {organ})))
+            source, match_mode = _candidate_mask_path(seg_dir, organ, model, alias_config)
+            contract = _candidate_identity_contract(
+                taxonomy=taxonomy, alias_config=alias_config, organ=organ, model_key=model, alias_match=match_mode,
+                seg_dir=seg_dir,
+            )
+            usable, hierarchy_qc = hard_qc_usable(source, organ)
+            if contract["identity_status"] != "valid" or not usable:
+                major_resolution.append({
+                    "organ": organ, "model": model, "status": "unusable", "mask": str(source),
+                    "cache_status": major_inference.get("cache_status"),
+                    "inference_scope": major_inference.get("inference_scope"),
+                    "hierarchy_qc": hierarchy_qc, **contract,
+                })
+                continue
+            destination = merged_dir(model) / f"{organ}.nii.gz"
+            if source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
+            _write_identity_provenance(merged_dir(model), organ, contract)
+            parent_masks[organ] = destination
+            major_resolution.append({
+                "organ": organ, "model": model, "status": "resolved", "mask": str(destination),
+                "cache_status": major_inference.get("cache_status"),
+                "inference_scope": major_inference.get("inference_scope"),
+                "hierarchy_qc": hierarchy_qc, **contract,
+            })
+            resolved = True
+            break
+        if not resolved:
+            blocked.append({"organ": organ, "status": "major_unresolved", "reason": "primary_and_backups_unusable"})
+
+    child_routes: list[dict[str, Any]] = []
+    child_backups: dict[str, list[str]] = {}
+    for organ in child_organs:
+        entry = taxonomy_entry(taxonomy, organ) or {}
+        route = per_organ.get(organ, {}) or {}
+        primary = route.get("primary_teacher")
+        backups = [str(x) for x in route.get("backup_teachers", []) if x]
+        if not primary:
+            blocked.append({"organ": organ, "status": "unresolved_route", "reason": "no_exact_primary_teacher"})
+            continue
+        child_routes.append({"organ": organ, "parent_ids": entry.get("parent_ids", []), "model": str(primary)})
+        child_backups[organ] = backups
+
+    roi_root = case_out / "hierarchical_roi"
+
+    def run_roi_model(image: Path, output: Path, model: str, target_organs: list[str], task_id: str) -> dict[str, Any]:
+        result = run_registered_model(
+            image, output, model, registry_path=registry_path, case_id=task_id,
+            dry_run=dry_run, timeout_sec=timeout_sec, device=device,
+            extra_context={"requested_organs": target_organs, "teacher_inference_mode": "hierarchical_roi", "inference_scope": "child_roi"},
+        )
+        result.setdefault("inference_scope", "child_roi")
+        raw_results.append({"case_id": case_id, "inference_scope": "child_roi", "roi_task_id": task_id, **result})
+        return result
+
+    if dry_run:
+        tasks = []
+        parent_blocked = [{"organ": route["organ"], "status": "dry_run_pending_parent_mask"} for route in child_routes]
+    else:
+        tasks, parent_blocked = plan_roi_tasks(
+            ct_path=ct, child_routes=child_routes, parent_masks=parent_masks, margin_mm=margin_mm,
+            allow_cross_parent_merge=True,
+        )
+    blocked.extend(parent_blocked)
+    attempted_child_pairs = {(str(task["model"]), str(organ)) for task in tasks for organ in task["organs"]}
+    for task in tasks:
+        merged_dir(str(task["model"]))
+    task_results = execute_roi_tasks(
+        ct_path=ct, tasks=tasks, work_root=roi_root, merged_model_dirs=merged_dirs, run_model=run_roi_model,
+        alias_config=alias_config,
+    ) if tasks and not dry_run else []
+
+    backup_results: list[dict[str, Any]] = []
+    unresolved = {
+        str(route["organ"]): route for route in child_routes
+        if not hard_qc_usable(merged_dir(str(route["model"])) / f"{route['organ']}.nii.gz", str(route["organ"]))[0]
+    }
+    primary_retry_results: list[dict[str, Any]] = []
+    if unresolved and not dry_run:
+        primary_retry_tasks, primary_retry_blocked = plan_roi_tasks(
+            ct_path=ct,
+            child_routes=list(unresolved.values()),
+            parent_masks=parent_masks,
+            margin_mm=margin_mm,
+            allow_cross_parent_merge=False,
+        )
+        blocked.extend(primary_retry_blocked)
+        primary_retry_results = execute_roi_tasks(
+            ct_path=ct,
+            tasks=primary_retry_tasks,
+            work_root=roi_root / "primary_parent_retry",
+            merged_model_dirs=merged_dirs,
+            run_model=run_roi_model,
+            alias_config=alias_config,
+        ) if primary_retry_tasks else []
+        attempted_child_pairs.update(
+            (str(task["model"]), str(organ))
+            for task in primary_retry_tasks
+            for organ in task["organs"]
+        )
+        unresolved = {
+            organ: route for organ, route in unresolved.items()
+            if not hard_qc_usable(merged_dir(str(route["model"])) / f"{organ}.nii.gz", organ)[0]
+        }
+    max_backups = max((len(child_backups.get(organ, [])) for organ in unresolved), default=0)
+    for backup_index in range(max_backups):
+        backup_routes = [
+            {**route, "model": child_backups[organ][backup_index]}
+            for organ, route in unresolved.items()
+            if backup_index < len(child_backups.get(organ, []))
+        ]
+        if dry_run:
+            backup_tasks, backup_parent_blocked = [], []
+        else:
+            backup_tasks, backup_parent_blocked = plan_roi_tasks(
+                ct_path=ct, child_routes=backup_routes, parent_masks=parent_masks, margin_mm=margin_mm,
+            )
+        blocked.extend(backup_parent_blocked)
+        attempted_child_pairs.update((str(task["model"]), str(organ)) for task in backup_tasks for organ in task["organs"])
+        for task in backup_tasks:
+            merged_dir(str(task["model"]))
+        round_results = execute_roi_tasks(
+            ct_path=ct, tasks=backup_tasks, work_root=roi_root / f"backup_{backup_index + 1}",
+            merged_model_dirs=merged_dirs, run_model=run_roi_model, alias_config=alias_config,
+        ) if backup_tasks and not dry_run else []
+        backup_results.extend(round_results)
+        for route in backup_routes:
+            organ = str(route["organ"])
+            if hard_qc_usable(merged_dir(str(route["model"])) / f"{organ}.nii.gz", organ)[0]:
+                unresolved.pop(organ, None)
+    for organ in sorted(unresolved):
+        blocked.append({"organ": organ, "status": "child_unresolved", "reason": "primary_and_backups_unusable"})
+
+    child_resolution: list[dict[str, Any]] = []
+    for organ in child_organs:
+        route = per_organ.get(organ, {}) or {}
+        ordered_models = [route.get("primary_teacher"), *route.get("backup_teachers", [])]
+        resolved_record: dict[str, Any] | None = None
+        attempts: list[dict[str, Any]] = []
+        for model_value in ordered_models:
+            if not model_value:
+                continue
+            model = str(model_value)
+            if (model, organ) not in attempted_child_pairs:
+                attempts.append({"model": model, "attempted": False, "reason": "not_needed_after_prior_success"})
+                continue
+            candidate = merged_dir(model) / f"{organ}.nii.gz"
+            usable, hierarchy_qc = hard_qc_usable(candidate, organ)
+            attempt = {"model": model, "attempted": True, "mask": str(candidate), "usable": usable, "hierarchy_qc": hierarchy_qc}
+            attempts.append(attempt)
+            if usable and resolved_record is None:
+                resolved_record = attempt
+        child_resolution.append({
+            "organ": organ,
+            "status": "resolved" if resolved_record else "unresolved",
+            "selected_model": resolved_record.get("model") if resolved_record else None,
+            "selected_mask": resolved_record.get("mask") if resolved_record else None,
+            "attempts": attempts,
+        })
+
+    manifest_path = case_out / "hierarchical_inference_plan.json"
+    registry_doc = load_registry(registry_file) if registry_file.exists() else {"models": {}}
+    checkpoint_refs: dict[str, Any] = {}
+    project_root = registry_file.parent.parent
+    for model in sorted(merged_dirs):
+        raw_checkpoint = str(((registry_doc.get("models", {}) or {}).get(model, {}) or {}).get("checkpoint_path") or "")
+        checkpoint_path = Path(raw_checkpoint)
+        if raw_checkpoint and not checkpoint_path.is_absolute():
+            checkpoint_path = project_root / checkpoint_path
+        checkpoint_refs[model] = {
+            "configured_path": raw_checkpoint,
+            "resolved_path": str(checkpoint_path.resolve()) if raw_checkpoint else None,
+            "exists": bool(raw_checkpoint and checkpoint_path.exists()),
+            "mtime_ns": checkpoint_path.stat().st_mtime_ns if raw_checkpoint and checkpoint_path.exists() else None,
+        }
+    write_hierarchical_manifest(manifest_path, {
+        "case_id": case_id,
+        "ct_path": str(ct),
+        "teacher_inference_mode": "hierarchical_roi",
+        "hierarchical_pipeline_version": HIERARCHICAL_PIPELINE_VERSION,
+        "taxonomy_schema_version": taxonomy.get("schema_version"),
+        "taxonomy_source_sha256": taxonomy.get("source_sha256"),
+        "registry_sha256": registry_sha256,
+        "model_checkpoint_refs": checkpoint_refs,
+        "margin_mm": margin_mm,
+        "requested_organs": requested_organs,
+        "hierarchical_plan_cache_key": cache_key,
+        "hierarchical_plan_cache_key_sha256": cache_key_sha256,
+        "cross_parent_roi_merge": "adaptive_parent_support_validation",
+        "major_organs": major_organs,
+        "child_organs": child_organs,
+        "major_resolution": major_resolution,
+        "child_resolution": child_resolution,
+        "roi_tasks": task_results,
+        "primary_parent_retry_tasks": primary_retry_results,
+        "backup_roi_tasks": backup_results,
+        "blocked": blocked,
+    })
+    return {
+        "model_seg_dirs": {model: path for model, path in merged_dirs.items() if any(path.glob("*.nii.gz"))},
+        "inference_results": raw_results,
+        "blocked": blocked,
+        "manifest": str(manifest_path),
+    }
+
+
 def _copy_annotation(src: Path | None, dst_dir: Path, organ: str) -> str | None:
     if src and src.exists():
         dst_dir.mkdir(parents=True, exist_ok=True)
         dst = dst_dir / f"{organ}.nii.gz"
-        if src.resolve() != dst.resolve():
+        if src.resolve() != dst.resolve() and not _same_file_fingerprint(src, dst):
             shutil.copy2(src, dst)
         return str(dst.resolve())
     return None
@@ -156,9 +990,95 @@ def _copy_case_mask(src: Path, dst_case_root: Path, organ: str) -> Path | None:
     seg_dir = dst_case_root / "segmentations"
     seg_dir.mkdir(parents=True, exist_ok=True)
     dst = seg_dir / f"{organ}.nii.gz"
-    if src.resolve() != dst.resolve():
+    if src.resolve() != dst.resolve() and not _same_file_fingerprint(src, dst):
         shutil.copy2(src, dst)
     return dst
+
+
+def _export_standard_case_dataset(
+    *,
+    case_id: str,
+    ct: Path,
+    selected_metadata: list[dict[str, Any]],
+    out_root: Path,
+    student_target_ids: dict[str, Any],
+) -> dict[str, Any]:
+    case_root = out_root / case_id
+    seg_dir = case_root / "segmentations"
+    case_root.mkdir(parents=True, exist_ok=True)
+    seg_dir.mkdir(parents=True, exist_ok=True)
+    image_dst = case_root / "image.nii.gz"
+    if ct.exists() and (not image_dst.exists() or not _same_file_fingerprint(ct, image_dst)):
+        shutil.copy2(ct, image_dst)
+
+    mappings: list[dict[str, Any]] = []
+    copied_masks: list[str] = []
+    exported_metadata: list[dict[str, Any]] = []
+    for meta in selected_metadata:
+        organ = str(meta.get("organ") or "").strip()
+        final = Path(str(meta.get("final_mask") or meta.get("mask_path") or ""))
+        if not organ or not final.exists():
+            continue
+        dst = seg_dir / f"{organ}.nii.gz"
+        if not dst.exists() or not _same_file_fingerprint(final, dst):
+            shutil.copy2(final, dst)
+        copied_masks.append(dst.name)
+        selected_prediction = str(meta.get("selected_prediction") or meta.get("selected_pre_shapekit_prediction") or "")
+        teacher_output_file = Path(selected_prediction).name if selected_prediction else None
+        mappings.append({
+            "teacher_target_id": meta.get("teacher_target_id"),
+            "teacher_output_name": Path(teacher_output_file).name[:-7] if teacher_output_file and teacher_output_file.endswith(".nii.gz") else organ,
+            "teacher_output_file": teacher_output_file,
+            "teacher_model": meta.get("selected_model") or meta.get("source_model"),
+            "canonical_organ_name": organ,
+            "student_target_id": student_target_ids.get(organ),
+            "selected_pseudo_label": str(dst.resolve()),
+            "mapping_status": "selected_teacher_output_to_canonical_binary_mask",
+        })
+        exported_metadata.append({
+            **meta,
+            "ct_path": str(image_dst.resolve()),
+            "image": str(image_dst.resolve()),
+            "final_mask": str(dst.resolve()),
+            "mask_path": str(dst.resolve()),
+            "mask": str(dst.resolve()),
+            "canonical_organ_name": organ,
+            "student_target_id": student_target_ids.get(organ),
+        })
+
+    mapping_path = case_root / "label_mapping.json"
+    write_json(mapping_path, {
+        "case_id": case_id,
+        "layout": "bdmap_pants_style_binary_masks",
+        "image": str(image_dst.resolve()),
+        "segmentations": str(seg_dir.resolve()),
+        "mapping_layers": [
+            "teacher target ID / output name",
+            "canonical organ name",
+            "student target ID",
+        ],
+        "target_mapping_policy": "Student target IDs come from configs/student_3d_prompt_target_organs.json and are not copied from teacher label IDs.",
+        "ground_truth_status": "pseudo_label_candidate",
+        "mappings": mappings,
+    })
+    write_json(case_root / "selection_metadata.json", {
+        "case_id": case_id,
+        "ct_path": str(image_dst.resolve()),
+        "dataset_type": "pseudo_label_dataset",
+        "ground_truth_status": "pseudo_label_candidate",
+        "layout": "bdmap_pants_style_binary_masks",
+        "label_mapping": str(mapping_path.resolve()),
+        "selected_organs": exported_metadata,
+    })
+    return {
+        "case_id": case_id,
+        "case_folder": str(case_root.resolve()),
+        "image": str(image_dst.resolve()),
+        "segmentations": str(seg_dir.resolve()),
+        "label_mapping": str(mapping_path.resolve()),
+        "num_masks": len(copied_masks),
+        "sample_masks": copied_masks[:30],
+    }
 
 
 def _resolve_preseeded_case_dir(seed_base: Path, case_id: str) -> Path | None:
@@ -166,7 +1086,10 @@ def _resolve_preseeded_case_dir(seed_base: Path, case_id: str) -> Path | None:
     if "{case_id}" in str(seed_base):
         seed_base = Path(str(seed_base).replace("{case_id}", case_id))
     case_root = seed_base / case_id
-    for candidate in (seed_base, case_root, case_root / "updated", case_root / "segmentations"):
+    # Prefer directories of canonical binary masks. Some teacher roots also
+    # contain a single combined_labels.nii.gz; selecting that root hides the
+    # usable per-organ segmentations nested below it.
+    for candidate in (case_root / "updated", case_root / "segmentations", seed_base / "updated", seed_base / "segmentations", case_root, seed_base):
         if candidate.exists() and any(candidate.glob("*.nii.gz")):
             return candidate
     return None
@@ -218,14 +1141,26 @@ def _add_shapekit_calibration_masks(
 
 def _prepare_candidate_shapekit_input(seg_dir: Path, input_root: Path, case_id: str) -> int:
     dst_seg = input_root / case_id / "segmentations"
-    if dst_seg.exists():
-        shutil.rmtree(dst_seg)
     dst_seg.mkdir(parents=True, exist_ok=True)
     count = 0
     for mask in sorted(seg_dir.glob("*.nii.gz")):
-        shutil.copy2(mask, dst_seg / mask.name)
+        dst = dst_seg / mask.name
+        if not _same_file_fingerprint(mask, dst):
+            shutil.copy2(mask, dst)
         count += 1
     return count
+
+
+def _safe_shapekit_targets_for_seg_dir(seg_dir: Path) -> list[str]:
+    names = {p.name[:-7] for p in seg_dir.glob("*.nii.gz")} if seg_dir.exists() else set()
+    targets: list[str] = []
+    for target, reqs in _SHAPEKIT_TARGET_REQUIREMENTS.items():
+        if target == "vertebrae":
+            if any(name.startswith("vertebrae_") for name in names):
+                targets.append(target)
+        elif all(req in names for req in reqs):
+            targets.append(target)
+    return targets
 
 
 def _postprocess_candidate_models_with_shapekit(
@@ -268,6 +1203,20 @@ def _postprocess_candidate_models_with_shapekit(
     for model_key, seg_dir in model_seg_dirs.items():
         input_root = case_refined / "candidate_shapekit_input" / model_key
         output_root = case_refined / "candidate_shapekit" / model_key
+        safe_targets = _safe_shapekit_targets_for_seg_dir(seg_dir)
+        if not safe_targets:
+            processed_dirs[model_key] = seg_dir
+            reports[model_key] = {
+                "stage": "candidate_preselection_shapekit",
+                "status": "unsupported_target_skipped_by_policy",
+                "reason": "No safe ShapeKit target organs detected before staging input",
+                "model": model_key,
+                "raw_seg_dir": str(seg_dir),
+                "processed_seg_dir": str(seg_dir),
+                "fallback_used": True,
+                "safe_targets": [],
+            }
+            continue
         copied = _prepare_candidate_shapekit_input(seg_dir, input_root, case_id)
         if copied == 0:
             processed_dirs[model_key] = seg_dir
@@ -279,6 +1228,7 @@ def _postprocess_candidate_models_with_shapekit(
                 "raw_seg_dir": str(seg_dir),
                 "processed_seg_dir": str(seg_dir),
                 "fallback_used": True,
+                "safe_targets": safe_targets,
             }
             continue
         result = run_shapekit(
@@ -303,6 +1253,7 @@ def _postprocess_candidate_models_with_shapekit(
             "processed_seg_dir": str(processed_dirs[model_key]),
             "fallback_used": not use_processed,
             "copied_masks": copied,
+            "safe_targets": safe_targets,
             "result": result,
             "reason": result.get("reason"),
         }
@@ -314,7 +1265,90 @@ def _add_unique(items: list[str], value: str) -> None:
         items.append(value)
 
 
-def _mask_dice_3d(a_path: str | Path, b_path: str | Path) -> float | None:
+def _file_fingerprint(path: str | Path | None) -> tuple[str, int, int] | None:
+    if not path:
+        return None
+    try:
+        p = Path(path)
+        st = p.stat()
+        return (str(p.resolve()), int(st.st_size), int(st.st_mtime_ns))
+    except Exception:
+        return None
+
+
+def _same_file_fingerprint(src: Path, dst: Path) -> bool:
+    src_fp = _file_fingerprint(src)
+    dst_fp = _file_fingerprint(dst)
+    return bool(src_fp and dst_fp and src_fp[1:] == dst_fp[1:])
+
+
+class _CaseMaskCache:
+    """Small case-scoped cache for NIfTI QC/Dice hot paths."""
+
+    def __init__(self, max_arrays: int = 96) -> None:
+        self.max_arrays = max(0, int(max_arrays))
+        self._binary_arrays: dict[tuple[str, int, int], Any] = {}
+        self._images: dict[tuple[str, int, int], Any] = {}
+        self._qc: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self._dice: dict[tuple[Any, Any], float | None] = {}
+        self._lock = threading.RLock()
+
+    def _evict_if_needed(self) -> None:
+        while self.max_arrays and len(self._binary_arrays) > self.max_arrays:
+            first = next(iter(self._binary_arrays))
+            self._binary_arrays.pop(first, None)
+            self._images.pop(first, None)
+
+    def image(self, path: str | Path):
+        fp = _file_fingerprint(path)
+        if fp is None:
+            return None
+        with self._lock:
+            if fp not in self._images:
+                import nibabel as nib
+
+                self._images[fp] = nib.load(str(path))
+            return self._images[fp]
+
+    def binary(self, path: str | Path):
+        fp = _file_fingerprint(path)
+        if fp is None:
+            return None
+        with self._lock:
+            if fp in self._binary_arrays:
+                return self._binary_arrays[fp]
+        import numpy as np
+
+        img = self.image(path)
+        if img is None:
+            return None
+        arr = np.asanyarray(img.dataobj) > 0
+        with self._lock:
+            self._binary_arrays[fp] = arr
+            self._evict_if_needed()
+            return self._binary_arrays.get(fp, arr)
+
+    def get_qc(self, key: tuple[Any, ...]) -> dict[str, Any] | None:
+        with self._lock:
+            cached = self._qc.get(key)
+            return dict(cached) if cached is not None else None
+
+    def set_qc(self, key: tuple[Any, ...], value: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            self._qc[key] = dict(value)
+        return value
+
+    def get_dice(self, key: tuple[Any, Any]) -> float | None | str:
+        with self._lock:
+            return self._dice[key] if key in self._dice else "__missing__"
+
+    def set_dice(self, key: tuple[Any, Any], value: float | None) -> float | None:
+        with self._lock:
+            self._dice[key] = value
+        return value
+
+
+def _mask_dice_3d(a_path: str | Path, b_path: str | Path, cache: _CaseMaskCache | None = None) -> float | None:
     """3D binary Dice between two mask files, or None if unreadable/mismatched.
 
     Used as a correct pre-check before LabelCritic: LabelCritic's own 2D dice gate
@@ -327,14 +1361,25 @@ def _mask_dice_3d(a_path: str | Path, b_path: str | Path) -> float | None:
         import nibabel as nib
         import numpy as np
 
-        a = np.asanyarray(nib.load(str(a_path)).dataobj) > 0
-        b = np.asanyarray(nib.load(str(b_path)).dataobj) > 0
+        a_fp = _file_fingerprint(a_path)
+        b_fp = _file_fingerprint(b_path)
+        dice_key = tuple(sorted([a_fp, b_fp], key=lambda x: str(x))) if a_fp and b_fp else None
+        if cache is not None and dice_key is not None:
+            cached = cache.get_dice(dice_key)
+            if cached != "__missing__":
+                return cached  # type: ignore[return-value]
+        a = cache.binary(a_path) if cache is not None else np.asanyarray(nib.load(str(a_path)).dataobj) > 0
+        b = cache.binary(b_path) if cache is not None else np.asanyarray(nib.load(str(b_path)).dataobj) > 0
+        if a is None or b is None:
+            return cache.set_dice(dice_key, None) if cache is not None and dice_key is not None else None
         if a.shape != b.shape:
-            return None
+            return cache.set_dice(dice_key, None) if cache is not None and dice_key is not None else None
         total = int(a.sum()) + int(b.sum())
         if total == 0:
-            return 1.0
-        return float(2 * int(np.logical_and(a, b).sum()) / total)
+            value = 1.0
+        else:
+            value = float(2 * int(np.logical_and(a, b).sum()) / total)
+        return cache.set_dice(dice_key, value) if cache is not None and dice_key is not None else value
     except Exception:
         return None
 
@@ -342,16 +1387,195 @@ def _mask_dice_3d(a_path: str | Path, b_path: str | Path) -> float | None:
 def _pick_reference_fallback(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     """Fallback selection when LabelCritic is unavailable or inconclusive.
 
-    Prefer the multi-teacher fusion consensus (the denoised default) when present;
-    otherwise the highest pseudo-consistency-Dice candidate; otherwise the first.
+    Conservative v1: prefer original teacher candidates. Fusion is allowed to
+    compete, but it must not automatically win fallback selection.
     """
-    fusion = [c for c in candidates if c.get("is_fusion")]
-    if fusion:
-        return fusion[0]
-    with_dice = [c for c in candidates if c.get("dice") is not None]
+    primary_pool = [c for c in candidates if not c.get("is_fusion")] or candidates
+    with_dice = [c for c in primary_pool if c.get("dice") is not None]
     if with_dice:
         return max(with_dice, key=lambda c: float(c.get("dice") or -1))
-    return candidates[0]
+    return primary_pool[0]
+
+
+def _mask_voxel_count(path: str | Path | None, cache: _CaseMaskCache | None = None) -> int | None:
+    if not path:
+        return None
+    try:
+        import numpy as np
+
+        arr = cache.binary(path) if cache is not None else None
+        if arr is None:
+            import nibabel as nib
+            arr = np.asanyarray(nib.load(str(path)).dataobj) > 0
+        return int(arr.sum())
+    except Exception:
+        return None
+
+
+def _verify_annotation_cached(
+    current_annotation: str | Path | None,
+    model_prediction: str | Path | None,
+    organ: str,
+    *,
+    dsc_replace_threshold: float = 0.0,
+    dsc_vlm_threshold: float = 0.5,
+    dsc_accept_threshold: float = 0.8,
+    cache: _CaseMaskCache | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "stage": "label_verifier",
+        "organ": organ,
+        "metric_family": "pseudo_consistency",
+        "metric_scope": "prediction_vs_prior_or_selected_pseudo_reference",
+        "ground_truth_status": "pseudo_label_candidate",
+        "accuracy_warning": "DSC is pseudo-label consistency unless the caller explicitly supplies expert fine labels.",
+        "dsc_replace_threshold": dsc_replace_threshold,
+        "dsc_vlm_threshold": dsc_vlm_threshold,
+        "dsc_accept_threshold": dsc_accept_threshold,
+        "cache_status": "case_mask_cache",
+    }
+    ann_path = Path(current_annotation).resolve() if current_annotation else None
+    pred_path = Path(model_prediction).resolve() if model_prediction else None
+    ann_exists = ann_path is not None and ann_path.exists()
+    pred_exists = pred_path is not None and pred_path.exists()
+    result["current_annotation"] = str(ann_path) if ann_path else None
+    result["model_prediction"] = str(pred_path) if pred_path else None
+    result["current_annotation_exists"] = ann_exists
+    result["model_prediction_exists"] = pred_exists
+
+    if not pred_exists and not ann_exists:
+        result.update({"status": "failed", "decision": "review_queue", "dice": None, "quality_bucket": "both_missing", "reason": "Both pseudo reference and prediction are missing."})
+        return result
+    if not pred_exists:
+        result.update({"status": "failed", "decision": "review_queue", "dice": None, "quality_bucket": "missing_prediction", "reason": "Model prediction missing; cannot verify."})
+        return result
+    if not ann_exists:
+        result.update({"status": "warning", "decision": "auto_replace_candidate", "quality_bucket": "no_reference", "reason": "No prior pseudo reference; prediction becomes pseudo-label candidate.", "dice": None})
+        return result
+
+    dice = _mask_dice_3d(ann_path, pred_path, cache=cache)
+    result["dice"] = round(float(dice), 6) if dice is not None else None
+    ann_voxels = _mask_voxel_count(ann_path, cache=cache)
+    pred_voxels = _mask_voxel_count(pred_path, cache=cache)
+    result["current_voxels"] = ann_voxels
+    result["prediction_voxels"] = pred_voxels
+
+    if dice is None:
+        result.update({"status": "failed", "decision": "review_queue", "quality_bucket": "dice_failed", "reason": "DSC computation failed; check read error or shape mismatch."})
+        return result
+
+    pred_nonempty = (pred_voxels or 0) > 10
+    ann_empty = (ann_voxels or 0) <= 10
+    ann_nonempty = not ann_empty
+    dice_value = float(dice)
+    if dice_value == 0.0 and pred_nonempty and ann_empty:
+        result.update({"status": "warning", "decision": "auto_replace_candidate", "quality_bucket": "empty_reference_nonempty_prediction", "reason": "Prior pseudo reference is empty but prediction is non-empty."})
+    elif dice_value == 0.0 and pred_nonempty and ann_nonempty:
+        result.update({"status": "warning", "decision": "send_to_vlm_label_expert", "quality_bucket": "critical_low_dice", "reason": "DSC=0 and both masks are non-empty; requires LabelCritic/VLM comparison."})
+    elif dice_value < dsc_vlm_threshold:
+        result.update({"status": "warning", "decision": "send_to_vlm_label_expert", "quality_bucket": "low_dice", "reason": f"DSC={round(dice_value, 6)} < {dsc_vlm_threshold}; send to LabelCritic/VLM."})
+    elif dice_value < dsc_accept_threshold:
+        result.update({"status": "warning", "decision": "uncertain_manual_check", "quality_bucket": "moderate_dice", "reason": f"{dsc_vlm_threshold} <= DSC={round(dice_value, 6)} < {dsc_accept_threshold}; keep best candidate but queue for sanity check."})
+    else:
+        result.update({"status": "success", "decision": "accept", "quality_bucket": "high_dice", "reason": f"DSC={round(dice_value, 6)} >= {dsc_accept_threshold}; accept."})
+    return result
+
+
+def _evaluate_candidate_for_organ(
+    *,
+    ct: Path,
+    organ: str,
+    model_key: str,
+    seg_dir: Path,
+    raw_seg_dir: Path,
+    alias_config: dict[str, Any],
+    shapekit_report: dict[str, Any],
+    current_ref: Path | None,
+    current_ref_exists: bool,
+    vlm_threshold: float,
+    case_id: str,
+    mask_cache: _CaseMaskCache,
+    taxonomy: dict[str, Any],
+) -> dict[str, Any]:
+    raw_pred, raw_alias_match = _candidate_mask_path(raw_seg_dir, organ, model_key, alias_config)
+    pred, alias_match = _candidate_mask_path(seg_dir, organ, model_key, alias_config)
+    candidate_shapekit_status = shapekit_report.get("status", "skipped_debug_only")
+    candidate_shapekit_reason = shapekit_report.get("reason")
+    if not pred.exists() and seg_dir != raw_seg_dir and raw_pred.exists():
+        pred = raw_pred
+        alias_match = f"post_shapekit_missing_fallback:{raw_alias_match}"
+        candidate_shapekit_status = "fallback_original"
+        candidate_shapekit_reason = "ShapeKit did not produce this organ mask; using raw candidate for LabelCritic comparison"
+    identity = _candidate_identity_contract(
+        taxonomy=taxonomy,
+        alias_config=alias_config,
+        organ=organ,
+        model_key=model_key,
+        alias_match=alias_match,
+        seg_dir=raw_seg_dir,
+    )
+    pred_for_verify = pred if pred.exists() else None
+    candidate_qc = _compute_candidate_qc(
+        ct=ct,
+        mask=pred_for_verify,
+        organ=organ,
+        reference=current_ref if current_ref_exists else None,
+        cache=mask_cache,
+    )
+    v = _verify_annotation_cached(
+        current_ref if current_ref_exists else None,
+        pred_for_verify,
+        organ,
+        dsc_replace_threshold=0.0,
+        dsc_vlm_threshold=vlm_threshold,
+        cache=mask_cache,
+    )
+    dice = v.get("dice")
+    result = {
+        "case_id": case_id,
+        "organ": organ,
+        "model": model_key,
+        "prediction": str(pred),
+        "pre_shapekit_prediction": str(raw_pred),
+        "reference": str(current_ref) if current_ref else "",
+        "reference_role": "historical_pseudo_label" if current_ref_exists else "none",
+        "reference_provenance": _historical_reference_provenance(current_ref) if current_ref_exists else None,
+        "metric_family": "pseudo_consistency",
+        "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
+        "ground_truth_status": "pseudo_label_candidate",
+        "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
+        "dice": dice,
+        "pseudo_consistency_dice": dice,
+        "decision": v.get("decision"),
+        "status": v.get("status"),
+        "reason": v.get("reason"),
+        "reference_quality_bucket": v.get("quality_bucket"),
+        "candidate_exists": pred.exists(),
+        "alias_match": alias_match,
+        "candidate_shapekit_status": candidate_shapekit_status,
+        "candidate_shapekit_reason": candidate_shapekit_reason,
+        "candidate_shapekit_report": shapekit_report,
+        "candidate_qc": candidate_qc,
+        "candidate_qc_status": candidate_qc.get("status"),
+        "candidate_qc_score": candidate_qc.get("score"),
+        "candidate_qc_flags": candidate_qc.get("flags", []),
+        "eligible_for_labelcritic": candidate_qc.get("eligible_for_labelcritic", True) and identity["identity_status"] == "valid",
+        **identity,
+    }
+    if str(model_key).lower().startswith("student") or "voxtell" in str(model_key).lower():
+        for provenance_path in (seg_dir / "oof_provenance.json", seg_dir.parent / "oof_provenance.json"):
+            if provenance_path.exists():
+                try:
+                    result["oof_provenance"] = json.loads(provenance_path.read_text(encoding="utf-8"))
+                    result["out_of_fold"] = True
+                except Exception as exc:
+                    result["oof_provenance_error"] = str(exc)
+                break
+    if identity["identity_status"] != "valid":
+        result["status"] = "failed"
+        result["decision"] = "identity_mismatch"
+        result["reason"] = "; ".join(identity["identity_mismatch_reasons"])
+    return result
 
 
 def _candidate_qc_summary(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -371,8 +1595,19 @@ def _compute_candidate_qc(
     mask: Path | None,
     organ: str,
     reference: Path | None = None,
+    cache: _CaseMaskCache | None = None,
 ) -> dict[str, Any]:
     """Run cheap structural QC after candidate ShapeKit and before LabelCritic."""
+    qc_key = (
+        _file_fingerprint(ct),
+        _file_fingerprint(mask),
+        organ,
+        _file_fingerprint(reference),
+    )
+    if cache is not None:
+        cached = cache.get_qc(qc_key)
+        if cached is not None:
+            return cached
     flags: list[str] = []
     checks: dict[str, Any] = {
         "organ": organ,
@@ -386,8 +1621,9 @@ def _compute_candidate_qc(
             "status": "fail",
             "score": 0.0,
             "eligible_for_labelcritic": False,
-            "flags": ["missing_mask"],
-            "reason": "candidate mask is missing",
+            "mask_availability": "missing_file",
+            "flags": ["missing_file"],
+            "reason": "candidate mask file is missing",
         }
 
     try:
@@ -404,14 +1640,17 @@ def _compute_candidate_qc(
         }
 
     try:
-        mask_img = nib.load(str(mask))
-        mask_arr = np.asarray(mask_img.get_fdata() > 0)
+        mask_img = cache.image(mask) if cache is not None else nib.load(str(mask))
+        mask_arr = cache.binary(mask) if cache is not None else np.asarray(mask_img.dataobj) > 0
+        if mask_img is None or mask_arr is None:
+            raise RuntimeError("mask could not be loaded")
     except Exception as exc:
         return {
             **checks,
             "status": "fail",
             "score": 0.0,
             "eligible_for_labelcritic": False,
+            "mask_availability": "unreadable_mask",
             "flags": ["unreadable_mask"],
             "reason": f"candidate mask is unreadable: {exc}",
         }
@@ -420,13 +1659,15 @@ def _compute_candidate_qc(
     checks["mask_shape"] = list(mask_shape)
     ct_img = None
     try:
-        ct_img = nib.load(str(ct))
+        ct_img = cache.image(ct) if cache is not None else nib.load(str(ct))
+        if ct_img is None:
+            raise RuntimeError("ct could not be loaded")
         ct_shape = tuple(int(x) for x in ct_img.shape[:3])
         checks["ct_shape"] = list(ct_shape)
         if mask_shape != ct_shape:
-            flags.append("shape_mismatch_ct")
+            flags.extend(["shape_mismatch_ct", "geometry_mismatch"])
         if not np.allclose(mask_img.affine, ct_img.affine, atol=1e-3):
-            flags.append("affine_mismatch_ct")
+            flags.extend(["affine_mismatch_ct", "geometry_mismatch"])
     except Exception as exc:
         checks["ct_geometry_status"] = f"unreadable:{exc}"
         flags.append("ct_geometry_unavailable")
@@ -434,7 +1675,10 @@ def _compute_candidate_qc(
     voxels = int(mask_arr.sum())
     checks["mask_voxels"] = voxels
     if voxels == 0:
-        flags.append("empty_mask")
+        flags.append("zero_volume_mask")
+        checks["mask_availability"] = "zero_volume_mask"
+    else:
+        checks["mask_availability"] = "nonzero_mask"
 
     try:
         voxel_volume = float(abs(np.linalg.det(mask_img.affine[:3, :3])))
@@ -457,8 +1701,10 @@ def _compute_candidate_qc(
 
     if reference and reference.exists():
         try:
-            ref_img = nib.load(str(reference))
-            ref_arr = np.asarray(ref_img.get_fdata() > 0)
+            ref_img = cache.image(reference) if cache is not None else nib.load(str(reference))
+            ref_arr = cache.binary(reference) if cache is not None else np.asarray(ref_img.dataobj) > 0
+            if ref_img is None or ref_arr is None:
+                raise RuntimeError("reference could not be loaded")
             ref_voxels = int(ref_arr.sum())
             checks["reference_voxels"] = ref_voxels
             if ref_voxels > 0 and voxels > 0:
@@ -471,14 +1717,16 @@ def _compute_candidate_qc(
         except Exception as exc:
             checks["reference_status"] = f"unreadable:{exc}"
 
-    hard_fail_flags = {"missing_mask", "unreadable_mask", "shape_mismatch_ct", "empty_mask"}
+    hard_fail_flags = {"missing_file", "unreadable_mask", "shape_mismatch_ct"}
     review_flags = {
         "affine_mismatch_ct",
+        "geometry_mismatch",
         "ct_geometry_unavailable",
         "many_connected_components",
         "connected_components_unavailable",
         "volume_ratio_too_small_vs_reference",
         "volume_ratio_too_large_vs_reference",
+        "zero_volume_mask",
     }
     if hard_fail_flags & set(flags):
         status = "fail"
@@ -493,7 +1741,7 @@ def _compute_candidate_qc(
         score = 1.0
         eligible = True
 
-    return {
+    result = {
         **checks,
         "status": status,
         "score": float(score),
@@ -501,6 +1749,7 @@ def _compute_candidate_qc(
         "flags": flags,
         "reason": "ok" if not flags else ";".join(flags),
     }
+    return cache.set_qc(qc_key, result) if cache is not None else result
 
 
 def _labelcritic_decision_path(records: list[dict[str, Any]] | None) -> str | None:
@@ -534,7 +1783,20 @@ def _case_resume_state(
     enable_shapekit: bool,
 ) -> dict[str, Any]:
     pred_root = case_out / "raw_predictions"
-    raw_ready = pred_root.exists() and any(pred_root.glob(f"*/{case_id}/segmentations/*.nii.gz"))
+    raw_ready = pred_root.exists() and (
+        any(pred_root.glob(f"*/{case_id}/segmentations/*.nii.gz"))
+        or any(pred_root.glob(f"*/{case_id}/inference_summary.json"))
+        or any(pred_root.glob(f"hierarchical_full/*/{case_id}/segmentations/*.nii.gz"))
+        or any(pred_root.glob(f"hierarchical_full/*/{case_id}/inference_summary.json"))
+    )
+    # Parent-cache-only hierarchical repair intentionally creates no new
+    # raw/full-volume predictions. Its authoritative raw-stage evidence is the
+    # hierarchical plan plus restored per-model predictions.
+    if (
+        (case_out / "hierarchical_inference_plan.json").exists()
+        and any((case_out / "hierarchical_predictions").glob("*/segmentations/*.nii.gz"))
+    ):
+        raw_ready = True
     meta_path = updated_root / case_id / "selection_metadata.json"
     updated_dir = updated_root / case_id / "updated"
     if not raw_ready:
@@ -584,6 +1846,40 @@ def _case_resume_state(
     return {"complete": True, "raw_ready": True, "reason": "complete"}
 
 
+def _load_reusable_raw_inference_cache(
+    *,
+    cached_summary: Path,
+    cached_seg_dir: Path,
+    model_key: str,
+) -> dict[str, Any] | None:
+    if not cached_summary.exists() or not cached_seg_dir.exists():
+        return None
+    try:
+        infer = json.loads(cached_summary.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if infer.get("timed_out") or infer.get("status") == "timed_out":
+        return None
+    cached_num_masks = sum(1 for _ in cached_seg_dir.glob("*.nii.gz"))
+    summary_num_masks = infer.get("num_masks")
+    executed_without_masks = (
+        cached_num_masks == 0
+        and str(infer.get("status")) in {"failed", "success"}
+        and infer.get("return_code") == 0
+        and int(summary_num_masks or 0) == 0
+    )
+    if cached_num_masks <= 0 and not executed_without_masks:
+        return None
+    infer.update({
+        "status": infer.get("status", "success"),
+        "model_key": model_key,
+        "segmentation_output": str(cached_seg_dir),
+        "num_masks": cached_num_masks,
+        "cache_status": "reused_empty_raw_prediction" if cached_num_masks == 0 else "reused_raw_prediction",
+    })
+    return infer
+
+
 def _build_gap_rows(
     *,
     case_id: str,
@@ -615,17 +1911,27 @@ def _build_gap_rows(
             continue
         status = selected.get("shapekit_status")
         if status in {"unsupported_target", "fallback_original", "failed"}:
+            mask_path = selected.get("mask_path") or selected.get("final_mask") or selected.get("selected_prediction")
+            original_usable = bool(mask_path and Path(str(mask_path)).exists())
+            if status == "fallback_original":
+                gap_type = "shapekit_failed_but_original_usable" if original_usable else "shapekit_failed_and_no_usable_mask"
+            elif status == "unsupported_target":
+                gap_type = "shapekit_unsupported_but_original_usable" if original_usable else "shapekit_unsupported_and_no_usable_mask"
+            else:
+                gap_type = "shapekit_failed_but_original_usable" if original_usable else "shapekit_failed_and_no_usable_mask"
             rows.append({
                 "case_id": case_id,
                 "ct_path": str(ct),
                 "organ": organ,
-                "gap_type": "shapekit_not_success",
+                "gap_type": gap_type,
                 "reason": selected.get("shapekit_reason") or status,
                 "candidate_count": selected.get("candidate_count"),
                 "candidate_models": selected.get("candidate_models", []),
                 "selection_method": selected.get("selection_method"),
                 "selection_status": selected.get("selection_status"),
                 "shapekit_status": status,
+                "original_mask_usable": original_usable,
+                "selected_mask": str(mask_path or ""),
                 "dataset_type": "pseudo_label_dataset",
                 "ground_truth_status": "pseudo_label_candidate",
             })
@@ -700,6 +2006,61 @@ def _summarize_preseeded_competition(
     }
 
 
+
+
+def _candidate_pairwise_agreement(
+    candidates: list[dict[str, Any]],
+    *,
+    cache: _CaseMaskCache | None = None,
+) -> dict[str, Any]:
+    """Summarize 3D Dice agreement across candidate masks for gating work."""
+    pairs: list[dict[str, Any]] = []
+    dice_values: list[float] = []
+    for i, cand_a in enumerate(candidates):
+        for cand_b in candidates[i + 1:]:
+            d3 = _mask_dice_3d(cand_a.get("prediction"), cand_b.get("prediction"), cache=cache)
+            pairs.append({
+                "candidate_a": cand_a.get("model"),
+                "candidate_b": cand_b.get("model"),
+                "dice_3d": round(float(d3), 4) if d3 is not None else None,
+            })
+            if d3 is not None:
+                dice_values.append(float(d3))
+    return {
+        "pair_count": len(pairs),
+        "pairs": pairs,
+        "min_dice_3d": min(dice_values) if dice_values else None,
+        "mean_dice_3d": (sum(dice_values) / len(dice_values)) if dice_values else None,
+    }
+
+
+def _should_fuse_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    cache: _CaseMaskCache | None = None,
+    high_agreement_dice: float = 0.90,
+) -> tuple[bool, dict[str, Any]]:
+    """Conservative fusion gate.
+
+    Fusion is allowed only for same-identity, same-family, QC-pass candidates
+    with high 3D agreement. It is a consensus candidate, not an automatic winner.
+    """
+    if len(candidates) < 2:
+        return False, {"reason": "fewer_than_two_candidates"}
+    canonical_ids = {c.get("requested_canonical_id") for c in candidates}
+    comparison_families = {c.get("comparison_family") for c in candidates}
+    if any(c.get("identity_status") != "valid" for c in candidates) or len(canonical_ids) != 1 or len(comparison_families) != 1:
+        return False, {"reason": "identity_mismatch_blocks_fusion", "canonical_ids": sorted(str(x) for x in canonical_ids)}
+    if any(c.get("candidate_qc_status") not in (None, "pass") or c.get("candidate_qc_flags") for c in candidates):
+        agreement = _candidate_pairwise_agreement(candidates, cache=cache)
+        return False, {"reason": "candidate_qc_not_all_pass_blocks_fusion", **agreement}
+    agreement = _candidate_pairwise_agreement(candidates, cache=cache)
+    min_dice = agreement.get("min_dice_3d")
+    if min_dice is not None and float(min_dice) >= high_agreement_dice:
+        return True, {"reason": "high_candidate_agreement_allows_conservative_fusion", **agreement}
+    return False, {"reason": "low_or_unknown_pairwise_agreement_blocks_fusion", **agreement}
+
+
 def _select_candidate(
     *,
     ct: Path,
@@ -715,6 +2076,9 @@ def _select_candidate(
     dry_run: bool,
     labelcritic_options: dict[str, Any] | None = None,
     near_identical_dice: float = 0.95,
+    mask_cache: _CaseMaskCache | None = None,
+    compare_batch_enabled: bool = True,
+    compare_batch_max_candidates: int = 2,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Select the pseudo-label candidate for one organ.
 
@@ -808,53 +2172,143 @@ def _select_candidate(
     lc_opts = {**labelcritic_options, "no_dice_check": True}
 
     if enable_critic and not dry_run:
-        for challenger in comparison_candidates[1:]:
-            d3 = _mask_dice_3d(selected["prediction"], challenger["prediction"])
-            if d3 is not None and d3 >= near_identical_dice:
-                # Candidates effectively agree; no VLM judgment needed (efficiency).
-                agreed += 1
-                critic_records.append({
-                    "candidate_a": selected["model"],
-                    "candidate_b": challenger["model"],
-                    "status": "skipped_near_identical",
-                    "decision": {"winner": "agree", "dice_3d": round(d3, 4)},
-                })
-                continue
-            critic_out = out / "critic" / case_id / f"{organ}_{selected['model']}_vs_{challenger['model']}.json"
-            critic = run_labelcritic_compare(
-                ct,
-                Path(selected["prediction"]),
-                Path(challenger["prediction"]),
-                organ,
-                critic_out,
+        all_pair_agreement = _candidate_pairwise_agreement(comparison_candidates, cache=mask_cache)
+        all_pair_min_dice = all_pair_agreement.get("min_dice_3d")
+        all_pair_threshold = float(os.getenv("MEDAI_COMPARE_HIGH_AGREEMENT_DICE", str(near_identical_dice)))
+        skip_all_compare = bool(
+            len(comparison_candidates) > 2
+            and all_pair_min_dice is not None
+            and float(all_pair_min_dice) >= all_pair_threshold
+        )
+        if skip_all_compare:
+            agreed = max(0, len(comparison_candidates) - 1)
+            critic_records.append({
+                "status": "skipped_high_pairwise_agreement",
+                "decision": {
+                    "winner": "agree",
+                    "min_dice_3d": round(float(all_pair_min_dice), 4),
+                    "threshold": all_pair_threshold,
+                },
+                "batch_status": "all_pair_agreement_gate",
+                "pairwise_agreement": all_pair_agreement,
+            })
+        compare_fn_patched = getattr(run_labelcritic_compare, "__module__", "") != "cli_anything.medai.core.labelcritic_wrapper"
+        use_batched_pairwise = bool(
+            not skip_all_compare
+            and compare_batch_enabled
+            and not compare_fn_patched
+            and 2 <= len(comparison_candidates) <= max(2, int(compare_batch_max_candidates))
+        )
+        if use_batched_pairwise:
+            batch_jobs: list[dict[str, Any]] = []
+            # Batch only the exact two-candidate tournament case. For 3+ candidates
+            # the incumbent can change after each comparison, so pre-batching all
+            # adjacent pairs would alter old tournament semantics.
+            pair_meta: list[tuple[dict[str, Any], dict[str, Any], float | None, Path | None]] = []
+            incumbent = comparison_candidates[0]
+            for challenger in comparison_candidates[1:]:
+                d3 = _mask_dice_3d(incumbent["prediction"], challenger["prediction"], cache=mask_cache)
+                critic_out = None
+                if d3 is None or d3 < near_identical_dice:
+                    critic_out = out / "critic" / case_id / f"{organ}_{incumbent['model']}_vs_{challenger['model']}.json"
+                    batch_jobs.append({
+                        "ct_image": ct,
+                        "mask_a": Path(incumbent["prediction"]),
+                        "mask_b": Path(challenger["prediction"]),
+                        "organ": organ,
+                        "output_json": critic_out,
+                        **lc_opts,
+                    })
+                pair_meta.append((incumbent, challenger, d3, critic_out))
+            batch_results = run_labelcritic_compare_batch(
+                batch_jobs,
                 backend=critic_backend,
                 base_url=critic_base_url,
                 port=critic_port,
                 dry_run=False,
-                timeout_sec=min(timeout_sec, 300),
-                **lc_opts,
-            )
-            record = {
-                "candidate_a": selected["model"],
-                "candidate_b": challenger["model"],
-                "output_json": str(critic_out),
-                "status": critic.get("status"),
-                "decision": critic.get("decision", {}),
-            }
-            critic_records.append(record)
-            winner = (critic.get("decision", {}) or {}).get("winner")
-            if critic.get("status") == "success" and winner == "b":
-                selected = challenger
-                decisive += 1
-            elif critic.get("status") == "success" and winner == "a":
-                decisive += 1
-            else:
-                # Inconclusive: VLM undecided, the dice-check skipped a near-identical
-                # pair (LabelCritic's efficiency gate produces no rows), or the call
-                # errored. Keep the incumbent and continue the tournament — a single
-                # inconclusive pair must not abort it and discard decisive results or
-                # the consensus pick.
-                inconclusive += 1
+                timeout_sec=min(timeout_sec, 900),
+            ) if batch_jobs else []
+            result_by_pair: dict[tuple[str, str], dict[str, Any]] = {}
+            for job, critic in zip(batch_jobs, batch_results):
+                result_by_pair[(str(Path(job["mask_a"])), str(Path(job["mask_b"])))] = critic
+            for cand_a, cand_b, d3, critic_out in pair_meta:
+                if d3 is not None and d3 >= near_identical_dice:
+                    agreed += 1
+                    critic_records.append({
+                        "candidate_a": cand_a["model"],
+                        "candidate_b": cand_b["model"],
+                        "status": "skipped_near_identical",
+                        "decision": {"winner": "agree", "dice_3d": round(d3, 4)},
+                        "batch_status": "batched_tournament",
+                    })
+                    continue
+                key = (str(Path(cand_a["prediction"])), str(Path(cand_b["prediction"])))
+                critic = result_by_pair.get(key, {})
+                record = {
+                    "candidate_a": cand_a["model"],
+                    "candidate_b": cand_b["model"],
+                    "output_json": critic.get("output_json") or (str(critic_out) if critic_out else None),
+                    "status": critic.get("status"),
+                    "decision": critic.get("decision", {}),
+                    "batch_status": "batched_tournament",
+                }
+                critic_records.append(record)
+                winner = (critic.get("decision", {}) or {}).get("winner")
+                if critic.get("status") == "success" and winner == "b":
+                    selected = cand_b
+                    decisive += 1
+                elif critic.get("status") == "success" and winner == "a":
+                    decisive += 1
+                else:
+                    inconclusive += 1
+        elif not skip_all_compare:
+            for challenger in comparison_candidates[1:]:
+                d3 = _mask_dice_3d(selected["prediction"], challenger["prediction"], cache=mask_cache)
+                if d3 is not None and d3 >= near_identical_dice:
+                    # Candidates effectively agree; no VLM judgment needed (efficiency).
+                    agreed += 1
+                    critic_records.append({
+                        "candidate_a": selected["model"],
+                        "candidate_b": challenger["model"],
+                        "status": "skipped_near_identical",
+                        "decision": {"winner": "agree", "dice_3d": round(d3, 4)},
+                    })
+                    continue
+                critic_out = out / "critic" / case_id / f"{organ}_{selected['model']}_vs_{challenger['model']}.json"
+                critic = run_labelcritic_compare(
+                    ct,
+                    Path(selected["prediction"]),
+                    Path(challenger["prediction"]),
+                    organ,
+                    critic_out,
+                    backend=critic_backend,
+                    base_url=critic_base_url,
+                    port=critic_port,
+                    dry_run=False,
+                    timeout_sec=min(timeout_sec, 300),
+                    **lc_opts,
+                )
+                record = {
+                    "candidate_a": selected["model"],
+                    "candidate_b": challenger["model"],
+                    "output_json": str(critic_out),
+                    "status": critic.get("status"),
+                    "decision": critic.get("decision", {}),
+                }
+                critic_records.append(record)
+                winner = (critic.get("decision", {}) or {}).get("winner")
+                if critic.get("status") == "success" and winner == "b":
+                    selected = challenger
+                    decisive += 1
+                elif critic.get("status") == "success" and winner == "a":
+                    decisive += 1
+                else:
+                    # Inconclusive: VLM undecided, the dice-check skipped a near-identical
+                    # pair (LabelCritic's efficiency gate produces no rows), or the call
+                    # errored. Keep the incumbent and continue the tournament — a single
+                    # inconclusive pair must not abort it and discard decisive results or
+                    # the consensus pick.
+                    inconclusive += 1
         if decisive > 0:
             method = "label_critic"
             selection_status = "selected"
@@ -862,9 +2316,17 @@ def _select_candidate(
                 f"{inconclusive} pairwise comparison(s) inconclusive; kept decisive LabelCritic result"
                 if inconclusive else None
             )
+        elif agreed == max(0, len(comparison_candidates) - 1) and inconclusive == 0:
+            # All candidates were near-identical in 3D, so no VLM tie-break is
+            # needed. Treat this as positive multi-teacher agreement rather than
+            # an inconclusive fallback, otherwise highly consistent labels get
+            # unfairly down-weighted in the dashboard/training manifest.
+            method = "near_identical_agreement"
+            selection_status = "selected"
+            fallback_reason = "All eligible candidates agree above the near-identical 3D Dice threshold; VLM tie-break skipped"
         else:
-            # No decisive VLM decision at all (commonly: all pairs near-identical and
-            # skipped by dice_check). Fall back to the fusion consensus / highest-Dice pick.
+            # No decisive VLM decision. Fall back to the fusion consensus /
+            # highest-Dice pick and keep the fallback auditable.
             selected = _pick_reference_fallback(comparison_candidates)
             method = "label_critic_inconclusive"
             selection_status = "fallback"
@@ -891,8 +2353,12 @@ def _select_candidate(
         "critic_records": critic_records,
         "labelcritic_records": critic_records,
         "fallback_reason": fallback_reason,
-        "quality_flags": (["labelcritic_selected"] if method == "label_critic" else ["fallback_selection"]) + qc_quality_flags,
-        "review_flags": ([] if selection_status == "selected" else ["selection_fallback"]) + qc_review_flags,
+        "quality_flags": (
+            ["labelcritic_selected"] if method == "label_critic"
+            else ["multi_teacher_agreement"] if method == "near_identical_agreement"
+            else ["fallback_selection", "labelcritic_uncertain"]
+        ) + qc_quality_flags,
+        "review_flags": ([] if selection_status == "selected" else ["selection_fallback", "labelcritic_uncertain"]) + qc_review_flags,
     }
 
 
@@ -910,8 +2376,106 @@ def _fusion_weight(tracker: OrganModelPerformance | None, organ: str, model: str
     except Exception:
         stats = None
     if stats and stats.get("n_cases", 0) >= 1:
-        return max(float(stats.get("mean_dice", 0.0)), 0.05)
+        return max(float(stats.get("estimated_reliability", stats.get("mean_estimated_reliability", 0.0))), 0.05)
     return 1.0
+
+
+_HIGH_RISK_GRADE_KEYWORDS = (
+    "tumor", "lesion", "duct", "vessel", "artery", "vein", "nerve",
+    "pancreas", "adrenal", "lymph", "node", "bowel", "intestine",
+    "duodenum", "colon", "prostate", "postcava", "portal", "hepatic",
+)
+
+
+def _is_high_risk_grade_organ(organ: str) -> bool:
+    key = _norm_organ_key(organ)
+    return any(term in key for term in _HIGH_RISK_GRADE_KEYWORDS)
+
+
+def _labelcritic_grade_policy_decision(
+    *,
+    organ: str,
+    selected: dict[str, Any] | None,
+    candidates: list[dict[str, Any]],
+    selection: dict[str, Any],
+    route_info: dict[str, Any],
+    best_dice: float | None,
+    vlm_threshold: float,
+    empty_reference_nonempty_prediction: bool,
+    policy: str,
+) -> dict[str, Any]:
+    if not selected:
+        return {"run": False, "reason": None, "skipped_reason": "no_selected_candidate"}
+    policy = (policy or "risk_aware").strip().lower()
+    if policy in {"all", "always", "formal_full_grade_all"}:
+        return {"run": True, "reason": "policy_grade_all", "skipped_reason": None}
+    if policy in {"off", "disabled", "none"}:
+        return {"run": False, "reason": None, "skipped_reason": "policy_grade_disabled"}
+
+    non_fusion_count = len([c for c in candidates if not c.get("is_fusion")])
+    selected_qc_status = selected.get("candidate_qc_status")
+    selected_qc_flags = selected.get("candidate_qc_flags", []) or []
+    selection_status = selection.get("selection_status")
+    selection_method = selection.get("selection_method")
+    compare_used = bool(selection.get("labelcritic_records") or selection.get("critic_records"))
+    high_risk = _is_high_risk_grade_organ(organ)
+    route_confidence = str(route_info.get("route_confidence", "low"))
+    low_dice = bool(
+        best_dice is not None
+        and float(best_dice) < vlm_threshold
+        and not empty_reference_nonempty_prediction
+    )
+
+    hard_qc_flags = {"missing_file", "unreadable_mask", "missing_prediction", "geometry_mismatch", "shape_mismatch", "shape_mismatch_ct", "all_candidates_failed_qc"}
+    hard_qc = (selected_qc_status == "fail") or bool(set(map(str, selected_qc_flags)) & hard_qc_flags)
+    review_qc = selected_qc_status not in (None, "pass") or bool(selected_qc_flags)
+
+    if hard_qc:
+        return {
+            "run": False,
+            "reason": None,
+            "skipped_reason": "hard_qc_structural_reject_no_vlm_needed",
+        }
+
+    reasons: list[str] = []
+    if low_dice:
+        reasons.append("low_pseudo_consistency_dice")
+    # LC-2 is an absolute safety-net, not a tax on every routed comparison.
+    # Compare evidence already chose among candidates; grade only when the organ
+    # is intrinsically risky or has non-structural warning evidence where VLM can help.
+    if high_risk:
+        reasons.append("high_risk_organ")
+    if review_qc and high_risk:
+        reasons.append("candidate_qc_review_high_risk")
+    if (
+        compare_used
+        and selection_method not in {"near_identical_agreement"}
+        and (high_risk or low_dice or (review_qc and route_confidence != "high"))
+    ):
+        reasons.append("post_compare_absolute_quality_gate")
+    if (
+        route_confidence == "low"
+        and (high_risk or low_dice or review_qc)
+    ):
+        reasons.append("route_confidence_low_with_risk")
+    if (
+        non_fusion_count > 1
+        and selection_method not in {"near_identical_agreement"}
+        and (high_risk or low_dice or review_qc)
+    ):
+        reasons.append("multi_candidate_conflict_or_diversity")
+
+    if selection_status != "selected" and not reasons:
+        return {"run": False, "reason": None, "skipped_reason": "fallback_structural_low_weight_no_vlm_needed"}
+
+    if reasons:
+        return {"run": True, "reason": ";".join(dict.fromkeys(reasons)), "skipped_reason": None}
+
+    if non_fusion_count <= 1 and selected_qc_status in (None, "pass") and route_confidence == "high":
+        return {"run": False, "reason": None, "skipped_reason": "stable_single_candidate_qc_pass"}
+    if selection_method == "near_identical_agreement" and selected_qc_status in (None, "pass"):
+        return {"run": False, "reason": None, "skipped_reason": "high_agreement_qc_pass"}
+    return {"run": False, "reason": None, "skipped_reason": "risk_aware_grade_not_required"}
 
 
 def _auto_arbitrate_organ(
@@ -928,6 +2492,7 @@ def _auto_arbitrate_organ(
     accept_grade: float,
     reject_grade: float,
     timeout_sec: int,
+    grade_cache: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Conservative automated absolute-quality arbitration (de-human) for one organ.
 
@@ -944,9 +2509,14 @@ def _auto_arbitrate_organ(
     grade_dir = out / "critic" / case_id
 
     def _grade(cand: dict[str, Any]) -> dict[str, Any]:
+        out_json = grade_dir / f"{organ}_{cand['model']}_grade.json"
+        if grade_cache is not None and str(out_json.resolve()) in grade_cache:
+            cached = dict(grade_cache[str(out_json.resolve())])
+            cached["cache_status"] = cached.get("cache_status", "reused_batched_grade")
+            return cached
         return run_labelcritic_grade(
             ct, Path(cand["prediction"]), organ,
-            grade_dir / f"{organ}_{cand['model']}_grade.json",
+            out_json,
             base_url=base_url, port=port, vlm_model=vlm_model,
             accept_grade=accept_grade, dry_run=False, timeout_sec=min(timeout_sec, 300),
         )
@@ -1018,11 +2588,15 @@ def run_multimodel_annotation_loop(
     preseeded_model_dirs: dict[str, Path] | None = None,
     labelcritic_options: dict[str, Any] | None = None,
     enable_fusion: bool = True,
-    fusion_method: str = "auto",
+    fusion_method: str = "weighted_vote",
     enable_auto_arbitration: bool = True,
     arbitration_accept_grade: float = 0.5,
     arbitration_reject_grade: float = 0.2,
     vlm_model: str | None = None,
+    candidate_mode: str = "route_pruned_with_competition",
+    teacher_inference_mode: str = "hierarchical_roi",
+    roi_margin_mm: float = 20.0,
+    preseeded_parent_only: bool = False,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -1030,9 +2604,9 @@ def run_multimodel_annotation_loop(
         <base>/<case_id>/<organ>.nii.gz,
         <base>/<case_id>/updated/<organ>.nii.gz, or
         <base>/<case_id>/segmentations/<organ>.nii.gz.
-        These models are injected directly into model_seg_dirs without running
-        inference, allowing the previous round's selected pseudo labels and the
-        previous student model to compete with teachers in the current E-step.
+        By default these models are injected directly into model_seg_dirs. When
+        preseeded_parent_only=True they are visible only to hierarchical major
+        parent resolution; stale child/sub-organ masks never enter selection.
     """
     """Run the teacher-requested multi-model annotation refinement loop.
 
@@ -1044,17 +2618,21 @@ def run_multimodel_annotation_loop(
     case_csv = Path(case_list).resolve()
     out = Path(output_folder).resolve()
     labelcritic_options = labelcritic_options or {}
+    if teacher_inference_mode not in {"full_volume", "hierarchical_roi"}:
+        raise ValueError("teacher_inference_mode must be 'full_volume' or 'hierarchical_roi'")
     out.mkdir(parents=True, exist_ok=True)
     cases = _read_case_list(case_csv)
     registry = load_registry(registry_path)
     project_root = Path(__file__).resolve().parents[4]
     alias_config = _load_model_label_aliases(project_root)
+    taxonomy = _load_organ_taxonomy(project_root)
     organ_prompts = _load_organ_prompts(project_root)
     if organs is None or not organs:
         organs = _load_default_target_organs(project_root)
     if models is None:
         models = ["mock_seg"] if dry_run else ["totalsegmentator"]
     target_validation = _target_validation_for_run(project_root, organs)
+    student_target_ids = _load_student_target_ids(project_root)
     target_blocking = target_validation.get("blocking", {}) if isinstance(target_validation, dict) else {}
     if target_blocking.get("requested_non_target_organs"):
         raise ValueError(
@@ -1079,7 +2657,10 @@ def run_multimodel_annotation_loop(
     all_gap_rows: list[dict[str, Any]] = []
     resume_rows: list[dict[str, Any]] = []
     updated_root = out / "annotation_versions"
+    standard_dataset_root = out / "standard_dataset"
+    standard_dataset_cases: list[dict[str, Any]] = []
     review_queue = out / "review_queue.jsonl"
+    timing_rows: list[dict[str, Any]] = []
     vlm_decisions = out / "vlm_decisions.jsonl"
     traces_jsonl = out / "patient_traces.jsonl"
     report_supervision_jsonl = out / "report_supervision.jsonl"
@@ -1101,6 +2682,66 @@ def run_multimodel_annotation_loop(
 
         import time as _time
         _case_start = _time.time()
+        grade_batch_concurrency = 1
+        compare_batch_enabled = True
+        stage_timing = {
+            "teacher_inference_sec": 0.0,
+            "candidate_shapekit_sec": 0.0,
+            "candidate_qc_verify_sec": 0.0,
+            "fusion_sec": 0.0,
+            "labelcritic_compare_sec": 0.0,
+            "labelcritic_grade_sec": 0.0,
+            "copy_final_sec": 0.0,
+            "labelcritic_batch_queue_sec": 0.0,
+        }
+        stage_counts = {
+            "candidate_qc_verify_count": 0,
+            "fusion_count": 0,
+            "labelcritic_compare_records": 0,
+            "labelcritic_grade_count": 0,
+            "copy_final_count": 0,
+            "labelcritic_grade_batch_concurrency": grade_batch_concurrency,
+            "labelcritic_compare_batch_enabled": compare_batch_enabled,
+        }
+
+        execution_organs = list(organs)
+        if teacher_inference_mode == "hierarchical_roi":
+            for requested_organ in organs:
+                for parent in ((taxonomy_entry(taxonomy, requested_organ) or {}).get("parent_ids", []) or []):
+                    if parent not in execution_organs:
+                        execution_organs.append(parent)
+        case_execution_plan = _build_case_execution_plan(
+            registry=registry,
+            project_root=project_root,
+            organs=execution_organs,
+            requested_models=list(models),
+            preseeded_model_dirs=preseeded_model_dirs,
+            candidate_mode=candidate_mode,
+        )
+        hierarchy_plan_cache_key: dict[str, Any] | None = None
+        hierarchy_plan_cache_key_sha256: str | None = None
+        if teacher_inference_mode == "hierarchical_roi":
+            requested_set_for_cache = set(organs)
+            dependency_parents_for_cache = {
+                parent
+                for organ in organs
+                for parent in ((taxonomy_entry(taxonomy, organ) or {}).get("parent_ids", []) or [])
+            }
+            major_organs_for_cache = sorted({
+                organ for organ in organs
+                if (taxonomy_entry(taxonomy, organ) or {}).get("hierarchy_role") == "major"
+            } | dependency_parents_for_cache)
+            child_organs_for_cache = sorted({
+                organ for organ in organs
+                if (taxonomy_entry(taxonomy, organ) or {}).get("hierarchy_role") == "child"
+            })
+            hierarchy_plan_cache_key = _hierarchical_plan_cache_key(
+                requested_organs=organs,
+                major_organs=major_organs_for_cache,
+                child_organs=child_organs_for_cache,
+                execution_plan=case_execution_plan,
+            )
+            hierarchy_plan_cache_key_sha256 = _stable_json_sha256(hierarchy_plan_cache_key)
 
         # Resume only when the full E-step artifact set is complete.  Raw
         # predictions alone are not enough because a prior run may have stopped
@@ -1113,6 +2754,31 @@ def run_multimodel_annotation_loop(
                 organs=organs,
                 enable_shapekit=enable_shapekit,
             )
+            if teacher_inference_mode == "hierarchical_roi":
+                hierarchy_manifest = case_out / "hierarchical_inference_plan.json"
+                if not hierarchy_manifest.exists():
+                    resume_state = {**resume_state, "complete": False, "reason": "hierarchical_roi_manifest_missing"}
+                else:
+                    try:
+                        hierarchy_cached = json.loads(hierarchy_manifest.read_text(encoding="utf-8"))
+                    except Exception as exc:
+                        resume_state = {
+                            **resume_state,
+                            "complete": False,
+                            "reason": f"hierarchical_roi_manifest_unreadable:{exc}",
+                        }
+                    else:
+                        if (
+                            hierarchy_cached.get("teacher_inference_mode") != "hierarchical_roi"
+                            or hierarchy_cached.get("hierarchical_pipeline_version") != HIERARCHICAL_PIPELINE_VERSION
+                            or hierarchy_cached.get("hierarchical_plan_cache_key_sha256") != hierarchy_plan_cache_key_sha256
+                            or (hierarchy_cached.get("hierarchical_plan_cache_key") or {}) != hierarchy_plan_cache_key
+                        ):
+                            resume_state = {
+                                **resume_state,
+                                "complete": False,
+                                "reason": "hierarchical_roi_plan_cache_mismatch",
+                            }
             resume_rows.append({"case_id": case_id, **resume_state})
             if resume_state["complete"]:
                 print(f"[{_time.strftime('%H:%M:%S')}] Case {idx}/{len(cases)}: {case_id} 已完整完成，跳过", flush=True)
@@ -1129,9 +2795,24 @@ def run_multimodel_annotation_loop(
             _append_jsonl(review_queue, {"case_id": case_id, "reason": "ct_path missing", "ct_path": str(ct)})
             continue
 
-        # Optionally expand candidate models by organ mapping.
-        case_models = list(models)
-        if checkpoint_map_models:
+        write_json(updated_root / case_id / "case_execution_plan.json", {
+            "case_id": case_id,
+            "ct_path": str(ct),
+            "teacher_inference_mode": teacher_inference_mode,
+            "roi_margin_mm": roi_margin_mm,
+            **case_execution_plan,
+        })
+        organ_task_state_path = updated_root / case_id / "organ_task_state.json"
+        organ_task_state = _load_organ_task_state(organ_task_state_path)
+        mask_cache = _CaseMaskCache(max_arrays=int(os.getenv("MEDAI_MASK_CACHE_MAX_ARRAYS", "96")))
+        grade_policy = os.getenv("MEDAI_LABELCRITIC_GRADE_POLICY", "risk_aware")
+        grade_batch_concurrency = max(1, int(os.getenv("MEDAI_LABELCRITIC_GRADE_CONCURRENCY", "2")))
+        compare_batch_enabled = os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH", "1").strip().lower() not in {"0", "false", "no"}
+        stage_counts["labelcritic_grade_batch_concurrency"] = grade_batch_concurrency
+        stage_counts["labelcritic_compare_batch_enabled"] = compare_batch_enabled
+
+        case_models = list(case_execution_plan.get("teacher_run_list", [])) if teacher_inference_mode == "full_volume" else []
+        if checkpoint_map_models and candidate_mode == "formal_full_legacy":
             mapped = candidate_models_for_organs(registry, organs)
             for organ_models in mapped.values():
                 for m in organ_models:
@@ -1139,6 +2820,9 @@ def run_multimodel_annotation_loop(
                         case_models.append(m)
 
         model_seg_dirs: dict[str, Path] = {}
+        resolved_preseeded_seg_dirs: dict[str, Path] = {}
+        hierarchy_blocked: list[dict[str, Any]] = []
+        hierarchy_models_used: list[str] = []
 
         # Inject preseeded predictions (e.g. student from previous round) directly
         # into model_seg_dirs without running inference.
@@ -1146,30 +2830,70 @@ def run_multimodel_annotation_loop(
             for seed_key, seed_base in preseeded_model_dirs.items():
                 seed_seg = _resolve_preseeded_case_dir(Path(seed_base), case_id)
                 if seed_seg:
-                    model_seg_dirs[seed_key] = seed_seg
+                    resolved_preseeded_seg_dirs[seed_key] = seed_seg
+                    if not preseeded_parent_only:
+                        model_seg_dirs[seed_key] = seed_seg
                     print(f"[{_time.strftime('%H:%M:%S')}]   [preseeded] {seed_key} ✓ ({sum(1 for _ in seed_seg.glob('*.nii.gz'))} masks)", flush=True)
 
-        for model_idx, model_key in enumerate(case_models, start=1):
-            print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key}...", flush=True)
-            infer = run_registered_model(
-                ct,
-                case_raw / model_key,
-                model_key,
-                registry_path=registry_path,
-                case_id=case_id,
-                dry_run=dry_run,
-                timeout_sec=timeout_sec,
-                device=device,
-                extra_context={"requested_organs": organs},
+        if teacher_inference_mode == "hierarchical_roi":
+            _teacher_t0 = _time.time()
+            hierarchy_result = _run_hierarchical_case_inference(
+                ct=ct, case_id=case_id, case_raw=case_raw, case_out=case_out,
+                registry_path=registry_path, execution_plan=case_execution_plan,
+                requested_organs=organs, taxonomy=taxonomy, alias_config=alias_config,
+                timeout_sec=timeout_sec, device=device, dry_run=dry_run, margin_mm=roi_margin_mm,
+                preseeded_seg_dirs=resolved_preseeded_seg_dirs,
             )
+            model_seg_dirs.update(hierarchy_result["model_seg_dirs"])
+            inference_results.extend(hierarchy_result["inference_results"])
+            hierarchy_blocked = list(hierarchy_result["blocked"])
+            hierarchy_models_used = sorted({
+                str(item.get("model_key")) for item in hierarchy_result["inference_results"] if item.get("model_key")
+            })
+            for item in hierarchy_blocked:
+                _append_jsonl(review_queue, {"case_id": case_id, "ct_path": str(ct), **item})
+            stage_timing["teacher_inference_sec"] += _time.time() - _teacher_t0
+
+        for model_idx, model_key in enumerate(case_models, start=1):
+            _teacher_t0 = _time.time()
+            print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key}...", flush=True)
+            cached_root = case_raw / model_key / case_id
+            cached_summary = cached_root / "inference_summary.json"
+            cached_seg_dir = cached_root / "segmentations"
+            infer = None
+            if resume and not dry_run:
+                infer = _load_reusable_raw_inference_cache(
+                    cached_summary=cached_summary,
+                    cached_seg_dir=cached_seg_dir,
+                    model_key=model_key,
+                )
+            if infer is not None:
+                cache_label = "cached-empty" if infer.get("num_masks", 0) == 0 else "cached"
+                print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} {cache_label} ({infer.get('num_masks',0)} masks)", flush=True)
+            else:
+                infer = run_registered_model(
+                    ct,
+                    case_raw / model_key,
+                    model_key,
+                    registry_path=registry_path,
+                    case_id=case_id,
+                    dry_run=dry_run,
+                    timeout_sec=timeout_sec,
+                    device=device,
+                    extra_context={"requested_organs": organs},
+                )
             inference_results.append({"case_id": case_id, **infer})
             seg_dir = Path(infer.get("segmentation_output", case_raw / model_key / case_id / "segmentations"))
+            actual_num_masks = sum(1 for _ in seg_dir.glob("*.nii.gz")) if seg_dir.exists() else int(infer.get("num_masks", 0) or 0)
+            infer["num_masks"] = actual_num_masks
             if infer.get("status") in {"success", "dry_run"}:
                 model_seg_dirs[model_key] = seg_dir
-                print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✓ ({infer.get('num_masks',0)} masks)", flush=True)
+                print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✓ ({actual_num_masks} masks)", flush=True)
             else:
                 print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✗ ({infer.get('status')})", flush=True)
+            stage_timing["teacher_inference_sec"] += _time.time() - _teacher_t0
 
+        _shapekit_t0 = _time.time()
         candidate_model_seg_dirs, candidate_shapekit_reports = _postprocess_candidate_models_with_shapekit(
             model_seg_dirs=model_seg_dirs,
             case_refined=case_refined,
@@ -1179,6 +2903,7 @@ def run_multimodel_annotation_loop(
             dry_run=dry_run,
             timeout_sec=timeout_sec,
         )
+        stage_timing["candidate_shapekit_sec"] += _time.time() - _shapekit_t0
 
         checked = accepted = low_dice = uncertain = updated = critic_count = 0
         selected_input_root = case_out / "selected_after_candidate_shapekit"
@@ -1186,89 +2911,135 @@ def run_multimodel_annotation_loop(
         selected_seg_dir = selected_case_root / "segmentations"
         if selected_seg_dir.exists() and not dry_run:
             shutil.rmtree(selected_seg_dir)
+        if case_updated.exists() and not dry_run:
+            shutil.rmtree(case_updated)
+        case_updated.mkdir(parents=True, exist_ok=True)
         selected_metadata: list[dict[str, Any]] = []
         selection_rows: list[dict[str, Any]] = []
+        pending_organ_decisions: list[dict[str, Any]] = []
+        ordered_organs = topological_order_organs(taxonomy, list(organs), strict=False)
 
-        for organ in organs:
+        for organ in ordered_organs:
             current_ref = _mask_path(ref_dir, organ) if ref_dir else None
             current_ref_exists = bool(current_ref and (not dry_run) and current_ref.exists())
             organ_rows: list[dict[str, Any]] = []
             candidates: list[dict[str, Any]] = []
 
-            # Performance tracker: decide which models to run for this organ.
-            # Preseeded models (e.g. student_prev) always participate regardless
-            # of tracker state — they must compete to drive distillation.
+            route_info = (case_execution_plan.get("per_organ", {}) or {}).get(organ, {})
+            eligible_teachers = set(route_info.get("eligible_teachers", []))
+            preseeded_keys = set() if preseeded_parent_only else set((preseeded_model_dirs or {}).keys())
             if tracker and not tracker.should_run_all(organ):
                 top_models = tracker.get_top_k_models(organ, k=2)
                 organ_model_seg_dirs = {
                     k: v for k, v in candidate_model_seg_dirs.items()
-                    if k in top_models
-                    or k.replace("_shapekit", "") in top_models
-                    or k in (preseeded_model_dirs or {})
+                    if (k in eligible_teachers or k in preseeded_keys)
+                    and (
+                        k in top_models
+                        or k.replace("_shapekit", "") in top_models
+                        or k in preseeded_keys
+                    )
                 }
                 if not organ_model_seg_dirs:
-                    organ_model_seg_dirs = candidate_model_seg_dirs  # fallback to all
+                    organ_model_seg_dirs = {
+                        k: v for k, v in candidate_model_seg_dirs.items()
+                        if k in eligible_teachers or k in preseeded_keys
+                    }
             else:
-                organ_model_seg_dirs = candidate_model_seg_dirs
-
-            for model_key, seg_dir in organ_model_seg_dirs.items():
-                raw_seg_dir = model_seg_dirs.get(model_key, seg_dir)
-                raw_pred, raw_alias_match = _candidate_mask_path(raw_seg_dir, organ, model_key, alias_config)
-                pred, alias_match = _candidate_mask_path(seg_dir, organ, model_key, alias_config)
-                shapekit_report = candidate_shapekit_reports.get(model_key, {})
-                candidate_shapekit_status = shapekit_report.get("status", "skipped_debug_only")
-                candidate_shapekit_reason = shapekit_report.get("reason")
-                if not pred.exists() and seg_dir != raw_seg_dir and raw_pred.exists():
-                    pred = raw_pred
-                    alias_match = f"post_shapekit_missing_fallback:{raw_alias_match}"
-                    candidate_shapekit_status = "fallback_original"
-                    candidate_shapekit_reason = "ShapeKit did not produce this organ mask; using raw candidate for LabelCritic comparison"
-                pred_for_verify = pred if pred.exists() else None
-                candidate_qc = _compute_candidate_qc(
-                    ct=ct,
-                    mask=pred_for_verify,
-                    organ=organ,
-                    reference=current_ref if current_ref_exists else None,
-                )
-                v = verify_annotation(current_ref if current_ref_exists else None, pred_for_verify, organ, dsc_replace_threshold=0.0, dsc_vlm_threshold=vlm_threshold)
-                dice = v.get("dice")
-                checked += 1
-                row = {
-                    "case_id": case_id,
-                    "organ": organ,
-                    "model": model_key,
-                    "prediction": str(pred),
-                    "pre_shapekit_prediction": str(raw_pred),
-                    "reference": str(current_ref) if current_ref else "",
-                    "reference_role": "prior_or_selected_pseudo_reference" if current_ref_exists else "none",
-                    "metric_family": "pseudo_consistency",
-                    "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
-                    "ground_truth_status": "pseudo_label_candidate",
-                    "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
-                    "dice": dice,
-                    "pseudo_consistency_dice": dice,
-                    "decision": v.get("decision"),
-                    "status": v.get("status"),
-                    "reason": v.get("reason"),
-                    "reference_quality_bucket": v.get("quality_bucket"),
-                    "candidate_exists": pred.exists(),
-                    "alias_match": alias_match,
-                    "candidate_shapekit_status": candidate_shapekit_status,
-                    "candidate_shapekit_reason": candidate_shapekit_reason,
-                    "candidate_shapekit_report": shapekit_report,
-                    "candidate_qc": candidate_qc,
-                    "candidate_qc_status": candidate_qc.get("status"),
-                    "candidate_qc_score": candidate_qc.get("score"),
-                    "candidate_qc_flags": candidate_qc.get("flags", []),
-                    "eligible_for_labelcritic": candidate_qc.get("eligible_for_labelcritic", True),
+                organ_model_seg_dirs = {
+                    k: v for k, v in candidate_model_seg_dirs.items()
+                    if k in eligible_teachers or k in preseeded_keys
                 }
-                dice_rows.append(row); organ_rows.append(row)
-                if pred.exists():
+
+            _qc_t0 = _time.time()
+            organ_worker_count = max(1, int(os.getenv("MEDAI_ORGAN_WORKER_COUNT", "4")))
+            organ_items = list(organ_model_seg_dirs.items())
+            evaluated_rows: list[dict[str, Any]] = []
+            if organ_worker_count > 1 and len(organ_items) > 1:
+                future_to_index = {}
+                with ThreadPoolExecutor(max_workers=min(organ_worker_count, len(organ_items))) as pool:
+                    for item_idx, (model_key, seg_dir) in enumerate(organ_items):
+                        raw_seg_dir = model_seg_dirs.get(model_key, seg_dir)
+                        future = pool.submit(
+                            _evaluate_candidate_for_organ,
+                            ct=ct,
+                            organ=organ,
+                            model_key=model_key,
+                            seg_dir=seg_dir,
+                            raw_seg_dir=raw_seg_dir,
+                            alias_config=alias_config,
+                            shapekit_report=candidate_shapekit_reports.get(model_key, {}),
+                            current_ref=current_ref,
+                            current_ref_exists=current_ref_exists,
+                            vlm_threshold=vlm_threshold,
+                            case_id=case_id,
+                            mask_cache=mask_cache,
+                            taxonomy=taxonomy,
+                        )
+                        future_to_index[future] = item_idx
+                    ordered: dict[int, dict[str, Any]] = {}
+                    for future in as_completed(future_to_index):
+                        ordered[future_to_index[future]] = future.result()
+                    evaluated_rows = [ordered[i] for i in range(len(organ_items)) if i in ordered]
+            else:
+                for model_key, seg_dir in organ_items:
+                    raw_seg_dir = model_seg_dirs.get(model_key, seg_dir)
+                    evaluated_rows.append(_evaluate_candidate_for_organ(
+                        ct=ct,
+                        organ=organ,
+                        model_key=model_key,
+                        seg_dir=seg_dir,
+                        raw_seg_dir=raw_seg_dir,
+                        alias_config=alias_config,
+                        shapekit_report=candidate_shapekit_reports.get(model_key, {}),
+                        current_ref=current_ref,
+                        current_ref_exists=current_ref_exists,
+                        vlm_threshold=vlm_threshold,
+                        case_id=case_id,
+                        mask_cache=mask_cache,
+                        taxonomy=taxonomy,
+                    ))
+            stage_timing["candidate_qc_verify_sec"] += _time.time() - _qc_t0
+            stage_counts["candidate_qc_verify_count"] += len(evaluated_rows)
+
+            for row in evaluated_rows:
+                dice_rows.append(row)
+                organ_rows.append(row)
+                if row.get("candidate_exists") and row.get("identity_status") == "valid":
                     candidates.append(row)
 
-                # Update performance tracker with this (organ, model, pseudo-consistency Dice) observation.
-                if tracker and dice is not None and not dry_run:
-                    tracker.update(organ, model_key, float(dice))
+            # v2 model reliability is updated only from a leave-one-evidence-
+            # family-out consensus. Candidate-vs-prior pseudo Dice is never
+            # written to the ranking tracker.
+            if tracker and not dry_run and candidates:
+                for observation in leave_one_family_out_observations(candidates, ct, registry=registry):
+                    if observation.get("status") == "success":
+                        tracker.update_leave_one_family_out(
+                            organ=organ,
+                            organ_family=str((taxonomy_entry(taxonomy, organ) or {}).get("comparison_family") or "unknown"),
+                            model=str(observation["model"]),
+                            evidence_family=str(observation["evidence_family"]),
+                            dice=float(observation["dice"]),
+                            nsd=float(observation["nsd"]),
+                            ct_support=float(observation["ct_support"]),
+                            anatomy_plausibility=float(observation["anatomy_plausibility"]),
+                            other_family_count=int(observation["other_family_count"]),
+                            case_id=case_id,
+                        )
+                    else:
+                        tracker.record_insufficient(
+                            organ=organ,
+                            model=str(observation.get("model")),
+                            evidence_family=str(observation.get("evidence_family")),
+                            other_family_count=int(observation.get("other_family_count") or 0),
+                            case_id=case_id,
+                            reason=str(observation.get("status")),
+                        )
+                for candidate in candidates:
+                    candidate["estimated_model_reliability"] = tracker.get_estimated_reliability(
+                        organ,
+                        str(candidate.get("model")),
+                        str((taxonomy_entry(taxonomy, organ) or {}).get("comparison_family") or "unknown"),
+                    )
 
             # Multi-teacher consensus fusion: when >=2 eligible teacher
             # candidates exist for this organ, fuse them (STAPLE / reliability-
@@ -1279,24 +3050,44 @@ def run_multimodel_annotation_loop(
                     c for c in candidates
                     if c.get("candidate_exists") and c.get("eligible_for_labelcritic", True) and not c.get("is_fusion")
                 ]
-                if len(fuse_inputs) >= 2:
+                should_fuse, fusion_gate = _should_fuse_candidates(
+                    fuse_inputs,
+                    cache=mask_cache,
+                    high_agreement_dice=float(os.getenv("MEDAI_FUSION_HIGH_AGREEMENT_DICE", "0.92")),
+                )
+                if len(fuse_inputs) >= 2 and not should_fuse:
+                    stage_counts["fusion_skipped_high_agreement_count"] = stage_counts.get("fusion_skipped_high_agreement_count", 0) + 1
+                    for c in fuse_inputs:
+                        c["fusion_gate"] = fusion_gate
+                        c["fusion_skipped_reason"] = fusion_gate.get("reason")
+                if len(fuse_inputs) >= 2 and should_fuse:
                     fused_path = case_refined / "fusion" / case_id / "segmentations" / f"{organ}.nii.gz"
+                    print(f"[{_time.strftime('%H:%M:%S')}]     fusion {organ}: {len(fuse_inputs)} candidates via {fusion_method}", flush=True)
+                    _fusion_t0 = _time.time()
                     fusion_meta = fuse_candidate_masks(
                         [c["prediction"] for c in fuse_inputs],
                         fused_path,
                         weights=[_fusion_weight(tracker, organ, c["model"]) for c in fuse_inputs],
                         reference_image=ct,
                         method=fusion_method,
+                        vote_threshold=float(os.getenv("MEDAI_FUSION_VOTE_THRESHOLD", "0.5")),
                     )
+                    stage_timing["fusion_sec"] += _time.time() - _fusion_t0
+                    stage_counts["fusion_count"] += 1
                     if fusion_meta.get("status") == "success" and fused_path.exists():
+                        _fused_qc_t0 = _time.time()
                         fused_qc = _compute_candidate_qc(
                             ct=ct, mask=fused_path, organ=organ,
                             reference=current_ref if current_ref_exists else None,
+                            cache=mask_cache,
                         )
-                        fv = verify_annotation(
+                        fv = _verify_annotation_cached(
                             current_ref if current_ref_exists else None, fused_path, organ,
                             dsc_replace_threshold=0.0, dsc_vlm_threshold=vlm_threshold,
+                            cache=mask_cache,
                         )
+                        stage_timing["candidate_qc_verify_sec"] += _time.time() - _fused_qc_t0
+                        stage_counts["candidate_qc_verify_count"] += 1
                         fused_row = {
                             "case_id": case_id,
                             "organ": organ,
@@ -1327,17 +3118,32 @@ def run_multimodel_annotation_loop(
                             "eligible_for_labelcritic": fused_qc.get("eligible_for_labelcritic", True),
                             "is_fusion": True,
                             "fusion_method": fusion_meta.get("method"),
+                            "fusion_status": fusion_meta.get("status"),
                             "fusion_inputs": [c["model"] for c in fuse_inputs],
                             "fusion_weights": fusion_meta.get("weights"),
+                            "fusion_vote_threshold": float(os.getenv("MEDAI_FUSION_VOTE_THRESHOLD", "0.5")),
+                            "fusion_gate": fusion_gate,
+                            **identity_contract(
+                                taxonomy,
+                                organ,
+                                "fusion_consensus",
+                                organ,
+                                mapping_type="exact_synonym",
+                                mapping_source="same_canonical_candidate_fusion",
+                            ),
                         }
                         dice_rows.append(fused_row)
-                        # Prepend so the consensus is the incumbent in pairwise
-                        # LabelCritic selection (a teacher must beat it to win).
-                        if fused_row.get("eligible_for_labelcritic", True):
-                            candidates.insert(0, fused_row)
-                        else:
+                        if fused_row.get("candidate_qc_status") == "pass" and fused_row.get("eligible_for_labelcritic", True):
+                            # Conservative v1: fusion joins the candidate set but
+                            # does not become the incumbent automatically.
                             candidates.append(fused_row)
+                        else:
+                            fused_row["fusion_rejected"] = True
+                            fused_row["fusion_rejected_reason"] = "fusion_qc_not_pass_or_ineligible"
+                            stage_counts["fusion_rejected_count"] = stage_counts.get("fusion_rejected_count", 0) + 1
+                            dice_rows[-1] = fused_row
 
+            _select_t0 = _time.time()
             selected, selection = _select_candidate(
                 ct=ct,
                 organ=organ,
@@ -1351,7 +3157,12 @@ def run_multimodel_annotation_loop(
                 timeout_sec=timeout_sec,
                 dry_run=dry_run,
                 labelcritic_options=labelcritic_options,
+                mask_cache=mask_cache,
+                compare_batch_enabled=compare_batch_enabled,
+                compare_batch_max_candidates=int(os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH_MAX_CANDIDATES", "2")),
             )
+            stage_timing["labelcritic_compare_sec"] += _time.time() - _select_t0
+            stage_counts["labelcritic_compare_records"] += len(selection.get("critic_records", []) or [])
             critic_count += len(selection.get("critic_records", []) or [])
             best_dice = selected.get("dice") if selected else None
             selected_reference_quality_bucket = selected.get("reference_quality_bucket") if selected else None
@@ -1360,38 +3171,54 @@ def run_multimodel_annotation_loop(
                 low_dice += 1
 
             # Phase 2 — automated absolute-quality arbitration (de-human).
-            # Only grade organs a human would otherwise review: selection
-            # fallback, low pseudo-consistency, QC-flagged, or single-teacher
-            # (no competition). The VLM verdict replaces human review; a rejected
-            # pick can be auto-swapped for a better-graded alternative.
+            # LC-2 is preserved as an absolute-quality gate, but risk-aware mode
+            # avoids sending stable single-candidate QC-pass organs through a
+            # costly VLM projection call with no extra conflict evidence.
             auto_grade_record = None
-            non_fusion_count = len([c for c in candidates if not c.get("is_fusion")])
-            needs_arbitration = bool(selected) and (
-                selection.get("selection_status") != "selected"
-                or (best_dice is not None and float(best_dice) < vlm_threshold and not empty_reference_nonempty_prediction)
-                or (selected.get("candidate_qc_status") not in (None, "pass"))
-                or non_fusion_count <= 1
+            grade_policy_decision = _labelcritic_grade_policy_decision(
+                organ=organ,
+                selected=selected,
+                candidates=candidates,
+                selection=selection,
+                route_info=route_info,
+                best_dice=best_dice,
+                vlm_threshold=vlm_threshold,
+                empty_reference_nonempty_prediction=empty_reference_nonempty_prediction,
+                policy=grade_policy,
             )
-            if enable_auto_arbitration and enable_critic and not dry_run and needs_arbitration:
-                auto_grade_record = _auto_arbitrate_organ(
-                    ct=ct, organ=organ, selected=selected, candidates=candidates,
-                    out=out, case_id=case_id, base_url=critic_base_url, port=critic_port,
-                    vlm_model=vlm_model, accept_grade=arbitration_accept_grade,
-                    reject_grade=arbitration_reject_grade, timeout_sec=timeout_sec,
-                )
-                chosen = auto_grade_record.get("_selected")
-                if chosen is not None and chosen is not selected:
-                    selected = chosen
-                    best_dice = selected.get("dice")
-                    selected_reference_quality_bucket = selected.get("reference_quality_bucket")
-                    empty_reference_nonempty_prediction = selected_reference_quality_bucket == "empty_reference_nonempty_prediction"
-                _append_jsonl(out / "auto_arbitration_log.jsonl", {k: v for k, v in auto_grade_record.items() if not k.startswith("_")})
+            should_run_grade = bool(
+                enable_auto_arbitration
+                and enable_critic
+                and not dry_run
+                and selected
+                and grade_policy_decision.get("run")
+            )
+            compare_used = bool(selection.get("labelcritic_records") or selection.get("critic_records"))
+            compare_reason = None
+            compare_skipped_reason = None
+            if compare_used:
+                compare_reason = "multi_candidate_conflict"
+            else:
+                if len(candidates) <= 1:
+                    compare_skipped_reason = "single_candidate_or_route_unique"
+                elif selection.get("selection_method") == "near_identical_agreement":
+                    compare_skipped_reason = "high_agreement"
+                else:
+                    compare_skipped_reason = "critic_disabled_or_not_needed"
 
             selection_record = {
                 "case_id": case_id,
                 "ct_path": str(ct),
                 "organ": organ,
                 "prompt": organ_prompts.get(organ, organ.replace("_", " ")),
+                "route_primary_teacher": route_info.get("primary_teacher"),
+                "route_backup_teachers": route_info.get("backup_teachers", []),
+                "route_competition_teachers": route_info.get("competition_teachers", []),
+                "route_confidence": route_info.get("route_confidence", "low"),
+                "candidate_mode": candidate_mode,
+                "labelcritic_compare_used": compare_used,
+                "labelcritic_compare_reason": compare_reason,
+                "labelcritic_compare_skipped_reason": compare_skipped_reason,
                 "candidate_models": [c["model"] for c in candidates],
                 "candidate_predictions": [
                     {
@@ -1408,12 +3235,24 @@ def run_multimodel_annotation_loop(
                         "candidate_qc_score": c.get("candidate_qc_score"),
                         "candidate_qc_flags": c.get("candidate_qc_flags", []),
                         "eligible_for_labelcritic": c.get("eligible_for_labelcritic", True),
+                        "fusion_gate": c.get("fusion_gate"),
+                        "fusion_skipped_reason": c.get("fusion_skipped_reason"),
+                        "requested_canonical_id": c.get("requested_canonical_id"),
+                        "source_local_label": c.get("source_local_label"),
+                        "resolved_canonical_id": c.get("resolved_canonical_id"),
+                        "comparison_family": c.get("comparison_family"),
+                        "parent_ids": c.get("parent_ids", []),
+                        "mapping_type": c.get("mapping_type"),
+                        "mapping_source": c.get("mapping_source"),
+                        "identity_status": c.get("identity_status"),
+                        "identity_mismatch_reasons": c.get("identity_mismatch_reasons", []),
                     }
                     for c in candidates
                 ],
                 "candidate_count": len(candidates),
                 "reference": str(current_ref) if current_ref else "",
-                "reference_role": "prior_or_selected_pseudo_reference" if current_ref_exists else "none",
+                "reference_role": "historical_pseudo_label" if current_ref_exists else "none",
+                "reference_provenance": _historical_reference_provenance(current_ref) if current_ref_exists else None,
                 "selected_model": selection.get("selected_model"),
                 "source_model": selection.get("selected_model"),
                 "selected_prediction": selected.get("prediction") if selected else None,
@@ -1426,6 +3265,15 @@ def run_multimodel_annotation_loop(
                 "selected_reference_quality_bucket": selected_reference_quality_bucket,
                 "selected_dice": best_dice,
                 "selected_pseudo_consistency_dice": best_dice,
+                "requested_canonical_id": selected.get("requested_canonical_id") if selected else organ,
+                "source_local_label": selected.get("source_local_label") if selected else None,
+                "resolved_canonical_id": selected.get("resolved_canonical_id") if selected else None,
+                "comparison_family": selected.get("comparison_family") if selected else (taxonomy_entry(taxonomy, organ) or {}).get("comparison_family"),
+                "parent_ids": selected.get("parent_ids", []) if selected else (taxonomy_entry(taxonomy, organ) or {}).get("parent_ids", []),
+                "mapping_type": selected.get("mapping_type") if selected else None,
+                "mapping_source": selected.get("mapping_source") if selected else None,
+                "identity_status": selected.get("identity_status") if selected else "missing",
+                "identity_mismatch_reasons": selected.get("identity_mismatch_reasons", []) if selected else ["no_selected_candidate"],
                 "metric_family": "pseudo_consistency",
                 "metric_scope": "selected_candidate_vs_prior_or_selected_pseudo_reference",
                 "accuracy_warning": "Selected Dice is pseudo-label consistency, not true expert-label accuracy.",
@@ -1437,17 +3285,203 @@ def run_multimodel_annotation_loop(
             selection_record["labelcritic_records"] = selection_record.get("critic_records", [])
             selection_record["labelcritic_decision_path"] = _labelcritic_decision_path(selection_record["labelcritic_records"])
             selection_record["label_critic_decision_path"] = selection_record["labelcritic_decision_path"]
+            selection_record["labelcritic_grade_policy"] = grade_policy
+            selection_record["labelcritic_grade_used"] = bool(should_run_grade)
+            selection_record["labelcritic_grade_reason"] = grade_policy_decision.get("reason") if should_run_grade else None
+            selection_record["labelcritic_grade_skipped_reason"] = None if should_run_grade else grade_policy_decision.get("skipped_reason", "grade_not_required_by_policy")
+            pending_organ_decisions.append({
+                "organ": organ,
+                "selected": selected,
+                "candidates": candidates,
+                "selection": selection,
+                "selection_record": selection_record,
+                "should_run_grade": should_run_grade,
+                "grade_policy_decision": grade_policy_decision,
+                "best_dice": best_dice,
+                "selected_reference_quality_bucket": selected_reference_quality_bucket,
+                "empty_reference_nonempty_prediction": empty_reference_nonempty_prediction,
+            })
+
+        grade_cache: dict[str, dict[str, Any]] = {}
+        grade_jobs: list[dict[str, Any]] = []
+        for decision in pending_organ_decisions:
+            selected = decision.get("selected")
+            if not (decision.get("should_run_grade") and selected):
+                continue
+            organ = str(decision["organ"])
+            out_json = out / "critic" / case_id / f"{organ}_{selected['model']}_grade.json"
+            grade_jobs.append({
+                "ct_image": ct,
+                "mask": Path(selected["prediction"]),
+                "organ": organ,
+                "output_json": out_json,
+                "accept_grade": arbitration_accept_grade,
+            })
+        grade_fn_patched = getattr(run_labelcritic_grade, "__module__", "") != "cli_anything.medai.core.labelcritic_wrapper"
+        if grade_jobs and not grade_fn_patched:
+            _grade_t0 = _time.time()
+            grade_results = run_labelcritic_grade_batch(
+                grade_jobs,
+                base_url=critic_base_url,
+                port=critic_port,
+                vlm_model=vlm_model,
+                accept_grade=arbitration_accept_grade,
+                dry_run=False,
+                timeout_sec=min(timeout_sec, 300),
+                concurrency=grade_batch_concurrency,
+            )
+            stage_timing["labelcritic_grade_sec"] += _time.time() - _grade_t0
+            stage_counts["labelcritic_grade_count"] += len(grade_jobs)
+            for result in grade_results:
+                out_json = result.get("output_json")
+                if out_json:
+                    grade_cache[str(Path(out_json).resolve())] = result
+
+        for decision in pending_organ_decisions:
+            organ = str(decision["organ"])
+            selected = decision.get("selected")
+            candidates = decision["candidates"]
+            selection = decision["selection"]
+            selection_record = decision["selection_record"]
+            best_dice = decision["best_dice"]
+            selected_reference_quality_bucket = decision["selected_reference_quality_bucket"]
+            empty_reference_nonempty_prediction = decision["empty_reference_nonempty_prediction"]
+            auto_grade_record = None
+
+            if decision.get("should_run_grade") and selected:
+                auto_grade_record = _auto_arbitrate_organ(
+                    ct=ct, organ=organ, selected=selected, candidates=candidates,
+                    out=out, case_id=case_id, base_url=critic_base_url, port=critic_port,
+                    vlm_model=vlm_model, accept_grade=arbitration_accept_grade,
+                    reject_grade=arbitration_reject_grade, timeout_sec=timeout_sec,
+                    grade_cache=grade_cache,
+                )
+                chosen = auto_grade_record.get("_selected")
+                if chosen is not None and chosen is not selected:
+                    selected = chosen
+                    best_dice = selected.get("dice")
+                    selected_reference_quality_bucket = selected.get("reference_quality_bucket")
+                    empty_reference_nonempty_prediction = selected_reference_quality_bucket == "empty_reference_nonempty_prediction"
+                    selection_record["selected_model"] = selected.get("model")
+                    selection_record["source_model"] = selected.get("model")
+                    selection_record["selected_prediction"] = selected.get("prediction")
+                    selection_record["selected_pre_shapekit_prediction"] = selected.get("pre_shapekit_prediction")
+                    selection_record["selected_candidate_shapekit_status"] = selected.get("candidate_shapekit_status")
+                    selection_record["selected_candidate_shapekit_reason"] = selected.get("candidate_shapekit_reason")
+                    selection_record["selected_candidate_qc_status"] = selected.get("candidate_qc_status")
+                    selection_record["selected_candidate_qc_score"] = selected.get("candidate_qc_score")
+                    selection_record["selected_candidate_qc_flags"] = selected.get("candidate_qc_flags", [])
+                    selection_record["selected_reference_quality_bucket"] = selected_reference_quality_bucket
+                    selection_record["selected_dice"] = best_dice
+                    selection_record["selected_pseudo_consistency_dice"] = best_dice
+                    for identity_field in (
+                        "requested_canonical_id", "source_local_label", "resolved_canonical_id",
+                        "comparison_family", "parent_ids", "mapping_type", "mapping_source",
+                        "identity_status", "identity_mismatch_reasons",
+                    ):
+                        selection_record[identity_field] = selected.get(identity_field)
+                _append_jsonl(out / "auto_arbitration_log.jsonl", {k: v for k, v in auto_grade_record.items() if not k.startswith("_")})
+
             if auto_grade_record is not None:
                 arb = {k: v for k, v in auto_grade_record.items() if not k.startswith("_")}
                 selection_record["auto_arbitration"] = arb
                 selection_record["auto_grade"] = arb.get("grade_after")
                 selection_record["auto_grade_accept"] = arb.get("final_accept")
                 selection_record["auto_grade_swapped"] = arb.get("swapped")
-                if arb.get("swapped"):
-                    # The arbitration swapped the pick; keep selected_* consistent.
-                    selection_record["selected_model"] = selected.get("model")
-                    selection_record["source_model"] = selected.get("model")
-                    selection_record["selected_prediction"] = selected.get("prediction")
+
+            # AutoLabelCore is the universal 373-target decision layer.
+            # LabelCritic contributes only an optional, bounded tie-break signal.
+            critic_records = selection_record.get("labelcritic_records", []) or []
+            successful_critic = [r for r in critic_records if r.get("status") == "success"]
+            selected_wins = 0
+            selected_losses = 0
+            for record in successful_critic:
+                winner = (record.get("decision") or {}).get("winner")
+                winner_model = record.get("candidate_a") if winner == "a" else record.get("candidate_b") if winner == "b" else None
+                if winner_model == (selected or {}).get("model"):
+                    selected_wins += 1
+                elif winner_model:
+                    selected_losses += 1
+            lc_adjustment = 0.0
+            if selected_wins > selected_losses:
+                lc_adjustment = 0.03
+            elif selected_losses > selected_wins:
+                lc_adjustment = -0.03
+            prior_path = current_ref if current_ref_exists else None
+            prior_candidate = next(
+                (
+                    c for c in candidates
+                    if str(c.get("model")) in {"round_prev_selected", "previous_round_selected"}
+                    and c.get("prediction") and Path(c["prediction"]).exists()
+                ),
+                None,
+            )
+            if prior_candidate:
+                prior_path = Path(prior_candidate["prediction"])
+            autolabel_decision = score_candidate_set(
+                case_id=case_id,
+                organ=organ,
+                ct_path=ct,
+                candidates=candidates,
+                prior_round=prior_path,
+                labelcritic_result={"supported": bool(successful_critic), "tiebreak_adjustment": lc_adjustment},
+                selected_model=(selected or {}).get("model"),
+                output_dir=out / "autolabel_core" / case_id / organ,
+                registry=registry,
+                parent_masks={
+                    parent: selected_case_root / f"{parent}.nii.gz"
+                    for parent in ((taxonomy_entry(taxonomy, organ) or {}).get("parent_ids", []) or [])
+                    if (selected_case_root / f"{parent}.nii.gz").exists()
+                },
+            )
+            autolabel_record = autolabel_decision.to_dict()
+            selection_record.update(autolabel_record)
+            selection_record["labelcritic_supported"] = bool(successful_critic)
+            selection_record["labelcritic_tiebreak_adjustment"] = lc_adjustment
+            selection_record["case_fold"] = stable_case_fold(case_id)
+            selection_record["estimated_reliability"] = autolabel_record["evidence_confidence"]
+            selection_record["autolabel_candidate_scores"] = [
+                {
+                    "model": c.get("model"),
+                    "evidence_family": c.get("evidence_family"),
+                    "relative_score": c.get("autolabel_candidate_relative_score"),
+                    "ct_support_score": c.get("ct_support_score"),
+                    "anatomy_plausibility_score": c.get("anatomy_plausibility_score"),
+                    "perturbation_stability_score": c.get("perturbation_stability_score"),
+                    "structural_corruption_probability": c.get("structural_corruption_probability"),
+                    "tta_plan": c.get("tta_plan"),
+                }
+                for c in candidates
+            ]
+            selection_record["metric_family"] = "pseudo_consistency_and_evidence_reliability"
+            selection_record["accuracy_warning"] = "AutoLabelCore evidence confidence is not expert accuracy or ground-truth DSC."
+            evidence_selected = next((c for c in candidates if str(c.get("model")) == str(autolabel_decision.selected_model)), None)
+            if evidence_selected is not None and evidence_selected is not selected:
+                selected = evidence_selected
+                selection_record["selected_model"] = selected.get("model")
+                selection_record["source_model"] = selected.get("model")
+                selection_record["selected_prediction"] = selected.get("prediction")
+                selection_record["selection_method"] = "autolabel_core_evidence"
+            # For accepted multi-family labels, the family-balanced hard mask is
+            # the actual selected artifact. C/D remain auditable but never replace
+            # the candidate used for visual review.
+            if (
+                selected
+                and autolabel_decision.target_type == "hard"
+                and autolabel_decision.independent_family_count >= 2
+                and autolabel_decision.hard_mask_path
+                and Path(autolabel_decision.hard_mask_path).exists()
+            ):
+                selected = {
+                    **selected,
+                    "model": "family_balanced_consensus",
+                    "prediction": autolabel_decision.hard_mask_path,
+                    "is_fusion": True,
+                }
+                selection_record["selected_model"] = "family_balanced_consensus"
+                selection_record["source_model"] = "family_balanced_consensus"
+                selection_record["selected_prediction"] = autolabel_decision.hard_mask_path
+
             selection_rows.append(selection_record)
             all_selection_rows.append(selection_record)
             for critic_record in selection_record.get("labelcritic_records", []) or []:
@@ -1465,8 +3499,11 @@ def run_multimodel_annotation_loop(
                 uncertain += 1
                 continue
 
+            _copy_t0 = _time.time()
             copied = _copy_case_mask(Path(selected["prediction"]), selected_case_root, organ)
+            stage_timing["copy_final_sec"] += _time.time() - _copy_t0
             if copied:
+                stage_counts["copy_final_count"] += 1
                 review_flags: list[str] = list(selection_record.get("review_flags", []) or [])
                 quality_flags: list[str] = list(selection_record.get("quality_flags", []) or [])
                 if auto_grade_record is not None and auto_grade_record.get("final_accept") is False:
@@ -1534,8 +3571,17 @@ def run_multimodel_annotation_loop(
                         "review_flags": review_flags,
                         "quality_flags": quality_flags,
                     })
+                _record_organ_task_state(
+                    organ_task_state,
+                    organ,
+                    status="selected",
+                    candidate_fingerprint=sorted(str(c.get("model")) for c in candidates),
+                    compare_used=selection_record.get("labelcritic_compare_used"),
+                    grade_used=selection_record.get("labelcritic_grade_used"),
+                )
                 selected_metadata.append({
                     **selection_record,
+                    "teacher_lineage": [c["model"] for c in candidates],
                     "pre_shapekit_mask": str(copied),
                     "mask_path": None,
                     "mask": None,
@@ -1558,16 +3604,17 @@ def run_multimodel_annotation_loop(
             "candidate_reports": candidate_shapekit_reports,
         }
 
-        case_updated.mkdir(parents=True, exist_ok=True)
         for meta in selected_metadata:
             organ = meta["organ"]
             pre_mask = Path(meta["pre_shapekit_mask"])
+            _final_copy_t0 = _time.time()
             final = _copy_annotation(pre_mask, case_updated, organ)
+            stage_timing["copy_final_sec"] += _time.time() - _final_copy_t0
             meta["final_mask"] = final
             meta["mask_path"] = final
             meta["mask"] = final
             if enable_shapekit and not dry_run and meta.get("shapekit_status") != "success":
-                shapekit_unsupported = meta.get("shapekit_status") == "unsupported_target"
+                shapekit_unsupported = meta.get("shapekit_status") in {"unsupported_target", "unsupported_target_skipped_by_policy"}
                 _add_unique(meta.setdefault("review_flags", []), "shapekit_fallback")
                 _add_unique(meta.setdefault("quality_flags", []), "shapekit_fallback")
                 if shapekit_unsupported:
@@ -1607,6 +3654,22 @@ def run_multimodel_annotation_loop(
                 "training_weight": passport["training_weight"],
                 "label_passport_path": str(passport_path_for_mask(final)) if final else None,
                 "ground_truth_status": "machine_generated_candidate",
+                "distillation_eligible": float(passport["training_weight"]) > 0.0,
+                "distillation_exclusion_reason": None if float(passport["training_weight"]) > 0.0 else "training_weight_zero",
+                "student_training_priority": passport["grade"],
+                "label_confidence": passport["auto_fine_label_reliability_score"],
+                "estimated_reliability": passport["evidence_confidence"],
+                "evidence_confidence": passport["evidence_confidence"],
+                "evidence_scores": passport["evidence_scores"],
+                "missing_evidence": passport["missing_evidence"],
+                "decision_status": passport["decision_status"],
+                "decision_reasons": passport["decision_reasons"],
+                "target_type": passport["target_type"],
+                "probability_mask_path": passport.get("probability_mask_path"),
+                "voxel_uncertainty_path": passport.get("voxel_uncertainty_path"),
+                "independent_family_count": passport.get("independent_family_count", 0),
+                "family_membership": passport.get("family_membership", {}),
+                "scoring_schema_version": passport["scoring_schema_version"],
             })
             if final:
                 write_json(passport_path_for_mask(final), passport)
@@ -1620,16 +3683,45 @@ def run_multimodel_annotation_loop(
         )
         all_gap_rows.extend(case_gap_rows)
 
+        write_json(organ_task_state_path, organ_task_state)
+        case_timing = {
+            "case_id": case_id,
+            "candidate_mode": candidate_mode,
+            "teacher_inference_mode": teacher_inference_mode,
+            "teacher_inference_models": hierarchy_models_used or case_models,
+            "teacher_inference_count": len(hierarchy_models_used or case_models),
+            "hierarchy_blocked_count": len(hierarchy_blocked),
+            "selected_organs": len(selected_metadata),
+            "compare_used_count": sum(1 for row in selection_rows if row.get("labelcritic_compare_used")),
+            "grade_used_count": sum(1 for row in selection_rows if row.get("labelcritic_grade_used")),
+            "runtime_sec": round(time.time() - _case_start, 3),
+            "stage_timing_sec": {k: round(v, 3) for k, v in stage_timing.items()},
+            "stage_counts": stage_counts,
+        }
+        timing_rows.append(case_timing)
+        write_json(updated_root / case_id / "case_timing_breakdown.json", case_timing)
         write_json(updated_root / case_id / "selection_metadata.json", {
             "case_id": case_id,
             "ct_path": str(ct),
             "dataset_type": "pseudo_label_dataset",
             "ground_truth_status": "pseudo_label_candidate",
+            "candidate_mode": candidate_mode,
+            "case_execution_plan": case_execution_plan,
+            "case_timing": case_timing,
             "selected_organs": selected_metadata,
             "selection_rows": selection_rows,
             "gap_rows": case_gap_rows,
             "shapekit": shapekit_result,
         })
+        standard_case = _export_standard_case_dataset(
+            case_id=case_id,
+            ct=ct,
+            selected_metadata=selected_metadata,
+            out_root=standard_dataset_root,
+            student_target_ids=student_target_ids,
+        )
+        standard_dataset_cases.append(standard_case)
+        write_json(updated_root / case_id / "standard_dataset_case.json", standard_case)
         write_json(updated_root / case_id / "shapekit_report.json", {
             "case_id": case_id,
             "ct_path": str(ct),
@@ -1713,11 +3805,22 @@ def run_multimodel_annotation_loop(
         "case_id", "organ", "model", "prediction", "reference", "reference_role",
         "metric_family", "metric_scope", "ground_truth_status", "accuracy_warning",
         "dice", "pseudo_consistency_dice", "decision", "status", "reason",
-        "candidate_exists", "alias_match",
+        "candidate_exists", "alias_match", "requested_canonical_id", "source_local_label",
+        "resolved_canonical_id", "comparison_family", "parent_ids", "mapping_type",
+        "mapping_source", "identity_status", "identity_mismatch_reasons",
     ])
     _write_csv(round_csv, round_rows, ["case_id", "checked_masks", "accepted_masks", "low_dice_masks", "vlm_reviewed", "updated_masks", "remaining_uncertain"])
     write_json(out / "inference_results.json", inference_results)
-    manifest = build_training_manifest(updated_root, out / "training_manifest.json", organs=organs)
+    write_json(out / "standard_dataset_index.json", {
+        "stage": "standard_dataset_index",
+        "status": "success",
+        "layout": "bdmap_pants_style_binary_masks",
+        "root": str(standard_dataset_root.resolve()),
+        "case_count": len(standard_dataset_cases),
+        "cases": standard_dataset_cases,
+        "mapping_policy": "teacher target ID / output name -> canonical organ name -> student target ID",
+    })
+    manifest = build_training_manifest(standard_dataset_root, out / "training_manifest.json", organs=organs)
     gap_report = {
         "stage": "pseudo_label_gap_report",
         "status": "success",
@@ -1727,6 +3830,8 @@ def run_multimodel_annotation_loop(
         "gap_rows": all_gap_rows,
         "target_space_policy": _load_target_space_policy(project_root, organs),
         "formal_373_target_validation": target_validation,
+        "teacher_inference_mode": teacher_inference_mode,
+        "roi_margin_mm": roi_margin_mm,
         "note": "Rows here are missing selected pseudo labels, ShapeKit fallbacks, or target-policy exclusions; they are not silently dropped.",
     }
     write_json(out / "pseudo_label_gap_report.json", gap_report)
@@ -1771,15 +3876,27 @@ def run_multimodel_annotation_loop(
         "labelcritic_options": labelcritic_options,
         "dice_metrics_csv": str(dice_csv), "round_metrics_csv": str(round_csv), "review_queue_jsonl": str(review_queue),
         "vlm_decisions_jsonl": str(vlm_decisions), "patient_traces_jsonl": str(traces_jsonl), "report_supervision_jsonl": str(report_supervision_jsonl),
+        "standard_dataset_root": str(standard_dataset_root.resolve()),
+        "standard_dataset_index": str((out / "standard_dataset_index.json").resolve()),
         "training_manifest": manifest, "pseudo_label_gap_report": gap_report, "shapekit_report": str((out / "shapekit_report.json").resolve()), "mstep_config": mcfg, "mstep_model_routing": mstep_routing,
         "resume_audit": resume_rows,
+        "preseeded_parent_only": preseeded_parent_only,
         "round2_competition_audit": _summarize_preseeded_competition(
-            preseeded_keys=sorted((preseeded_model_dirs or {}).keys()),
+            preseeded_keys=[] if preseeded_parent_only else sorted((preseeded_model_dirs or {}).keys()),
             selection_rows=all_selection_rows,
         ),
         "round_rows": round_rows,
         "total_updated": sum(int(r.get("updated_masks", 0) or 0) for r in round_rows),
         "total_labelcritic_decisions": sum(int(r.get("vlm_reviewed", 0) or 0) for r in round_rows),
     }
+    timing_rows = _merge_case_timing_rows(cases, updated_root, timing_rows)
+    _write_csv(
+        out / "case_timing_breakdown.csv",
+        timing_rows,
+        ["case_id", "candidate_mode", "teacher_inference_mode", "teacher_inference_models", "teacher_inference_count", "hierarchy_blocked_count", "selected_organs", "compare_used_count", "grade_used_count", "runtime_sec", "stage_timing_sec", "stage_counts"],
+    )
+    write_json(out / "case_timing_breakdown.json", {"stage": "case_timing_breakdown", "status": "success", "rows": timing_rows})
+    summary["case_timing_breakdown"] = timing_rows
+    summary["candidate_mode"] = candidate_mode
     write_json(out / "run_summary.json", summary)
     return summary

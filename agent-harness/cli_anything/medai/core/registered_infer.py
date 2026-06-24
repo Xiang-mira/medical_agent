@@ -14,6 +14,7 @@ from .totalseg_runner import run_totalseg_with_contract, run_totalsegmentator
 
 _PREDICT_SCRIPTS = (
     "nnunetv2_predict_and_split.py",
+    "atlasnet_predict_and_split.py",
     "vista3d_predict_and_split.py",
     "unest_predict_and_split.py",
 )
@@ -219,7 +220,7 @@ def run_registered_model(
             subtask_config=subtask_config,
             subtasks=selected_subtasks,
             fast=fast, device=ts_device,
-            dry_run=dry_run, timeout_sec=timeout_sec,
+            dry_run=dry_run, timeout_sec=None,
             case_id=case_id,
         )
         result["model_key"] = model_key

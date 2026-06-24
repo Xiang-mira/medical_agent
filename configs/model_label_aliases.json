@@ -1,7 +1,16 @@
 {
-  "version": 2,
+  "version": 3,
   "note": "Local label name -> global organ name mapping. Only non-trivial aliases listed; direct matches fall back automatically. _pathology_ignore: labels produced by model but not in global organ space. _not_in_routing: model produces these but routing table assigns them to other models.",
   "models": {
+    "atlasnet": {
+      "local_to_global": {
+        "celiac_artery": "celiac_aa (celiac_artery)",
+        "gallbladder": "gall_bladder",
+        "small_intestine": "intestine",
+        "portal_splenic_veins": "portal_vein_and_splenic_vein"
+      },
+      "_note": "ATLAS-Net emits canonical left/right organ names directly; only source label-name differences are listed here."
+    },
     "cads551": {
       "local_to_global": {
         "gallbladder": "gall_bladder",
@@ -220,9 +229,17 @@
         "lung_arteries": "lung_vessels",
         "lung_veins": "lung_vessels",
         "costal_cartilages": "rib_cartilage",
-        "gallbladder": "gall_bladder"
+        "gallbladder": "gall_bladder",
+        "kidney_left": "kidney",
+        "kidney_right": "kidney"
       },
-      "_note": "costal_cartilages in TS(total) -> global rib_cartilage (global costal_cartilages is a separate organ covered by VISTA3D); lung_arteries + lung_veins both union into global lung_vessels"
+      "mapping_types": {
+        "lung_arteries": "approved_union",
+        "lung_veins": "approved_union",
+        "kidney_left": "approved_union",
+        "kidney_right": "approved_union"
+      },
+      "_note": "costal_cartilages in TS(total) -> global rib_cartilage (global costal_cartilages is a separate organ covered by VISTA3D); lung_arteries + lung_veins union into global lung_vessels; kidney_left + kidney_right union into whole kidney"
     },
     "unest": {
       "local_to_global": {
@@ -237,5 +254,19 @@
       "_pending_verification": true,
       "_note": "Drive doc confirms DAP label mapping was never found upstream. Verify local label names once checkpoint_best.pth is downloaded and a test run is complete."
     }
-  }
+  },
+  "forbidden_coarsening": [
+    ["liver_segment_1", "liver"],
+    ["liver_segment_2", "liver"],
+    ["liver_segment_3", "liver"],
+    ["liver_segment_4", "liver"],
+    ["liver_segment_5", "liver"],
+    ["liver_segment_6", "liver"],
+    ["liver_segment_7", "liver"],
+    ["liver_segment_8", "liver"],
+    ["pancreas_head", "pancreas"],
+    ["pancreas_body", "pancreas"],
+    ["pancreas_tail", "pancreas"],
+    ["portal_vein_and_splenic_vein", "veins"]
+  ]
 }

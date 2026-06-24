@@ -10,6 +10,7 @@ fine-tunes the 3D prompt segmentation network with frozen text embeddings.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pydoc
@@ -17,6 +18,7 @@ import random
 import shutil
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,14 @@ from voxtell.model.voxtell_model import VoxTellModel
 from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
 
 
+SAFE_NEGATIVE_SOURCES = {
+    "nonmedical_absent_object",
+    "out_of_scan_anatomy_with_coverage_evidence",
+    "explicit_confirmed_absent_anatomy",
+}
+ACCEPTED_AUTOLABEL_SCHEMAS = {"autolabel_core_v2", "autolabel_core_v3"}
+
+
 def parse_args() -> argparse.Namespace:
     env = os.environ
     ap = argparse.ArgumentParser(description="Fine-tune VoxTell-style 3D prompt student on prompt/mask manifest.")
@@ -50,19 +60,55 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--epochs", type=int, default=int(env.get("MEDAI_MSTEP_EPOCHS", "1")))
     ap.add_argument("--max-steps", type=int, default=int(env.get("MEDAI_MAX_STEPS", "0")), help="0 means one pass over manifest per epoch.")
     ap.add_argument("--max-items", type=int, default=int(env.get("MEDAI_MAX_ITEMS", "0")), help="Optional subset for smoke tests.")
-    ap.add_argument("--learning-rate", type=float, default=float(env.get("MEDAI_MSTEP_LR", "5e-5")))
-    ap.add_argument("--weight-decay", type=float, default=float(env.get("MEDAI_WEIGHT_DECAY", "1e-5")))
+    ap.add_argument("--learning-rate", type=float, default=float(env.get("MEDAI_MSTEP_LR", "1e-4")))
+    ap.add_argument("--weight-decay", type=float, default=float(env.get("MEDAI_WEIGHT_DECAY", "3e-5")))
+    ap.add_argument("--optimizer", choices=["sgd", "adamw"], default=env.get("MEDAI_OPTIMIZER", "sgd"))
+    ap.add_argument("--poly-power", type=float, default=float(env.get("MEDAI_POLY_POWER", "0.9")))
+    ap.add_argument("--deep-supervision", action="store_true", default=env.get("MEDAI_DEEP_SUPERVISION", "1").lower() not in {"0", "false", "no"})
     ap.add_argument("--foreground-prob", type=float, default=float(env.get("MEDAI_FOREGROUND_PROB", "0.7")))
     ap.add_argument("--seed", type=int, default=int(env.get("MEDAI_SEED", "42")))
     ap.add_argument("--save-every", type=int, default=int(env.get("MEDAI_SAVE_EVERY", "0")), help="0 disables intermediate checkpoints.")
     ap.add_argument("--dry-run", action="store_true", help="Validate inputs and write a training plan without loading Qwen/model weights.")
     ap.add_argument("--freeze-encoder", action="store_true", help="Only train prompt projection/decoder layers.")
+    ap.add_argument(
+        "--trainable-scope",
+        choices=["all_decoder", "prompt_path"],
+        default=env.get("MEDAI_TRAINABLE_SCOPE", "all_decoder"),
+        help="prompt_path freezes the spatial decoder and only adapts text/image prompt fusion layers.",
+    )
+    ap.add_argument(
+        "--bce-pos-weight-cap",
+        type=float,
+        default=float(env.get("MEDAI_BCE_POS_WEIGHT_CAP", "100")),
+        help="Cap for per-patch foreground-balanced BCE; <=1 restores unweighted BCE.",
+    )
     return ap.parse_args()
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+TEXT_ENCODER_POLICY = {
+    "text_encoder": "Qwen/Qwen3-Embedding-4B by default, or --text-encoding-model override",
+    "trainability": "frozen",
+    "implementation": "prompt embeddings are precomputed under torch.inference_mode(); Qwen parameters are set requires_grad=False and are not passed to the optimizer",
+    "token_flow": "tokenize wrapped instruction/query text -> Qwen hidden states -> last_token_pool over last_hidden_state -> pooled embedding",
+    "embedding_shape": "training stores one tensor per prompt with shape (1, 1, 2560) for the current Qwen3-Embedding-4B setup",
+    "fusion": "VoxTell projects pooled text embeddings to query_dim and uses them as transformer decoder queries with cross-attention over projected CT bottleneck features; resulting mask embeddings condition the U-Net decoder via einsum fusion at multiple scales",
+}
+
+
+def _text_encoder_cache_meta(prompts: list[str], text_model_name: str) -> dict[str, Any]:
+    prompt_hash = hashlib.sha1(json.dumps(sorted(prompts), ensure_ascii=False).encode("utf-8")).hexdigest()
+    return {
+        "format_version": 2,
+        "text_model_name": str(text_model_name),
+        "num_prompts": len(prompts),
+        "prompt_hash": prompt_hash,
+        "policy": TEXT_ENCODER_POLICY,
+    }
 
 
 def write_voxtell_model_dir(
@@ -92,20 +138,127 @@ def write_voxtell_model_dir(
     return model_out
 
 
+def _as_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _legacy_prompt_rows(item: dict[str, Any]) -> list[dict[str, Any]]:
+    if "prompt_variant_index" in item or "canonical_prompt" in item:
+        return [item]
+    canonical = str(item.get("prompt") or "").strip()
+    variants = [str(p).strip() for p in item.get("prompt_variants", []) if str(p).strip()]
+    if canonical and canonical not in variants:
+        variants.insert(0, canonical)
+    if not variants and canonical:
+        variants = [canonical]
+    rows: list[dict[str, Any]] = []
+    configured = set(variants[1:])
+    for idx, prompt in enumerate(variants):
+        row = dict(item)
+        row["prompt"] = prompt
+        row["prompt_text"] = prompt
+        row["canonical_prompt"] = canonical or prompt
+        row["prompt_variant_index"] = idx
+        row["is_prompt_variant"] = idx > 0
+        row["prompt_source"] = "canonical" if idx == 0 else ("configured_variant" if prompt in configured else "template_variant")
+        row["prompt_family_id"] = f"{row.get('case_id')}:{row.get('organ')}:{row.get('supervision_type', 'positive')}"
+        row.setdefault("negative_source", None)
+        rows.append(row)
+    return rows
+
+
+def compute_sampling_weight(item: dict[str, Any]) -> float:
+    base = max(0.0, float(item.get("training_weight", 1.0) or 0.0))
+    grade = str(item.get("grade") or item.get("student_training_priority") or "C").upper()
+    grade_mult = {"A": 1.6, "B": 1.3, "C": 1.0, "D": 0.55}.get(grade, 1.0)
+    priority = str(item.get("student_training_priority") or "").lower()
+    if priority in {"a", "high", "strong"}:
+        grade_mult = max(grade_mult, 1.6)
+    elif priority in {"b", "medium"}:
+        grade_mult = max(grade_mult, 1.3)
+    elif priority == "negative":
+        grade_mult = min(grade_mult, 0.8)
+
+    route_conf = _as_float(item.get("route_confidence"), None)
+    label_conf = _as_float(item.get("label_confidence") or item.get("auto_fine_label_reliability_score"), None)
+    confidence_mult = 1.0
+    for conf in (route_conf, label_conf):
+        if conf is not None:
+            confidence_mult *= 0.75 + 0.5 * max(0.0, min(1.0, conf))
+
+    lineage = item.get("teacher_lineage") or item.get("candidate_models") or []
+    lineage_count = len(lineage) if isinstance(lineage, list) else 1
+    lineage_mult = min(1.25, 1.0 + 0.05 * max(0, lineage_count - 1))
+
+    flags = {str(x) for x in (item.get("review_flags") or [])} | {str(x) for x in (item.get("quality_flags") or [])}
+    quality_mult = 0.7 if flags & {"missing_candidate", "missing_final_mask", "selection_fallback"} else 1.0
+    if item.get("supervision_type") == "negative":
+        quality_mult *= 0.75
+    if item.get("is_prompt_variant"):
+        quality_mult *= 0.9
+    return max(0.0, base * grade_mult * confidence_mult * lineage_mult * quality_mult)
+
+
+def is_allowed_negative_item(item: dict[str, Any]) -> bool:
+    if item.get("supervision_type") != "negative":
+        return True
+    source = str(item.get("negative_source") or "")
+    if source not in SAFE_NEGATIVE_SOURCES:
+        return False
+    if item.get("zero_mask_role") != "negative_target_mask":
+        return False
+    if source != "nonmedical_absent_object" and not item.get("negative_evidence"):
+        return False
+    return True
+
+
+def is_allowed_positive_item(item: dict[str, Any]) -> bool:
+    if item.get("supervision_type", "positive") != "positive":
+        return True
+    if str(item.get("scoring_schema_version") or "legacy") not in ACCEPTED_AUTOLABEL_SCHEMAS:
+        return False
+    grade = str(item.get("grade") or "D").upper()
+    target_type = str(item.get("target_type") or "hard").lower()
+    if grade in {"A", "B"}:
+        return target_type == "hard"
+    if grade == "C":
+        probability_path = item.get("probability_mask_path") or item.get("mask")
+        return target_type == "soft" and bool(probability_path) and Path(str(probability_path)).exists()
+    return False
+
+
 def load_manifest(path: Path, max_items: int = 0) -> list[dict[str, Any]]:
     doc = json.loads(path.read_text(encoding="utf-8"))
     rows = []
-    for item in doc.get("items", []):
-        image = item.get("image")
-        mask = item.get("mask")
-        prompt = item.get("prompt")
-        training_weight = float(item.get("training_weight", 1.0) or 0.0)
-        if not image or not mask or not prompt:
-            continue
-        if training_weight <= 0.0:
-            continue
-        if Path(image).exists() and Path(mask).exists():
-            rows.append({**item, "training_weight": training_weight})
+    for raw in doc.get("items", []):
+        for item in _legacy_prompt_rows(raw):
+            image = item.get("image")
+            mask = item.get("mask")
+            prompt = item.get("prompt")
+            training_weight = float(item.get("training_weight", 1.0) or 0.0)
+            if not image or not mask or not prompt:
+                continue
+            if training_weight <= 0.0:
+                continue
+            if not is_allowed_positive_item(item):
+                continue
+            if not is_allowed_negative_item(item):
+                continue
+            if Path(image).exists() and Path(mask).exists():
+                sampling_weight = compute_sampling_weight({**item, "training_weight": training_weight})
+                repeat = max(1, min(5, int(round(sampling_weight * 2.0))))
+                normalized = {**item, "training_weight": training_weight}
+                normalized["sampling_weight"] = round(float(sampling_weight), 6)
+                normalized["effective_loss_weight"] = round(float(sampling_weight), 6)
+                normalized["sampling_repeat"] = repeat
+                normalized.setdefault("supervision_type", "positive")
+                normalized.setdefault("distillation_role", normalized["supervision_type"])
+                rows.extend([dict(normalized) for _ in range(repeat)])
     if max_items > 0:
         rows = rows[:max_items]
     return rows
@@ -155,7 +308,7 @@ def read_image(path: Path) -> np.ndarray:
         return arr[None] if arr.ndim == 3 else arr
 
 
-def read_mask(path: Path) -> np.ndarray:
+def read_mask(path: Path, preserve_probabilities: bool = False) -> np.ndarray:
     try:
         from nnunetv2.imageio.nibabel_reader_writer import NibabelIOWithReorient
         arr, _ = NibabelIOWithReorient().read_images([str(path)])
@@ -163,6 +316,11 @@ def read_mask(path: Path) -> np.ndarray:
     except Exception:
         import nibabel as nib
         arr = np.asanyarray(nib.load(str(path)).dataobj)
+    arr = np.asarray(arr, dtype=np.float32)
+    if preserve_probabilities:
+        if not np.isfinite(arr).all() or float(arr.min()) < 0.0 or float(arr.max()) > 1.0:
+            raise ValueError(f"Soft target must contain finite probabilities in [0,1]: {path}")
+        return arr
     return (arr > 0).astype(np.float32)
 
 
@@ -186,13 +344,18 @@ def pad_to_shape(image: np.ndarray, mask: np.ndarray, patch_size: tuple[int, int
     return image, mask
 
 
-def choose_patch_start(mask: np.ndarray, patch_size: tuple[int, int, int], foreground_prob: float) -> tuple[int, int, int]:
+def choose_patch_start(
+    mask: np.ndarray,
+    patch_size: tuple[int, int, int],
+    foreground_prob: float,
+    foreground_flat: np.ndarray | None = None,
+) -> tuple[int, int, int]:
     shape = mask.shape
     max_start = [max(0, int(s) - int(p)) for s, p in zip(shape, patch_size)]
-    use_fg = random.random() < foreground_prob and bool(mask.sum() > 0)
+    foreground_flat = foreground_flat if foreground_flat is not None else np.flatnonzero(mask)
+    use_fg = random.random() < foreground_prob and foreground_flat.size > 0
     if use_fg:
-        coords = np.argwhere(mask > 0)
-        center = coords[random.randrange(len(coords))]
+        center = np.unravel_index(int(foreground_flat[random.randrange(foreground_flat.size)]), mask.shape)
         start = []
         for c, p, m in zip(center, patch_size, max_start):
             lo = max(0, int(c) - int(p) // 2)
@@ -201,18 +364,34 @@ def choose_patch_start(mask: np.ndarray, patch_size: tuple[int, int, int], foreg
     return tuple(random.randint(0, m) if m > 0 else 0 for m in max_start)  # type: ignore[return-value]
 
 
-def load_training_patch(item: dict[str, Any], patch_size: tuple[int, int, int], foreground_prob: float) -> tuple[torch.Tensor, torch.Tensor]:
-    image = read_image(Path(item["image"]))
-    mask = read_mask(Path(item["mask"]))
-    if image.shape[1:] != mask.shape:
-        raise ValueError(f"Image/mask shape mismatch for {item['case_id']} {item['organ']}: {image.shape[1:]} vs {mask.shape}")
-
+@lru_cache(maxsize=max(1, int(os.getenv("MEDAI_IMAGE_CACHE_SIZE", "16"))))
+def _cached_preprocessed_image(path: str) -> tuple[np.ndarray, tuple[tuple[int, int], ...], tuple[int, ...]]:
+    image = read_image(Path(path))
+    original_shape = tuple(int(x) for x in image.shape[1:])
     image, _, bbox = crop_to_nonzero(image, None)
-    mask = mask[bbox_to_slices(bbox)]
     image = ZScoreNormalization(intensityproperties={}).run(image, None)
-    image, mask = pad_to_shape(image, mask, patch_size)
+    bbox_key = tuple((int(pair[0]), int(pair[1])) for pair in bbox)
+    return image, bbox_key, original_shape
 
-    sx, sy, sz = choose_patch_start(mask, patch_size, foreground_prob)
+
+@lru_cache(maxsize=max(1, int(os.getenv("MEDAI_MASK_CACHE_SIZE", "64"))))
+def _cached_cropped_mask(path: str, bbox: tuple[tuple[int, int], ...], original_shape: tuple[int, ...], target_type: str = "hard") -> tuple[np.ndarray, np.ndarray]:
+    mask = read_mask(Path(path), preserve_probabilities=target_type == "soft")
+    if tuple(mask.shape) != tuple(original_shape):
+        raise ValueError(f"Image/mask shape mismatch: {original_shape} vs {mask.shape}")
+    mask = mask[bbox_to_slices(bbox)]
+    return mask, np.flatnonzero(mask)
+
+
+def load_training_patch(item: dict[str, Any], patch_size: tuple[int, int, int], foreground_prob: float) -> tuple[torch.Tensor, torch.Tensor]:
+    image, bbox, original_shape = _cached_preprocessed_image(str(Path(item["image"]).resolve()))
+    target_type = str(item.get("target_type") or "hard")
+    mask, foreground_flat = _cached_cropped_mask(str(Path(item["mask"]).resolve()), bbox, original_shape, target_type)
+    image, mask = pad_to_shape(image, mask, patch_size)
+    if tuple(mask.shape) != tuple(_cached_cropped_mask(str(Path(item["mask"]).resolve()), bbox, original_shape, target_type)[0].shape):
+        foreground_flat = np.flatnonzero(mask)
+
+    sx, sy, sz = choose_patch_start(mask, patch_size, foreground_prob, foreground_flat)
     px, py, pz = patch_size
     image_patch = image[:, sx:sx + px, sy:sy + py, sz:sz + pz]
     mask_patch = mask[sx:sx + px, sy:sy + py, sz:sz + pz]
@@ -221,13 +400,28 @@ def load_training_patch(item: dict[str, Any], patch_size: tuple[int, int, int], 
 
 @torch.inference_mode()
 def build_prompt_embeddings(prompts: list[str], text_model_name: str, device: torch.device, cache_path: Path | None) -> dict[str, torch.Tensor]:
+    expected_meta = _text_encoder_cache_meta(prompts, text_model_name)
     if cache_path and cache_path.exists():
         cached = torch.load(cache_path, map_location="cpu", weights_only=False)
-        if all(prompt in cached for prompt in prompts):
-            return {prompt: cached[prompt].float() for prompt in prompts}
+        if isinstance(cached, dict) and "embeddings" in cached:
+            cached_meta = cached.get("metadata") or {}
+            cached_embeddings = cached.get("embeddings") or {}
+            if (
+                cached_meta.get("format_version") == expected_meta["format_version"]
+                and cached_meta.get("text_model_name") == expected_meta["text_model_name"]
+                and cached_meta.get("prompt_hash") == expected_meta["prompt_hash"]
+                and all(prompt in cached_embeddings for prompt in prompts)
+            ):
+                return {prompt: cached_embeddings[prompt].float() for prompt in prompts}
+        elif isinstance(cached, dict) and all(prompt in cached for prompt in prompts):
+            # Legacy cache format lacked text-model metadata, so only reuse when
+            # the caller explicitly accepts old cache files.
+            if os.getenv("MEDAI_ALLOW_LEGACY_PROMPT_CACHE", "0").lower() in {"1", "true", "yes"}:
+                return {prompt: cached[prompt].float() for prompt in prompts}
 
     tokenizer = AutoTokenizer.from_pretrained(text_model_name, padding_side="left")
     text_backbone = AutoModel.from_pretrained(text_model_name).eval().to(device)
+    text_backbone.requires_grad_(False)
     out: dict[str, torch.Tensor] = {}
     for prompt in prompts:
         wrapped = wrap_with_instruction([prompt])
@@ -238,18 +432,112 @@ def build_prompt_embeddings(prompts: list[str], text_model_name: str, device: to
         out[prompt] = embedding.detach().cpu().float()
     if cache_path:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(out, cache_path)
+        torch.save({"metadata": expected_meta, "embeddings": out}, cache_path)
     del text_backbone
     if device.type == "cuda":
         torch.cuda.empty_cache()
     return out
 
 
-def set_trainable_params(network: nn.Module, freeze_encoder: bool) -> None:
-    if not freeze_encoder:
-        return
+
+def dice_loss_with_logits(logits: torch.Tensor, target: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    probs = torch.sigmoid(logits)
+    target = target.float()
+    reduce_dims = tuple(range(1, probs.ndim))
+    intersection = (probs * target).sum(dim=reduce_dims)
+    denom = probs.sum(dim=reduce_dims) + target.sum(dim=reduce_dims)
+    dice = (2.0 * intersection + eps) / (denom + eps)
+    return 1.0 - dice.mean()
+
+
+def _resize_target_like(target: torch.Tensor, pred: torch.Tensor) -> torch.Tensor:
+    if tuple(target.shape[2:]) == tuple(pred.shape[2:]):
+        return target
+    return F.interpolate(target.float(), size=pred.shape[2:], mode="nearest")
+
+
+def _foreground_balanced_bce(pred: torch.Tensor, target: torch.Tensor, pos_weight_cap: float) -> torch.Tensor:
+    positive = target.sum()
+    if positive <= 0 or pos_weight_cap <= 1:
+        return F.binary_cross_entropy_with_logits(pred, target)
+    negative = target.numel() - positive
+    pos_weight = torch.clamp(negative / positive.clamp_min(1.0), min=1.0, max=float(pos_weight_cap))
+    return F.binary_cross_entropy_with_logits(pred, target, pos_weight=pos_weight)
+
+
+def voxtell_supervision_loss(
+    outputs: Any,
+    target: torch.Tensor,
+    training_weight: float,
+    bce_pos_weight_cap: float = 100.0,
+) -> torch.Tensor:
+    preds = list(outputs) if isinstance(outputs, (list, tuple)) else [outputs]
+    if not preds:
+        raise ValueError("VoxTell network returned no outputs")
+    total = None
+    total_w = 0.0
+    for idx, pred in enumerate(preds):
+        if isinstance(pred, dict):
+            pred = pred.get("logits") or pred.get("seg") or pred.get("prediction")
+        if pred is None:
+            continue
+        stage_target = _resize_target_like(target, pred)
+        bce = _foreground_balanced_bce(pred, stage_target, bce_pos_weight_cap)
+        dice = dice_loss_with_logits(pred, stage_target)
+        stage_w = 0.5 ** idx
+        loss = stage_w * (bce + dice)
+        total = loss if total is None else total + loss
+        total_w += stage_w
+    if total is None or total_w <= 0:
+        raise ValueError("VoxTell network outputs were not tensors")
+    return (total / total_w) * float(training_weight or 0.0)
+
+
+def build_optimizer(params, args: argparse.Namespace):
+    if args.optimizer == "adamw":
+        return torch.optim.AdamW(params, lr=args.learning_rate, weight_decay=args.weight_decay)
+    return torch.optim.SGD(params, lr=args.learning_rate, momentum=0.99, nesterov=True, weight_decay=args.weight_decay)
+
+
+def poly_lr(step: int, max_steps: int, base_lr: float, power: float) -> float:
+    if max_steps <= 0:
+        return base_lr
+    progress = min(max(step, 0), max_steps) / float(max_steps)
+    return float(base_lr * ((1.0 - progress) ** power))
+
+
+def set_optimizer_lr(optim: torch.optim.Optimizer, lr: float) -> None:
+    for group in optim.param_groups:
+        group["lr"] = lr
+
+def set_trainable_params(network: nn.Module, freeze_encoder: bool, trainable_scope: str) -> None:
+    prompt_prefixes = (
+        "project_bottleneck_embed.",
+        "project_text_embed.",
+        "project_to_decoder_channels.",
+        "transformer_decoder.",
+    )
     for name, param in network.named_parameters():
-        param.requires_grad = not name.startswith("encoder.")
+        if trainable_scope == "prompt_path":
+            param.requires_grad = name.startswith(prompt_prefixes)
+        elif freeze_encoder:
+            param.requires_grad = not name.startswith("encoder.")
+
+
+def mask_locality_shuffle(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Shuffle mask groups while keeping prompt variants cache-local."""
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (str(row.get("image")), str(row.get("mask")))
+        groups.setdefault(key, []).append(row)
+    keys = list(groups)
+    random.shuffle(keys)
+    ordered: list[dict[str, Any]] = []
+    for key in keys:
+        group = groups[key]
+        random.shuffle(group)
+        ordered.extend(group)
+    return ordered
 
 
 def main() -> int:
@@ -283,16 +571,33 @@ def main() -> int:
         "model_dir": str(model_dir),
         "output_dir": str(output_dir),
         "num_manifest_items": len(rows),
-        "training_weight_policy": "Items with training_weight <= 0 are skipped; A/B/C map to strong/lower/weak supervision.",
+        "training_weight_policy": "Items with training_weight <= 0 are skipped; prompt variants are expanded; sampler repeats use training_weight, grade, LabelCritic/quality flags, route confidence, teacher lineage, and student priority.",
+        "loss_mode": "weighted_dice_plus_bce_deep_supervision",
+        "optimizer": args.optimizer,
+        "poly_power": args.poly_power,
+        "deep_supervision": args.deep_supervision,
+        "num_positive_items": sum(1 for r in rows if r.get("supervision_type", "positive") == "positive"),
+        "num_negative_items": sum(1 for r in rows if r.get("supervision_type") == "negative"),
+        "num_prompt_variant_items": sum(1 for r in rows if r.get("is_prompt_variant")),
+        "mean_sampling_weight": float(np.mean([r.get("sampling_weight", 0.0) for r in rows])) if rows else 0.0,
+        "mean_effective_loss_weight": float(np.mean([r.get("effective_loss_weight", r.get("training_weight", 0.0)) for r in rows])) if rows else 0.0,
+        "effective_loss_weight_range": [
+            float(np.min([r.get("effective_loss_weight", r.get("training_weight", 0.0)) for r in rows])) if rows else 0.0,
+            float(np.max([r.get("effective_loss_weight", r.get("training_weight", 0.0)) for r in rows])) if rows else 0.0,
+        ],
         "model_files_ok": model_files_ok,
         "manifest_items_ok": bool(rows),
         "validation_status": "ok" if not validation_errors else "failed",
         "validation_errors": validation_errors,
         "text_encoding_model": args.text_encoding_model,
+        "text_encoder_policy": TEXT_ENCODER_POLICY,
+        "prompt_embedding_cache": str(Path(args.embedding_cache).resolve()) if args.embedding_cache else str(output_dir / "prompt_embeddings.pt"),
         "epochs": args.epochs,
         "max_steps": args.max_steps,
         "learning_rate": args.learning_rate,
         "freeze_encoder": args.freeze_encoder,
+        "trainable_scope": args.trainable_scope,
+        "bce_pos_weight_cap": args.bce_pos_weight_cap,
     }
     if args.dry_run:
         plan["expected_inference_model_dir"] = str(output_dir / "voxtell_finetuned_model")
@@ -320,20 +625,21 @@ def main() -> int:
 
     started = time.time()
     embeddings = build_prompt_embeddings(prompts, args.text_encoding_model, device, cache_path)
-    network = build_voxtell_network(model_dir, deep_supervision=False)
-    set_trainable_params(network, args.freeze_encoder)
+    network = build_voxtell_network(model_dir, deep_supervision=args.deep_supervision)
+    set_trainable_params(network, args.freeze_encoder, args.trainable_scope)
     network.to(device)
     network.train()
 
-    optim = torch.optim.AdamW((p for p in network.parameters() if p.requires_grad), lr=args.learning_rate, weight_decay=args.weight_decay)
+    optim = build_optimizer((p for p in network.parameters() if p.requires_grad), args)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
 
     losses: list[float] = []
+    loss_history: list[dict[str, float | int]] = []
     total_steps = 0
     max_steps = args.max_steps if args.max_steps > 0 else args.epochs * len(rows)
     while total_steps < max_steps:
-        random.shuffle(rows)
-        for item in rows:
+        epoch_rows = mask_locality_shuffle(rows)
+        for item in epoch_rows:
             if total_steps >= max_steps:
                 break
             try:
@@ -347,21 +653,30 @@ def main() -> int:
             text_embedding = embeddings[str(item["prompt"])].to(device, non_blocking=True)
 
             optim.zero_grad(set_to_none=True)
+            set_optimizer_lr(optim, poly_lr(total_steps, max_steps, args.learning_rate, args.poly_power))
             with torch.autocast(device.type, enabled=device.type == "cuda"):
                 logits = network(image, text_embedding)
-                raw_loss = F.binary_cross_entropy_with_logits(logits, target)
-                loss = raw_loss * float(item.get("training_weight", 1.0) or 0.0)
+                loss = voxtell_supervision_loss(
+                    logits,
+                    target,
+                    float(item.get("effective_loss_weight", item.get("training_weight", 1.0)) or 0.0),
+                    args.bce_pos_weight_cap,
+                )
             scaler.scale(loss).backward()
             scaler.step(optim)
             scaler.update()
 
             total_steps += 1
-            losses.append(float(loss.detach().cpu()))
+            loss_value = float(loss.detach().cpu())
+            losses.append(loss_value)
+            loss_history.append({"step": total_steps, "loss": loss_value, "learning_rate": float(optim.param_groups[0]["lr"])})
             if total_steps % 10 == 0:
                 recent = [x for x in losses[-10:] if np.isfinite(x)]
                 print(f"step={total_steps} loss={np.mean(recent):.5f}", flush=True)
             if args.save_every > 0 and total_steps % args.save_every == 0:
-                torch.save({"network_weights": network.state_dict(), "step": total_steps}, output_dir / f"checkpoint_step_{total_steps}.pth")
+                # Rotate one recovery checkpoint; 3D checkpoints are ~1.7 GB
+                # and retaining every interval can exhaust the experiment disk.
+                torch.save({"network_weights": network.state_dict(), "step": total_steps}, output_dir / "checkpoint_latest.pth")
 
     final_ckpt = output_dir / "model_finetune.pth"
     torch.save({
@@ -374,12 +689,17 @@ def main() -> int:
     }, final_ckpt)
     inference_model_dir = write_voxtell_model_dir(model_dir, output_dir, network, total_steps, manifest_path)
     finite_losses = [x for x in losses if np.isfinite(x)]
+    write_json(output_dir / "loss_history.json", {"steps": total_steps, "history": loss_history})
     result = {
         **plan,
         "status": "success",
         "device": str(device),
         "patch_size": list(patch_size),
         "num_prompts": len(prompts),
+        "optimizer": args.optimizer,
+        "loss_mode": "weighted_dice_plus_bce_deep_supervision",
+        "deep_supervision": args.deep_supervision,
+        "poly_power": args.poly_power,
         "steps": total_steps,
         "mean_loss": float(np.mean(finite_losses)) if finite_losses else None,
         "last_loss": finite_losses[-1] if finite_losses else None,

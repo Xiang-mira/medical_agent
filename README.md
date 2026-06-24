@@ -43,7 +43,7 @@ Mask normalization + candidate ShapeKit
 Candidate QC gate: geometry, empty mask, volume, connected components
         |
         v
-LabelCritic selects among eligible post-ShapeKit candidates
+AutoLabelCore scores all eligible post-ShapeKit candidates; LabelCritic is an optional bounded tie-break signal for supported organs
         |
         v
 Pseudo-reference consistency checks when prior masks exist
@@ -92,6 +92,11 @@ checkpoints/
   UNEST/
   VSmTrans/
   ATLAS-Net/
+    nnUNet_results/Dataset001_ATLASNet/
+      nnUNetTrainer__nnUNetPlans__3d_fullres/
+        dataset.json
+        plans.json
+        fold_all/checkpoint_final.pth
 third_party/PanTS-main/data/
   ImageTr/
   LabelTr/
@@ -104,6 +109,33 @@ data_manifest/case_list_50_tumor.csv
 ```
 
 Each row should point to a CT file and an annotation folder. The CLI expects PanTS/ShapeKit-style masks under `segmentations/*.nii.gz`.
+
+### Install and run ATLAS-Net
+
+ATLAS-Net is a public CC BY 4.0 nnUNet v2 checkpoint. Clone it into the registry's
+expected checkpoint location without committing its large weights to this repository:
+
+```bash
+git lfs install
+git clone https://huggingface.co/Koushik45048545309/Atlas-Net checkpoints/ATLAS-Net
+pip install nnunetv2
+```
+
+Run it through the same JSON CLI and output contract as the other registered models:
+
+```bash
+python run_medai_cli.py --json infer \
+  --model atlasnet \
+  --image /path/to/ct.nii.gz \
+  --output outputs/atlasnet_case \
+  --case-id case_001 \
+  --device cuda:0
+```
+
+The normalized masks are written to
+`outputs/atlasnet_case/case_001/segmentations/*.nii.gz`; the combined label map,
+local label map, and run metadata are written under
+`outputs/atlasnet_case/case_001/per_model/atlasnet/`.
 
 ## 3. Install and verify the CLI
 
@@ -232,6 +264,35 @@ If a case list contains an `annotation_folder`, those masks are treated as prior
 Therefore every default metric is labeled as `metric_family=pseudo_consistency` and every training item keeps `ground_truth_status=pseudo_label_candidate`. Dice/DSC numbers mean overlap with a pseudo reference or selected pseudo label. They do not mean anatomical accuracy.
 
 Future expert-label evaluation can be added only through an explicit separate path, such as `--fine-label-root` in the failure-mining script. Until that path is configured with real expert labels, reports must not use phrases like true accuracy, ground-truth DSC, or expert-label performance.
+
+### AutoLabelCore v2 (373 targets)
+
+`configs/autolabel_core.yaml` defines the universal evidence scorer used for all
+373 formal prompt targets. Structural QC is a rejection gate rather than
+positive accuracy evidence. Correlated checkpoints are collapsed into explicit
+`evidence_family` groups, candidate fusion is family-balanced, and model history
+is updated only through leave-one-evidence-family-out observations. The legacy
+candidate-vs-current-pseudo-reference `mean_dice` tracker is read-only and is
+not used for v2 routing.
+
+Each selected label records `evidence_confidence`, its six evidence components,
+missing evidence, independent-family count, conflict, decision status and target
+type. A/B labels are hard training targets; C labels are soft only for the
+VoxTell probability-target path; provisional/rejected labels remain auditable
+with zero training weight. LabelCritic is an optional bounded tie-break signal
+for supported organs and its absence never reduces confidence.
+
+Audit the configuration and freeze a rollout baseline with:
+
+```bash
+python scripts/audit_autolabel_core.py \
+  --selection outputs/<run>/pseudo_label_selection.json \
+  --output outputs/<run>/autolabel_core_baseline.json
+```
+
+The optional LongTailCritic learns only synthetic structural corruptions from
+A-grade multi-family seeds. Its output is named
+`structural_corruption_probability`; it is not a segmentation-accuracy score.
 
 ## 8. Expected E-step output
 

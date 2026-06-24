@@ -40,7 +40,7 @@
 ## 3. 器官路由 + 标签合并
 **新增 3 个配置**：
 - `configs/global_label_space.json`：384 类固定 id（1..384，0=背景），从 organ_routing keys 排序生成（organ_to_id / id_to_organ）。
-- `configs/routing_token_to_model.json`：51 个路由 token → {model, subtask, enabled, reason}。处理脏标签（Totalsegmentator 空格不一致 / MOOSE 缺 3.0 / 裸 CADS 按器官区分到 551/556/558）；Duke/ATLASNet/缺权重 MOOSE 子任务/未下载 DAPS → enabled=false。归一化：去括号空格、统一大小写后匹配。
+- `configs/routing_token_to_model.json`：路由 token → {model, subtask, enabled, reason}。处理脏标签（Totalsegmentator 空格不一致 / MOOSE 缺 3.0 / 裸 CADS 按器官区分到 551/556/558）；ATLAS-Net 权重和真实 GPU 推理已验证，`Dataset001_ATLASNet` 启用为 22 个 373 腹部目标的辅助候选；Duke/缺权重 MOOSE 子任务/未下载 DAPS → enabled=false。归一化：去括号空格、统一大小写后匹配。
 - `configs/model_label_aliases.json`：每模型「局部标签名→全局器官名」。先用归一化字符串相等自动对齐，**无法自动对齐的列入 unmapped 清单，阻断式提示人工确认，不得静默丢器官**。
 
 **路由**（organ_router.py）：逐 token 经 (b) 解析→过滤 disabled→保留顺序得每器官有序候选；反查本 case 需跑模型集。

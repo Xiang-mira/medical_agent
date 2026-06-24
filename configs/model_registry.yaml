@@ -1,5 +1,7 @@
-schema_version: '1.0'
-generated_from: D:\Desktop\medai_agent_loop_task2_final_v14_windows_safe\medai_v14\configs\class_checkpoint_map.xlsx
+schema_version: '1.1'
+generated_from: configs/class_checkpoint_map_updates.xlsx
+organ_taxonomy_path: configs/organ_taxonomy.json
+hierarchy_source_sha256: 1b2e43d9652af3500f858beceac4423bf32ba25e13fb0090a7cffd35e77a1e80
 checkpoint_root: checkpoints
 models:
   cads551:
@@ -56,6 +58,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 551
+    is_student: false
+    lineage_contract_status: derived
   cads552:
     name: CADS Dataset552_Totalseg252 nnUNet
     type: segmentation
@@ -117,6 +124,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 552
+    is_student: false
+    lineage_contract_status: derived
   cads553:
     name: CADS Dataset553_Totalseg253 nnUNet
     type: segmentation
@@ -172,6 +184,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 553
+    is_student: false
+    lineage_contract_status: derived
   cads554:
     name: CADS Dataset554_Totalseg254 nnUNet
     type: segmentation
@@ -230,6 +247,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 554
+    is_student: false
+    lineage_contract_status: derived
   cads555:
     name: CADS Dataset555_Totalseg255 nnUNet
     type: segmentation
@@ -291,6 +313,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 555
+    is_student: false
+    lineage_contract_status: derived
   cads556:
     name: CADS Dataset556_GC256 nnUNet
     type: segmentation
@@ -343,6 +370,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 556
+    is_student: false
+    lineage_contract_status: derived
   cads557:
     name: CADS Dataset557_Brain257 nnUNet
     type: segmentation
@@ -389,6 +421,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 557
+    is_student: false
+    lineage_contract_status: derived
   cads558:
     name: CADS Dataset558_OAR258 nnUNet
     type: segmentation
@@ -455,6 +492,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 558
+    is_student: false
+    lineage_contract_status: derived
   cads559:
     name: CADS Dataset559_Saros259 nnUNet
     type: segmentation
@@ -502,6 +544,11 @@ models:
       CLI output. Official TotalSegmentator tasks, including academic-license subtasks,
       are routed only through the separate `totalsegmentator` registry entry and official
       CLI/license filtering.
+    evidence_family: cads
+    architecture_lineage: cads
+    training_data_lineage: 559
+    is_student: false
+    lineage_contract_status: derived
   moose666:
     name: MOOSE3.0 peripheral bones nnUNet Dataset666
     type: segmentation
@@ -559,6 +606,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: moose666
+    architecture_lineage: moose
+    training_data_lineage: 666
+    is_student: false
+    lineage_contract_status: derived
   moose888:
     name: MOOSE3.0 cardiac nnUNet Dataset888
     type: segmentation
@@ -598,6 +650,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: moose888
+    architecture_lineage: moose
+    training_data_lineage: 888
+    is_student: false
+    lineage_contract_status: derived
   nnunet_private:
     name: Private AbdomenAtlas nnUNet Dataset224
     type: segmentation
@@ -657,6 +714,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: nnunet_private
+    architecture_lineage: type1
+    training_data_lineage: 224
+    is_student: false
+    lineage_contract_status: derived
   saros_nnunet:
     name: Private SAROS nnUNet Dataset1345
     type: segmentation
@@ -695,6 +757,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: saros_nnunet
+    architecture_lineage: type1
+    training_data_lineage: 1345
+    is_student: false
+    lineage_contract_status: derived
   atm:
     name: ATM airway nnUNet Dataset1370
     type: segmentation
@@ -721,6 +788,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: atm
+    architecture_lineage: type1
+    training_data_lineage: 1370
+    is_student: false
+    lineage_contract_status: derived
   airrc:
     name: AirRC airway/vessel nnUNet Dataset1380
     type: segmentation
@@ -750,6 +822,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: airrc
+    architecture_lineage: type1
+    training_data_lineage: 1380
+    is_student: false
+    lineage_contract_status: derived
   lvp:
     name: LVP liver vessel nnUNet Dataset1381 (formerly vsnet)
     type: segmentation
@@ -777,6 +854,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: lvp
+    architecture_lineage: type1
+    training_data_lineage: 1381
+    is_student: false
+    lineage_contract_status: derived
   daps:
     name: DAPS nnUNet Dataset1347
     type: segmentation
@@ -833,6 +915,11 @@ models:
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
       3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
     private_checkpoint: true
+    evidence_family: daps
+    architecture_lineage: type1
+    training_data_lineage: 1347
+    is_student: false
+    lineage_contract_status: derived
   epai_20250421:
     name: ePAI qchen76 2025-04-21 / Dataset1339 25-class abdomen-pancreas model
     type: segmentation
@@ -879,8 +966,6 @@ models:
       celiac_aa_celiac_artery: celiac_aa
       inferior_vena_cava: postcava
       small_intestine: intestine
-      portal_splenic_veins: veins
-      portal_vein_and_splenic_vein: veins
     checkpoint_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres
     dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
     dataset_id: 1339
@@ -896,6 +981,11 @@ models:
     private_checkpoint: true
     source_code_path: third_party/ePAI-main
     all_organ_patch: scripts/patch_epai_enable_all_organs.py
+    evidence_family: epai
+    architecture_lineage: type2
+    training_data_lineage: 1339
+    is_student: false
+    lineage_contract_status: derived
   vsmtrans:
     name: VSmTrans BDMAP nnUNet Dataset001
     type: segmentation
@@ -948,6 +1038,11 @@ models:
       third_party/VSmTrans_lightweight/nnUNet
     private_checkpoint: true
     source_code_path: third_party/VSmTrans_lightweight
+    evidence_family: vsmtrans
+    architecture_lineage: vsmtrans
+    training_data_lineage: 1
+    is_student: false
+    lineage_contract_status: derived
   vista3d:
     name: VISTA3D Inference Pipeline
     type: segmentation
@@ -1080,6 +1175,11 @@ models:
     checkpoint_name: model.pt
     routing_aliases:
     - VISTA3D
+    evidence_family: vista3d
+    architecture_lineage: vista3d
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   unest:
     name: UNEST renalStructures segmentation
     type: segmentation
@@ -1108,6 +1208,11 @@ models:
     checkpoint_name: null
     routing_aliases:
     - UNEST
+    evidence_family: unest
+    architecture_lineage: unest
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   totalsegmentator:
     name: TotalSegmentator
     type: segmentation
@@ -1270,6 +1375,11 @@ models:
     - Totalsegmentator(body)
     - Totalsegmentator(headneck_bones_vessels)
     - Totalsegmentator(total)
+    evidence_family: totalsegmentator
+    architecture_lineage: totalseg
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   atlasnet:
     name: ATLAS-Net nnUNet v2 abdominal 25-class model
     type: segmentation
@@ -1278,6 +1388,8 @@ models:
     - adrenal_gland_left
     - adrenal_gland_right
     - aorta
+    - cbd_stent
+    - celiac_aa (celiac_artery)
     - colon
     - common_bile_duct
     - duodenum
@@ -1294,22 +1406,24 @@ models:
     - portal_vein_and_splenic_vein
     - renal_vein_left
     - renal_vein_right
-    - small_intestine
+    - intestine
     - spleen
     - stomach
     - superior_mesenteric_artery
-    status: ignored
+    status: ready_if_checkpoint_folder_present
     output_layout: case_id/segmentations/*.nii.gz
-    notes: ATLAS-Net model card from teacher's 'Another version of ShapeKit.docx'
-      is integrated. It covers 25 abdominal organ/tumor labels and expects Linux/CUDA/nnUNet
-      v2 plus downloaded ATLAS-Net weights.
+    notes: Public ATLAS-Net nnUNet v2 checkpoint from Hugging Face. It covers 25 abdominal
+      organ/duct/tumor labels and expects Linux, an NVIDIA GPU, CUDA 11.7+, and nnUNet
+      v2.
     runner: command_template
     checkpoint_path: checkpoints/ATLAS-Net
     label_map_path: configs/atlasnet_label_map.json
     command_template: python scripts/atlasnet_predict_and_split.py --image {image}
       --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path}
+      --device "{device}"
     private_checkpoint: false
-    source_code_path: docs/ATLAS-Net_model_card_from_teacher.docx
+    source_code_path: https://huggingface.co/Koushik45048545309/Atlas-Net
+    license: CC-BY-4.0
     trainable: yes_if_atlasnet_nnunet_training_state_present
     mstep_role: conditional_trainable_abdominal_25_class_backend
     mstep_backend: nnunetv2_finetune
@@ -1317,10 +1431,15 @@ models:
     mstep_init_from: checkpoints/ATLAS-Net
     mstep_reason: ATLAS-Net is described as an nnUNet v2 abdominal model; fine-tuning
       requires downloaded weights and nnUNet-compatible training files.
-    enabled: false
+    enabled: true
     recipe: null
     checkpoint_name: null
     routing_aliases: []
+    evidence_family: atlasnet
+    architecture_lineage: atlasnet
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   duke:
     name: duke
     type: segmentation
@@ -1349,6 +1468,11 @@ models:
     recipe: null
     checkpoint_name: null
     routing_aliases: []
+    evidence_family: duke
+    architecture_lineage: duke
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   pedro:
     name: pedro
     type: segmentation
@@ -1384,6 +1508,11 @@ models:
     recipe: null
     checkpoint_name: null
     routing_aliases: []
+    evidence_family: pedro
+    architecture_lineage: pedro
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   goacc:
     name: goacc
     type: segmentation
@@ -1433,6 +1562,11 @@ models:
     recipe: null
     checkpoint_name: null
     routing_aliases: []
+    evidence_family: goacc
+    architecture_lineage: goacc
+    training_data_lineage: class_checkpoint_map.xlsx
+    is_student: false
+    lineage_contract_status: derived
   mock_seg:
     name: Local mock segmentation wrapper
     type: segmentation
@@ -1460,6 +1594,11 @@ models:
     recipe: mock
     checkpoint_name: null
     routing_aliases: []
+    evidence_family: mock_seg
+    architecture_lineage: mock
+    training_data_lineage: unreviewed
+    is_student: false
+    lineage_contract_status: derived
   epai_finetuned:
     name: ePAI finetuned (M-step round1, 50 epochs, 9-class)
     type: segmentation
@@ -1497,6 +1636,11 @@ models:
     recipe: type2
     checkpoint_name: checkpoint_final
     routing_aliases: []
+    evidence_family: epai
+    architecture_lineage: type2
+    training_data_lineage: 1939
+    is_student: false
+    lineage_contract_status: derived
 organ_to_models:
   abdominal_cavity:
   - cads
@@ -2583,3 +2727,4 @@ notes:
 - Edit command_template for private models after inspecting each original inference
   script.
 - All wrappers normalize outputs to case_id/segmentations/*.nii.gz.
+autolabel_scoring_schema_version: autolabel_core_v3

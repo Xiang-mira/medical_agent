@@ -263,10 +263,10 @@
       "reason": "missing weight (only 666/888 available)"
     },
     "Dataset001_ATLASNet": {
-      "model": null,
+      "model": "atlasnet",
       "subtask": null,
-      "enabled": false,
-      "reason": "决策:忽略不封装"
+      "enabled": true,
+      "reason": null
     },
     "CADS551": {
       "model": "cads551",

@@ -68,6 +68,7 @@ def main() -> int:
         timeout_sec=args.timeout_sec,
         device="cuda",
         resume=False,
+        teacher_inference_mode="hierarchical_roi",
         preseeded_model_dirs={
             "round_prev_selected": Path(args.round_prev_selected).resolve(),
             "student_prev": Path(args.student_prev).resolve(),
