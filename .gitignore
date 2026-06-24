@@ -22,10 +22,11 @@ PanTSMini_Label/
 outputs/
 results/
 comparison_results/
-rows/
-cid/
-label_dir/
-import/
+/rows
+/cid
+/label_dir
+/import
+/wget-log*
 
 # ── nnUNet environment folders (generated at runtime) ─────────────────────────
 nnUNet_raw/
@@ -48,6 +49,7 @@ venv/
 env/
 _inspect_*/
 .pytest_tmp*/
+.pytest_cache/
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
