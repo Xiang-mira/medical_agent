@@ -8,6 +8,12 @@ from .paths import resolve_path
 
 
 EXPECTED_FORMAL_TARGET_COUNT = 373
+CANONICAL_TARGET_ALIASES = {"postcava": "inferior_vena_cava"}
+EXPECTED_EFFECTIVE_TARGET_COUNT = 372
+
+
+def canonical_target_name(name: str) -> str:
+    return CANONICAL_TARGET_ALIASES.get(str(name), str(name))
 
 
 def load_student_target_space(target_config: str | Path = "configs/student_3d_prompt_target_organs.json") -> dict[str, Any]:
@@ -35,7 +41,9 @@ def validate_formal_373_target_space(
     """
     doc = load_student_target_space(target_config)
     target_organs = [str(x) for x in doc.get("target_organs", [])]
-    target_set = set(target_organs)
+    effective_target_organs = list(dict.fromkeys(canonical_target_name(x) for x in target_organs))
+    raw_target_set = set(target_organs)
+    target_set = set(effective_target_organs)
     organ_to_prompt = doc.get("organ_to_prompt", {}) or {}
     organ_to_student_id = doc.get("organ_to_student_id", {}) or {}
     policy_skipped = {str(item.get("organ")) for item in doc.get("policy_skipped_organs", []) if isinstance(item, dict)}
@@ -47,14 +55,15 @@ def validate_formal_373_target_space(
     target_contains_skipped = sorted([organ for organ in target_organs if organ in policy_skipped])
     target_contains_no_route = sorted([organ for organ in target_organs if organ in no_route])
 
-    requested = [str(x) for x in (requested_organs or [])]
+    requested = [canonical_target_name(str(x)) for x in (requested_organs or [])]
     requested_set = set(requested)
     requested_non_target = sorted(requested_set - target_set)
     target_not_requested = sorted(target_set - requested_set) if requested else []
 
     blocking: dict[str, Any] = {
         "target_count_mismatch": [] if len(target_organs) == EXPECTED_FORMAL_TARGET_COUNT else [len(target_organs)],
-        "unique_target_count_mismatch": [] if len(target_set) == EXPECTED_FORMAL_TARGET_COUNT else [len(target_set)],
+        "unique_target_count_mismatch": [] if len(raw_target_set) == EXPECTED_FORMAL_TARGET_COUNT else [len(raw_target_set)],
+        "effective_target_count_mismatch": [] if len(target_set) == EXPECTED_EFFECTIVE_TARGET_COUNT else [len(target_set)],
         "duplicate_targets": duplicate_targets,
         "missing_prompts": missing_prompts,
         "missing_student_ids": missing_student_ids,
@@ -71,7 +80,8 @@ def validate_formal_373_target_space(
         "expected_formal_target_count": EXPECTED_FORMAL_TARGET_COUNT,
         "counts": {
             "target_organs": len(target_organs),
-            "unique_target_organs": len(target_set),
+            "unique_target_organs": len(raw_target_set),
+            "effective_target_organs": len(effective_target_organs),
             "requested_organs": len(requested) if requested else None,
             "global_label_space_organs": (doc.get("counts") or {}).get("global_label_space_organs"),
             "policy_skipped_organs": len(policy_skipped),
@@ -79,6 +89,7 @@ def validate_formal_373_target_space(
             "historical_teacher_direction": (doc.get("counts") or {}).get("historical_teacher_direction"),
         },
         "requested_is_full_373_target": requested_set == target_set if requested else None,
+        "canonical_aliases": CANONICAL_TARGET_ALIASES,
         "blocking": blocking,
         "historical_count_explanation": {
             "384": "global_label_space_organs, not the formal current target",
@@ -117,4 +128,3 @@ def require_formal_373_target_space(
     if result["status"] != "success":
         raise ValueError(json.dumps(result, indent=2, ensure_ascii=False))
     return result
-

@@ -182,6 +182,33 @@ def test_verified_oof_can_promote_single_teacher_to_b_but_not_a():
     assert result["oof_promotable"] is True
 
 
+def test_single_teacher_can_promote_to_b_with_strict_non_oof_evidence():
+    result = score_evidence_record({
+        **_complete_record(independent_family_count=1),
+        "expected_presence": "expected_present",
+        "ct_support_score": 0.8,
+        "anatomy_plausibility_score": 1.0,
+        "perturbation_stability_score": 0.95,
+        "labelcritic_calibrated_score": 0.8,
+        "parent_containment": 0.95,
+        "review_flags": [],
+        "quality_flags": [],
+    })
+    assert result["grade"] == "B"
+    assert result["grade_cap"] == "B"
+    assert result["single_teacher_b_eligible"] is True
+
+
+def test_expected_present_zero_volume_is_hard_fail():
+    result = score_evidence_record({
+        **_complete_record(independent_family_count=1),
+        "expected_presence": "expected_present",
+        "selected_candidate_qc_flags": ["zero_volume_mask"],
+    })
+    assert result["grade"] == "D"
+    assert result["target_type"] == "rejected"
+
+
 def test_oof_provenance_rejects_leakage_and_accepts_heldout_case():
     from cli_anything.medai.core.auto_label_core import verify_oof_student_provenance
 
@@ -317,6 +344,33 @@ def test_candidate_identity_missing_mask_is_not_identity_mismatch():
     assert result["identity_status"] == "missing_candidate"
     assert result["mapping_type"] == "missing_mask"
     assert result["identity_mismatch_reasons"] == ["candidate_mask_missing"]
+
+
+def test_whole_kidney_alias_does_not_satisfy_left_kidney_candidate():
+    from cli_anything.medai.core.multimodel_loop import _candidate_identity_contract
+
+    taxonomy = {
+        "organs": {
+            "kidney_left": {"comparison_family": "whole_organ", "parent_ids": []},
+        }
+    }
+    alias_config = {
+        "models": {
+            "official_voxtell_pretrained": {
+                "local_to_global": {},
+                "mapping_types": {},
+            }
+        }
+    }
+    result = _candidate_identity_contract(
+        taxonomy=taxonomy,
+        alias_config=alias_config,
+        organ="kidney_left",
+        model_key="official_voxtell_pretrained",
+        alias_match="missing",
+    )
+    assert result["identity_status"] == "missing_candidate"
+    assert result["resolved_canonical_id"] == "kidney_left"
 
 
 def test_shapekit_fallback_gap_distinguishes_usable_original(tmp_path):

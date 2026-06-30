@@ -31,6 +31,86 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on", "y"}
 
 
+def _cli_option_value(name: str) -> str | None:
+    prefix = f"{name}="
+    for idx, arg in enumerate(sys.argv[1:], start=1):
+        if arg == name and idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+        if arg.startswith(prefix):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _cli_flag(name: str) -> bool:
+    return name in sys.argv[1:]
+
+
+from cli_anything.medai.core.backend_capabilities import (
+    LEGACY_AMBIGUOUS_OFFICIAL_FINETUNE,
+    LEGACY_OFFICIAL_NNUNET_FINETUNE,
+    LEGACY_PROJECT_DISTILLATION,
+    OFFICIAL_NNUNET_BASELINE,
+    PROJECT_PROMPT_STUDENT,
+    backend_capability,
+    canonical_backend_name,
+    profile_runtime_policy,
+)
+from cli_anything.medai.core.target_space import canonical_target_name
+
+VOXTELL_MSTEP_MODES = {"manifest_only", PROJECT_PROMPT_STUDENT, LEGACY_PROJECT_DISTILLATION, OFFICIAL_NNUNET_BASELINE, LEGACY_OFFICIAL_NNUNET_FINETUNE}
+LEGACY_VOXTELL_MSTEP_MODE = LEGACY_AMBIGUOUS_OFFICIAL_FINETUNE
+OFFICIAL_VOXTELL_ENCODER_MODE = OFFICIAL_NNUNET_BASELINE
+
+
+def resolve_voxtell_mstep_mode() -> dict:
+    cli_mode = _cli_option_value("--voxtell-mstep-mode")
+    env_mode = os.getenv("MEDAI_VOXTELL_MSTEP_MODE")
+    profile_name = os.getenv("MEDAI_EXPERIMENT_PROFILE", "advisor_aligned_default")
+    profile_policy = profile_runtime_policy(profile_name)
+    if cli_mode:
+        requested = cli_mode.strip()
+        source = "cli"
+    elif env_mode:
+        requested = env_mode.strip()
+        source = "env_debug"
+    elif not env_bool("MEDAI_ENABLE_VOXTELL_TRAINING", default=True):
+        requested = "manifest_only"
+        source = "legacy_training_disabled"
+    else:
+        requested = str(profile_policy.get("mstep_backend") or PROJECT_PROMPT_STUDENT)
+        source = f"experiment_profile:{profile_policy.get('experiment_profile')}"
+    allow_manifest_only = (
+        _cli_flag("--allow-manifest-only")
+        or env_bool("MEDAI_ALLOW_MANIFEST_ONLY", default=False)
+        or source == "legacy_training_disabled"
+    )
+    explicit_baseline_mode = (
+        _cli_flag("--explicit-baseline-mode")
+        or env_bool("MEDAI_EXPLICIT_BASELINE_MODE", default=False)
+        or bool((profile_policy.get("official_voxtell_nnunet_encoder_baseline") or {}).get("explicit_baseline_mode"))
+    )
+    legacy_mode_rejected = requested == LEGACY_VOXTELL_MSTEP_MODE
+    canonical_requested = canonical_backend_name(requested)
+    valid = requested == "manifest_only" or canonical_requested in {PROJECT_PROMPT_STUDENT, OFFICIAL_NNUNET_BASELINE}
+    alias_used = canonical_requested != requested if requested else False
+    return {
+        "requested_mode": requested,
+        "resolved_mode": canonical_requested if valid and requested != "manifest_only" else ("manifest_only" if requested == "manifest_only" else None),
+        "canonical_training_backend": canonical_requested if valid and requested != "manifest_only" else None,
+        "legacy_mode": requested if alias_used else None,
+        "alias_used": requested if alias_used else None,
+        "mode_source": source,
+        "experiment_profile": profile_policy.get("experiment_profile"),
+        "profile_policy": profile_policy,
+        "valid": valid and not legacy_mode_rejected,
+        "legacy_mode_rejected": legacy_mode_rejected,
+        "deprecated_mode_replacement": OFFICIAL_NNUNET_BASELINE if legacy_mode_rejected else None,
+        "allow_manifest_only": allow_manifest_only,
+        "explicit_baseline_mode": explicit_baseline_mode,
+        "allowed_modes": sorted(VOXTELL_MSTEP_MODES),
+    }
+
+
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path("/home/teacher1/JHU-project1/medical_agent")
 CASE_LIST    = Path(os.getenv("MEDAI_CASE_LIST", PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"))
@@ -98,10 +178,18 @@ CONSOLIDATION_INTERVAL = 2
 CONVERGENCE_AUTOSTOP   = env_bool("MEDAI_CONVERGENCE_AUTOSTOP", default=True)
 CONVERGENCE_DSC_DELTA  = float(os.getenv("MEDAI_CONVERGENCE_DSC_DELTA", "0.01"))
 CONVERGENCE_MIN_ROUNDS = int(os.getenv("MEDAI_CONVERGENCE_MIN_ROUNDS", "2"))
-FINETUNE_EPOCHS        = 100   # 增加 epoch 数，让模型充分学习
-CONSOLIDATION_EPOCHS   = 50    # 全局整合也需要足够 epoch
-LEARNING_RATE          = 5e-5
-CONSOLIDATION_LR       = 5e-6
+# Prompt-student training is sample-wise: one epoch already means one update
+# for every expanded manifest row.  The old 100/50 defaults came from the
+# legacy trainer and accidentally expanded a formal 11k-row M-step to >1M
+# updates.  Keep formal defaults explicit, bounded, and environment-overridable.
+FINETUNE_EPOCHS        = int(os.getenv("MEDAI_FINETUNE_EPOCHS", "1"))
+CONSOLIDATION_EPOCHS   = int(os.getenv("MEDAI_CONSOLIDATION_EPOCHS", "1"))
+LEARNING_RATE          = float(os.getenv("MEDAI_MSTEP_LR", "1e-6"))
+CONSOLIDATION_LR       = float(os.getenv("MEDAI_CONSOLIDATION_LR", "1e-6"))
+PROMPT_MAX_STEPS       = int(os.getenv("MEDAI_MAX_STEPS", "0"))
+PROMPT_TRAINABLE_SCOPE = os.getenv("MEDAI_TRAINABLE_SCOPE", "prompt_path")
+PROMPT_BCE_POS_CAP     = float(os.getenv("MEDAI_BCE_POS_WEIGHT_CAP", "20"))
+PROMPT_SAVE_EVERY      = int(os.getenv("MEDAI_SAVE_EVERY", "1000"))
 
 # 单个 teacher 推理 timeout（秒）。正式共享 GPU 环境可能排队/低利用率，
 # 不能再用 600s 硬切导致被动中断；可用 MEDAI_INFER_TIMEOUT_SEC 覆盖。
@@ -153,6 +241,22 @@ def load_case_rows() -> list[dict]:
     import csv as _csv
     with open(CASE_LIST, encoding="utf-8-sig") as f:
         return list(_csv.DictReader(f))
+
+
+def write_pending_case_list(round_idx: int, done: set[str]) -> Path:
+    """Write a temporary case list containing only incomplete E-step cases."""
+    import csv as _csv
+
+    rows = load_case_rows()
+    pending_rows = [row for row in rows if row.get("case_id") not in done]
+    pending_path = OUTPUT_ROOT / f"round{round_idx}_estep_pending_cases.csv"
+    pending_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(rows[0].keys()) if rows else ["case_id", "ct_path"]
+    with open(pending_path, "w", encoding="utf-8", newline="") as f:
+        writer = _csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(pending_rows)
+    return pending_path
 
 
 def check_vllm_server() -> bool:
@@ -257,7 +361,7 @@ def load_student_target_organs() -> list[str]:
     """Current accepted exact target space for the 3D prompt student: 373 organs."""
     with open(PROMPT_TARGET_CONFIG, encoding="utf-8") as f:
         doc = json.load(f)
-    return list(doc.get("target_organs", []))
+    return list(dict.fromkeys(canonical_target_name(x) for x in doc.get("target_organs", [])))
 
 
 def ensure_current_student_backend_allowed() -> None:
@@ -305,6 +409,343 @@ def ensure_formal_quality_gates() -> None:
             "selection. Set MEDAI_DEBUG_ALLOW_NO_LABELCRITIC=1 only for "
             "smoke/debug runs."
         )
+
+
+def _load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _round_evaluation_chain_dir(round_idx: int) -> Path:
+    return OUTPUT_ROOT / f"round{round_idx}" / "metrics" / "evaluation_chain"
+
+
+def _previous_round_blocklist(round_idx: int) -> Path:
+    return _round_evaluation_chain_dir(round_idx - 1) / "next_round_blocklist.csv"
+
+
+def _load_blocklisted_case_organs(path: Path) -> set[tuple[str, str]]:
+    if not path.exists():
+        return set()
+    import csv as _csv
+
+    blocked: set[tuple[str, str]] = set()
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        for row in _csv.DictReader(f):
+            case_id = str(row.get("case_id") or "").strip()
+            organ = str(row.get("organ") or row.get("student_name") or "").strip()
+            if case_id and organ:
+                blocked.add((case_id, organ))
+    return blocked
+
+
+def _filtered_student_prediction_root_for_next_round(round_idx: int, source_root: Path) -> tuple[Path, dict]:
+    """Create a QC-filtered view of previous-round student predictions for E-step."""
+    blocklist_path = _previous_round_blocklist(round_idx)
+    blocked = _load_blocklisted_case_organs(blocklist_path)
+    filtered_root = source_root.parent / f"{source_root.name}_qc_filtered_for_round{round_idx}"
+    summary = {
+        "source_root": str(source_root),
+        "filtered_root": str(filtered_root),
+        "blocklist_path": str(blocklist_path),
+        "blocked_case_organs": len(blocked),
+        "copied_or_linked_masks": 0,
+        "skipped_masks": 0,
+        "status": "not_needed" if not blocked else "created",
+    }
+    if not blocked:
+        return source_root, summary
+
+    if filtered_root.exists():
+        shutil.rmtree(filtered_root)
+    filtered_root.mkdir(parents=True, exist_ok=True)
+    for case_dir in sorted(p for p in source_root.iterdir() if p.is_dir()):
+        out_case = filtered_root / case_dir.name
+        for mask in sorted(case_dir.glob("*.nii.gz")):
+            organ = mask.name[:-7] if mask.name.endswith(".nii.gz") else mask.stem
+            if (case_dir.name, organ) in blocked:
+                summary["skipped_masks"] += 1
+                continue
+            out_case.mkdir(parents=True, exist_ok=True)
+            dst = out_case / mask.name
+            try:
+                dst.symlink_to(mask)
+            except Exception:
+                shutil.copy2(mask, dst)
+            summary["copied_or_linked_masks"] += 1
+        result_json = case_dir / "voxtell_student_result.json"
+        if result_json.exists() and out_case.exists():
+            shutil.copy2(result_json, out_case / result_json.name)
+    (filtered_root / "qc_filter_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    return filtered_root, summary
+
+
+def _formal_round1_key_organs() -> list[str]:
+    return [
+        "liver",
+        "spleen",
+        "pancreas",
+        "kidney_left",
+        "kidney_right",
+        "aorta",
+        "adrenal_gland_left",
+        "adrenal_gland_right",
+        "stomach",
+        "duodenum",
+        "colon",
+        "small_bowel",
+        "bladder",
+    ]
+
+
+def _cohort_coverage(
+    key_organs: list[str],
+    selection_rows: list[dict],
+    selected_by_key: dict[tuple[str, str], dict],
+) -> tuple[dict[str, dict[str, float | int | str]], list[dict[str, object]], list[str]]:
+    """Measure usable key-organ labels only where CT evidence expects the organ."""
+    minimum_rate = float(os.getenv("MEDAI_FORMAL_KEY_ORGAN_MIN_COVERAGE", "0.80"))
+    coverage = {
+        organ: {"expected_present": 0, "usable": 0, "coverage_rate": 1.0}
+        for organ in key_organs
+    }
+    missing_rows: list[dict[str, object]] = []
+    for row in selection_rows:
+        organ = str(row.get("organ") or "")
+        if organ not in coverage or str(row.get("expected_presence") or "unknown") != "expected_present":
+            continue
+        case_id = str(row.get("case_id") or "")
+        coverage[organ]["expected_present"] += 1
+        selected = selected_by_key.get((case_id, organ))
+        usable = bool(
+            selected
+            and str(selected.get("grade") or "D").upper() in {"A", "B", "C"}
+            and selected.get("final_mask")
+        )
+        if usable:
+            coverage[organ]["usable"] += 1
+        else:
+            missing_rows.append({
+                "case_id": case_id,
+                "organ": organ,
+                "reason": "missing_usable_selected_label",
+            })
+    failures: list[dict[str, object]] = []
+    not_applicable: list[str] = []
+    for organ, counts in coverage.items():
+        expected = int(counts["expected_present"])
+        usable = int(counts["usable"])
+        if expected == 0:
+            counts["coverage_rate"] = 1.0
+            counts["status"] = "not_applicable_no_expected_present_case"
+            not_applicable.append(organ)
+            continue
+        rate = usable / expected
+        counts["coverage_rate"] = round(rate, 6)
+        counts["status"] = "pass" if rate >= minimum_rate else "failed"
+        if rate < minimum_rate:
+            failures.append({
+                "organ": organ,
+                "usable": usable,
+                "expected_present": expected,
+                "coverage_rate": round(rate, 6),
+                "minimum_coverage_rate": minimum_rate,
+            })
+    return coverage, failures, not_applicable
+
+
+def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | None = None) -> dict:
+    estep_root = OUTPUT_ROOT / f"round{round_idx}" / "estep"
+    ann_root = estep_root / "annotation_versions"
+    meta_paths = sorted(ann_root.glob("*/selection_metadata.json"))
+    selected_organs: list[dict] = []
+    selection_rows: list[dict] = []
+    quality_contract_mismatches = 0
+    for path in meta_paths:
+        doc = _load_json(path)
+        if doc.get("quality_contract_version") != "estep_quality_contract_v3":
+            quality_contract_mismatches += 1
+        for item in doc.get("selected_organs", []) or []:
+            if isinstance(item, dict):
+                selected_organs.append(item)
+        for row in doc.get("selection_rows", []) or []:
+            if isinstance(row, dict):
+                selection_rows.append(row)
+    grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0}
+    key_organs = _formal_round1_key_organs()
+    key_coverage = {organ: 0 for organ in key_organs}
+    rejected_hard_labels = 0
+    uncertain_count = 0
+    auto_grade_reject_count = 0
+    metadata_mismatch_count = 0
+    published_d_labels = 0
+    geometry_error_labels = 0
+    multi_candidate_failures: list[dict[str, object]] = []
+    expected_present_coverage_failures: list[dict[str, object]] = []
+    voxtell_competition_failures: list[dict[str, object]] = []
+    shapekit_coverage_failures: list[dict[str, object]] = []
+    labelcritic_coverage_failures: list[dict[str, object]] = []
+    uncertain_rows: list[dict[str, str]] = []
+    selected_by_key = {
+        (str(item.get("case_id") or ""), str(item.get("organ") or "")): item
+        for item in selected_organs
+    }
+    for item in selected_organs:
+        grade = str(item.get("grade") or "D").upper()
+        if grade in grade_counts:
+            grade_counts[grade] += 1
+        organ = str(item.get("organ") or "")
+        if organ in key_coverage and grade in {"A", "B", "C"} and item.get("final_mask"):
+            key_coverage[organ] += 1
+        if grade == "D" and str(item.get("target_type") or "").lower() == "hard":
+            rejected_hard_labels += 1
+        if grade == "D" and item.get("publication_status") != "rejected_but_recorded":
+            published_d_labels += 1
+        item_flags = set(item.get("quality_flags") or []) | set(item.get("review_flags") or []) | set(item.get("selected_candidate_qc_flags") or [])
+        if item_flags & {"geometry_mismatch", "shape_mismatch_ct", "affine_mismatch_ct", "orientation_mismatch_ct"}:
+            geometry_error_labels += 1
+        if str(item.get("selection_status") or "") != "selected":
+            uncertain_count += 1
+            uncertain_rows.append({"case_id": str(item.get("case_id") or ""), "organ": organ})
+        if "auto_grade_reject" in set(item.get("review_flags") or []) | set(item.get("quality_flags") or []):
+            auto_grade_reject_count += 1
+    for row in selection_rows:
+        organ = str(row.get("organ") or "")
+        candidate_models = row.get("candidate_models") or []
+        candidate_count = len(candidate_models) if isinstance(candidate_models, list) else int(row.get("candidate_count") or 0)
+        independent_family_count = int(row.get("independent_family_count") or 0)
+        expected_presence = str(row.get("expected_presence") or "unknown")
+        case_id = str(row.get("case_id") or "")
+        if (
+            organ in key_organs
+            and expected_presence == "expected_present"
+            and candidate_count < 2
+        ):
+            multi_candidate_failures.append({
+                "case_id": str(row.get("case_id") or ""),
+                "organ": organ,
+                "candidate_count": candidate_count,
+                "independent_family_count": independent_family_count,
+                "candidate_models": candidate_models,
+            })
+        if organ in key_organs and expected_presence == "expected_present":
+            selected_item = selected_by_key.get((case_id, organ))
+            if not selected_item or str(selected_item.get("grade") or "D").upper() not in {"A", "B", "C"} or not selected_item.get("final_mask"):
+                expected_present_coverage_failures.append({
+                    "case_id": case_id,
+                    "organ": organ,
+                    "reason": "missing_usable_selected_label",
+                })
+            model_names = [str(model) for model in candidate_models] if isinstance(candidate_models, list) else []
+            has_voxtell = "official_voxtell_pretrained" in model_names
+            has_teacher = any(model not in {"official_voxtell_pretrained", "fusion_consensus"} for model in model_names)
+            if not (has_voxtell and has_teacher):
+                voxtell_competition_failures.append({
+                    "case_id": case_id,
+                    "organ": organ,
+                    "candidate_models": model_names,
+                })
+            candidate_predictions = row.get("candidate_predictions") or []
+            shapekit_success = any(
+                str(candidate.get("candidate_shapekit_status") or "") == "success"
+                for candidate in candidate_predictions
+                if isinstance(candidate, dict)
+            )
+            if not shapekit_success:
+                shapekit_coverage_failures.append({"case_id": case_id, "organ": organ})
+            critic_used = bool(row.get("labelcritic_compare_used"))
+            critic_bypass = str(row.get("labelcritic_compare_skipped_reason") or "") == "high_agreement"
+            if candidate_count >= 2 and not (critic_used or critic_bypass):
+                labelcritic_coverage_failures.append({
+                    "case_id": case_id,
+                    "organ": organ,
+                    "reason": str(row.get("labelcritic_compare_skipped_reason") or "not_executed"),
+                })
+        selected_model = str(row.get("selected_model") or "")
+        selected_prediction = str(row.get("selected_prediction") or "")
+        if row.get("labelcritic_grade_used") and row.get("auto_grade") is None:
+            metadata_mismatch_count += 1
+    # Validate final selected metadata rather than pre-publication selection rows,
+    # whose grades may legitimately change during evidence scoring.
+    metadata_mismatch_count = 0
+    for item in selected_organs:
+        if str(item.get("grade") or "D").upper() not in {"A", "B"}:
+            continue
+        selected_model = str(item.get("selected_model") or "")
+        final_mask = str(item.get("final_mask") or "")
+        if not selected_model or not final_mask or not Path(final_mask).exists():
+            metadata_mismatch_count += 1
+    manifest_doc = _load_json(manifest_path) if manifest_path and manifest_path.exists() else {}
+    gate_summary = (((manifest_doc.get("training_gate_summary") or {}) if isinstance(manifest_doc, dict) else {}) or {})
+    manifest_grade_counts = manifest_doc.get("grade_counts", {}) if isinstance(manifest_doc, dict) else {}
+    included_grade_counts = gate_summary.get("included_grade_counts", {})
+    ab_nonzero = (
+        int(included_grade_counts.get("A", manifest_grade_counts.get("A", 0)) or 0)
+        + int(included_grade_counts.get("B", manifest_grade_counts.get("B", 0)) or 0)
+    )
+    missing_key_organs = [organ for organ, count in key_coverage.items() if count <= 0]
+    cohort_coverage, cohort_coverage_failures, fov_not_applicable_key_organs = _cohort_coverage(
+        key_organs, selection_rows, selected_by_key
+    )
+    expected_num_cases = int(estep_result.get("num_cases") or 0)
+    missing_case_metadata = max(0, expected_num_cases - len(meta_paths))
+    passed = (
+        estep_result.get("status") == "success"
+        and quality_contract_mismatches == 0
+        and missing_case_metadata == 0
+        and not cohort_coverage_failures
+        and not shapekit_coverage_failures
+        and not labelcritic_coverage_failures
+        and metadata_mismatch_count == 0
+        and rejected_hard_labels == 0
+        and published_d_labels == 0
+        and geometry_error_labels == 0
+        and ab_nonzero > 0
+    )
+    return {
+        "stage": "formal_estep_gate",
+        "status": "success" if passed else "failed",
+        "round": round_idx,
+        "num_cases_with_selection_metadata": len(meta_paths),
+        "num_selected_organs": len(selected_organs),
+        "grade_counts": grade_counts,
+        "key_organ_coverage": key_coverage,
+        "missing_key_organs": missing_key_organs,
+        "fov_not_applicable_key_organs": fov_not_applicable_key_organs,
+        "cohort_key_organ_coverage": cohort_coverage,
+        "cohort_key_organ_coverage_failures": cohort_coverage_failures,
+        "expected_present_coverage_failures": expected_present_coverage_failures,
+        "multi_candidate_failures": multi_candidate_failures,
+        "voxtell_competition_failures": voxtell_competition_failures,
+        "shapekit_coverage_failures": shapekit_coverage_failures,
+        "labelcritic_coverage_failures": labelcritic_coverage_failures,
+        "expected_num_cases": expected_num_cases,
+        "missing_case_metadata": missing_case_metadata,
+        "metadata_mismatch_count": metadata_mismatch_count,
+        "rejected_hard_labels": rejected_hard_labels,
+        "published_d_labels": published_d_labels,
+        "geometry_error_labels": geometry_error_labels,
+        "quality_contract_mismatches": quality_contract_mismatches,
+        "uncertain_selection_count": uncertain_count,
+        "uncertain_selection_rows": uncertain_rows[:100],
+        "auto_grade_reject_count": auto_grade_reject_count,
+        "manifest_training_gate_summary": gate_summary,
+        "ab_nonzero": ab_nonzero,
+        "reason": None if passed else (
+            "quality_contract_mismatch" if quality_contract_mismatches else
+            "missing_case_metadata" if missing_case_metadata else
+            "cohort_key_organ_coverage_failed" if cohort_coverage_failures else
+            "shapekit_coverage_failed" if shapekit_coverage_failures else
+            "labelcritic_coverage_failed" if labelcritic_coverage_failures else
+            "metadata_mismatch" if metadata_mismatch_count else
+            "rejected_hard_labels_present" if rejected_hard_labels else
+            "published_d_labels_present" if published_d_labels else
+            "geometry_errors_present" if geometry_error_labels else
+            "A_plus_B_zero"
+        ),
+    }
 
 
 def _round_selected_pseudo_label_root(round_idx: int) -> Path:
@@ -429,17 +870,26 @@ def run_estep(round_idx: int) -> dict:
         else:
             log(f"  上一轮 selected pseudo labels 不存在，跳过注入: {prev_selected_dir}")
 
-        prev_pred_dir = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions"
+        prev_pred_dir = _round_student_prediction_root_for_qc(round_idx - 1)
         prev_mstep_result = OUTPUT_ROOT / f"round{round_idx - 1}" / "mstep" / "voxtell_prompt_mstep_result.json"
         prev_student_eligible = False
         if prev_mstep_result.exists():
             try:
-                prev_student_eligible = bool(json.loads(prev_mstep_result.read_text(encoding="utf-8")).get("checkpoint_eligible_for_next_round"))
+                prev_doc = json.loads(prev_mstep_result.read_text(encoding="utf-8"))
+                prev_student_eligible = bool(prev_doc.get("eligible_for_next_round_prompt_student", prev_doc.get("checkpoint_eligible_for_next_round")))
             except Exception:
                 prev_student_eligible = False
         if prev_student_eligible and prev_pred_dir.exists() and any(prev_pred_dir.iterdir()):
-            preseeded["student_prev"] = prev_pred_dir
-            log(f"  注入上一轮合格 student 预测参与竞争: {prev_pred_dir}")
+            filtered_prev_pred_dir, qc_filter_summary = _filtered_student_prediction_root_for_next_round(round_idx, prev_pred_dir)
+            preseeded["student_prev"] = filtered_prev_pred_dir
+            if qc_filter_summary.get("blocked_case_organs", 0):
+                log(
+                    "  注入上一轮合格 student 预测参与竞争（已按 evaluation_chain blocklist 过滤）: "
+                    f"{filtered_prev_pred_dir}; skipped={qc_filter_summary.get('skipped_masks', 0)}, "
+                    f"blocklist={qc_filter_summary.get('blocklist_path')}"
+                )
+            else:
+                log(f"  注入上一轮合格 student 预测参与竞争: {filtered_prev_pred_dir}")
         else:
             log(f"  上一轮 student 预测未通过质量门槛或不存在，跳过注入: {prev_pred_dir}")
 
@@ -457,8 +907,13 @@ def run_estep(round_idx: int) -> dict:
         log("  所有 case 已完成，跳过 E-step")
         return {"status": "success", "num_cases": expected_cases, "total_updated": 0, "skipped": True}
 
+    estep_case_list = CASE_LIST
+    if done:
+        estep_case_list = write_pending_case_list(round_idx, done)
+        log(f"  本次 E-step 仅处理未完成 case list: {estep_case_list}")
+
     result = run_multimodel_annotation_loop(
-        case_list=CASE_LIST,
+        case_list=estep_case_list,
         output_folder=out_dir,
         models=models_to_run,
         organs=organ_list,
@@ -649,6 +1104,43 @@ def build_vista3d_dataset(round_idx: int) -> Path:
     return datalist_path
 
 
+def run_prompt_semantic_audit(round_idx: int, manifest_path: Path) -> dict:
+    """Audit the generated prompt manifest for dataset-definition semantic hazards."""
+    import runpy
+
+    out_csv = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "prompt_semantic_audit.csv"
+    old_argv = sys.argv[:]
+    sys.argv = [
+        str(PROJECT_ROOT / "scripts/audit_prompt_semantics.py"),
+        "--target-config", str(PROMPT_TARGET_CONFIG),
+        "--manifest", str(manifest_path),
+        "--policy", str(PROJECT_ROOT / "configs/prompt_semantic_policy.yaml"),
+        "--output", str(out_csv),
+    ]
+    try:
+        try:
+            runpy.run_path(str(PROJECT_ROOT / "scripts/audit_prompt_semantics.py"), run_name="__main__")
+        except SystemExit as exc:
+            if int(exc.code or 0) != 0:
+                raise RuntimeError(f"prompt_semantic_audit exited with {exc.code}")
+    except Exception as exc:
+        summary = {"status": "failed", "reason": str(exc), "output": str(out_csv)}
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        out_csv.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        log(f"prompt semantic audit 失败: {exc}")
+        return summary
+    finally:
+        sys.argv = old_argv
+    summary = _load_json(out_csv.with_suffix(".summary.json"))
+    summary["status"] = "success" if int(summary.get("flagged_prompts", 0) or 0) == 0 else "review"
+    out_csv.with_suffix(".summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    if summary["status"] == "review":
+        log(f"prompt semantic audit 发现需复核 prompts: {summary.get('flagged_prompts')} -> {out_csv}")
+    else:
+        log(f"prompt semantic audit 通过: audited={summary.get('audited_prompts', 0)}")
+    return summary
+
+
 def build_3d_prompt_student_dataset(round_idx: int) -> Path:
     """Build VoxTell-style prompt/mask manifest from current E-step pseudo-labels."""
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
@@ -664,7 +1156,7 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
         target_config=PROMPT_TARGET_CONFIG,
         device="cuda",
     )
-    prev_student_root = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions" if round_idx > 1 else None
+    prev_student_root = _round_student_prediction_root_for_qc(round_idx - 1) if round_idx > 1 else None
     manifest = student.build_training_manifest(
         cases_root=cases_root,
         output_manifest=manifest_path,
@@ -672,10 +1164,17 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
         require_images=True,
         student_prediction_root=prev_student_root if prev_student_root and prev_student_root.exists() else None,
     )
+    prompt_audit = run_prompt_semantic_audit(round_idx, manifest_path)
+    if prompt_audit.get("status") == "review" and not env_bool("MEDAI_ALLOW_PROMPT_SEMANTIC_WARNINGS", default=False):
+        raise RuntimeError(
+            "Prompt semantic audit found dataset-definition hazards. "
+            f"Review {prompt_audit.get('output')} or set MEDAI_ALLOW_PROMPT_SEMANTIC_WARNINGS=1 for diagnostic runs."
+        )
     log(
         f"3D prompt manifest 完成: items={manifest.get('num_items', 0)}, "
         f"cases={manifest.get('num_cases', 0)}, "
-        f"missing_image_items={manifest.get('num_items_missing_image', 0)}"
+        f"missing_image_items={manifest.get('num_items_missing_image', 0)}, "
+        f"prompt_audit={prompt_audit.get('status')}"
     )
     return manifest_path
 
@@ -746,7 +1245,8 @@ def _mask_nonempty(path: Path) -> bool:
         import numpy as np
         if not path.exists():
             return False
-        return bool((np.asanyarray(nib.load(str(path)).dataobj) > 0).sum() > 0)
+        threshold = float(os.getenv("MEDAI_DSC_MASK_THRESHOLD", "0.5"))
+        return bool((np.asanyarray(nib.load(str(path)).dataobj) >= threshold).sum() > 0)
     except Exception:
         return False
 
@@ -757,8 +1257,9 @@ def _dice_for_masks(pred_path: Path, ref_path: Path) -> tuple[float | None, bool
         import numpy as np
         if not pred_path.exists() or not ref_path.exists():
             return None, False, _mask_nonempty(ref_path), "missing_mask"
-        pred = np.asanyarray(nib.load(str(pred_path)).dataobj) > 0
-        ref = np.asanyarray(nib.load(str(ref_path)).dataobj) > 0
+        threshold = float(os.getenv("MEDAI_DSC_MASK_THRESHOLD", "0.5"))
+        pred = np.asanyarray(nib.load(str(pred_path)).dataobj) >= threshold
+        ref = np.asanyarray(nib.load(str(ref_path)).dataobj) >= threshold
         if pred.shape != ref.shape:
             return None, bool(pred.sum() > 0), bool(ref.sum() > 0), "shape_mismatch"
         pred_nonempty = bool(pred.sum() > 0)
@@ -949,10 +1450,10 @@ def _select_quality_gate_items(manifest_path: Path, max_cases: int, max_prompts:
     grade_rank = {"A": 0, "B": 1, "C": 2, "D": 3}
     allowed_grades = {
         g.strip().upper()
-        for g in os.getenv("MEDAI_STUDENT_QUALITY_GRADES", "A,B").split(",")
+        for g in os.getenv("MEDAI_STUDENT_QUALITY_GRADES", "A,B,C").split(",")
         if g.strip()
     }
-    min_weight = float(os.getenv("MEDAI_STUDENT_QUALITY_MIN_WEIGHT", "0.5"))
+    min_weight = float(os.getenv("MEDAI_STUDENT_QUALITY_MIN_WEIGHT", "0.1"))
     seen: set[tuple[str, str]] = set()
     for item in doc.get("items", []):
         if item.get("supervision_type") != "positive" or item.get("is_prompt_variant"):
@@ -973,7 +1474,24 @@ def _select_quality_gate_items(manifest_path: Path, max_cases: int, max_prompts:
             continue
         seen.add((case_id, organ))
         candidates.append({**item, "_grade_rank": grade_rank.get(str(item.get("grade") or "C").upper(), 2)})
-    candidates.sort(key=lambda x: (x["_grade_rank"], -float(x.get("training_weight") or 0.0), str(x.get("case_id")), str(x.get("organ"))))
+    # Prefer representative core anatomy before alphabetical composite labels.
+    # The previous ordering selected abdominal_cavity/body/body_trunc first and
+    # made an 8-prompt mini gate systematically unrepresentative.
+    core_order = {
+        organ: idx
+        for idx, organ in enumerate((
+            "liver", "spleen", "pancreas", "kidney_left", "kidney_right",
+            "aorta", "adrenal_gland_left", "adrenal_gland_right",
+            "bladder", "stomach", "lung_left", "lung_right", "heart", "bones",
+        ))
+    }
+    candidates.sort(key=lambda x: (
+        x["_grade_rank"],
+        -float(x.get("training_weight") or 0.0),
+        str(x.get("case_id")),
+        core_order.get(str(x.get("organ")), len(core_order)),
+        str(x.get("organ")),
+    ))
     grouped: dict[str, list[dict]] = {}
     for item in candidates:
         if item["case_id"] not in grouped and len(grouped) >= max_cases:
@@ -1025,6 +1543,8 @@ def run_voxtell_student_quality_gate(round_idx: int, model_dir: Path, manifest_p
         "max_prompts_per_case": max_prompts,
         "min_mean_dsc": min_mean_dsc,
         "min_nonempty_recall": min_recall,
+        "mask_binarization_threshold": float(os.getenv("MEDAI_DSC_MASK_THRESHOLD", "0.5")),
+        "sampling_policy": "grade_weight_then_representative_core_anatomy",
     }
     if not grouped:
         base.update({"status": "failed", "reason": "no eligible nonempty positive manifest items for mini consistency eval"})
@@ -1127,15 +1647,14 @@ def run_voxtell_student_quality_gate(round_idx: int, model_dir: Path, manifest_p
 def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consolidation: bool = False) -> dict:
     """Run or plan the VoxTell-style 3D prompt student M-step.
 
-    The upstream VoxTell release provides inference code but no ready project
-    fine-tuning script. This project supplies scripts/train_voxtell_prompt_student.py
-    as the default M-step trainer, so a formal run should produce a real
-    inference-compatible checkpoint unless MEDAI_ENABLE_VOXTELL_TRAINING=0.
+    VoxTell model/inference code is treated as official vendor code. Project
+    distillation remains available only under an explicit experimental mode.
     """
     log(f"=== Round {round_idx} 3D prompt student M-step 开始 ===")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
     out_dir.mkdir(parents=True, exist_ok=True)
     result_path = out_dir / "voxtell_prompt_mstep_result.json"
+    run_mode_audit_path = out_dir / "run_mode_audit.json"
 
     with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
@@ -1148,13 +1667,48 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             if item.get("distillation_eligible") is not False
             and float(item.get("training_weight") or 0.0) > 0.0
         )
-    training_disabled = (not ENABLE_VOXTELL_TRAINING) or not VOXTELL_TRAIN_CMD
+    mode_audit = resolve_voxtell_mstep_mode()
+    mode = mode_audit.get("resolved_mode")
+    canonical_training_backend = mode_audit.get("canonical_training_backend") or (PROJECT_PROMPT_STUDENT if mode == PROJECT_PROMPT_STUDENT else None)
+    mode_capability = backend_capability(canonical_training_backend) if canonical_training_backend else None
+    official_finetune_cmd = os.getenv("MEDAI_OFFICIAL_VOXTELL_FINETUNE_CMD", "").strip()
+    run_mode_audit = {
+        **mode_audit,
+        "stage": "voxtell_mstep_run_mode_audit",
+        "round": round_idx,
+        "manifest_path": str(manifest_path),
+        "gpu_training_launched": False,
+        "trainer_command": None,
+        "official_preflight_status": None,
+        "checkpoint_path": None,
+        "skip_or_failure_reason": None,
+        "safety_policy": (
+            "Formal VoxTell M-step requires an explicit mode. manifest_only is audit-only unless "
+            "--allow-manifest-only or MEDAI_ALLOW_MANIFEST_ONLY=1 is set. official mode never falls "
+            "back to project prompt Student training."
+        ),
+    }
     result = {
         "stage": "voxtell_style_3d_prompt_mstep",
-        "status": "manifest_ready" if training_disabled else "pending",
-        "training_status": "manifest_ready_training_disabled" if training_disabled else "pending",
+        "status": "pending",
+        "training_status": "pending",
         "student_backend": STUDENT_BACKEND,
+        "student_source_statement": (
+            "VoxTell inference/model code is official vendor code; project-specific manifest, scoring, "
+            "quality gate, and experimental distillation remain outside third_party/VoxTell."
+        ),
+        "training_mode": mode,
+        "canonical_training_backend": canonical_training_backend,
+        "legacy_mode": mode_audit.get("legacy_mode"),
+        "training_mode_source": mode_audit.get("mode_source"),
+        "experiment_profile": mode_audit.get("experiment_profile"),
+        "backend_capability": mode_capability,
+        "is_prompt_conditioned_student": canonical_training_backend == PROJECT_PROMPT_STUDENT,
+        "is_official_voxtell_encoder_transfer": canonical_training_backend == OFFICIAL_NNUNET_BASELINE,
+        "is_project_distillation": canonical_training_backend == PROJECT_PROMPT_STUDENT,
+        "student_inference_backend": "voxtell_prompt_api" if canonical_training_backend == PROJECT_PROMPT_STUDENT else ("nnunet_multiclass_split" if canonical_training_backend == OFFICIAL_NNUNET_BASELINE else None),
         "manifest_path": str(manifest_path),
+        "run_mode_audit_path": str(run_mode_audit_path),
         "num_items": manifest.get("num_items", 0),
         "num_cases": manifest.get("num_cases", 0),
         "num_distillation_eligible_items": eligible_items,
@@ -1164,11 +1718,37 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "train_cmd": VOXTELL_TRAIN_CMD,
         "trainer_enabled": ENABLE_VOXTELL_TRAINING,
         "finetuned_checkpoint": None,
-        "note": (
-            "3D prompt-based student uses prompt/mask pairs and does not use "
-            "VISTA3D 127-class label IDs."
-        ),
+        "note": "3D prompt-based student uses prompt/mask pairs and does not use VISTA3D 127-class label IDs.",
     }
+
+    def finish(payload: dict) -> dict:
+        run_mode_audit["gpu_training_launched"] = bool(payload.get("gpu_training_launched", False))
+        run_mode_audit["trainer_command"] = payload.get("trainer_command")
+        run_mode_audit["official_preflight_status"] = payload.get("official_preflight_status")
+        run_mode_audit["checkpoint_path"] = payload.get("inference_checkpoint") or payload.get("finetuned_checkpoint")
+        run_mode_audit["skip_or_failure_reason"] = payload.get("reason")
+        with open(run_mode_audit_path, "w", encoding="utf-8") as f:
+            json.dump(run_mode_audit, f, indent=2, ensure_ascii=False)
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        return payload
+
+    if not mode_audit.get("valid"):
+        reason = (
+            "Deprecated mode official_voxtell_finetune is ambiguous. Use "
+            "official_voxtell_nnunet_encoder_baseline only for explicit nnU-Net encoder-transfer baseline ablation."
+            if mode_audit.get("legacy_mode_rejected") else
+            "Formal VoxTell M-step requires explicit --voxtell-mstep-mode, experiment config/env mode, "
+            "or MEDAI_ENABLE_VOXTELL_TRAINING=0 for legacy manifest-only audit."
+        )
+        result.update({
+            "status": "failed",
+            "training_status": "failed_missing_or_invalid_voxtell_mstep_mode",
+            "reason": reason,
+        })
+        run_mode_audit["skip_or_failure_reason"] = result["reason"]
+        log("3D prompt M-step 失败：未显式指定 VoxTell M-step mode，避免正式实验静默跑成测试模式。")
+        return finish(result)
 
     if eligible_items <= 0:
         result.update({
@@ -1176,21 +1756,185 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             "training_status": "failed_no_distillation_items",
             "reason": "No distillation-eligible prompt/mask items with positive training_weight are available.",
         })
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
         log("3D prompt M-step 失败：没有可用于蒸馏训练的正权重样本。")
-        return result
+        return finish(result)
 
-    if training_disabled:
-        result["reason"] = (
-            "VoxTell training is explicitly disabled. Manifest is ready, but no "
-            "student checkpoint will be produced until MEDAI_ENABLE_VOXTELL_TRAINING=1 "
-            "and MEDAI_VOXTELL_TRAIN_CMD points to a trainer."
+    if mode == "manifest_only":
+        if not mode_audit.get("allow_manifest_only"):
+            result.update({
+                "status": "failed",
+                "training_status": "failed_manifest_only_not_allowed_for_formal_training",
+                "reason": "manifest_only is audit-only; pass --allow-manifest-only or MEDAI_ALLOW_MANIFEST_ONLY=1 for CPU-only checks.",
+            })
+            log("3D prompt M-step 失败：manifest_only 未显式允许，避免正式实验误跑成 dry-run。")
+            return finish(result)
+        result.update({
+            "status": "manifest_ready",
+            "training_status": "manifest_ready_manifest_only",
+            "reason": "VoxTell M-step mode is manifest_only; training intentionally not launched.",
+            "checkpoint_eligible_for_next_round": False,
+            "eligible_for_next_round_prompt_student": False,
+        })
+        log("3D prompt M-step 已生成 manifest；manifest_only 模式不启动训练。")
+        return finish(result)
+
+    if canonical_training_backend == OFFICIAL_NNUNET_BASELINE:
+        if not mode_audit.get("explicit_baseline_mode"):
+            result.update({
+                "status": "failed",
+                "training_status": "failed_official_voxtell_nnunet_baseline_requires_explicit_mode",
+                "reason": (
+                    "official_voxtell_nnunet_encoder_baseline is baseline/ablation only. "
+                    "Pass --explicit-baseline-mode or MEDAI_EXPLICIT_BASELINE_MODE=1 to run it; "
+                    "it cannot be the default prompt-conditioned Student M-step."
+                ),
+                "baseline_only": True,
+                "prompt_conditioned": False,
+                "main_mstep_allowed": False,
+                "not_used_as_main_prompt_student": True,
+                "checkpoint_eligible_for_next_round": False,
+                "eligible_for_next_round_prompt_student": False,
+                "eligible_as_teacher_candidate": False,
+            })
+            log("官方 VoxTell nnU-Net encoder baseline 未显式启用；不会作为主 M-step 运行。")
+            return finish(result)
+        from cli_anything.medai.core.voxtell_nnunet_encoder import (
+            VOXTELL_NNUNET_TRAINER,
+            build_official_encoder_transfer_commands,
+            convert_manifest_to_nnunet_dataset,
+            official_encoder_transfer_preflight,
         )
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
-        log("3D prompt M-step 已生成 manifest；VoxTell training 被显式关闭，因此不生成 checkpoint。")
-        return result
+        dataset_id = int(os.getenv("MEDAI_VOXTELL_NNUNET_DATASET_ID", "997"))
+        dataset_name = os.getenv("MEDAI_VOXTELL_NNUNET_DATASET_NAME", "MedAI_VoxTellEncoder")
+        configuration = os.getenv("MEDAI_VOXTELL_NNUNET_CONFIGURATION", "3d_fullres")
+        fold = os.getenv("MEDAI_VOXTELL_NNUNET_FOLD", "0")
+        trainer = os.getenv("MEDAI_VOXTELL_NNUNET_TRAINER", VOXTELL_NNUNET_TRAINER)
+        plans = os.getenv("MEDAI_VOXTELL_NNUNET_PLANS", "nnUNetPlans")
+        official_root = out_dir / "official_voxtell_nnunet_encoder"
+        nnunet_raw = Path(os.getenv("nnUNet_raw", official_root / "nnUNet_raw"))
+        nnunet_preprocessed = Path(os.getenv("nnUNet_preprocessed", official_root / "nnUNet_preprocessed"))
+        nnunet_results = Path(os.getenv("nnUNet_results", official_root / "nnUNet_results"))
+        pretrained_checkpoint = Path(os.getenv("MEDAI_VOXTELL_PRETRAINED_CHECKPOINT", str(VOXTELL_MODEL_DIR / "fold_0" / "checkpoint_final.pth")))
+        converter = convert_manifest_to_nnunet_dataset(
+            manifest_path=manifest_path,
+            output_root=official_root,
+            dataset_id=dataset_id,
+            dataset_name=dataset_name,
+            target_config=PROMPT_TARGET_CONFIG,
+            dry_run=False,
+            nnunet_raw=nnunet_raw,
+        )
+        commands = build_official_encoder_transfer_commands(dataset_id, configuration, fold, pretrained_checkpoint, trainer, plans)
+        nnunet_preprocessed.mkdir(parents=True, exist_ok=True)
+        nnunet_results.mkdir(parents=True, exist_ok=True)
+        preflight = official_encoder_transfer_preflight(
+            nnunet_raw=nnunet_raw,
+            nnunet_preprocessed=nnunet_preprocessed,
+            nnunet_results=nnunet_results,
+            dataset_id=dataset_id,
+            dataset_name=dataset_name,
+            pretrained_checkpoint=pretrained_checkpoint,
+            trainer=trainer,
+        )
+        expected_checkpoint_folder = nnunet_results / f"Dataset{dataset_id:03d}_{dataset_name}" / f"{trainer}__{plans}__{configuration}" / f"fold_{fold}"
+        expected_checkpoint_path = expected_checkpoint_folder / "checkpoint_final.pth"
+        result.update({
+            "official_voxtell_encoder_transfer_converter": converter,
+            "baseline_only": True,
+            "prompt_conditioned": False,
+            "main_mstep_allowed": False,
+            "not_used_as_main_prompt_student": True,
+            "official_voxtell_encoder_transfer_preflight": preflight,
+            "official_preflight_status": preflight.get("status"),
+            "official_encoder_transfer_commands": commands,
+            "nnunet_environment": {
+                "nnUNet_raw": str(nnunet_raw),
+                "nnUNet_preprocessed": str(nnunet_preprocessed),
+                "nnUNet_results": str(nnunet_results),
+            },
+            "pretrained_checkpoint": str(pretrained_checkpoint),
+            "trainer": trainer,
+            "dataset_id": dataset_id,
+            "plans": plans,
+            "dataset_name": dataset_name,
+            "expected_checkpoint_folder": str(expected_checkpoint_folder),
+            "expected_checkpoint_path": str(expected_checkpoint_path),
+        })
+        run_mode_audit["official_preflight_status"] = preflight.get("status")
+        run_mode_audit["nnunet_environment"] = {
+            "nnUNet_raw": str(nnunet_raw),
+            "nnUNet_preprocessed": str(nnunet_preprocessed),
+            "nnUNet_results": str(nnunet_results),
+        }
+        run_mode_audit["expected_checkpoint_folder"] = str(expected_checkpoint_folder)
+        run_mode_audit["plans"] = plans
+        run_mode_audit["expected_checkpoint_path"] = str(expected_checkpoint_path)
+        if preflight.get("status") != "passed":
+            result.update({
+                "status": "failed",
+                "training_status": "failed_official_voxtell_nnunet_encoder_preflight",
+                "reason": ",".join(preflight.get("errors") or ["official_voxtell_nnunet_encoder_preflight_failed"]),
+                "checkpoint_eligible_for_next_round": False,
+                "eligible_for_next_round_prompt_student": False,
+            })
+            log("官方 VoxTell encoder-transfer preflight 未通过，不会 fallback 到项目 trainer。")
+            return finish(result)
+        os.environ.update({
+            "nnUNet_raw": str(nnunet_raw),
+            "nnUNet_preprocessed": str(nnunet_preprocessed),
+            "nnUNet_results": str(nnunet_results),
+        })
+        official_env = os.environ.copy()
+        start = time.time()
+        plan_proc = subprocess.run(commands["preprocess_command"], cwd=str(PROJECT_ROOT), env=official_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        result.update({
+            "gpu_training_launched": False,
+            "preprocess_return_code": plan_proc.returncode,
+            "preprocess_stdout_tail": (plan_proc.stdout or "")[-4000:],
+            "preprocess_stderr_tail": (plan_proc.stderr or "")[-4000:],
+        })
+        if plan_proc.returncode != 0:
+            result.update({
+                "status": "failed",
+                "training_status": "failed_official_voxtell_nnunet_preprocess",
+                "reason": "nnUNetv2_plan_and_preprocess failed",
+                "runtime_sec": round(time.time() - start, 3),
+                "checkpoint_eligible_for_next_round": False,
+                "eligible_for_next_round_prompt_student": False,
+            })
+            return finish(result)
+        train_proc = subprocess.run(commands["train_command"], cwd=str(PROJECT_ROOT), env=official_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        has_expected_checkpoint = expected_checkpoint_path.exists()
+        result.update({
+            "gpu_training_launched": True,
+            "trainer_command": commands["train_command"],
+            "training_status": "completed" if train_proc.returncode == 0 else "failed",
+            "status": "success" if train_proc.returncode == 0 and has_expected_checkpoint else "failed",
+            "return_code": train_proc.returncode,
+            "runtime_sec": round(time.time() - start, 3),
+            "stdout_tail": (train_proc.stdout or "")[-4000:],
+            "stderr_tail": (train_proc.stderr or "")[-4000:],
+            "checkpoint_eligible_for_next_round": False,
+            "eligible_for_next_round_prompt_student": False,
+            "eligible_as_teacher_candidate": train_proc.returncode == 0 and has_expected_checkpoint and env_bool("MEDAI_OFFICIAL_NNUNET_BASELINE_AS_CANDIDATE", default=False),
+            "checkpoint_status": "official_voxtell_nnunet_encoder_baseline" if has_expected_checkpoint else "missing_expected_checkpoint",
+            "expected_checkpoint_exists": has_expected_checkpoint,
+            "inference_checkpoint": str(expected_checkpoint_path) if has_expected_checkpoint else None,
+            "inference_model_dir": str(expected_checkpoint_folder.parent) if has_expected_checkpoint else None,
+        })
+        log(f"官方 VoxTell encoder-transfer M-step 完成: status={result.get('status')}")
+        return finish(result)
+    else:
+        train_cmd = VOXTELL_TRAIN_CMD
+        if not ENABLE_VOXTELL_TRAINING or not train_cmd:
+            result.update({
+                "status": "failed",
+                "training_status": "failed_project_distillation_command_disabled",
+                "reason": "project_voxtell_prompt_distillation_student was selected, but MEDAI_ENABLE_VOXTELL_TRAINING=0 or train command is empty.",
+                "checkpoint_eligible_for_next_round": False,
+                "eligible_for_next_round_prompt_student": False,
+            })
+            return finish(result)
 
     stop_vllm_for_mstep()
     env = os.environ.copy()
@@ -1202,10 +1946,16 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "MEDAI_TEXT_ENCODING_MODEL": str(VOXTELL_TEXT_ENCODING_MODEL),
         "MEDAI_MSTEP_EPOCHS": str(CONSOLIDATION_EPOCHS if global_consolidation else FINETUNE_EPOCHS),
         "MEDAI_MSTEP_LR": str(CONSOLIDATION_LR if global_consolidation else LEARNING_RATE),
+        "MEDAI_MAX_STEPS": str(PROMPT_MAX_STEPS),
+        "MEDAI_TRAINABLE_SCOPE": PROMPT_TRAINABLE_SCOPE,
+        "MEDAI_BCE_POS_WEIGHT_CAP": str(PROMPT_BCE_POS_CAP),
+        "MEDAI_SAVE_EVERY": str(PROMPT_SAVE_EVERY),
+        "MEDAI_VOXTELL_MSTEP_MODE": str(mode),
+        "MEDAI_CANONICAL_TRAINING_BACKEND": PROJECT_PROMPT_STUDENT,
     })
     start = time.time()
     proc = subprocess.run(
-        VOXTELL_TRAIN_CMD,
+        train_cmd,
         shell=True,
         cwd=str(PROJECT_ROOT),
         env=env,
@@ -1215,6 +1965,8 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         check=False,
     )
     elapsed = time.time() - start
+    result["gpu_training_launched"] = True
+    result["trainer_command"] = train_cmd
     train_result_path = out_dir / "voxtell_prompt_train_result.json"
     train_result = {}
     if train_result_path.exists():
@@ -1248,7 +2000,24 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "stdout_tail": (proc.stdout or "")[-4000:],
         "stderr_tail": (proc.stderr or "")[-4000:],
     })
+    if canonical_training_backend == PROJECT_PROMPT_STUDENT:
+        result["trainer"] = PROJECT_PROMPT_STUDENT
+        result["uses_official_voxtell_model"] = True
+        result["uses_official_checkpoint_initialization"] = True
+        result["uses_project_manifest"] = True
+        result["uses_autolabelcore_confidence"] = True
+        result["uses_abcd_training_weight"] = True
+        result["text_encoder"] = "Qwen/Qwen3-Embedding-4B"
+        result["text_encoder_frozen"] = True
+        result["official_prompt_training_pipeline_available"] = False
+        result["negative_prompt_sampling"] = "project_specific"
+        result["training_provenance_warning"] = (
+            "This checkpoint comes from the project prompt-conditioned distillation trainer using official VoxTell components, "
+            "not from official voxtell-finetune."
+        )
     result["checkpoint_eligible_for_next_round"] = False
+    result["eligible_for_next_round_prompt_student"] = False
+    result["eligible_as_teacher_candidate"] = False
     if result["status"] == "success" and has_inference_model:
         result["sanity_check"] = run_voxtell_student_sanity_check(round_idx, inference_model_dir, manifest_path)
         if result["sanity_check"].get("status") == "success":
@@ -1262,17 +2031,18 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         elif pilot_short_training:
             result["training_status"] = "completed_pilot_quality_gated"
             result["checkpoint_eligible_for_next_round"] = False
+            result["eligible_for_next_round_prompt_student"] = False
             result["formal_round2_recommendation"] = (
                 "Pilot checkpoint passed automatic gates but was trained on a capped subset; "
                 "run full M-step before formal Round2 competition."
             )
         else:
             result["checkpoint_eligible_for_next_round"] = True
-    with open(result_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
+            result["eligible_for_next_round_prompt_student"] = True
+            result["eligible_as_teacher_candidate"] = True
     restart_vllm_after_mstep()
     log(f"3D prompt M-step 完成: status={result.get('status')}, checkpoint={result.get('finetuned_checkpoint')}")
-    return result
+    return finish(result)
 
 
 def run_student_mstep(round_idx: int, dataset_path: Path, global_consolidation: bool = False) -> dict:
@@ -1285,6 +2055,88 @@ def run_student_mstep(round_idx: int, dataset_path: Path, global_consolidation: 
 
 
 # ── 评估指标 ──────────────────────────────────────────────────────────────────
+
+def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> dict:
+    """Run the formal multi-evidence QC chain for a completed student round."""
+    import runpy
+
+    student_root = _round_student_prediction_root_for_qc(round_idx)
+    teacher_root = OUTPUT_ROOT / f"round{reference_round}" / "estep" / "annotation_versions"
+    gt_env = os.getenv("MEDAI_GT_ROOT", "").strip()
+    gt_root = Path(gt_env).expanduser() if gt_env else None
+    if gt_root is not None and not gt_root.is_absolute():
+        gt_root = PROJECT_ROOT / gt_root
+    output_dir = _round_evaluation_chain_dir(round_idx)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / "evaluation_chain_summary.json"
+
+    if not student_root.exists() or not any(p.is_dir() for p in student_root.iterdir()):
+        summary = {
+            "status": "skipped",
+            "reason": "student_predictions_missing",
+            "student_root": str(student_root),
+            "output_dir": str(output_dir),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+    if not teacher_root.exists():
+        summary = {
+            "status": "skipped",
+            "reason": "teacher_reference_missing",
+            "teacher_root": str(teacher_root),
+            "output_dir": str(output_dir),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+
+    old_argv = sys.argv[:]
+    sys.argv = [
+        str(PROJECT_ROOT / "scripts/evaluate_segmentation_chain.py"),
+        "--case-list", str(CASE_LIST),
+        "--student-root", str(student_root),
+        "--teacher-root", str(teacher_root),
+        "--target-config", str(PROMPT_TARGET_CONFIG),
+        "--output-dir", str(output_dir),
+        "--volume-policy", str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"),
+    ]
+    if gt_root and gt_root.exists():
+        sys.argv.extend(["--gt-root", str(gt_root)])
+    try:
+        try:
+            runpy.run_path(str(PROJECT_ROOT / "scripts/evaluate_segmentation_chain.py"), run_name="__main__")
+        except SystemExit as exc:
+            if int(exc.code or 0) != 0:
+                raise RuntimeError(f"evaluation_chain exited with {exc.code}")
+    except Exception as exc:
+        summary = {
+            "status": "failed",
+            "reason": str(exc),
+            "student_root": str(student_root),
+            "teacher_root": str(teacher_root),
+            "gt_root": str(gt_root) if gt_root else None,
+            "output_dir": str(output_dir),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        log(f"evaluation_chain 失败: {exc}")
+        return summary
+    finally:
+        sys.argv = old_argv
+
+    summary = _load_json(summary_path)
+    summary.update({
+        "status": "success",
+        "student_root": str(student_root),
+        "teacher_root": str(teacher_root),
+        "gt_root": str(gt_root) if gt_root and gt_root.exists() else None,
+        "output_dir": str(output_dir),
+    })
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    log(
+        "evaluation_chain 完成: "
+        f"rows={summary.get('rows')}, blocklist={summary.get('outputs', {}).get('next_round_blocklist')}"
+    )
+    return summary
+
 
 def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
     """
@@ -1459,6 +2311,91 @@ def save_round_predictions(round_idx: int):
     log(f"Student 推理完成: {saved}/{len(cases)} 个 case")
 
 
+def save_official_voxtell_nnunet_encoder_predictions(round_idx: int):
+    """Run nnU-Net inference for official VoxTell encoder-transfer checkpoints and split labels."""
+    log(f"保存 Round {round_idx} 官方 VoxTell encoder-transfer nnU-Net student 推理结果...")
+    pred_dir = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    mstep_result_path = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json"
+    if not mstep_result_path.exists():
+        summary = {"stage": "official_voxtell_nnunet_encoder_inference_summary", "status": "skipped_no_mstep_result", "round": round_idx}
+        (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+    try:
+        mstep_result = json.loads(mstep_result_path.read_text(encoding="utf-8"))
+    except Exception:
+        mstep_result = {}
+    if mstep_result.get("canonical_training_backend") != OFFICIAL_NNUNET_BASELINE and mstep_result.get("training_mode") != OFFICIAL_VOXTELL_ENCODER_MODE:
+        return save_prompt_student_predictions(round_idx)
+    if not mstep_result.get("expected_checkpoint_exists") and not mstep_result.get("inference_model_dir"):
+        summary = {
+            "stage": "official_voxtell_nnunet_encoder_inference_summary",
+            "status": "skipped_no_eligible_checkpoint",
+            "round": round_idx,
+            "training_mode": mstep_result.get("training_mode"),
+            "reason": "Official encoder-transfer checkpoint is missing or not quality-gated for next round.",
+        }
+        (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+    env_info = mstep_result.get("nnunet_environment") or {}
+    dataset_id = str(mstep_result.get("dataset_id") or os.getenv("MEDAI_VOXTELL_NNUNET_DATASET_ID", "997"))
+    dataset_name = str(mstep_result.get("dataset_name") or os.getenv("MEDAI_VOXTELL_NNUNET_DATASET_NAME", "MedAI_VoxTellEncoder"))
+    trainer = str(mstep_result.get("trainer") or os.getenv("MEDAI_VOXTELL_NNUNET_TRAINER", "VoxTellTrainer_noMirroring"))
+    configuration = os.getenv("MEDAI_VOXTELL_NNUNET_CONFIGURATION", "3d_fullres")
+    folds = os.getenv("MEDAI_VOXTELL_NNUNET_FOLD", "0")
+    plans = str(mstep_result.get("plans") or os.getenv("MEDAI_VOXTELL_NNUNET_PLANS", "nnUNetPlans"))
+    nnunet_results = Path(env_info.get("nnUNet_results") or "")
+    nnunet_raw = Path(env_info.get("nnUNet_raw") or "")
+    dataset_json = nnunet_raw / f"Dataset{int(dataset_id):03d}_{dataset_name}" / "dataset.json"
+    cases = []
+    import csv as csv_mod
+    with open(CASE_LIST) as f:
+        for row in csv_mod.DictReader(f):
+            cases.append(row)
+    results = []
+    saved = 0
+    for case in cases:
+        case_id = case["case_id"]
+        ct_path = Path(case["ct_path"])
+        case_pred_dir = pred_dir / case_id
+        case_pred_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts/nnunetv2_predict_and_split.py"),
+            "--image", str(ct_path),
+            "--output", str(case_pred_dir),
+            "--dataset-id", dataset_id,
+            "--nnunet-results", str(nnunet_results),
+            "--dataset-json", str(dataset_json),
+            "--trainer", trainer,
+            "--plans", plans,
+            "--configuration", configuration,
+            "--folds", folds,
+            "--checkpoint-name", "checkpoint_final.pth",
+        ]
+        if not ct_path.exists() or not dataset_json.exists() or not nnunet_results.exists():
+            item = {"case_id": case_id, "status": "dry_run_or_missing_inputs", "command": cmd}
+        else:
+            proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            item = {"case_id": case_id, "status": "success" if proc.returncode == 0 else "failed", "return_code": proc.returncode, "command": cmd, "stdout_tail": (proc.stdout or "")[-2000:], "stderr_tail": (proc.stderr or "")[-2000:]}
+            if proc.returncode == 0:
+                saved += 1
+        results.append(item)
+    summary = {
+        "stage": "official_voxtell_nnunet_encoder_inference_summary",
+        "status": "success" if saved == len(cases) else "partial_success",
+        "round": round_idx,
+        "training_mode": OFFICIAL_VOXTELL_ENCODER_MODE,
+        "student_inference_backend": "nnunet_multiclass_split",
+        "num_cases": len(cases),
+        "num_cases_success": saved,
+        "results": results,
+        "accuracy_warning": "Student pseudo-consistency outputs are not expert ground-truth accuracy.",
+    }
+    (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    return summary
+
+
 def save_prompt_student_predictions(round_idx: int):
     """Save VoxTell-style 3D prompt student predictions for 373 exact organs."""
     log(f"保存 Round {round_idx} 3D prompt student 推理结果（373 organs）...")
@@ -1475,7 +2412,7 @@ def save_prompt_student_predictions(round_idx: int):
         except Exception:
             mstep_result = {}
     has_finetuned = (finetuned_model_dir / "plans.json").exists() and (finetuned_model_dir / "fold_0" / "checkpoint_final.pth").exists()
-    eligible = bool(mstep_result.get("checkpoint_eligible_for_next_round"))
+    eligible = bool(mstep_result.get("eligible_for_next_round_prompt_student", mstep_result.get("checkpoint_eligible_for_next_round")))
     if has_finetuned and eligible:
         model_dir = finetuned_model_dir
         checkpoint_status = "finetuned"
@@ -1485,19 +2422,36 @@ def save_prompt_student_predictions(round_idx: int):
         checkpoint_status = "not_distilled_student"
         eligible_for_competition = False
     else:
+        training_status = str(mstep_result.get("training_status") or "")
+        if not has_finetuned:
+            checkpoint_status = "missing_finetuned_checkpoint"
+            skip_reason = "The finetuned VoxTell checkpoint is missing."
+        elif training_status == "completed_pilot_quality_gated":
+            checkpoint_status = "pilot_checkpoint_not_formal"
+            skip_reason = "The checkpoint passed pilot gates but did not complete a full formal M-step."
+        elif training_status == "completed_sanity_failed":
+            checkpoint_status = "sanity_gate_failed"
+            skip_reason = "The finetuned checkpoint failed the post-training sanity gate."
+        elif training_status == "completed_quality_gate_failed":
+            checkpoint_status = "quality_gate_failed"
+            skip_reason = "The finetuned checkpoint failed the pseudo-consistency quality gate."
+        else:
+            checkpoint_status = "checkpoint_not_eligible"
+            skip_reason = "The finetuned checkpoint was not marked eligible for formal inference."
         summary = {
             "stage": "voxtell_3d_prompt_student_inference_summary",
             "status": "skipped_no_eligible_checkpoint",
             "round": round_idx,
             "model_dir": str(finetuned_model_dir),
-            "checkpoint_status": "missing_or_quality_gate_failed",
+            "checkpoint_status": checkpoint_status,
             "checkpoint_eligible_for_next_round": False,
+            "eligible_for_next_round_prompt_student": False,
             "eligible_for_competition": False,
             "mstep_result_path": str(mstep_result_path),
-            "reason": "No quality-gated finetuned VoxTell student checkpoint; base fallback is disabled for formal runs.",
+            "reason": skip_reason,
         }
         (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        log("3D prompt student 推理跳过：没有通过质量门槛的 finetuned checkpoint。")
+        log(f"3D prompt student 推理跳过：{skip_reason}")
         return summary
 
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
@@ -1509,6 +2463,9 @@ def save_prompt_student_predictions(round_idx: int):
         device="cuda",
     )
     all_organs = load_student_target_organs()
+
+    def case_prediction_complete(case_dir: Path) -> bool:
+        return all((case_dir / f"{organ}.nii.gz").exists() for organ in all_organs)
 
     cases = []
     with open(CASE_LIST) as f:
@@ -1523,7 +2480,7 @@ def save_prompt_student_predictions(round_idx: int):
         if not ct_path.exists():
             continue
         case_pred_dir = pred_dir / case_id
-        if case_pred_dir.exists() and any(case_pred_dir.glob("*.nii.gz")):
+        if case_pred_dir.exists() and case_prediction_complete(case_pred_dir):
             saved += 1
             cached_result = case_pred_dir / "voxtell_student_result.json"
             if cached_result.exists():
@@ -1570,9 +2527,65 @@ def save_prompt_student_predictions(round_idx: int):
     log(f"3D prompt student 推理阶段完成/计划完成: {saved}/{len(cases)} 个 case")
 
 
+def apply_round_organ_type_postprocess(round_idx: int) -> dict:
+    """Materialize organ-type-aware postprocessed student predictions for formal QC/next EM."""
+    import runpy
+
+    input_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+    output_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_postprocessed"
+    summary_path = output_root / "organ_type_postprocess_summary.json"
+    if not input_root.exists() or not any(p.is_dir() for p in input_root.iterdir()):
+        summary = {"status": "skipped", "reason": "student_predictions_missing", "input_root": str(input_root), "output_root": str(output_root)}
+        output_root.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+    old_argv = sys.argv[:]
+    sys.argv = [
+        str(PROJECT_ROOT / "scripts/apply_organ_type_postprocess.py"),
+        "--input-root", str(input_root),
+        "--output-root", str(output_root),
+        "--case-list", str(CASE_LIST),
+        "--policy", str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"),
+        "--overwrite",
+    ]
+    try:
+        try:
+            runpy.run_path(str(PROJECT_ROOT / "scripts/apply_organ_type_postprocess.py"), run_name="__main__")
+        except SystemExit as exc:
+            if int(exc.code or 0) != 0:
+                raise RuntimeError(f"organ_type_postprocess exited with {exc.code}")
+    except Exception as exc:
+        output_root.mkdir(parents=True, exist_ok=True)
+        summary = {"status": "failed", "reason": str(exc), "input_root": str(input_root), "output_root": str(output_root)}
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        log(f"organ-type postprocess 失败: {exc}")
+        return summary
+    finally:
+        sys.argv = old_argv
+    summary = _load_json(summary_path)
+    summary.setdefault("status", "success")
+    log(f"organ-type postprocess 完成: masks={summary.get('processed_masks')}, output={output_root}")
+    return summary
+
+
+def _round_student_prediction_root_for_qc(round_idx: int) -> Path:
+    pp = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_postprocessed"
+    if pp.exists() and any(p.is_dir() for p in pp.iterdir()):
+        return pp
+    return OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+
+
 def save_student_predictions(round_idx: int):
     ensure_current_student_backend_allowed()
     if STUDENT_BACKEND == "voxtell_style_3d_prompt":
+        mstep_result_path = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json"
+        if mstep_result_path.exists():
+            try:
+                mstep_result = json.loads(mstep_result_path.read_text(encoding="utf-8"))
+            except Exception:
+                mstep_result = {}
+            if mstep_result.get("canonical_training_backend") == OFFICIAL_NNUNET_BASELINE or mstep_result.get("training_mode") == OFFICIAL_VOXTELL_ENCODER_MODE:
+                return save_official_voxtell_nnunet_encoder_predictions(round_idx)
         return save_prompt_student_predictions(round_idx)
     if STUDENT_BACKEND == "vista3d_legacy":
         return save_round_predictions(round_idx)
@@ -1706,7 +2719,25 @@ def main():
         if summary_path.exists():
             with open(summary_path) as f:
                 s = json.load(f)
-            if s.get("estep_status") == "success" and s.get("mstep_status") == "success":
+            mstep_complete = s.get("mstep_status") == "success"
+            if STUDENT_BACKEND == "voxtell_style_3d_prompt" and mstep_complete:
+                mstep_result_path = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json"
+                try:
+                    prior_mstep = json.loads(mstep_result_path.read_text(encoding="utf-8"))
+                except Exception:
+                    prior_mstep = {}
+                mstep_complete = bool(
+                    prior_mstep.get(
+                        "eligible_for_next_round_prompt_student",
+                        prior_mstep.get("checkpoint_eligible_for_next_round", False),
+                    )
+                )
+                if not mstep_complete:
+                    log(
+                        f"\nRound {round_idx} 有旧 summary，但没有正式可用的 prompt-student checkpoint；"
+                        "继续断点执行 M-step。"
+                    )
+            if s.get("estep_status") == "success" and mstep_complete:
                 log(f"\nRound {round_idx} 已完成，跳过")
                 continue
 
@@ -1721,9 +2752,33 @@ def main():
 
         # 构建训练数据
         dataset_path = build_student_dataset(round_idx)
+        is_consolidation = (round_idx % CONSOLIDATION_INTERVAL == 0)
+        estep_gate = formal_estep_gate(round_idx, estep_result, dataset_path)
+        gate_path = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "formal_gate.json"
+        gate_path.parent.mkdir(parents=True, exist_ok=True)
+        gate_path.write_text(json.dumps(estep_gate, indent=2, ensure_ascii=False), encoding="utf-8")
+        if estep_gate.get("status") != "success":
+            log(f"E-step 正式门禁失败，阻断 M-step: {estep_gate.get('reason')}")
+            round_elapsed = time.time() - round_start
+            summary = {
+                "round": round_idx,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "estep_status": estep_result.get("status"),
+                "estep_formal_gate": estep_gate,
+                "mstep_status": "blocked_by_estep_gate",
+                "student_backend": STUDENT_BACKEND,
+                "mstep_type": "global_consolidation" if is_consolidation else "local_update",
+                "finetuned_checkpoint": None,
+                "metrics": {"status": "skipped", "reason": "formal_estep_gate_failed"},
+                "label_scoring_dashboard": label_scoring_dashboard,
+                "round_elapsed_hours": round(round_elapsed / 3600, 2),
+            }
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(summary_path, "w") as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            continue
 
         # M-step — 실패 시 1회 재시도
-        is_consolidation = (round_idx % CONSOLIDATION_INTERVAL == 0)
         mstep_result = run_student_mstep(round_idx, dataset_path, global_consolidation=is_consolidation)
 
         if (
@@ -1753,7 +2808,12 @@ def main():
             log(f"摘要已保存: {summary_path}")
             break
 
-        if mstep_result.get("status") != "success":
+        training_status = str(mstep_result.get("training_status") or "")
+        retryable_failure = (
+            mstep_result.get("status") != "success"
+            and not training_status.startswith("completed_")
+        )
+        if retryable_failure:
             log(f"⚠️  M-step 失败 (return_code={mstep_result.get('return_code')}), 清理后重试一次...")
             # 清理失败的输出，重试
             import shutil as _shutil
@@ -1765,6 +2825,29 @@ def main():
                 if _dp.exists():
                     _shutil.rmtree(_dp)
             mstep_result = run_student_mstep(round_idx, dataset_path, global_consolidation=is_consolidation)
+
+        if mstep_result.get("training_status") == "completed_pilot_quality_gated":
+            log("⏸️  M-step pilot 已通过质量门，但未完成正式全量训练；停止本轮，禁止写成正式 Round success。")
+            summary = {
+                "round": round_idx,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "estep_status": estep_result.get("status"),
+                "mstep_status": "pilot_only",
+                "student_backend": STUDENT_BACKEND,
+                "mstep_type": "global_consolidation" if is_consolidation else "local_update",
+                "finetuned_checkpoint": mstep_result.get("finetuned_checkpoint"),
+                "metrics": {
+                    "status": "skipped",
+                    "reason": "Pilot checkpoint passed gates but formal full M-step was not completed.",
+                },
+                "label_scoring_dashboard": label_scoring_dashboard,
+                "round_elapsed_hours": round((time.time() - round_start) / 3600, 2),
+            }
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(summary_path, "w") as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            log(f"Pilot 摘要已保存: {summary_path}")
+            break
 
         if mstep_result.get("status") != "success":
             log(f"❌ M-step 重试后仍失败，跳过 Round {round_idx} 的 student 推理和评估")
@@ -1795,11 +2878,16 @@ def main():
                 "reason": mstep_result.get("reason", "prompt student manifest is ready but no checkpoint was produced"),
             }
         else:
-            # 先保存 student 推理结果，再评估（评估依赖 student_predictions）
+            # 先保存 student 推理结果，再做器官类型感知后处理，然后评估。
             save_student_predictions(round_idx)
+            postprocess_summary = apply_round_organ_type_postprocess(round_idx)
 
             # 评估 student 与 Round1 selected pseudo label 的一致性；不能当真实 accuracy。
             round_metrics = compute_round_metrics(round_idx)
+            # 正式 QC evidence chain：teacher-vs-GT（如有 GT）、student-vs-teacher、student-vs-GT（如有 GT）、
+            # volume/empty/false-positive/organ-group gates，并生成下一轮 blocklist。
+            evaluation_chain = compute_round_evaluation_chain(round_idx)
+            round_metrics["evaluation_chain"] = evaluation_chain
 
         round_elapsed = time.time() - round_start
         log(f"Round {round_idx} 完成，耗时 {round_elapsed/3600:.1f} 小时")
@@ -1808,6 +2896,7 @@ def main():
             "round": round_idx,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "estep_status": estep_result.get("status"),
+            "estep_formal_gate": estep_gate,
             "mstep_status": mstep_result.get("status"),
             "student_backend": STUDENT_BACKEND,
             "mstep_type": "global_consolidation" if is_consolidation else "local_update",
@@ -1820,11 +2909,19 @@ def main():
                 "accuracy_warning": round_metrics.get("accuracy_warning", "Not true accuracy."),
                 "top5_organs": round_metrics.get("top5_organs", []),
                 "bottom5_organs": round_metrics.get("bottom5_organs", []),
+                "evaluation_chain": round_metrics.get("evaluation_chain", {}),
+                "organ_type_postprocess": locals().get("postprocess_summary", {}),
             },
             "label_scoring_dashboard": label_scoring_dashboard,
             "round_elapsed_hours": round(round_elapsed / 3600, 2),
         }
         summary["reliability_weights"] = _student_manifest_weight_summary(round_idx)
+        summary["success"] = bool(
+            summary.get("estep_status") == "success"
+            and (summary.get("estep_formal_gate") or {}).get("status") == "success"
+            and summary.get("mstep_status") == "success"
+            and bool(mstep_result.get("eligible_for_next_round_prompt_student", mstep_result.get("checkpoint_eligible_for_next_round", False)))
+        )
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)

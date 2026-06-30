@@ -1,0 +1,26 @@
+dataset_name: example_dataset
+version: 1
+description: >
+  Fill this file for each dataset so prompt generation, postprocessing, and
+  evaluation use the dataset's actual label definitions rather than generic
+  organ-name assumptions.
+
+labels:
+  stomach:
+    target_definition: full_organ
+    organ_group: hollow_gi
+    banned_prompt_terms:
+      - "gastric lumen"
+      - "lumen only"
+  colon:
+    target_definition: full_organ
+    organ_group: hollow_gi
+    banned_prompt_terms:
+      - "colonic lumen"
+      - "lumen only"
+  aorta:
+    target_definition: vessel
+    organ_group: vessel_or_duct
+  pancreatic_duct:
+    target_definition: duct
+    organ_group: vessel_or_duct

@@ -17,6 +17,54 @@ PROMPT_BANK_CATEGORIES = (
 )
 
 
+SEMANTICALLY_RISKY_PROMPT_TERMS = (
+    "lumen only",
+    "gastric lumen",
+    "colonic lumen",
+    "bowel lumen",
+    "vesical lumen",
+    "all vessels",
+    "all veins",
+    "all arteries",
+    "vascular tree",
+)
+
+SAFE_PROMPT_REPLACEMENTS = {
+    "segment the gastric lumen": "segment the stomach organ according to the dataset label definition",
+    "segment the colonic lumen": "segment the colon organ / large bowel structure according to the dataset label definition",
+    "segment the bowel lumen": "segment the bowel organ region according to the dataset label definition",
+    "segment the vesical lumen": "segment the bladder according to the dataset label definition",
+    "segment the aortic lumen": "segment the aorta according to the dataset label definition",
+}
+
+
+def sanitize_prompt_text(prompt: str) -> str:
+    text = str(prompt or "").strip()
+    low = text.lower()
+    for bad, replacement in SAFE_PROMPT_REPLACEMENTS.items():
+        if bad in low:
+            return replacement
+    return text
+
+
+def prompt_semantic_flags(prompt: str) -> list[str]:
+    low = str(prompt or "").lower()
+    return [term for term in SEMANTICALLY_RISKY_PROMPT_TERMS if term in low]
+
+
+def filter_semantically_risky_prompts(prompts: list[str]) -> list[str]:
+    filtered: list[str] = []
+    for prompt in prompts:
+        clean = sanitize_prompt_text(str(prompt or "").strip())
+        if not clean:
+            continue
+        if prompt_semantic_flags(clean):
+            continue
+        if clean not in filtered:
+            filtered.append(clean)
+    return filtered
+
+
 CURATED_ORGAN_FACTS: dict[str, dict[str, Any]] = {
     "liver": {
         "aliases": ["liver", "hepatic parenchyma", "hepatic organ"],
@@ -49,7 +97,7 @@ CURATED_ORGAN_FACTS: dict[str, dict[str, Any]] = {
         "appearance": "bean-shaped retroperitoneal organ with cortex, medulla, and renal sinus on CT",
     },
     "aorta": {
-        "aliases": ["aorta", "aortic lumen", "aortic vessel"],
+        "aliases": ["aorta", "aortic vessel"],
         "region": "midline to left paraspinal thoracoabdominal course",
         "landmarks": ["heart", "spine", "diaphragm", "iliac bifurcation"],
         "appearance": "long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase",
@@ -61,7 +109,7 @@ CURATED_ORGAN_FACTS: dict[str, dict[str, Any]] = {
         "appearance": "long venous tubular structure, usually right of the aorta on axial CT",
     },
     "stomach": {
-        "aliases": ["stomach", "gastric lumen", "gastric organ"],
+        "aliases": ["stomach", "gastric organ"],
         "region": "left upper abdomen between the esophagus and duodenum",
         "landmarks": ["liver", "spleen", "pancreas", "diaphragm"],
         "appearance": "hollow J-shaped or sac-like structure that may contain air, fluid, or oral contrast",
@@ -97,13 +145,13 @@ CURATED_ORGAN_FACTS: dict[str, dict[str, Any]] = {
         "appearance": "C-shaped bowel loop with variable air, fluid, or contrast on CT",
     },
     "colon": {
-        "aliases": ["colon", "large bowel", "colonic lumen"],
+        "aliases": ["colon", "large bowel"],
         "region": "peripheral abdomen and pelvis following the large-bowel frame",
         "landmarks": ["small bowel", "abdominal wall", "rectum", "cecum"],
         "appearance": "haustrated bowel structure with variable gas, stool, fluid, or contrast",
     },
     "bladder": {
-        "aliases": ["urinary bladder", "bladder", "vesical lumen"],
+        "aliases": ["urinary bladder", "bladder"],
         "region": "anterior pelvis, inferior to the peritoneal cavity",
         "landmarks": ["pubic symphysis", "prostate or uterus", "rectum", "pelvic sidewalls"],
         "appearance": "rounded fluid-density pelvic reservoir with a thin wall when distended",
@@ -343,12 +391,12 @@ def build_prompt_bank(organs: list[str]) -> dict[str, dict[str, Any]]:
 
 def flatten_prompt_bank_entry(entry: dict[str, Any]) -> list[str]:
     prompts: list[str] = []
-    canonical = str(entry.get("canonical_prompt") or "").strip()
-    if canonical:
+    canonical = sanitize_prompt_text(str(entry.get("canonical_prompt") or "").strip())
+    if canonical and not prompt_semantic_flags(canonical):
         prompts.append(canonical)
     for category in PROMPT_BANK_CATEGORIES:
         prompts.extend(str(p).strip() for p in (entry.get("prompts", {}).get(category) or []))
-    return _dedupe(prompts)
+    return _dedupe(filter_semantically_risky_prompts(prompts))
 
 
 def prompt_category_for(entry: dict[str, Any], prompt: str) -> str:
@@ -376,7 +424,7 @@ def select_balanced_prompt_variants(entry: dict[str, Any], *, seed: str) -> list
         selected.append(canonical)
     category_prompts = entry.get("prompts", {}) or {}
     for category in PROMPT_BANK_CATEGORIES:
-        choices = _dedupe([str(x) for x in (category_prompts.get(category) or [])])
+        choices = _dedupe(filter_semantically_risky_prompts([str(x) for x in (category_prompts.get(category) or [])]))
         if not choices:
             continue
         digest = hashlib.sha1(f"{seed}:{category}".encode("utf-8")).hexdigest()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -9,8 +10,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .backend_capabilities import profile_runtime_policy
 from .model_registry import get_model_entry, load_registry
+from .subprocess_utils import subprocess_text
 from .totalseg_runner import run_totalseg_with_contract, run_totalsegmentator
+from .voxtell_official_predictor import OfficialVoxTellPretrainedAdapter
 
 _PREDICT_SCRIPTS = (
     "nnunetv2_predict_and_split.py",
@@ -82,6 +86,113 @@ def _write_inference_summary(case_out: Path, result: dict[str, Any], seg_out: Pa
         pass
 
 
+def _official_voxtell_model_dir(project_root: Path, extra_context: dict[str, Any]) -> Path:
+    explicit = extra_context.get("model_dir") or extra_context.get("official_voxtell_model_dir")
+    env_value = os.getenv("MEDAI_VOXTELL_MODEL_DIR")
+    chosen = explicit or env_value or (project_root / "checkpoints" / "VoxTell" / "voxtell_v1.1")
+    return Path(str(chosen)).resolve()
+
+
+def _official_voxtell_target_config(project_root: Path, extra_context: dict[str, Any]) -> Path:
+    explicit = extra_context.get("target_config") or extra_context.get("prompt_target_config")
+    chosen = explicit or os.getenv("MEDAI_PROMPT_TARGET_CONFIG") or (project_root / "configs" / "student_3d_prompt_target_organs.json")
+    return Path(str(chosen)).resolve()
+
+
+def _run_official_voxtell_pretrained(
+    *,
+    image: Path,
+    output_root: Path,
+    case_out: Path,
+    seg_out: Path,
+    per_model_dir: Path,
+    model_key: str,
+    case_id: str,
+    dry_run: bool,
+    timeout_sec: int,
+    device: str | None,
+    extra_context: dict[str, Any],
+    project_root: Path,
+) -> dict[str, Any]:
+    profile_name = os.getenv("MEDAI_EXPERIMENT_PROFILE", "")
+    runtime_policy = profile_runtime_policy(profile_name)
+    voxtell_policy = runtime_policy.get("official_voxtell_pretrained") or {}
+    mode = str(voxtell_policy.get("official_voxtell_mode") or "baseline_only")
+    requested_organs = [
+        str(organ).strip()
+        for organ in (extra_context.get("requested_organs") or [])
+        if str(organ).strip()
+    ]
+    prompt_overrides = extra_context.get("prompt_overrides")
+    text_encoding_model = extra_context.get("text_encoding_model") or os.getenv("MEDAI_TEXT_ENCODING_MODEL")
+    model_dir = _official_voxtell_model_dir(project_root, extra_context)
+    target_config = _official_voxtell_target_config(project_root, extra_context)
+    try:
+        target_doc = json.loads(target_config.read_text(encoding="utf-8"))
+        supported_targets = {str(item) for item in target_doc.get("target_organs", [])}
+    except Exception:
+        supported_targets = set()
+    supported_organs = [organ for organ in requested_organs if organ in supported_targets]
+    skipped_organs = [organ for organ in requested_organs if organ not in supported_targets]
+    if requested_organs and not supported_organs:
+        result = {
+            "stage": "infer",
+            "status": "skipped_unsupported_targets",
+            "backend": "official_voxtell_pretrained",
+            "model_key": model_key,
+            "case_id": case_id,
+            "image": str(image),
+            "segmentation_output": str(seg_out),
+            "requested_organs": requested_organs,
+            "supported_organs": [],
+            "skipped_unsupported_organs": skipped_organs,
+            "target_config": str(target_config),
+            "reason": "None of the requested hierarchy/dependency organs belong to the formal VoxTell target space.",
+        }
+        _write_run_meta(per_model_dir, model_key, "official_voxtell_pretrained_adapter", result)
+        _write_inference_summary(case_out, result, seg_out)
+        return result
+    prompts = supported_organs or None
+
+    adapter = OfficialVoxTellPretrainedAdapter(
+        model_dir=model_dir,
+        target_config=target_config,
+        mode=mode,
+        device=device or "cuda",
+        text_encoding_model=text_encoding_model,
+    )
+    result = adapter.segment(
+        ct_image=image,
+        output_dir=seg_out,
+        prompts=prompts,
+        dry_run=dry_run,
+        timeout_sec=timeout_sec,
+        prompt_batch_size=max(1, len(supported_organs)) if supported_organs else 16,
+        prompt_overrides=prompt_overrides if isinstance(prompt_overrides, dict) else None,
+    )
+    result.update({
+        "stage": "infer",
+        "backend": "official_voxtell_pretrained",
+        "model_key": model_key,
+        "case_id": case_id,
+        "image": str(image),
+        "segmentation_output": str(seg_out),
+        "per_model_dir": str(per_model_dir),
+        "registry_path": str((project_root / "configs" / "model_registry.yaml").resolve()),
+        "output_folder": str(output_root),
+        "requested_organs": requested_organs,
+        "supported_organs": supported_organs,
+        "skipped_unsupported_organs": skipped_organs,
+        "target_config": str(target_config),
+        "model_dir": str(model_dir),
+        "text_encoding_model": str(text_encoding_model) if text_encoding_model else None,
+        "experiment_profile": runtime_policy.get("experiment_profile"),
+    })
+    _write_run_meta(per_model_dir, model_key, "official_voxtell_pretrained_adapter", result)
+    _write_inference_summary(case_out, result, seg_out)
+    return result
+
+
 def _totalseg_subtasks_for_context(subtask_config: dict | None, extra_context: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
     """Return official TotalSegmentator subtasks safe for the current request.
 
@@ -147,7 +258,6 @@ def run_registered_model(
     image = Path(image_path).resolve()
     registry_file = Path(registry_path).resolve()
     registry = load_registry(registry_file)
-    entry = get_model_entry(registry, model_key)
     if case_id is None:
         case_id = image.parent.name or image.stem
 
@@ -157,6 +267,32 @@ def run_registered_model(
     segmentation_output_override = extra_context.get("segmentation_output_override")
     case_out = Path(case_output_override).resolve() if case_output_override else output_root / case_id
     seg_out = Path(segmentation_output_override).resolve() if segmentation_output_override else case_out / "segmentations"
+    seg_out.mkdir(parents=True, exist_ok=True)
+
+    # Per-model output contract directory.
+    per_model_dir = case_out / "per_model" / model_key
+    per_model_dir.mkdir(parents=True, exist_ok=True)
+
+    # project root relative to configs/model_registry.yaml
+    project_root = registry_file.parent.parent
+
+    if model_key == "official_voxtell_pretrained":
+        return _run_official_voxtell_pretrained(
+            image=image,
+            output_root=output_root,
+            case_out=case_out,
+            seg_out=seg_out,
+            per_model_dir=per_model_dir,
+            model_key=model_key,
+            case_id=case_id,
+            dry_run=dry_run,
+            timeout_sec=timeout_sec,
+            device=device,
+            extra_context=extra_context,
+            project_root=project_root,
+        )
+
+    entry = get_model_entry(registry, model_key)
 
     # Skip models explicitly disabled in the registry.
     if entry.get("enabled") is False:
@@ -184,11 +320,6 @@ def run_registered_model(
                 "status": "failed", "reason": "Refusing to write inference output inside checkpoint_path. Use a separate outputs/ folder so linked teacher checkpoints remain read-only.",
                 "case_id": case_id, "output_folder": str(case_out), "checkpoint_path": str(checkpoint_path),
             }
-    seg_out.mkdir(parents=True, exist_ok=True)
-
-    # Per-model output contract directory.
-    per_model_dir = case_out / "per_model" / model_key
-    per_model_dir.mkdir(parents=True, exist_ok=True)
 
     recipe = entry.get("recipe", "")
     runner = entry.get("runner", "command_template")
@@ -243,7 +374,6 @@ def run_registered_model(
     checkpoint_path = checkpoint_path_value
     # Registry file is configs/model_registry.yaml; checkpoint paths like
     # "checkpoints/..." are relative to the project root (one level up).
-    project_root = registry_file.parent.parent
 
     def _resolve_from_registry(p: str) -> Path:
         """Resolve a path relative to the project root (parent of configs/)."""
@@ -322,7 +452,12 @@ def run_registered_model(
         completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, shell=True, timeout=timeout_sec)
         timed_out = False
     except subprocess.TimeoutExpired as exc:
-        completed = subprocess.CompletedProcess(shlex.split(command), 124, stdout=exc.stdout or "", stderr=(exc.stderr or "") + f"\n[registered_infer] Timeout after {timeout_sec}s.")
+        completed = subprocess.CompletedProcess(
+            shlex.split(command),
+            124,
+            stdout=subprocess_text(exc.stdout),
+            stderr=subprocess_text(exc.stderr) + f"\n[registered_infer] Timeout after {timeout_sec}s.",
+        )
         timed_out = True
     elapsed = time.time() - start
     num_masks, sample_masks = _mask_summary(seg_out)

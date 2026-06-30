@@ -1,0 +1,19 @@
+experiment_profile: advisor_aligned_default
+
+advisor_aligned_default:
+  official_voxtell_pretrained:
+    mode: baseline_only
+  mstep_backend: project_voxtell_prompt_distillation_student
+  official_voxtell_nnunet_encoder_baseline:
+    enabled: false
+    allow_as_teacher_candidate: false
+    explicit_baseline_mode: false
+
+enhanced_candidate_pool:
+  official_voxtell_pretrained:
+    mode: candidate
+  mstep_backend: project_voxtell_prompt_distillation_student
+  official_voxtell_nnunet_encoder_baseline:
+    enabled: false
+    allow_as_teacher_candidate: false
+    explicit_baseline_mode: false

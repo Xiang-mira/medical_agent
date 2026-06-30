@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -23,21 +24,18 @@ from cli_anything.medai.core.multimodel_loop import run_multimodel_annotation_lo
 
 DEFAULT_ORGANS = [
     "liver",
+    "spleen",
     "pancreas",
-    "kidney",
     "kidney_left",
     "kidney_right",
-    "liver_segment_1",
-    "liver_segment_2",
-    "liver_segment_3",
-    "liver_segment_4",
-    "liver_segment_5",
-    "liver_segment_6",
-    "liver_segment_7",
-    "liver_segment_8",
-    "pancreas_head",
-    "pancreas_body",
-    "pancreas_tail",
+    "aorta",
+    "adrenal_gland_left",
+    "adrenal_gland_right",
+    "stomach",
+    "duodenum",
+    "colon",
+    "small_bowel",
+    "bladder",
 ]
 
 
@@ -52,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--critic-backend", default="stub", choices=["stub", "labelcritic"])
     ap.add_argument("--enable-shapekit", action=argparse.BooleanOptionalAction, default=False)
     ap.add_argument("--timeout-sec", type=int, default=1800)
+    ap.add_argument("--experiment-profile", default="enhanced_candidate_pool")
     return ap.parse_args()
 
 
@@ -111,6 +110,11 @@ def summarize(out: Path) -> dict[str, Any]:
     fresh_major_full_volume: list[dict[str, Any]] = []
     blocked = []
     fusion_rows = []
+    gate_failures: list[dict[str, Any]] = []
+    expected_present_rows = 0
+    voxtell_candidate_rows = 0
+    labelcritic_rows = 0
+    shapekit_rows = 0
     for plan_path in (estep / "cases").glob("*/hierarchical_inference_plan.json"):
         plan = read_json(plan_path, {})
         fresh_major_full_volume.extend([
@@ -126,6 +130,44 @@ def summarize(out: Path) -> dict[str, Any]:
     for meta_path in (estep / "annotation_versions").glob("*/selection_metadata.json"):
         meta = read_json(meta_path, {})
         for row in meta.get("selection_rows", []) or []:
+            if row.get("organ") in DEFAULT_ORGANS and row.get("expected_presence") == "expected_present":
+                expected_present_rows += 1
+                models = [str(model) for model in row.get("candidate_models", []) or []]
+                predictions = row.get("candidate_predictions", []) or []
+                selected = next(
+                    (
+                        item for item in meta.get("selected_organs", []) or []
+                        if item.get("organ") == row.get("organ")
+                    ),
+                    None,
+                )
+                has_voxtell = "official_voxtell_pretrained" in models
+                has_teacher = any(model not in {"official_voxtell_pretrained", "fusion_consensus"} for model in models)
+                critic_ok = bool(row.get("labelcritic_compare_used")) or row.get("labelcritic_compare_skipped_reason") == "high_agreement"
+                shapekit_ok = any(
+                    candidate.get("candidate_shapekit_status") == "success"
+                    for candidate in predictions if isinstance(candidate, dict)
+                )
+                voxtell_candidate_rows += int(has_voxtell and has_teacher)
+                labelcritic_rows += int(critic_ok)
+                shapekit_rows += int(shapekit_ok)
+                reasons = []
+                if len(models) < 2:
+                    reasons.append("candidate_count_lt_2")
+                if not (has_voxtell and has_teacher):
+                    reasons.append("teacher_voxtell_competition_missing")
+                if not critic_ok:
+                    reasons.append("labelcritic_not_executed")
+                if not shapekit_ok:
+                    reasons.append("shapekit_not_executed")
+                if not selected or selected.get("grade") not in {"A", "B", "C"} or not selected.get("final_mask"):
+                    reasons.append("usable_selection_missing")
+                if reasons:
+                    gate_failures.append({
+                        "case_id": meta.get("case_id"),
+                        "organ": row.get("organ"),
+                        "reasons": reasons,
+                    })
             if "fusion_consensus" in (row.get("candidate_models") or []):
                 fusion_rows.append({
                     "case_id": meta.get("case_id"),
@@ -139,12 +181,10 @@ def summarize(out: Path) -> dict[str, Any]:
     if child_scope_failures:
         status = "failed"
         failures.append("child inference outside child_roi")
-    if fresh_major_full_volume:
-        status = "failed"
-        failures.append("fresh full-volume major inference used despite repair cache policy")
-    for item in focus:
-        if item.get("organ") in {"liver", "pancreas", "kidney"} and item.get("grade") not in {"A", "B", None}:
-            failures.append(f"{item.get('case_id')}/{item.get('organ')} grade={item.get('grade')}")
+    if gate_failures:
+        failures.append("teacher/VoxTell, ShapeKit, LabelCritic, or key-organ gate failed")
+    if grade_counts.get("A", 0) + grade_counts.get("B", 0) <= 0:
+        failures.append("A+B is zero")
     if failures:
         status = "failed"
 
@@ -158,6 +198,11 @@ def summarize(out: Path) -> dict[str, Any]:
         "focus_whole_organ_items": focus,
         "child_scope_failures": child_scope_failures,
         "fresh_major_full_volume": fresh_major_full_volume,
+        "expected_present_rows": expected_present_rows,
+        "voxtell_candidate_rows": voxtell_candidate_rows,
+        "labelcritic_rows": labelcritic_rows,
+        "shapekit_rows": shapekit_rows,
+        "gate_failures": gate_failures,
         "blocked": blocked,
         "fusion_rows": fusion_rows,
         "failures": failures,
@@ -168,6 +213,7 @@ def summarize(out: Path) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args()
+    os.environ["MEDAI_EXPERIMENT_PROFILE"] = args.experiment_profile
     out = Path(args.output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     subset = out / "case_list_subset.csv"

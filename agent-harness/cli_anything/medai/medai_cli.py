@@ -1002,8 +1002,9 @@ def vista3d_finetune_cmd(pseudo_label_dir, ct_dir, target_organs, output_folder,
 @click.option("--gpu", default=0, type=int, show_default=True)
 @click.option("--timeout-sec", default=1800, type=int, show_default=True)
 @click.option("--prompt-batch-size", default=16, type=int, show_default=True, help="Run prompts in batches to avoid loading all 373 prompts at once.")
+@click.option("--backend", default="official_python_api", type=click.Choice(["official_python_api", "official_cli"]), show_default=True, help="Use the official VoxTell Python API or official CLI through the project adapter.")
 @click.option("--dry-run", is_flag=True, default=False)
-def voxtell_student_segment_cmd(ct_image, output_folder, model_dir, target_config, prompts, text_encoding_model, device, gpu, timeout_sec, prompt_batch_size, dry_run):
+def voxtell_student_segment_cmd(ct_image, output_folder, model_dir, target_config, prompts, text_encoding_model, device, gpu, timeout_sec, prompt_batch_size, backend, dry_run):
     """New 3D prompt-based student inference.
 
     This route keeps the CT as a 3D volume and uses free-text organ prompts. It
@@ -1017,6 +1018,7 @@ def voxtell_student_segment_cmd(ct_image, output_folder, model_dir, target_confi
         gpu=gpu,
         target_config=resolve_path(target_config),
         text_encoding_model=resolve_path(text_encoding_model) if text_encoding_model else None,
+        backend=backend,
     )
     emit(student.segment(
         ct_image=resolve_path(ct_image),

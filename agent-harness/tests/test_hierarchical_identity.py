@@ -354,8 +354,16 @@ def test_hierarchical_case_runs_major_then_child_roi(tmp_path: Path, monkeypatch
     monkeypatch.setattr(loop, "run_registered_model", fake_registered)
     execution_plan = {
         "per_organ": {
-            "liver": {"primary_teacher": "major_teacher", "backup_teachers": []},
-            "liver_segment_1": {"primary_teacher": "child_teacher", "backup_teachers": ["unused_backup"]},
+            "liver": {
+                "primary_teacher": "major_teacher",
+                "backup_teachers": [],
+                "competition_teachers": ["competition_teacher"],
+            },
+            "liver_segment_1": {
+                "primary_teacher": "child_teacher",
+                "backup_teachers": ["unused_backup"],
+                "competition_teachers": ["child_competition_teacher"],
+            },
         }
     }
     result = loop._run_hierarchical_case_inference(
@@ -364,23 +372,31 @@ def test_hierarchical_case_runs_major_then_child_roi(tmp_path: Path, monkeypatch
         requested_organs=["liver", "liver_segment_1"], taxonomy=taxonomy,
         alias_config={"models": {}}, timeout_sec=30, device="cpu", dry_run=False, margin_mm=2,
     )
-    assert [call["model"] for call in calls] == ["major_teacher", "child_teacher"]
+    assert [call["model"] for call in calls[:2]] == ["major_teacher", "competition_teacher"]
+    assert {call["model"] for call in calls[2:]} == {
+        "child_teacher",
+        "unused_backup",
+        "child_competition_teacher",
+    }
     assert nib.load(str(result["model_seg_dirs"]["major_teacher"] / "liver.nii.gz")).shape == (32, 32, 32)
     assert nib.load(str(result["model_seg_dirs"]["child_teacher"] / "liver_segment_1.nii.gz")).shape == (32, 32, 32)
     provenance = json.loads((result["model_seg_dirs"]["child_teacher"] / "identity_provenance.json").read_text())
     assert provenance["organs"]["liver_segment_1"]["resolved_canonical_id"] == "liver_segment_1"
     assert not result["blocked"]
     manifest = json.loads(Path(result["manifest"]).read_text())
-    assert manifest["child_resolution"][0]["attempts"][1] == {
-        "model": "unused_backup", "attempted": False, "reason": "not_needed_after_prior_success"
-    }
+    assert manifest["child_resolution"][0]["attempts"][1]["model"] == "unused_backup"
+    assert manifest["child_resolution"][0]["attempts"][1]["attempted"] is True
+    assert manifest["major_resolution"][1]["model"] == "competition_teacher"
+    assert manifest["major_resolution"][1]["status"] == "resolved"
+    assert manifest["child_resolution"][0]["attempts"][2]["model"] == "child_competition_teacher"
+    assert manifest["child_resolution"][0]["attempts"][2]["attempted"] is True
     cached = loop._run_hierarchical_case_inference(
         ct=ct, case_id="case_001", case_raw=tmp_path / "raw", case_out=tmp_path / "case",
         registry_path=tmp_path / "registry.yaml", execution_plan=execution_plan,
         requested_organs=["liver", "liver_segment_1"], taxonomy=taxonomy,
         alias_config={"models": {}}, timeout_sec=30, device="cpu", dry_run=False, margin_mm=2,
     )
-    assert len(calls) == 2
+    assert len(calls) == 5
     assert cached["inference_results"][0]["cache_status"] == "reused_hierarchical_roi_cache"
     assert manifest["requested_organs"] == ["liver", "liver_segment_1"]
     assert manifest["hierarchical_plan_cache_key"]["requested_organs"] == ["liver", "liver_segment_1"]
@@ -390,7 +406,7 @@ def test_hierarchical_case_runs_major_then_child_roi(tmp_path: Path, monkeypatch
         requested_organs=["liver"], taxonomy=taxonomy,
         alias_config={"models": {}}, timeout_sec=30, device="cpu", dry_run=False, margin_mm=2,
     )
-    assert len(calls) == 3
+    assert len(calls) == 7
     assert plan_changed["inference_results"][0].get("cache_status") != "reused_hierarchical_roi_cache"
 
 
@@ -461,7 +477,7 @@ def test_outer_resume_does_not_skip_when_hierarchical_plan_changes(tmp_path: Pat
         candidate_mode="route_pruned_with_competition",
     )
     assert first["status"] == "success"
-    assert calls == ["major_teacher", "child_teacher_old"]
+    assert calls == ["major_teacher", "child_teacher_old", "child_teacher_new"]
 
     branch_map["liver_segment_1"] = {"teacher_model": "child_teacher_new", "fallback_teachers": []}
     second = loop.run_multimodel_annotation_loop(
@@ -480,7 +496,14 @@ def test_outer_resume_does_not_skip_when_hierarchical_plan_changes(tmp_path: Pat
         candidate_mode="route_pruned_with_competition",
     )
     assert second["status"] == "success"
-    assert calls == ["major_teacher", "child_teacher_old", "major_teacher", "child_teacher_new"]
+    assert calls == [
+        "major_teacher",
+        "child_teacher_old",
+        "child_teacher_new",
+        "major_teacher",
+        "child_teacher_new",
+        "child_teacher_old",
+    ]
     assert second["resume_audit"][0]["reason"] == "hierarchical_roi_plan_cache_mismatch"
     manifest = json.loads((out / "cases" / "case_001" / "hierarchical_inference_plan.json").read_text())
     assert manifest["hierarchical_plan_cache_key"]["execution_plan"]["per_organ"]["liver_segment_1"]["primary_teacher"] == "child_teacher_new"
@@ -583,7 +606,10 @@ def test_preseeded_major_parent_is_reused_inside_hierarchical_pipeline(tmp_path:
         margin_mm=2,
         preseeded_seg_dirs={"major_teacher": preseed},
     )
-    assert calls == [("child_teacher", "child_roi")]
+    assert calls == [
+        ("uncached_primary", "major_full_volume"),
+        ("child_teacher", "child_roi"),
+    ]
     assert any(r.get("cache_status") == "reused_preseeded_major_parent_cache" for r in result["inference_results"])
 
 
@@ -851,3 +877,69 @@ def test_label_merger_materializes_approved_union(tmp_path: Path):
     complete = label_merger._materialize_approved_union(seg, "lung_vessels", aliases)
     assert complete["status"] == "success"
     assert int(np.asanyarray(nib.load(complete["output"]).dataobj).sum()) == 2
+
+
+@pytest.mark.cpu_unit
+def test_expected_presence_uses_case_coverage_metadata():
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    abdomen_only = {
+        "has_abdomen_coverage": True,
+        "has_pelvis_coverage": False,
+        "confirmed_absent_organs": [],
+    }
+    pelvis_only = {
+        "has_abdomen_coverage": False,
+        "has_pelvis_coverage": True,
+        "confirmed_absent_organs": [],
+    }
+    explicit_absent = {
+        "has_abdomen_coverage": True,
+        "has_pelvis_coverage": True,
+        "confirmed_absent_organs": ["pancreas"],
+    }
+
+    assert loop._expected_presence_for_organ("liver", abdomen_only) == "expected_present"
+    assert loop._expected_presence_for_organ("bladder", abdomen_only) == "expected_absent"
+    assert loop._expected_presence_for_organ("bladder", pelvis_only) == "expected_present"
+    assert loop._expected_presence_for_organ("kidney_left", pelvis_only) == "expected_absent"
+    assert loop._expected_presence_for_organ("pancreas", explicit_absent) == "expected_absent"
+    assert loop._expected_presence_for_organ("liver", {}) == "unknown"
+    assert loop._expected_presence_for_organ("bladder", {}) == "unknown"
+
+
+@pytest.mark.cpu_unit
+def test_presence_context_never_uses_reference_masks_as_fov_evidence(tmp_path):
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    annotations = tmp_path / "annotations"
+    annotations.mkdir()
+    abdomen = np.zeros((8, 8, 8), dtype=np.uint8)
+    abdomen[2:6, 2:6, 2:6] = 1
+    _save(abdomen, annotations / "liver.nii.gz")
+    _save(np.zeros_like(abdomen), annotations / "bladder.nii.gz")
+    ct = tmp_path / "ct.nii.gz"
+    _save(np.zeros_like(abdomen), ct)
+
+    context = loop._load_case_presence_context(
+        {"annotation_folder": str(annotations)}, ct, "case", tmp_path / "out"
+    )
+
+    assert context["has_abdomen_coverage"] is False
+    assert context["has_pelvis_coverage"] is False
+    assert not any("reference" in item for item in context["coverage_evidence"])
+    assert loop._expected_presence_for_organ("liver", context) == "unknown"
+    assert loop._expected_presence_for_organ("bladder", context) == "unknown"
+    active = loop._fov_pruned_organs(
+        ["liver", "liver_segment_1", "brain", "bladder"],
+        {
+            "organs": {
+                "liver": {"canonical_id": "liver", "parent_ids": []},
+                "liver_segment_1": {"canonical_id": "liver_segment_1", "parent_ids": ["liver"]},
+                "brain": {"canonical_id": "brain", "parent_ids": []},
+                "bladder": {"canonical_id": "bladder", "parent_ids": []},
+            }
+        },
+        context,
+    )
+    assert active == ["liver", "liver_segment_1", "brain", "bladder"]

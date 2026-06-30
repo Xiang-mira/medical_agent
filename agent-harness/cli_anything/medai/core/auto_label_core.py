@@ -28,6 +28,7 @@ HARD_FAILURE_FLAGS = {
     "missing_candidate", "missing_final_mask", "all_candidates_failed_qc",
     "candidate_qc_fail", "missing_file", "unreadable_mask", "geometry_mismatch",
     "shape_mismatch_ct", "identity_mismatch", "left_right_mismatch", "zero_volume_mask",
+    "expected_present_zero_volume_mask", "expected_present_missing_candidate",
 }
 
 
@@ -515,7 +516,12 @@ def score_evidence_record(record: dict[str, Any], config: dict[str, Any] | None 
     confidence = max(0.0, min(1.0, normalized - conflict_penalty - correlation_penalty + lc_adjustment))
 
     family_count = int(record.get("independent_family_count") or 0)
+    expected_presence = str(record.get("expected_presence") or "unknown")
     flags = set(record.get("review_flags") or []) | set(record.get("quality_flags") or []) | set(record.get("selected_candidate_qc_flags") or [])
+    if expected_presence == "expected_present" and "zero_volume_mask" in flags:
+        flags.add("expected_present_zero_volume_mask")
+    if expected_presence == "expected_present" and record.get("identity_status") in {"missing", "missing_candidate"}:
+        flags.add("expected_present_missing_candidate")
     hard_fail = bool(flags & HARD_FAILURE_FLAGS) or record.get("identity_status") not in {None, "", "valid"} or record.get("selected_candidate_qc_status") == "fail"
     severe_conflict = bool(record.get("severe_family_conflict")) or (
         evidence.get("family_consensus") is not None and family_count >= 2
@@ -526,6 +532,9 @@ def score_evidence_record(record: dict[str, Any], config: dict[str, Any] | None 
     oof_cfg = config.get("oof_promotion") or {}
     anatomy = evidence.get("anatomy_plausibility")
     oof_verified = record.get("out_of_fold_verified") is True
+    parent_containment = record.get("parent_containment")
+    labelcritic_calibrated_score = _clip_score(record.get("labelcritic_calibrated_score"))
+    no_review_or_hard_flags = not flags
     oof_promotable = bool(
         oof_verified
         and float(evidence.get("teacher_student_oof") or 0.0) >= float(oof_cfg.get("teacher_student_dice", 0.85))
@@ -536,6 +545,17 @@ def score_evidence_record(record: dict[str, Any], config: dict[str, Any] | None 
         and anatomy is not None and float(anatomy) >= float(oof_cfg.get("anatomy_plausibility", 0.95))
         and normalized >= float(thresholds["grade_b"])
         and not hard_fail and not severe_conflict
+    )
+    single_teacher_b_eligible = bool(
+        family_count <= 1
+        and record.get("identity_status") in {None, "", "valid"}
+        and record.get("selected_candidate_qc_status") == "pass"
+        and expected_presence != "expected_absent"
+        and float(evidence.get("ct_support") or 0.0) >= 0.70
+        and float(evidence.get("perturbation_stability") or 0.0) >= 0.90
+        and (parent_containment is None or float(parent_containment) >= 0.90)
+        and float(labelcritic_calibrated_score or 0.0) >= 0.70
+        and no_review_or_hard_flags
     )
 
     if hard_fail:
@@ -557,8 +577,12 @@ def score_evidence_record(record: dict[str, Any], config: dict[str, Any] | None 
     grade_cap_reason = None
     grade_rank = {"D": 0, "C": 1, "B": 2, "A": 3}
     if not expert_verified and family_count <= 1:
-        grade_cap = str(config.get("single_teacher_with_oof_grade_cap", "B") if oof_promotable else config.get("single_teacher_grade_cap", "C"))
-        grade_cap_reason = "verified_oof_student_corroboration" if oof_promotable else "single_teacher_without_verified_oof"
+        if oof_promotable or single_teacher_b_eligible:
+            grade_cap = str(config.get("single_teacher_with_oof_grade_cap", "B"))
+            grade_cap_reason = "verified_oof_student_corroboration" if oof_promotable else "single_teacher_b_evidence_gate"
+        else:
+            grade_cap = str(config.get("single_teacher_grade_cap", "C"))
+            grade_cap_reason = "single_teacher_without_verified_oof"
         if grade_rank[grade] > grade_rank[grade_cap]:
             grade = grade_cap
 
@@ -599,6 +623,7 @@ def score_evidence_record(record: dict[str, Any], config: dict[str, Any] | None 
         "grade_cap": grade_cap,
         "grade_cap_reason": grade_cap_reason,
         "oof_promotable": oof_promotable,
+        "single_teacher_b_eligible": single_teacher_b_eligible,
         "training_weight": training_weight,
         "target_type": target_type,
         "decision_status": status,
@@ -662,6 +687,7 @@ def score_candidate_set(
         candidate["perturbation_stability_score"] = stability
         candidate["ct_support_score"] = candidate_ct.get("score")
         candidate["anatomy_plausibility_score"] = candidate_anatomy.get("score")
+        candidate["parent_containment"] = candidate_anatomy.get("parent_containment")
         corruption_probability = _clip_score(candidate.get("structural_corruption_probability"))
         if corruption_probability is None and longtail_model is not None:
             try:
@@ -760,6 +786,9 @@ def score_candidate_set(
         "loo_model_reliability_score": loo,
         "teacher_student_oof_score": teacher_student_oof,
         "out_of_fold_verified": bool(oof_verification.get("verified")),
+        "expected_presence": chosen.get("expected_presence") if chosen else "unknown",
+        "parent_containment": chosen.get("parent_containment") if chosen else None,
+        "labelcritic_calibrated_score": (labelcritic_result or {}).get("calibrated_score"),
         "evidence_details": evidence_details,
         "independent_family_count": family_count,
         "probability_mask_path": fusion.get("probability_mask_path"),

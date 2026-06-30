@@ -4,6 +4,8 @@ import subprocess
 import time
 import shutil
 import tempfile
+import os
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ except ImportError:
     yaml = None  # type: ignore[assignment]
 
 from .data_checker import check_case_folder
+from .subprocess_utils import subprocess_text
 
 _SHAPEKIT_TARGET_REQUIREMENTS = {
     "adrenal_gland": ["adrenal_gland_left", "adrenal_gland_right"],
@@ -154,6 +157,50 @@ def _summarize_output(out: Path) -> dict:
     return {"num_cases": len(cases), "num_masks_total": total, "cases": summaries}
 
 
+def _run_command_with_timeout(cmd: list[str], *, cwd: Path, timeout_sec: int) -> tuple[subprocess.CompletedProcess, bool]:
+    """Run a subprocess and reliably terminate its process group on timeout.
+
+    ShapeKit can spawn worker processes.  subprocess.run(timeout=...) only
+    times out the direct child and may leave workers behind on some failure
+    paths.  Use a new process group on POSIX so the wrapper can clean up the
+    whole tree, and normalize stdout/stderr to text because TimeoutExpired may
+    carry bytes even when text=True was requested.
+    """
+    popen_kwargs: dict[str, Any] = {
+        "cwd": str(cwd),
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if hasattr(os, "setsid"):
+        popen_kwargs["preexec_fn"] = os.setsid
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_sec)
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout or "", stderr or ""), False
+    except subprocess.TimeoutExpired as exc:
+        if hasattr(os, "killpg"):
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                stdout, stderr = proc.communicate()
+        else:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+        stdout_text = subprocess_text(stdout) or subprocess_text(exc.stdout)
+        stderr_text = subprocess_text(stderr) or subprocess_text(exc.stderr)
+        stderr_text += f"\n[ShapeKit wrapper] Timeout after {timeout_sec} seconds; process group terminated."
+        return subprocess.CompletedProcess(cmd, 124, stdout_text, stderr_text), True
+
+
 def run_shapekit(shapekit_root: str | Path, input_folder: str | Path, output_folder: str | Path, log_folder: str | Path, cpu_count: int = 2, continue_prediction: bool = False, csv: str | None = None, tqdm_ncols: int = 100, dry_run: bool = False, auto_config: bool = True, timeout_sec: int = 120) -> dict:
     root, inp, out, logs = Path(shapekit_root).resolve(), Path(input_folder).resolve(), Path(output_folder).resolve(), Path(log_folder).resolve()
     precheck = check_case_folder(inp)
@@ -188,12 +235,8 @@ def run_shapekit(shapekit_root: str | Path, input_folder: str | Path, output_fol
         return {"stage": "postprocess", "tool": "ShapeKit", "status": "dry_run", "command": cmd, "input_check": precheck, "config_check": clean_config, "runtime_root": str(runtime_root)}
     out.mkdir(parents=True, exist_ok=True); logs.mkdir(parents=True, exist_ok=True)
     start = time.time()
-    timed_out = False
     try:
-        completed = subprocess.run(cmd, cwd=str(runtime_root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec)
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        completed = subprocess.CompletedProcess(cmd, returncode=124, stdout=(exc.stdout or ""), stderr=(exc.stderr or "") + f"\n[ShapeKit wrapper] Timeout after {timeout_sec} seconds.")
+        completed, timed_out = _run_command_with_timeout(cmd, cwd=runtime_root, timeout_sec=timeout_sec)
     finally:
         if runtime_tmp is not None:
             runtime_tmp.cleanup()

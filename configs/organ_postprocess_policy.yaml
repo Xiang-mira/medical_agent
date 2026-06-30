@@ -1,0 +1,45 @@
+version: 1
+description: Generic organ postprocess and QC policy for CT segmentation.
+
+volume_gate:
+  default_min_ratio: 0.2
+  default_max_ratio: 3.0
+  groups:
+    core_large_organ:
+      min_ratio: 0.5
+      max_ratio: 1.8
+    hollow_gi:
+      min_ratio: 0.2
+      max_ratio: 3.0
+    vessel_or_duct:
+      min_ratio: 0.05
+      max_ratio: 5.0
+    bone_or_fragmented_structure:
+      min_ratio: 0.05
+      max_ratio: 8.0
+    partial_fov:
+      min_ratio: 0.05
+      max_ratio: 10.0
+
+threshold_sweep:
+  thresholds: [0.3, 0.5, 0.7, 0.9]
+  selection_metric_with_gt: dice_gt_with_volume_penalty
+  selection_metric_without_gt: dice_teacher_with_volume_penalty
+
+postprocess:
+  core_large_organ:
+    strategy: keep_largest_or_top_k_components
+    remove_tiny_components: true
+    body_mask_clip: true
+  hollow_gi:
+    strategy: top_k_components_with_body_or_abdomen_roi
+    remove_tiny_components: true
+    body_mask_clip: true
+  vessel_or_duct:
+    strategy: preserve_thin_connected_structures
+    remove_isolated_blobs: true
+    do_not_force_single_largest_component: true
+  bone_or_fragmented_structure:
+    strategy: allow_multiple_components_with_location_qc
+  longtail_uncertain:
+    strategy: conservative_body_clip_and_review

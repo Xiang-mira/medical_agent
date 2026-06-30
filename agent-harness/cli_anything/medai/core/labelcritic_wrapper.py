@@ -12,6 +12,7 @@ from typing import Any
 
 from .projection_builder import build_projection
 from .json_utils import write_json
+from .subprocess_utils import subprocess_text
 
 
 def _file_fingerprint(path: str | Path | None) -> dict[str, Any] | None:
@@ -325,8 +326,15 @@ def _call_vlm_grade(base_url: str, port: int, model: str, prompt: str, image_pat
 
 
 def _parse_grade_response(raw: str, accept_grade: float) -> dict[str, Any]:
-    """Extract {grade, accept, reason} from a VLM absolute-quality reply."""
+    """Extract normalized grade semantics from a VLM absolute-quality reply."""
     import re
+
+    label_to_grade = {
+        "good": 0.9,
+        "acceptable": 0.65,
+        "bad": 0.1,
+        "reject": 0.0,
+    }
 
     text = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL).strip()
     try:
@@ -334,30 +342,64 @@ def _parse_grade_response(raw: str, accept_grade: float) -> dict[str, Any]:
         end = text.rfind("}") + 1
         if start >= 0 and end > start:
             parsed = json.loads(text[start:end])
-            grade = float(parsed.get("grade"))
+            grade = parsed.get("grade")
+            grade_label = parsed.get("grade_label") or parsed.get("quality") or parsed.get("bucket")
+            hard_failure_reason = parsed.get("hard_failure_reason")
+            if isinstance(grade, str) and grade.strip().lower() in label_to_grade:
+                grade_label = grade.strip().lower()
+                grade = label_to_grade[grade_label]
+            elif grade_label is not None:
+                grade_label = str(grade_label).strip().lower()
+                if grade_label in label_to_grade:
+                    grade = label_to_grade[grade_label] if grade is None else grade
+            grade = float(grade)
             grade = min(1.0, max(0.0, grade))
+            if not grade_label:
+                if grade >= 0.85:
+                    grade_label = "good"
+                elif grade >= accept_grade:
+                    grade_label = "acceptable"
+                else:
+                    grade_label = "bad"
             accept = parsed.get("accept")
             if not isinstance(accept, bool):
                 accept = grade >= accept_grade
-            return {"grade": round(grade, 4), "accept": bool(accept), "reason": str(parsed.get("reason", ""))[:300], "parse_status": "success"}
+            return {
+                "grade": round(grade, 4),
+                "grade_label": grade_label,
+                "accept": bool(accept),
+                "reason": str(parsed.get("reason", ""))[:300],
+                "hard_failure_reason": str(hard_failure_reason)[:300] if hard_failure_reason else None,
+                "parse_status": "success",
+            }
     except Exception:
         pass
-    return {"grade": None, "accept": None, "reason": (raw or "")[:300], "parse_status": "unparseable"}
+    return {
+        "grade": None,
+        "grade_label": None,
+        "accept": None,
+        "reason": (raw or "")[:300],
+        "hard_failure_reason": "unparseable_grade_response",
+        "parse_status": "unparseable",
+    }
 
 
 GRADE_PROMPT_TEMPLATE = """You are a medical imaging QA expert. The image shows a CT slice with a single predicted {organ} segmentation highlighted in color.
 
 Grade how well the highlighted region matches the true {organ} in this slice:
-- 1.0 : accurate location, shape and boundaries.
-- 0.7 : correct location and shape; only minor boundary error.
-- 0.5 : correct location but noticeable over- or under-segmentation.
-- 0.2 : mostly wrong — highlights a different structure or grossly mislocated.
-- 0.0 : {organ} is absent here, or the highlight is empty / clearly a different organ.
+- good: accurate location, shape and boundaries.
+- acceptable: correct location with usable but imperfect boundaries.
+- bad: mostly wrong, grossly mislocated, empty, or clearly a different organ.
 
-Localising small or elongated structures from one slice is hard: if you are unsure whether the location is correct, assume it is plausible and grade around 0.5 rather than 0.0. Reserve 0.0-0.2 for cases where the highlight is clearly NOT the {organ}. accept=true if the highlight is plausibly the {organ} and usable as a pseudo-label (grade >= 0.5).
+Also provide a numeric grade:
+- 0.9 for good
+- 0.65 for acceptable
+- 0.1 for bad
+
+Localising small or elongated structures from one slice is hard: if you are unsure whether the location is correct but plausible, prefer acceptable over bad. Only use bad when the highlighted region is clearly not the {organ}, clearly empty, or grossly implausible. Set accept=true only for good/acceptable.
 
 Respond with JSON only, no other text:
-{{"grade": <0.0-1.0>, "accept": <true|false>, "reason": "<brief anatomical reasoning>"}}"""
+{{"grade_label": "<good|acceptable|bad>", "grade": <0.0-1.0>, "accept": <true|false>, "reason": "<brief anatomical reasoning>", "hard_failure_reason": "<optional: empty|wrong_organ|gross_mislocation|none>"}}"""
 
 
 def run_labelcritic_grade_batch(
@@ -708,7 +750,12 @@ def run_labelcritic_compare_batch(
             completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec, cwd=str(lc_root))
             timed_out = False
         except subprocess.TimeoutExpired as exc:
-            completed = subprocess.CompletedProcess(command, 124, stdout=exc.stdout or "", stderr=(exc.stderr or "") + f"\n[labelcritic batch] Timeout after {timeout_sec}s")
+            completed = subprocess.CompletedProcess(
+                command,
+                124,
+                stdout=subprocess_text(exc.stdout),
+                stderr=subprocess_text(exc.stderr) + f"\n[labelcritic batch] Timeout after {timeout_sec}s",
+            )
             timed_out = True
         elapsed = time.time() - start
         for item in pending:
@@ -882,7 +929,12 @@ def run_labelcritic_compare(
         completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec, cwd=str(lc_root))
         timed_out = False
     except subprocess.TimeoutExpired as exc:
-        completed = subprocess.CompletedProcess(command, 124, stdout=exc.stdout or "", stderr=(exc.stderr or "") + f"\n[labelcritic] Timeout after {timeout_sec}s")
+        completed = subprocess.CompletedProcess(
+            command,
+            124,
+            stdout=subprocess_text(exc.stdout),
+            stderr=subprocess_text(exc.stderr) + f"\n[labelcritic] Timeout after {timeout_sec}s",
+        )
         timed_out = True
     elapsed = time.time() - start
     decision = _parse_labelcritic_log(log_file, mask1_folder, mask2_folder, run_id=run_id, csv_path=csv_path)

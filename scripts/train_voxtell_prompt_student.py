@@ -128,7 +128,9 @@ def write_voxtell_model_dir(
         shutil.copy2(info_path, fold_out / "INFO.txt")
     torch.save(
         {
-            "network_weights": network.state_dict(),
+            "eligible_for_next_round_prompt_student": False,
+        "eligible_as_teacher_candidate": False,
+        "network_weights": network.state_dict(),
             "source_model_dir": str(source_model_dir),
             "manifest": str(manifest_path),
             "step": step,
@@ -241,7 +243,9 @@ def load_manifest(path: Path, max_items: int = 0) -> list[dict[str, Any]]:
             mask = item.get("mask")
             prompt = item.get("prompt")
             training_weight = float(item.get("training_weight", 1.0) or 0.0)
-            if not image or not mask or not prompt:
+            if not prompt:
+                raise ValueError("Prompt-level manifest item missing prompt. This breaks prompt-conditioned Student training.")
+            if not image or not mask:
                 continue
             if training_weight <= 0.0:
                 continue
@@ -567,6 +571,22 @@ def main() -> int:
     plan = {
         "stage": "train_voxtell_prompt_student",
         "status": "dry_run" if args.dry_run else "pending",
+        "training_mode": "project_voxtell_prompt_distillation_student",
+        "legacy_mode": "project_distillation_experimental",
+        "canonical_training_backend": "project_voxtell_prompt_distillation_student",
+        "trainer": "project_voxtell_prompt_distillation_student",
+        "is_official_voxtell_encoder_transfer": False,
+        "is_prompt_conditioned_student": True,
+        "student_inference_backend": "voxtell_prompt_api",
+        "is_project_distillation": True,
+        "uses_official_voxtell_model": True,
+        "uses_official_checkpoint_initialization": True,
+        "uses_project_manifest": True,
+        "uses_autolabelcore_confidence": True,
+        "uses_abcd_training_weight": True,
+        "official_prompt_training_pipeline_available": False,
+        "negative_prompt_sampling": "project_specific",
+        "training_provenance_warning": "Project prompt-conditioned distillation trainer using official VoxTell components; not official voxtell-finetune.",
         "manifest": str(manifest_path),
         "model_dir": str(model_dir),
         "output_dir": str(output_dir),
@@ -676,10 +696,20 @@ def main() -> int:
             if args.save_every > 0 and total_steps % args.save_every == 0:
                 # Rotate one recovery checkpoint; 3D checkpoints are ~1.7 GB
                 # and retaining every interval can exhaust the experiment disk.
-                torch.save({"network_weights": network.state_dict(), "step": total_steps}, output_dir / "checkpoint_latest.pth")
+                torch.save({"eligible_for_next_round_prompt_student": False,
+        "eligible_as_teacher_candidate": False,
+        "network_weights": network.state_dict(), "step": total_steps}, output_dir / "checkpoint_latest.pth")
 
     final_ckpt = output_dir / "model_finetune.pth"
     torch.save({
+        "training_mode": "project_voxtell_prompt_distillation_student",
+        "legacy_mode": "project_distillation_experimental",
+        "canonical_training_backend": "project_voxtell_prompt_distillation_student",
+        "trainer": "project_voxtell_prompt_distillation_student",
+        "is_official_voxtell_encoder_transfer": False,
+        "is_prompt_conditioned_student": True,
+        "eligible_for_next_round_prompt_student": False,
+        "eligible_as_teacher_candidate": False,
         "network_weights": network.state_dict(),
         "optimizer_state": optim.state_dict(),
         "source_model_dir": str(model_dir),

@@ -639,6 +639,91 @@ class TestRunEMTrainingVoxTellMstep:
         assert "scripts/train_voxtell_prompt_student.py" in module.VOXTELL_TRAIN_CMD
         assert module.ENABLE_VOXTELL_TRAINING is False
 
+    def test_formal_prompt_mstep_defaults_are_one_full_epoch(self, monkeypatch, tmp_path):
+        for name in (
+            "MEDAI_FINETUNE_EPOCHS",
+            "MEDAI_MSTEP_LR",
+            "MEDAI_MAX_STEPS",
+            "MEDAI_TRAINABLE_SCOPE",
+            "MEDAI_BCE_POS_WEIGHT_CAP",
+            "MEDAI_SAVE_EVERY",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        module = self._load_run_em_training(monkeypatch, tmp_path)
+        assert module.FINETUNE_EPOCHS == 1
+        assert module.PROMPT_MAX_STEPS == 0
+        assert module.LEARNING_RATE == 1e-6
+        assert module.PROMPT_TRAINABLE_SCOPE == "prompt_path"
+        assert module.PROMPT_BCE_POS_CAP == 20
+        assert module.PROMPT_SAVE_EVERY == 1000
+
+    def test_quality_gate_defaults_include_c_soft_labels(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("MEDAI_STUDENT_QUALITY_GRADES", raising=False)
+        monkeypatch.delenv("MEDAI_STUDENT_QUALITY_MIN_WEIGHT", raising=False)
+        module = self._load_run_em_training(monkeypatch, tmp_path)
+        image = tmp_path / "ct.nii.gz"
+        mask = tmp_path / "probability_mask.nii.gz"
+        image.touch()
+        mask.touch()
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"items": [{
+            "case_id": "case_001",
+            "image": str(image),
+            "mask": str(mask),
+            "organ": "liver",
+            "prompt": "segment the liver",
+            "supervision_type": "positive",
+            "training_weight": 0.1,
+            "grade": "C",
+            "is_prompt_variant": False,
+        }]}), encoding="utf-8")
+        monkeypatch.setattr(module, "_mask_nonempty", lambda path: True)
+
+        selected = module._select_quality_gate_items(manifest, max_cases=3, max_prompts=8)
+
+        assert list(selected) == ["case_001"]
+        assert selected["case_001"][0]["grade"] == "C"
+
+    def test_quality_gate_prefers_core_anatomy_over_alphabetical_composites(self, monkeypatch, tmp_path):
+        module = self._load_run_em_training(monkeypatch, tmp_path)
+        image = tmp_path / "ct.nii.gz"
+        mask = tmp_path / "mask.nii.gz"
+        image.touch()
+        mask.touch()
+        manifest = tmp_path / "manifest.json"
+        common = {
+            "case_id": "case_001",
+            "image": str(image),
+            "mask": str(mask),
+            "supervision_type": "positive",
+            "training_weight": 0.1,
+            "grade": "C",
+            "is_prompt_variant": False,
+        }
+        manifest.write_text(json.dumps({"items": [
+            {**common, "organ": "abdominal_cavity", "prompt": "abdominal cavity"},
+            {**common, "organ": "liver", "prompt": "liver"},
+        ]}), encoding="utf-8")
+        monkeypatch.setattr(module, "_mask_nonempty", lambda path: True)
+
+        selected = module._select_quality_gate_items(manifest, max_cases=1, max_prompts=1)
+
+        assert selected["case_001"][0]["organ"] == "liver"
+
+    def test_dice_uses_half_probability_threshold_by_default(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("MEDAI_DSC_MASK_THRESHOLD", raising=False)
+        module = self._load_run_em_training(monkeypatch, tmp_path)
+        pred = _make_nii(np.ones((4, 4, 4), dtype=np.float32), tmp_path / "pred.nii.gz")
+        ref_data = np.full((4, 4, 4), 0.1, dtype=np.float32)
+        ref = _make_nii(ref_data, tmp_path / "ref.nii.gz")
+
+        dsc, pred_nonempty, ref_nonempty, reason = module._dice_for_masks(pred, ref)
+
+        assert dsc == 0.0
+        assert pred_nonempty is True
+        assert ref_nonempty is False
+        assert reason is None
+
     def test_round_teacher_cache_uses_hierarchical_predictions_only(self, monkeypatch, tmp_path):
         module = self._load_run_em_training(monkeypatch, tmp_path)
         monkeypatch.setattr(module, "ALL_TEACHERS", ["teacher_a", "teacher_b"])
@@ -695,7 +780,8 @@ class TestRunEMTrainingVoxTellMstep:
         result = module.run_prompt_student_mstep(1, manifest)
 
         assert result["status"] == "manifest_ready"
-        assert result["training_status"] == "manifest_ready_training_disabled"
+        assert result["training_status"] == "manifest_ready_manifest_only"
+        assert result["training_mode"] == "manifest_only"
         assert result["num_distillation_eligible_items"] == 1
         assert result["finetuned_checkpoint"] is None
         assert "train_cmd" in result
@@ -874,6 +960,7 @@ class TestRunEMTrainingVoxTellMstep:
         }), encoding="utf-8")
         monkeypatch.setattr(module, "ENABLE_VOXTELL_TRAINING", True)
         monkeypatch.setattr(module, "VOXTELL_TRAIN_CMD", "fake-train")
+        monkeypatch.setattr(module.sys, "argv", ["run_em_training.py", "--voxtell-mstep-mode", "project_distillation_experimental"])
         monkeypatch.setattr(module, "stop_vllm_for_mstep", lambda: None)
         monkeypatch.setattr(module, "restart_vllm_after_mstep", lambda: None)
         monkeypatch.setattr(module, "run_voxtell_student_sanity_check", lambda *args, **kwargs: {"status": "success"})
@@ -1277,6 +1364,38 @@ class TestBDMAPPanTSLayout:
         assert exported["mask_path"].endswith("standard_dataset/case_001/segmentations/pancreas.nii.gz")
         assert exported["student_target_id"] == 7
 
+    def test_standard_dataset_export_excludes_d_grade_positive_masks(self, tmp_path):
+        from cli_anything.medai.core.multimodel_loop import _export_standard_case_dataset
+
+        ct = _make_nii(np.zeros((4, 4, 4), dtype=np.int16), tmp_path / "ct.nii.gz")
+        mask_path = tmp_path / "annotation_versions" / "case_001" / "updated" / "pancreatic_duct.nii.gz"
+        mask_path.parent.mkdir(parents=True)
+        mask = _make_nii(np.ones((4, 4, 4), dtype=np.uint8), mask_path)
+
+        result = _export_standard_case_dataset(
+            case_id="case_001",
+            ct=ct,
+            selected_metadata=[{
+                "organ": "pancreatic_duct",
+                "final_mask": str(mask),
+                "selected_model": "teacher_a",
+                "grade": "D",
+                "training_weight": 0.0,
+                "target_type": "hard",
+            }],
+            out_root=tmp_path / "standard_dataset",
+            student_target_ids={"pancreatic_duct": 9},
+        )
+
+        case_folder = Path(result["case_folder"])
+        assert not (case_folder / "segmentations" / "pancreatic_duct.nii.gz").exists()
+        assert result["num_masks"] == 0
+        meta = json.loads((case_folder / "selection_metadata.json").read_text(encoding="utf-8"))
+        exported = meta["selected_organs"][0]
+        assert exported["distillation_eligible"] is False
+        assert exported["distillation_exclusion_reason"] == "grade_D_or_zero_weight"
+        assert exported["standard_dataset_export_status"] == "metadata_only_excluded_from_positive_masks"
+
 
 class TestRound1RepairAuditAndMstepContracts:
     def test_mstep_manifest_excludes_d_grade_zero_weight_and_ineligible_items(self, tmp_path):
@@ -1288,6 +1407,7 @@ class TestRound1RepairAuditAndMstepContracts:
         updated.mkdir(parents=True)
         for organ in ["liver", "pancreas", "kidney_left", "kidney_right"]:
             _make_nii(np.ones((4, 4, 4), dtype=np.uint8), updated / f"{organ}.nii.gz")
+        pancreas_prob = _make_nii(np.full((4, 4, 4), 0.7, dtype=np.float32), tmp_path / "pancreas_probability.nii.gz")
 
         selected_organs = [
             {
@@ -1310,6 +1430,8 @@ class TestRound1RepairAuditAndMstepContracts:
                 "resolved_canonical_id": "pancreas",
                 "comparison_family": "whole_organ",
                 "scoring_schema_version": "autolabel_core_v2",
+                "target_type": "soft",
+                "probability_mask_path": str(pancreas_prob),
             },
             {
                 "organ": "kidney_left",
@@ -1342,7 +1464,10 @@ class TestRound1RepairAuditAndMstepContracts:
 
         assert result["num_items"] == 2
         assert organs == {"liver", "pancreas"}
-        assert next(row for row in rows if row["organ"] == "pancreas")["training_weight"] == 0.1
+        pancreas_row = next(row for row in rows if row["organ"] == "pancreas")
+        assert pancreas_row["training_weight"] == 0.1
+        assert pancreas_row["target_type"] == "soft"
+        assert pancreas_row["training_gate_decision"] == "include_soft_c"
         exclusions = json.loads(Path(result["training_exclusions"]).read_text(encoding="utf-8"))
         assert {row["organ"] for row in exclusions} == {"kidney_left", "kidney_right"}
         assert next(row for row in exclusions if row["organ"] == "kidney_left")["distillation_exclusion_reason"] == "grade_D_or_zero_weight"
@@ -1657,7 +1782,7 @@ class TestTeacherMeetingPipeline:
         ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
         case_list = tmp_path / "cases.csv"
         case_list.write_text(
-            "case_id,ct_path,annotation_folder\ncase_001,%s,\n" % ct,
+            "case_id,ct_path,annotation_folder,scan_coverage\ncase_001,%s,,abdomen\n" % ct,
             encoding="utf-8",
         )
         out = tmp_path / "out"
@@ -1748,21 +1873,121 @@ class TestTeacherMeetingPipeline:
         assert (out / "shapekit_report.json").exists()
         assert (out / "annotation_versions" / "case_001" / "shapekit_report.json").exists()
         exclusions = json.loads((out / "training_manifest.training_exclusions.json").read_text(encoding="utf-8"))
-        pancreas = next(row for row in exclusions if row["organ"] == "pancreas")
-        assert pancreas["training_weight"] == 0.0
+        assert isinstance(exclusions, list)
         gaps = json.loads((out / "pseudo_label_gap_report.json").read_text(encoding="utf-8"))
+        pancreas = next(row for row in gaps["gap_rows"] if row["organ"] == "pancreas")
+        assert pancreas["gap_type"] == "shapekit_unsupported_but_original_usable"
         gap_types = {row["gap_type"] for row in gaps["gap_rows"]}
         assert "missing_final_pseudo_label" in gap_types
-        assert "shapekit_not_success" in gap_types
+        assert "shapekit_unsupported_but_original_usable" in gap_types
         resume_reasons = [row["reason"] for row in result["resume_audit"]]
         assert "selection_metadata_missing" in resume_reasons
+
+    def test_resume_rebuilds_summary_consistently_with_incremental_cases(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        case_rows = []
+        for idx in range(3):
+            case_id = f"case_{idx+1:03d}"
+            ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / f"{case_id}_ct.nii.gz")
+            case_rows.append((case_id, ct))
+
+        case_list_all = tmp_path / "cases_all.csv"
+        case_list_all.write_text(
+            "case_id,ct_path,annotation_folder\n" + "".join(f"{case_id},{ct},\n" for case_id, ct in case_rows),
+            encoding="utf-8",
+        )
+        case_list_partial = tmp_path / "cases_partial.csv"
+        case_list_partial.write_text(
+            "case_id,ct_path,annotation_folder\n" + "".join(f"{case_id},{ct},\n" for case_id, ct in case_rows[:2]),
+            encoding="utf-8",
+        )
+
+        def fake_infer(ct_image, output_folder, model_key, **kwargs):
+            case_id = kwargs["case_id"]
+            seg = Path(output_folder) / case_id / "segmentations"
+            seg.mkdir(parents=True, exist_ok=True)
+            _make_nii(_sphere_mask(shape=(16, 16, 16), radius=4), seg / "liver.nii.gz")
+            _make_nii(_sphere_mask(shape=(16, 16, 16), radius=3), seg / "pancreas.nii.gz")
+            return {
+                "stage": "registered_infer",
+                "status": "success",
+                "model_key": model_key,
+                "segmentation_output": str(seg),
+                "num_masks": len(list(seg.glob("*.nii.gz"))),
+            }
+
+        monkeypatch.setattr(ml, "run_registered_model", fake_infer)
+        monkeypatch.setattr(ml, "run_shapekit", lambda *args, **kwargs: {"status": "skipped_debug_only"})
+
+        out_resume = tmp_path / "out_resume"
+        first = ml.run_multimodel_annotation_loop(
+            case_list=case_list_partial,
+            output_folder=out_resume,
+            models=["teacher_a"],
+            organs=["liver", "pancreas"],
+            enable_critic=False,
+            enable_shapekit=False,
+            dry_run=False,
+            resume=True,
+            timeout_sec=30,
+            teacher_inference_mode="full_volume",
+            enable_fusion=False,
+            enable_auto_arbitration=False,
+        )
+        assert first["status"] == "success"
+
+        second = ml.run_multimodel_annotation_loop(
+            case_list=case_list_all,
+            output_folder=out_resume,
+            models=["teacher_a"],
+            organs=["liver", "pancreas"],
+            enable_critic=False,
+            enable_shapekit=False,
+            dry_run=False,
+            resume=True,
+            timeout_sec=30,
+            teacher_inference_mode="full_volume",
+            enable_fusion=False,
+            enable_auto_arbitration=False,
+        )
+        assert second["status"] == "success"
+
+        out_full = tmp_path / "out_full"
+        full = ml.run_multimodel_annotation_loop(
+            case_list=case_list_all,
+            output_folder=out_full,
+            models=["teacher_a"],
+            organs=["liver", "pancreas"],
+            enable_critic=False,
+            enable_shapekit=False,
+            dry_run=False,
+            resume=False,
+            timeout_sec=30,
+            teacher_inference_mode="full_volume",
+            enable_fusion=False,
+            enable_auto_arbitration=False,
+        )
+        assert full["status"] == "success"
+
+        resume_summary = json.loads((out_resume / "run_summary.json").read_text(encoding="utf-8"))
+        full_summary = json.loads((out_full / "run_summary.json").read_text(encoding="utf-8"))
+
+        for key in ("num_cases", "selected_organs_rebuilt", "selection_rows_rebuilt", "total_updated"):
+            assert resume_summary[key] == full_summary[key]
+        assert resume_summary["summary_rebuilt_from_artifacts"] is True
+        assert full_summary["summary_rebuilt_from_artifacts"] is True
+        assert len(resume_summary["case_timing_breakdown"]) == len(full_summary["case_timing_breakdown"]) == 3
 
     def test_route_aware_execution_uses_existing_mapping_only(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml
 
         ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
         case_list = tmp_path / "cases.csv"
-        case_list.write_text("case_id,ct_path,annotation_folder\ncase_001,%s,\n" % ct, encoding="utf-8")
+        case_list.write_text(
+            "case_id,ct_path,annotation_folder,scan_coverage\ncase_001,%s,,abdomen\n" % ct,
+            encoding="utf-8",
+        )
         out = tmp_path / "out"
 
         infer_calls = []
@@ -1802,7 +2027,10 @@ class TestTeacherMeetingPipeline:
 
         ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
         case_list = tmp_path / "cases.csv"
-        case_list.write_text("case_id,ct_path,annotation_folder\ncase_001,%s,\n" % ct, encoding="utf-8")
+        case_list.write_text(
+            "case_id,ct_path,annotation_folder,scan_coverage\ncase_001,%s,,abdomen\n" % ct,
+            encoding="utf-8",
+        )
         out = tmp_path / "out"
 
         def fake_infer(ct_image, output_folder, model_key, **kwargs):
@@ -1933,6 +2161,55 @@ class TestTeacherMeetingPipeline:
         assert "fusion_consensus" not in liver_sel["candidate_models"]
         assert any(p.get("fusion_skipped_reason") == "low_or_unknown_pairwise_agreement_blocks_fusion" for p in liver_sel["candidate_predictions"])
 
+    def test_gap_rows_distinguish_expected_absent_from_route_failure(self, tmp_path):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        ct = _make_nii(np.zeros((8, 8, 8), dtype=np.int16), tmp_path / "ct.nii.gz")
+        rows = ml._build_gap_rows(
+            case_id="case_001",
+            ct=ct,
+            organs=["bladder", "liver"],
+            selection_rows=[
+                {
+                    "organ": "bladder",
+                    "expected_presence": "expected_absent",
+                    "selection_status": "missing",
+                    "candidate_count": 0,
+                    "candidate_models": [],
+                },
+                {
+                    "organ": "liver",
+                    "expected_presence": "expected_present",
+                    "selection_status": "missing",
+                    "selected_candidate_qc_flags": ["missing_file"],
+                    "candidate_count": 1,
+                    "candidate_models": ["official_voxtell_pretrained"],
+                },
+            ],
+            selected_metadata=[],
+        )
+        by_organ = {row["organ"]: row for row in rows}
+        assert by_organ["bladder"]["reason"] == "organ_expected_absent_or_out_of_fov"
+        assert by_organ["liver"]["reason"] == "model_or_route_failed_to_produce_usable_mask"
+        assert by_organ["bladder"]["gap_severity"] == "informational_out_of_fov"
+        assert by_organ["liver"]["gap_severity"] == "action_required_expected_present"
+
+    def test_fov_hints_turn_head_and_extremity_gaps_into_out_of_fov(self, tmp_path):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        assert ml._expected_presence_for_organ(
+            "brain",
+            {"has_region_evidence": True, "has_abdomen_coverage": True, "has_head_coverage": False},
+        ) == "expected_absent"
+        assert ml._expected_presence_for_organ(
+            "femur_left",
+            {"has_region_evidence": True, "has_abdomen_coverage": True, "has_extremity_coverage": False},
+        ) == "expected_absent"
+        assert ml._expected_presence_for_organ(
+            "pancreas",
+            {"has_region_evidence": True, "has_abdomen_coverage": True},
+        ) == "expected_present"
+
 
     def test_high_agreement_candidates_add_conservative_fusion_without_auto_winning(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml
@@ -2005,6 +2282,29 @@ class TestTeacherMeetingPipeline:
         miss = run_labelcritic_grade(ct, tmp_path / "nope.nii.gz", "liver", tmp_path / "g1.json")
         assert miss["status"] == "skipped" and miss["accept"] is None
 
+    def test_parse_grade_response_supports_semantic_grade_labels(self):
+        from cli_anything.medai.core.labelcritic_wrapper import _parse_grade_response
+
+        parsed = _parse_grade_response(
+            '{"grade_label":"acceptable","grade":0.65,"accept":true,"reason":"plausible organ location","hard_failure_reason":"none"}',
+            accept_grade=0.5,
+        )
+        assert parsed["parse_status"] == "success"
+        assert parsed["grade"] == 0.65
+        assert parsed["grade_label"] == "acceptable"
+        assert parsed["accept"] is True
+        assert parsed["hard_failure_reason"] == "none"
+
+        labeled = _parse_grade_response(
+            '{"grade":"bad","accept":false,"reason":"wrong organ","hard_failure_reason":"wrong_organ"}',
+            accept_grade=0.5,
+        )
+        assert labeled["parse_status"] == "success"
+        assert labeled["grade"] == 0.1
+        assert labeled["grade_label"] == "bad"
+        assert labeled["accept"] is False
+        assert labeled["hard_failure_reason"] == "wrong_organ"
+
     def test_auto_arbitration_swaps_and_flags(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml
 
@@ -2034,8 +2334,11 @@ class TestTeacherMeetingPipeline:
         def fake_grade(ct_image, mask, organ, output_json, **kwargs):
             # Reject teacher_a's masks, accept anything else with a high grade.
             reject = "teacher_a" in str(mask)
-            d = ({"status": "success", "grade": 0.1, "accept": False, "reason": "stub reject"}
-                 if reject else {"status": "success", "grade": 0.9, "accept": True, "reason": "stub accept"})
+            d = (
+                {"status": "success", "grade": 0.1, "grade_label": "bad", "accept": False, "reason": "stub reject", "hard_failure_reason": "wrong_organ"}
+                if reject else
+                {"status": "success", "grade": 0.9, "grade_label": "good", "accept": True, "reason": "stub accept", "hard_failure_reason": None}
+            )
             Path(output_json).parent.mkdir(parents=True, exist_ok=True)
             Path(output_json).write_text(json.dumps(d))
             return {"stage": "labelcritic_grade", "organ": organ, "mask": str(mask), **d}
@@ -2332,6 +2635,13 @@ class TestLabelCriticWrapperSafety:
         assert second["cache_status"] == "reused_labelcritic_compare_fingerprint"
         assert second["decision"]["cache_orientation"] == "inverted"
         assert calls["projection"] == 1
+
+    def test_labelcritic_invert_compare_decision_swaps_winner(self):
+        from cli_anything.medai.core.labelcritic_wrapper import _invert_compare_decision
+
+        assert _invert_compare_decision({"winner": "a"})["winner"] == "b"
+        assert _invert_compare_decision({"winner": "b"})["winner"] == "a"
+        assert _invert_compare_decision({"winner": "uncertain"})["winner"] == "uncertain"
 
     def test_prepare_mask_folder_does_not_mutate_source_directory(self, tmp_path):
         from cli_anything.medai.core.labelcritic_wrapper import _prepare_mask_folder

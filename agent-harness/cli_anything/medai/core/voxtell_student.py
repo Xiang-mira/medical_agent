@@ -20,6 +20,7 @@ from .auto_fine_label import grade_to_training_weight
 from .auto_label_core import ACCEPTED_SCORING_SCHEMA_VERSIONS
 from .json_utils import read_json, write_json
 from .organ_prompt_bank import (
+    filter_semantically_risky_prompts,
     flatten_prompt_bank_entry,
     prompt_category_for,
     prompt_record_for,
@@ -27,6 +28,7 @@ from .organ_prompt_bank import (
     select_prompt_for_organ,
 )
 from .paths import resolve_path
+from .subprocess_utils import subprocess_text
 from .target_space import validate_formal_373_target_space
 
 
@@ -53,6 +55,8 @@ ABDOMEN_PELVIS_COVERAGE_TERMS = {
     "pelvic",
 }
 HEAD_COVERAGE_TERMS = {"head", "brain", "cranial", "skull", "neck", "head_neck", "head-neck"}
+VOXTELL_VENDOR_ROOT = Path(__file__).resolve().parents[4] / "third_party" / "VoxTell"
+VOXTELL_BACKENDS = {"official_python_api", "official_cli"}
 
 
 def load_prompt_targets(target_config: str | Path = DEFAULT_TARGETS) -> dict[str, Any]:
@@ -175,6 +179,44 @@ def _chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
+def _voxtell_vendor_audit() -> dict[str, Any]:
+    audit: dict[str, Any] = {
+        "official_repo": "https://github.com/MIC-DKFZ/VoxTell",
+        "vendor_root": str(VOXTELL_VENDOR_ROOT),
+        "vendor_policy": "Do not patch third_party/VoxTell/voxtell/*; keep project adaptation in VoxTellStudent.",
+    }
+    if not VOXTELL_VENDOR_ROOT.exists():
+        audit.update({"status": "missing_vendor_root", "dirty": None})
+        return audit
+    try:
+        commit = subprocess.run(
+            ["git", "-C", str(VOXTELL_VENDOR_ROOT), "rev-parse", "--short", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        audit["commit"] = commit.stdout.strip() if commit.returncode == 0 else None
+        status = subprocess.run(
+            ["git", "-C", str(VOXTELL_VENDOR_ROOT), "status", "--short"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        dirty_lines = [line for line in (status.stdout or "").splitlines() if line.strip()]
+        audit.update({
+            "status": "ok" if status.returncode == 0 else "git_status_failed",
+            "dirty": bool(dirty_lines),
+            "dirty_files": dirty_lines,
+        })
+    except Exception as exc:
+        audit.update({"status": "audit_failed", "dirty": None, "reason": str(exc)})
+    return audit
+
+
 def _mask_stats(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"status": "missing", "mask_path": str(path), "mask_voxels": None, "empty_mask": None}
@@ -249,6 +291,7 @@ class VoxTellStudent:
         target_config: str | Path = DEFAULT_TARGETS,
         text_encoding_model: str | Path | None = None,
         python_executable: str | Path | None = None,
+        backend: str | None = None,
     ) -> None:
         self.model_dir = Path(model_dir).resolve()
         self.device = device
@@ -260,6 +303,9 @@ class VoxTellStudent:
             or resolve_path("checkpoints/Qwen/Qwen3-Embedding-4B")
         )
         self.python_executable = str(python_executable or sys.executable)
+        self.backend = (backend or os.getenv("MEDAI_VOXTELL_BACKEND") or "official_python_api").strip().lower()
+        if self.backend not in VOXTELL_BACKENDS:
+            raise ValueError(f"Unsupported VoxTell backend: {self.backend}. Expected one of {sorted(VOXTELL_BACKENDS)}")
 
     def _target_doc(self) -> dict[str, Any]:
         return load_prompt_targets(self.target_config)
@@ -288,6 +334,7 @@ class VoxTellStudent:
         timeout_sec: int = 1800,
         prompt_batch_size: int = 16,
         prompt_overrides: dict[str, str] | None = None,
+        save_probability_outputs: bool | None = None,
     ) -> dict[str, Any]:
         """Segment a 3D CT volume with text prompts.
 
@@ -309,6 +356,11 @@ class VoxTellStudent:
         ct = Path(ct_image).resolve()
         out = Path(output_dir).resolve()
         out.mkdir(parents=True, exist_ok=True)
+        probability_dir = out / "probability_masks"
+        if save_probability_outputs is None:
+            save_probability_outputs = os.getenv("MEDAI_SAVE_STUDENT_PROBABILITY", "1").strip().lower() in {"1", "true", "yes", "on"}
+        if save_probability_outputs:
+            probability_dir.mkdir(parents=True, exist_ok=True)
         organs, organ_to_prompt = self._select_organs(prompts)
         if prompt_overrides:
             for organ, prompt_text in prompt_overrides.items():
@@ -318,10 +370,28 @@ class VoxTellStudent:
 
         def command_for(batch_organs: list[str]) -> list[str]:
             batch_prompt_texts = [organ_to_prompt[o] for o in batch_organs]
+            if self.backend == "official_cli":
+                return [
+                    self.python_executable,
+                    "-m",
+                    "voxtell.inference.predict_from_raw_data",
+                    "--input",
+                    str(ct),
+                    "--output",
+                    str(out),
+                    "--model",
+                    str(self.model_dir),
+                    "--prompts",
+                    *batch_prompt_texts,
+                    "--device",
+                    self.device,
+                    "--gpu",
+                    str(self.gpu),
+                ]
             return [
-                self.python_executable,
-                "-m",
-                "voxtell.inference.predict_from_raw_data",
+                "official_python_api",
+                "voxtell.inference.predictor.VoxTellPredictor",
+                "predict_single_image",
                 "--input",
                 str(ct),
                 "--output",
@@ -331,32 +401,12 @@ class VoxTellStudent:
                 "--prompts",
                 *batch_prompt_texts,
                 "--device",
-                self.device,
-                "--gpu",
-                str(self.gpu),
+                f"{self.device}:{self.gpu}" if self.device == "cuda" else self.device,
                 "--text-encoding-model",
                 self.text_encoding_model,
             ]
 
-        command = [
-            self.python_executable,
-            "-m",
-            "voxtell.inference.predict_from_raw_data",
-            "--input",
-            str(ct),
-            "--output",
-            str(out),
-            "--model",
-            str(self.model_dir),
-            "--prompts",
-            *prompt_texts,
-            "--device",
-            self.device,
-            "--gpu",
-            str(self.gpu),
-            "--text-encoding-model",
-            self.text_encoding_model,
-        ]
+        command = command_for(organs)
         expected_masks = {organ: str(out / f"{organ}.nii.gz") for organ in organs}
         official_output_masks = {
             organ: str(out / f"{_input_stem_for_voxtell(ct)}_{_safe_prompt_name(organ_to_prompt[organ])}{_voxtell_suffix(ct)}")
@@ -367,9 +417,16 @@ class VoxTellStudent:
             "status": "dry_run" if dry_run else "pending",
             "ct_image": str(ct),
             "output_dir": str(out),
+            "probability_output_dir": str(probability_dir),
+            "save_probability_outputs_requested": bool(save_probability_outputs),
+            "probability_outputs_available": False,
+            "probability_output_reason": "VoxTell adapter currently receives binary segmentations from the vendor API/CLI; probability/logit tensors are not exposed.",
             "model_dir": str(self.model_dir),
             "text_encoding_model": self.text_encoding_model,
             "target_config": str(self.target_config),
+            "backend": self.backend,
+            "voxtell_source_mode": "official_vendor_via_project_adapter",
+            "vendor_audit": _voxtell_vendor_audit(),
             "num_prompts": len(organs),
             "organs": organs,
             "organ_to_prompt": organ_to_prompt,
@@ -377,6 +434,7 @@ class VoxTellStudent:
             "expected_masks": expected_masks,
             "official_output_masks": official_output_masks,
             "command": command,
+            "official_api_or_cli_command": command,
             "prompt_batch_size": prompt_batch_size,
             "prompt_overrides": prompt_overrides or {},
             "num_batches": len(_chunked(organs, prompt_batch_size)),
@@ -391,6 +449,7 @@ class VoxTellStudent:
                 "official_input": "3D NIfTI + free-text prompt list + VoxTell model dir + Qwen3 text encoder",
                 "official_output": "one binary mask per prompt, named <input_stem>_<prompt>.nii.gz",
                 "project_output": "one binary mask per organ, standardized to <organ>.nii.gz",
+                "probability_output": "optional probability_masks/<organ>.nii.gz when backend exposes logits/probabilities; currently recorded as unavailable for binary-only VoxTell outputs",
                 "combined_multilabel_policy": "not used formally because overlapping prompt masks can overwrite earlier labels",
             },
         }
@@ -422,46 +481,109 @@ class VoxTellStudent:
         stdout_tail = ""
         stderr_tail = ""
 
+        api_context: dict[str, Any] | None = None
+        if self.backend == "official_python_api":
+            try:
+                import torch
+                if VOXTELL_VENDOR_ROOT.exists() and str(VOXTELL_VENDOR_ROOT) not in sys.path:
+                    sys.path.insert(0, str(VOXTELL_VENDOR_ROOT))
+                from voxtell.inference.predict_from_raw_data import get_reader_writer, save_segmentation
+                from voxtell.inference.predictor import VoxTellPredictor
+
+                if self.device == "cuda":
+                    device = torch.device(f"cuda:{self.gpu}" if torch.cuda.is_available() else "cpu")
+                else:
+                    device = torch.device("cpu")
+                reader_writer = get_reader_writer(str(ct))
+                img, props = reader_writer.read_images([str(ct)])
+                predictor = VoxTellPredictor(
+                    model_dir=str(self.model_dir),
+                    device=device,
+                    text_encoding_model=self.text_encoding_model,
+                )
+                api_context = {
+                    "device": str(device),
+                    "img": img,
+                    "props": props,
+                    "predictor": predictor,
+                    "save_segmentation": save_segmentation,
+                    "input_filename": _input_stem_for_voxtell(ct),
+                    "suffix": _voxtell_suffix(ct),
+                }
+            except Exception as exc:
+                result.update({
+                    "status": "failed",
+                    "reason": f"Official VoxTell Python API initialization failed: {exc}",
+                    "return_code": 1,
+                })
+                write_json(out / "voxtell_student_result.json", result)
+                return result
+
         for batch_idx, batch_organs in enumerate(_chunked(organs, prompt_batch_size), start=1):
             batch_command = command_for(batch_organs)
+            batch_prompt_texts = [organ_to_prompt[o] for o in batch_organs]
             batch_start = time.time()
-            try:
-                proc = subprocess.run(
-                    batch_command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    check=False,
-                    timeout=timeout_sec,
-                )
-                timed_out = False
-            except subprocess.TimeoutExpired as exc:
-                proc = subprocess.CompletedProcess(
-                    batch_command,
-                    124,
-                    stdout=exc.stdout or "",
-                    stderr=(exc.stderr or "") + f"\n[VoxTellStudent] Timeout after {timeout_sec}s.",
-                )
-                timed_out = True
-            stdout_tail = ((stdout_tail + "\n" + (proc.stdout or ""))[-4000:])
-            stderr_tail = ((stderr_tail + "\n" + (proc.stderr or ""))[-4000:])
-            batch_status = "timed_out" if timed_out else ("success" if proc.returncode == 0 else "failed")
+            proc_stdout = ""
+            proc_stderr = ""
+            return_code = 0
+            timed_out = False
+            if self.backend == "official_cli":
+                try:
+                    proc = subprocess.run(
+                        batch_command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        check=False,
+                        timeout=timeout_sec,
+                    )
+                    return_code = proc.returncode
+                    proc_stdout = proc.stdout or ""
+                    proc_stderr = proc.stderr or ""
+                except subprocess.TimeoutExpired as exc:
+                    return_code = 124
+                    proc_stdout = subprocess_text(exc.stdout)
+                    proc_stderr = subprocess_text(exc.stderr) + f"\n[VoxTellStudent] Timeout after {timeout_sec}s."
+                    timed_out = True
+            else:
+                try:
+                    assert api_context is not None
+                    segmentations = api_context["predictor"].predict_single_image(api_context["img"], batch_prompt_texts)
+                    for i, prompt_text in enumerate(batch_prompt_texts):
+                        api_context["save_segmentation"](
+                            segmentations[i],
+                            out,
+                            api_context["input_filename"],
+                            api_context["props"],
+                            prompt_name=prompt_text,
+                            suffix=api_context["suffix"],
+                        )
+                except Exception as exc:
+                    return_code = 1
+                    proc_stderr = f"Official VoxTell Python API prediction failed: {exc}"
+
+            stdout_tail = ((stdout_tail + "\n" + proc_stdout)[-4000:])
+            stderr_tail = ((stderr_tail + "\n" + proc_stderr)[-4000:])
+            batch_status = "timed_out" if timed_out else ("success" if return_code == 0 else "failed")
             batch_results.append({
                 "batch_index": batch_idx,
                 "organs": batch_organs,
                 "status": batch_status,
-                "return_code": proc.returncode,
+                "return_code": return_code,
                 "runtime_sec": round(time.time() - batch_start, 3),
+                "backend": self.backend,
                 "command": batch_command,
-                "stdout_tail": (proc.stdout or "")[-1200:],
-                "stderr_tail": (proc.stderr or "")[-1200:],
+                "stdout_tail": proc_stdout[-1200:],
+                "stderr_tail": proc_stderr[-1200:],
             })
-            if proc.returncode != 0 or timed_out:
+            if return_code != 0 or timed_out:
                 for organ in batch_organs:
                     per_organ_status[organ] = {
                         "status": batch_status,
                         "official_mask": official_output_masks[organ],
                         "standardized_mask": expected_masks[organ],
+                        "prompt": organ_to_prompt[organ],
+                        "backend": self.backend,
                         "empty_mask": None,
                     }
                 continue
@@ -480,6 +602,7 @@ class VoxTellStudent:
                         "official_mask": str(official),
                         "standardized_mask": str(standardized),
                         "prompt": organ_to_prompt[organ],
+                        "backend": self.backend,
                         "retry_recommended": bool(stats.get("empty_mask")),
                         "retry_reason": "empty_mask_check_prompt_orientation_spacing_threshold" if stats.get("empty_mask") else None,
                     }
@@ -489,6 +612,7 @@ class VoxTellStudent:
                         "official_mask": str(official),
                         "standardized_mask": str(standardized),
                         "prompt": organ_to_prompt[organ],
+                        "backend": self.backend,
                         "empty_mask": None,
                         "reason": "official output mask missing after successful VoxTell command",
                     }
@@ -618,22 +742,40 @@ class VoxTellStudent:
                     and not (meta.get("probability_mask_path") and Path(str(meta.get("probability_mask_path"))).exists())
                 )
                 c_without_soft_target = grade == "C" and target_type != "soft"
-                if (
-                    not schema_supported
-                    or grade == "D"
-                    or training_weight <= 0.0
-                    or item.get("distillation_eligible") is False
-                    or c_without_soft_target
-                    or soft_probability_missing
-                ):
-                    reason = "unsupported_scoring_schema_requires_rescoring"
+                if not schema_supported:
+                    training_gate_decision = "exclude_unsupported_schema"
+                    training_gate_policy = "Unsupported scoring schemas require rescoring before student training."
+                elif grade in {"A", "B"} and target_type == "hard" and training_weight > 0.0:
+                    training_gate_decision = "include_hard_ab"
+                    training_gate_policy = "A/B hard pseudo-labels are eligible for direct student training."
+                elif grade in {"A", "B"}:
+                    training_gate_decision = "exclude_ab_non_hard_or_zero_weight"
+                    training_gate_policy = "A/B labels must be hard targets with positive training weight for direct student training."
+                elif grade == "C" and target_type == "soft" and training_weight > 0.0 and not soft_probability_missing:
+                    training_gate_decision = "include_soft_c"
+                    training_gate_policy = "C is eligible only as a soft target with an explicit probability mask."
+                elif grade == "C" and target_type == "soft":
+                    training_gate_decision = "exclude_c_soft_missing_probability"
+                    training_gate_policy = "C soft labels require an explicit probability mask before student training."
+                elif grade == "C":
+                    training_gate_decision = "exclude_or_review_c"
+                    training_gate_policy = "C hard/provisional labels are audit/review only unless a soft target is present."
+                else:
+                    training_gate_decision = "exclude_d_or_zero_weight"
+                    training_gate_policy = "D and zero-weight labels are excluded from student training."
+                item["training_gate_decision"] = training_gate_decision
+                item["training_gate_policy"] = training_gate_policy
+                if training_gate_decision not in {"include_hard_ab", "include_soft_c"} or item.get("distillation_eligible") is False:
+                    reason = "legacy_requires_autolabel_core_v2_rescoring" if scoring_schema_version in {"", "legacy", "none", "null"} else "unsupported_scoring_schema_requires_rescoring"
                     if schema_supported:
                         if c_without_soft_target:
                             reason = "grade_C_requires_soft_probability_target"
                         elif soft_probability_missing:
                             reason = "soft_target_probability_mask_missing"
+                        elif training_gate_decision == "exclude_ab_non_hard_or_zero_weight":
+                            reason = "grade_AB_requires_hard_positive_target"
                         else:
-                            reason = item.get("distillation_exclusion_reason") or "grade_D_or_zero_weight"
+                            reason = item.get("distillation_exclusion_reason") or training_gate_decision or "grade_D_or_zero_weight"
                     skipped_ineligible_positive.append({
                         "case_id": case_id,
                         "organ": organ,
@@ -641,6 +783,10 @@ class VoxTellStudent:
                         "training_weight": item.get("training_weight"),
                         "target_type": item.get("target_type"),
                         "scoring_schema_version": scoring_schema_version,
+                        "training_gate_decision": training_gate_decision,
+                        "training_gate_policy": training_gate_policy,
+                        "probability_mask_path": item.get("probability_mask_path"),
+                        "distillation_eligible": item.get("distillation_eligible"),
                         "reason": reason,
                         "exclusion_category": reason.split(":", 1)[0],
                         "identity_status": item.get("identity_status"),
@@ -742,6 +888,16 @@ class VoxTellStudent:
             "num_strong_training_items": sum(1 for r in rows if r.get("supervision_type") == "positive" and float(r.get("training_weight") or 0.0) >= 0.5),
             "num_distillation_eligible_items": sum(1 for r in rows if r.get("distillation_eligible") is not False and float(r.get("training_weight") or 0.0) > 0.0),
             "num_zero_weight_items": sum(1 for r in rows if float(r.get("training_weight") or 0.0) == 0.0),
+            "target_type_counts": {target_type: sum(1 for r in rows if str(r.get("target_type") or "hard") == target_type) for target_type in ["hard", "soft", "provisional", "rejected"]},
+            "training_gate_summary": {
+                "num_included": len(rows),
+                "num_excluded_positive": len(skipped_ineligible_positive),
+                "num_c_soft_included": sum(1 for r in rows if r.get("grade") == "C" and r.get("target_type") == "soft" and r.get("probability_mask_path")),
+                "num_c_missing_probability_excluded": sum(1 for r in skipped_ineligible_positive if r.get("reason") == "soft_target_probability_mask_missing"),
+                "num_c_hard_or_provisional_excluded": sum(1 for r in skipped_ineligible_positive if r.get("reason") == "grade_C_requires_soft_probability_target"),
+                "num_d_excluded": sum(1 for r in skipped_ineligible_positive if r.get("grade") == "D"),
+                "num_unsupported_schema_excluded": sum(1 for r in skipped_ineligible_positive if r.get("reason") == "unsupported_scoring_schema_requires_rescoring"),
+            },
             "zero_mask_targets": zero_mask_targets,
             "skipped_missing_image": skipped_missing_image,
             "skipped_ineligible_positive": skipped_ineligible_positive,
@@ -822,7 +978,7 @@ def _prompt_variants(organ: str, canonical_prompt: str, doc: dict[str, Any]) -> 
         prompt = str(prompt or "").strip()
         if prompt and prompt not in variants:
             variants.append(prompt)
-    return variants
+    return filter_semantically_risky_prompts(variants)
 
 
 def _negative_quota_policy() -> dict[str, float]:
@@ -1086,6 +1242,8 @@ def _manifest_base_item(
         "target_mapping_policy": "teacher output/name -> canonical organ name -> student target id; teacher IDs are never reused as student IDs",
         "selected_model": meta.get("selected_model"),
         "source_model": meta.get("source_model", meta.get("selected_model")),
+        "selected_provider": meta.get("selected_provider") or meta.get("selected_model") or meta.get("source_model"),
+        "selection_reason": meta.get("selection_reason") or meta.get("selection_method") or meta.get("fallback_reason"),
         "candidate_models": meta.get("candidate_models", []),
         "teacher_lineage": meta.get("teacher_lineage") or meta.get("candidate_models", []),
         "candidate_count": meta.get("candidate_count"),
@@ -1137,6 +1295,10 @@ def _manifest_base_item(
         "label_confidence": meta.get("label_confidence", meta.get("auto_fine_label_reliability_score")),
         "label_passport_path": meta.get("label_passport_path"),
         "review_flags": meta.get("review_flags", []),
+        "human_review_status": meta.get("human_review_status", "pending"),
+        "human_review_reason": meta.get("human_review_reason"),
+        "review_packet": meta.get("review_packet"),
+        "affects_training_manifest": meta.get("affects_training_manifest"),
         "quality_flags": meta.get("quality_flags", []),
         "quality_status": meta.get("quality_status") or _quality_status(meta.get("review_flags", []), meta.get("quality_flags", [])),
         "source_metadata_available": bool(meta),

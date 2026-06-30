@@ -329,6 +329,10 @@ def sync_pilot_mstep_result(round_root: Path) -> dict[str, Any]:
         "quality_gate": quality or None,
         "pilot_checkpoint_quality_gated": gates_success,
         "checkpoint_eligible_for_next_round": False if pilot_short else bool(gates_success),
+        "eligible_for_next_round_prompt_student": False if pilot_short else bool(gates_success),
+        "eligible_as_teacher_candidate": False if pilot_short else bool(gates_success),
+        "checkpoint_origin": "project_distillation",
+        "is_project_student": True,
         "formal_round2_recommendation": "Pilot checkpoint passed automatic gates but was trained on a capped subset; run full M-step before formal Round2 competition." if pilot_short else "Eligible if automatic gates passed.",
         "accuracy_warning": "Pseudo-consistency only; no expert ground-truth accuracy is claimed.",
     }
@@ -351,6 +355,8 @@ def collect_mstep_status(round_root: Path, output_dir: Path) -> dict[str, Any]:
         "training_status": result.get("training_status"),
         "mstep_status": result.get("status"),
         "checkpoint_eligible_for_next_round": bool(result.get("checkpoint_eligible_for_next_round")),
+        "eligible_for_next_round_prompt_student": bool(result.get("eligible_for_next_round_prompt_student", result.get("checkpoint_eligible_for_next_round"))),
+        "eligible_as_teacher_candidate": bool(result.get("eligible_as_teacher_candidate", result.get("checkpoint_eligible_for_next_round"))),
         "num_items": manifest.get("num_items") or result.get("num_items"),
         "num_cases": manifest.get("num_cases") or result.get("num_cases"),
         "num_positive_items": manifest.get("num_positive_items"),
@@ -650,7 +656,7 @@ def write_markdown_summary(output_dir: Path, auto_quality: dict[str, Any], manif
         f"- Prompt variants: `{manifest.get('num_prompt_variant_items')}`; prompt source counts: `{manifest.get('prompt_source_counts')}`",
         f"- Negative source counts expanded: `{manifest.get('negative_source_counts')}`",
         f"- Negative source counts canonical: `{manifest.get('negative_source_counts_canonical')}`",
-        f"- Checkpoint status: `{mstep.get('status')}`; eligible for next round: `{mstep.get('checkpoint_eligible_for_next_round')}`",
+        f"- Checkpoint status: `{mstep.get('status')}`; prompt-student eligible for next round: `{mstep.get('eligible_for_next_round_prompt_student', mstep.get('checkpoint_eligible_for_next_round'))}`",
     ]
     if robustness:
         lines.append(f"- Prompt robustness status: `{robustness.get('status')}`; variant-vs-canonical mean DSC: `{robustness.get('variant_vs_canonical_mean_dsc')}`")

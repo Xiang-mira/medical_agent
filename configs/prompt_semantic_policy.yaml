@@ -1,0 +1,42 @@
+version: 1
+description: >
+  Generic prompt semantic policy for CT segmentation. The defaults are
+  dataset-agnostic: do not imply lumen-only, wall-only, whole-region, or
+  all-vessel semantics unless a dataset schema explicitly defines that target.
+
+default_banned_terms:
+  - "lumen"
+  - "lumen only"
+  - "wall only"
+  - "all vessels"
+  - "all veins"
+  - "all arteries"
+  - "whole abdomen"
+  - "nearby tissue"
+  - "surrounding tissue"
+
+organ_type_banned_terms:
+  hollow_gi:
+    - "gastric lumen"
+    - "colonic lumen"
+    - "bowel lumen"
+    - "lumen only"
+  vessel_or_duct:
+    - "all vessels"
+    - "all veins"
+    - "all arteries"
+    - "vascular tree"
+
+safe_replacements:
+  "segment the gastric lumen": "segment the stomach organ according to the dataset label definition"
+  "segment the colonic lumen": "segment the colon organ / large bowel structure according to the dataset label definition"
+  "segment the bowel lumen": "segment the bowel organ region according to the dataset label definition"
+  "segment the aortic lumen": "segment the aorta according to the dataset label definition"
+  "segment the vesical lumen": "segment the bladder according to the dataset label definition"
+
+recommended_prompt_limits:
+  max_prompts_per_organ_for_debug: 3
+  required_categories:
+    - canonical
+    - anatomical_location
+    - boundary_instruction

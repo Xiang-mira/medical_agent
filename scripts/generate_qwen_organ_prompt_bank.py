@@ -21,7 +21,14 @@ sys.path.insert(0, str(ROOT / "agent-harness"))
 
 from cli_anything.medai.core.organ_prompt_bank import (
     PROMPT_BANK_CATEGORIES,
+    display_name,
     flatten_prompt_bank_entry,
+)
+from cli_anything.medai.core.prompt_governance import (
+    build_prompt_validation_context,
+    prompt_record,
+    taxonomy_for_legacy_category,
+    validate_generated_prompt_record,
 )
 
 DEFAULT_TARGET = ROOT / "configs" / "student_3d_prompt_target_organs.json"
@@ -185,7 +192,15 @@ def generation_request(
         **hierarchy,
         "existing_prompts_to_avoid": existing,
     }
-    schema = {category: [f"exactly {count} distinct strings"] for category in PROMPT_BANK_CATEGORIES}
+    schema = {
+        category: [{
+            "prompt": f"exactly {count} distinct grounded strings total in this category",
+            "introduced_anatomy": ["only supplied landmarks/context anatomy, never a new target"],
+            "laterality": "left | right | bilateral | midline | none",
+            "ct_scan_range_assumption": "must stay inside the supplied region/scan range",
+        }]
+        for category in PROMPT_BANK_CATEGORIES
+    }
     return (
         "Generate diverse prompts grounded strictly in the facts below. Every prompt must explicitly "
         "name the target or one supplied alias. Do not broaden to a parent, child, sibling, opposite "
@@ -242,6 +257,53 @@ def validate_prompt(
     return (prompt if not errors else None), errors
 
 
+def _record_from_generated_value(
+    value: Any,
+    *,
+    category: str,
+    organ: str,
+    entry: dict[str, Any],
+    hierarchy: dict[str, Any],
+) -> dict[str, Any]:
+    canonical_name = str(entry.get("display_name") or display_name(organ))
+    if isinstance(value, dict):
+        prompt = clean_text(value.get("prompt") or value.get("text"))
+        level, subclass = taxonomy_for_legacy_category(category)
+        return {
+            "organ_token": str(value.get("organ_token") or organ),
+            "canonical_name": str(value.get("canonical_name") or canonical_name),
+            "prompt": prompt,
+            "prompt_level": value.get("prompt_level") or level,
+            "prompt_subclass": value.get("prompt_subclass") or subclass,
+            "introduced_anatomy": value.get("introduced_anatomy") if isinstance(value.get("introduced_anatomy"), list) else [],
+            "laterality": value.get("laterality") or "none",
+            "ct_scan_range_assumption": value.get("ct_scan_range_assumption") or entry.get("region") or "",
+            "prompt_source": value.get("prompt_source") or "qwen_generated",
+        }
+    return prompt_record(
+        prompt=clean_text(value),
+        organ_token=organ,
+        canonical_name=canonical_name,
+        prompt_source="qwen_generated",
+        category=category,
+        introduced_anatomy=[],
+        ct_scan_range_assumption=str(entry.get("region") or ""),
+    )
+
+
+def _validation_context(organ: str, entry: dict[str, Any], hierarchy: dict[str, Any]) -> dict[str, Any]:
+    return build_prompt_validation_context(
+        organ_token=organ,
+        canonical_name=str(entry.get("display_name") or display_name(organ)),
+        region=str(entry.get("region") or ""),
+        ct_appearance=str(entry.get("ct_appearance") or ""),
+        synonyms=[str(x) for x in (entry.get("aliases") or [])],
+        allowed_adjacent_anatomy=[str(x) for x in (entry.get("landmarks") or [])] + [str(x) for x in (hierarchy.get("parent_ids") or [])],
+        ct_scan_range=str(entry.get("region") or ""),
+        forbidden_targets=[str(x) for x in (hierarchy.get("forbidden_targets") or [])],
+    )
+
+
 def validate_response(
     response: dict[str, Any],
     *,
@@ -250,47 +312,75 @@ def validate_response(
     hierarchy: dict[str, Any],
     needed: int,
     accepted: dict[str, list[str]],
-) -> tuple[dict[str, list[str]], list[dict[str, Any]]]:
+) -> tuple[dict[str, list[str]], list[dict[str, Any]], list[dict[str, Any]]]:
     rejected: list[dict[str, Any]] = []
+    accepted_records: list[dict[str, Any]] = []
     seen = [
         *flatten_prompt_bank_entry(entry),
         *(prompt for values in accepted.values() for prompt in values),
     ]
+    context = _validation_context(organ, entry, hierarchy)
+    fallback_prompt = clean_text(entry.get("canonical_prompt") or f"segment the {context['canonical_name']}")
     for category in PROMPT_BANK_CATEGORIES:
         values = response.get(category)
         if not isinstance(values, list):
             rejected.append({"category": category, "text": None, "reasons": ["missing_or_non_list_category"]})
             continue
         for value in values:
-            prompt, errors = validate_prompt(
-                text=value,
-                category=category,
-                organ=organ,
-                entry=entry,
-                hierarchy=hierarchy,
-                seen=seen,
+            record = _record_from_generated_value(value, category=category, organ=organ, entry=entry, hierarchy=hierarchy)
+            validation = validate_generated_prompt_record(
+                record,
+                context,
+                existing_prompts=seen,
+                fallback_prompt=fallback_prompt,
             )
-            if errors:
-                rejected.append({"category": category, "text": clean_text(value), "reasons": errors})
+            if validation["validation_status"] != "accepted":
+                rejected.append({
+                    "category": category,
+                    "text": clean_text(record.get("prompt")),
+                    "reasons": validation.get("validation_errors", []),
+                    "fallback_prompt": validation.get("fallback_prompt"),
+                    "prompt_source": validation.get("prompt_source"),
+                    "validation_status": validation.get("validation_status"),
+                    "fallback_reason": validation.get("fallback_reason"),
+                })
                 continue
-            if len(accepted[category]) < needed and prompt:
+            if len(accepted[category]) < needed:
+                prompt = validation["accepted_prompt"]
                 accepted[category].append(prompt)
                 seen.append(prompt)
-    return accepted, rejected
+                accepted_records.append({
+                    "text": prompt,
+                    "category": category,
+                    "source": "qwen_generated",
+                    "validation_status": "accepted",
+                    "fallback_reason": None,
+                    "prompt_level": validation.get("prompt_level"),
+                    "prompt_subclass": validation.get("prompt_subclass"),
+                    "introduced_anatomy": validation.get("introduced_anatomy", []),
+                    "laterality": validation.get("laterality"),
+                    "ct_scan_range_assumption": validation.get("ct_scan_range_assumption"),
+                })
+    return accepted, rejected, accepted_records
 
 
 def template_records(entry: dict[str, Any]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     canonical = clean_text(entry.get("canonical_prompt"))
     if canonical:
-        records.append({"text": canonical, "category": "canonical", "source": "template", "validation_status": "accepted"})
+        level, subclass = taxonomy_for_legacy_category("canonical")
+        records.append({"text": canonical, "category": "canonical", "source": "template", "validation_status": "accepted", "fallback_reason": None, "prompt_level": level, "prompt_subclass": subclass})
     for category in PROMPT_BANK_CATEGORIES:
         for prompt in entry.get("prompts", {}).get(category, []) or []:
+            level, subclass = taxonomy_for_legacy_category(category)
             records.append({
                 "text": clean_text(prompt),
                 "category": category,
                 "source": "template",
                 "validation_status": "accepted",
+                "fallback_reason": None,
+                "prompt_level": level,
+                "prompt_subclass": subclass,
             })
     unique: dict[str, dict[str, Any]] = {}
     for record in records:
@@ -306,21 +396,32 @@ def merge_generated_entry(
     attempts: int,
     needed: int,
     rejected: list[dict[str, Any]],
+    accepted_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     merged = copy.deepcopy(entry)
     merged.setdefault("prompts", {})
     records = template_records(entry)
+    generated_records = accepted_records or []
+    generated_by_key = {(r.get("category"), r.get("text")): r for r in generated_records}
     for category in PROMPT_BANK_CATEGORIES:
         current = [clean_text(x) for x in merged["prompts"].get(category, []) if clean_text(x)]
         for prompt in accepted.get(category, []):
             if prompt.lower() not in {x.lower() for x in current}:
                 current.append(prompt)
+            level, subclass = taxonomy_for_legacy_category(category)
+            source_record = generated_by_key.get((category, prompt), {})
             records.append({
                 "text": prompt,
                 "category": category,
-                "source": "qwen_freeform",
+                "source": "qwen_generated",
                 "model": model,
                 "validation_status": "accepted",
+                "fallback_reason": None,
+                "prompt_level": source_record.get("prompt_level") or level,
+                "prompt_subclass": source_record.get("prompt_subclass") or subclass,
+                "introduced_anatomy": source_record.get("introduced_anatomy", []),
+                "laterality": source_record.get("laterality"),
+                "ct_scan_range_assumption": source_record.get("ct_scan_range_assumption"),
             })
         merged["prompts"][category] = current
     merged["prompt_records"] = records
@@ -390,6 +491,7 @@ def main() -> int:
         entry = doc["organ_prompt_bank"][organ]
         hierarchy = taxonomy_context(organ, taxonomy)
         accepted = {category: [] for category in PROMPT_BANK_CATEGORIES}
+        accepted_records: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
         raw_responses: list[str] = []
         attempts = 0
@@ -414,7 +516,7 @@ def main() -> int:
                     timeout=args.timeout_sec,
                 )
                 raw_responses.append(raw)
-                accepted, new_rejections = validate_response(
+                accepted, new_rejections, new_records = validate_response(
                     response,
                     organ=organ,
                     entry=entry,
@@ -423,6 +525,7 @@ def main() -> int:
                     accepted=accepted,
                 )
                 rejected.extend(new_rejections)
+                accepted_records.extend(new_records)
             except Exception as exc:
                 last_error = str(exc)
                 rejected.append({"attempt": attempts, "reasons": ["request_or_parse_error"], "detail": last_error})
@@ -433,6 +536,7 @@ def main() -> int:
             model=model,
             attempts=attempts,
             rejected=rejected,
+            accepted_records=accepted_records,
             needed=args.prompts_per_category,
         )
         per_organ_audit = {
@@ -440,6 +544,7 @@ def main() -> int:
             "attempts": attempts,
             "accepted_counts": {category: len(values) for category, values in accepted.items()},
             "rejected_count": len(rejected),
+            "accepted_prompt_records": len(accepted_records),
             "last_error": last_error,
         }
         bank[organ] = merged
@@ -456,12 +561,13 @@ def main() -> int:
     candidate["version"] = max(3, int(candidate.get("version", 0)))
     candidate["status"] = "hybrid_qwen_prompt_bank_candidate"
     candidate["prompt_generation"] = {
-        "source": "qwen_freeform_plus_template_baseline",
+        "source": "qwen_generated_plus_template_baseline_with_prompt_governance",
         "model": model,
         "base_url": args.base_url,
         "prompts_per_category": args.prompts_per_category,
         "temperature": args.temperature,
         "active_config_unchanged": str(output_path) != str(target_path),
+        "validation_contract": "schema_identity_laterality_anatomy_scan_range_duplicate_word_count_then_fallback",
     }
     candidate["prompt_variants"] = {
         organ: flatten_prompt_bank_entry(entry)

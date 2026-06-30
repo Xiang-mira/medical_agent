@@ -13,6 +13,7 @@ from .auto_fine_label import grade_to_training_weight
 from .auto_label_core import ACCEPTED_SCORING_SCHEMA_VERSIONS
 from .json_utils import write_json
 from .organ_taxonomy import normalize_canonical_id
+from .subprocess_utils import subprocess_text
 
 
 def _quality_status(review_flags: Any, quality_flags: Any) -> str:
@@ -114,6 +115,31 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                 if not schema_supported:
                     training_weight_value = 0.0
                     distillation_eligible_value = False
+                target_type_value = str(meta.get("target_type", "hard")).lower()
+                probability_path_value = meta.get("probability_mask_path")
+                probability_path_exists = bool(probability_path_value and Path(str(probability_path_value)).exists())
+                if not schema_supported:
+                    training_gate_decision = "exclude_unsupported_schema"
+                    training_gate_policy = "Unsupported scoring schemas require rescoring before student training."
+                elif grade_value in {"A", "B"} and target_type_value == "hard" and training_weight_value > 0.0:
+                    training_gate_decision = "include_hard_ab"
+                    training_gate_policy = "A/B hard pseudo-labels are eligible for direct student training."
+                elif grade_value in {"A", "B"}:
+                    training_gate_decision = "exclude_ab_non_hard_or_zero_weight"
+                    training_gate_policy = "A/B labels must be hard targets with positive training weight for direct student training."
+                elif grade_value == "C" and target_type_value == "soft" and training_weight_value > 0.0 and probability_path_exists:
+                    training_gate_decision = "include_soft_c"
+                    training_gate_policy = "C is eligible only as a soft target with an explicit probability mask."
+                elif grade_value == "C" and target_type_value == "soft":
+                    training_gate_decision = "exclude_c_soft_missing_probability"
+                    training_gate_policy = "C soft labels require an explicit probability mask before student training."
+                elif grade_value == "C":
+                    training_gate_decision = "exclude_or_review_c"
+                    training_gate_policy = "C hard/provisional labels are audit/review only unless a soft target is present."
+                else:
+                    training_gate_decision = "exclude_d_or_zero_weight"
+                    training_gate_policy = "D and zero-weight labels are excluded from student training."
+
                 row: dict[str, Any] = {
                     "case_id": case_dir.name,
                     "dataset_type": "auto_fine_label_dataset",
@@ -160,8 +186,10 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                     "missing_evidence": meta.get("missing_evidence", []),
                     "decision_status": meta.get("decision_status"),
                     "decision_reasons": meta.get("decision_reasons", []),
-                    "target_type": meta.get("target_type", "hard"),
-                    "probability_mask_path": meta.get("probability_mask_path"),
+                    "target_type": target_type_value,
+                    "training_gate_decision": training_gate_decision,
+                    "training_gate_policy": training_gate_policy,
+                    "probability_mask_path": probability_path_value,
                     "voxel_uncertainty_path": meta.get("voxel_uncertainty_path"),
                     "independent_family_count": meta.get("independent_family_count", 0),
                     "family_membership": meta.get("family_membership", {}),
@@ -186,15 +214,24 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                 }
                 grade = str(row.get("grade") or "D").upper()
                 training_weight = float(row.get("training_weight") or 0.0)
-                if grade == "D" or training_weight <= 0.0 or row.get("distillation_eligible") is False:
+                include_gate = row.get("training_gate_decision") in {"include_hard_ab", "include_soft_c"}
+                if (not include_gate) or grade == "D" or training_weight <= 0.0 or row.get("distillation_eligible") is False:
                     exclusion_reason = row.get("distillation_exclusion_reason")
                     if not exclusion_reason:
                         if row.get("scoring_schema_version") not in ACCEPTED_SCORING_SCHEMA_VERSIONS:
                             exclusion_reason = "unsupported_scoring_schema_requires_rescoring"
+                        elif row.get("training_gate_decision") == "exclude_c_soft_missing_probability":
+                            exclusion_reason = "soft_target_probability_mask_missing"
+                        elif row.get("training_gate_decision") == "exclude_or_review_c":
+                            exclusion_reason = "grade_C_requires_soft_probability_target"
+                        elif row.get("training_gate_decision") == "exclude_ab_non_hard_or_zero_weight":
+                            exclusion_reason = "grade_AB_requires_hard_positive_target"
                         elif grade == "D":
                             exclusion_reason = "grade_D_or_zero_weight"
                         elif training_weight <= 0.0:
                             exclusion_reason = "training_weight_zero"
+                        elif not include_gate:
+                            exclusion_reason = str(row.get("training_gate_decision") or "training_gate_excluded")
                         else:
                             exclusion_reason = "distillation_eligible_false"
                     excluded_training_rows.append({
@@ -203,6 +240,10 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                         "mask_path": str(mask.resolve()),
                         "grade": grade,
                         "training_weight": training_weight,
+                        "target_type": row.get("target_type"),
+                        "probability_mask_path": row.get("probability_mask_path"),
+                        "training_gate_decision": row.get("training_gate_decision"),
+                        "training_gate_policy": row.get("training_gate_policy"),
                         "distillation_eligible": row.get("distillation_eligible"),
                         "distillation_exclusion_reason": exclusion_reason,
                         "exclusion_category": exclusion_reason.split(":", 1)[0],
@@ -226,6 +267,26 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
     write_json(exclusion_path, excluded_identity_rows)
     training_exclusion_path = out.with_name(out.stem + ".training_exclusions.json")
     write_json(training_exclusion_path, excluded_training_rows)
+    grade_counts = {grade: sum(1 for r in rows if r.get("grade") == grade) for grade in ["A", "B", "C", "D"]}
+    target_type_counts: dict[str, int] = {}
+    for r in rows:
+        target_type_counts[str(r.get("target_type") or "hard")] = target_type_counts.get(str(r.get("target_type") or "hard"), 0) + 1
+    exclusion_counts: dict[str, int] = {}
+    for r in excluded_training_rows:
+        key = str(r.get("distillation_exclusion_reason") or "unknown")
+        exclusion_counts[key] = exclusion_counts.get(key, 0) + 1
+    training_gate_summary = {
+        "included_grade_counts": grade_counts,
+        "included_target_type_counts": target_type_counts,
+        "num_included": len(rows),
+        "num_excluded_training": len(excluded_training_rows),
+        "num_c_soft_included": sum(1 for r in rows if r.get("grade") == "C" and r.get("target_type") == "soft" and r.get("probability_mask_path")),
+        "num_c_missing_probability_excluded": sum(1 for r in excluded_training_rows if r.get("distillation_exclusion_reason") == "soft_target_probability_mask_missing"),
+        "num_c_hard_or_provisional_excluded": sum(1 for r in excluded_training_rows if r.get("distillation_exclusion_reason") == "grade_C_requires_soft_probability_target"),
+        "num_d_excluded": sum(1 for r in excluded_training_rows if r.get("grade") == "D"),
+        "num_unsupported_schema_excluded": sum(1 for r in excluded_training_rows if r.get("distillation_exclusion_reason") == "unsupported_scoring_schema_requires_rescoring"),
+        "exclusion_reason_counts": exclusion_counts,
+    }
     return {
         "stage": "mstep_manifest",
         "status": "success",
@@ -236,6 +297,7 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
         "num_identity_exclusions": len(excluded_identity_rows),
         "training_exclusions": str(training_exclusion_path),
         "num_training_exclusions": len(excluded_training_rows),
+        "training_gate_summary": training_gate_summary,
         "sample_items": rows[:20],
     }
 
@@ -430,7 +492,9 @@ def run_mstep_nnunet_training(
     except subprocess.TimeoutExpired as exc:
         result.update({"status": "timeout", "reason": f"Training timed out after {timeout_sec}s"})
         train_proc = subprocess.CompletedProcess(train_cmd, -1,
-            stdout=(exc.stdout or ""), stderr=(exc.stderr or "") + f"\n[timeout after {timeout_sec}s]")
+            stdout=subprocess_text(exc.stdout),
+            stderr=subprocess_text(exc.stderr) + f"\n[timeout after {timeout_sec}s]",
+        )
 
     elapsed = time.time() - start
     result["runtime_sec"] = round(elapsed, 2)
