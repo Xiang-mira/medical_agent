@@ -33,7 +33,9 @@ SAFE_NEGATIVE_SOURCES = {
     "nonmedical_absent_object",
     "out_of_scan_anatomy_with_coverage_evidence",
     "explicit_confirmed_absent_anatomy",
+    "case_373_expected_absent",
 }
+SAFE_ZERO_MASK_ROLES = {"negative_target_mask", "absent_negative_target_mask"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -533,9 +535,9 @@ def select_negative_jobs(manifest_path: Path, max_cases: int, max_per_source: in
         source = str(item.get("negative_source") or "unknown")
         if source not in SAFE_NEGATIVE_SOURCES:
             continue
-        if item.get("zero_mask_role") != "negative_target_mask":
+        if item.get("zero_mask_role") not in SAFE_ZERO_MASK_ROLES:
             continue
-        if source != "nonmedical_absent_object" and not item.get("negative_evidence"):
+        if source not in {"nonmedical_absent_object", "case_373_expected_absent"} and not item.get("negative_evidence") and str(item.get("target_type") or "") != "absent_negative":
             continue
         case_id = str(item.get("case_id") or "")
         organ = str(item.get("organ") or "")

@@ -800,6 +800,52 @@ class VoxTellStudent:
                 if float(item.get("training_weight") or 0.0) > 0.0:
                     positive_count += 1
 
+            absent_negative_count = 0
+            for organ, meta in sorted(selection_index.items()):
+                if organ not in target_organs or str(meta.get("target_type")) != "absent_negative":
+                    continue
+                zero_mask = meta.get("mask_path") or meta.get("mask") or meta.get("final_mask") or _zero_mask_path_for_case(case_dir, image)
+                if not zero_mask or not Path(str(zero_mask)).exists():
+                    skipped_ineligible_positive.append({
+                        "case_id": case_id,
+                        "organ": organ,
+                        "grade": meta.get("grade", "A"),
+                        "training_weight": meta.get("training_weight"),
+                        "target_type": "absent_negative",
+                        "reason": "absent_negative_zero_mask_missing",
+                        "exclusion_category": "absent_negative_zero_mask_missing",
+                    })
+                    continue
+                canonical_prompt = str(organ_to_prompt.get(organ, organ.replace("_", " ")))
+                prompt_variants = [canonical_prompt]
+                item = _manifest_base_item(
+                    case_id=case_id, image=image, organ=organ, prompt=canonical_prompt,
+                    prompt_variants=prompt_variants, doc=doc, meta=meta,
+                )
+                item.update({
+                    "mask": str(zero_mask),
+                    "mask_path": str(zero_mask),
+                    "grade": meta.get("grade", "A"),
+                    "grade_scope": "absence_target",
+                    "training_weight": float(meta.get("training_weight", os.getenv("MEDAI_NEGATIVE_ABSENT_TRAINING_WEIGHT", "0.1")) or 0.0),
+                    "distillation_eligible": bool(meta.get("distillation_eligible", True)),
+                    "student_training_priority": "negative_absent",
+                    "supervision_type": "negative",
+                    "distillation_role": "negative",
+                    "target_type": "absent_negative",
+                    "negative_reason": meta.get("negative_reason") or "out_of_scan_by_scan_coverage",
+                    "negative_source": meta.get("negative_source") or "case_373_expected_absent",
+                    "zero_mask_role": meta.get("zero_mask_role") or "absent_negative_target_mask",
+                    "source_quality": "valid_absent_negative",
+                    "training_gate_decision": "include_absent_negative",
+                    "training_gate_policy": "Absent-negative all-zero masks are valid negative supervision targets, separate from A/B/C/D positive quality grades.",
+                })
+                rows.extend(_expand_prompt_manifest_item(item, prompt_variant_mode, doc))
+                absent_negative_count += 1
+                negative_source_counts[item["negative_source"]] = negative_source_counts.get(item["negative_source"], 0) + 1
+            if absent_negative_count:
+                zero_mask_targets.append({"case_id": case_id, "source": "case_373_absent_negative", "count": absent_negative_count, "image": image})
+
             max_negative = int(max(0, round(positive_count * max_negative_ratio)))
             zero_mask = _zero_mask_path_for_case(case_dir, image)
             if zero_mask and max_negative > 0:
@@ -857,22 +903,30 @@ class VoxTellStudent:
             "student_prediction_root": str(ignored_student_prediction_root) if ignored_student_prediction_root else None,
             "num_items": len(rows),
             "num_cases": len({r["case_id"] for r in rows}),
+            "num_classes": len(target_organs),
+            "expected_targets": len(case_dirs) * len(target_organs),
+            "manifest_targets": len(rows),
+            "candidate_pseudo_targets": sum(1 for r in rows if r.get("supervision_type") == "positive"),
+            "absent_negative_targets": sum(1 for r in rows if str(r.get("target_type")) == "absent_negative"),
+            "all_zero_masks": len({str(r.get("mask_path") or r.get("mask") or "") for r in rows if str(r.get("target_type")) == "absent_negative" and (r.get("mask_path") or r.get("mask"))}),
             "num_items_missing_image": sum(1 for r in rows if not r.get("image")),
             "grade_counts": {grade: sum(1 for r in rows if r.get("grade") == grade) for grade in ["A", "B", "C", "D"]},
             "num_positive_items": sum(1 for r in rows if r.get("supervision_type") == "positive"),
             "num_negative_items": sum(1 for r in rows if r.get("supervision_type") == "negative"),
             "negative_prompt_ratio": max_negative_ratio,
+            "negative_prompt_ratio_note": "Candidate-manifest compatibility field only; final training positive/negative mix is controlled at runtime by scripts/train_voxtell_prompt_student.py --pos-neg-ratio.",
             "negative_quota_policy": negative_quota_policy,
             "negative_source_counts": negative_source_counts,
             "negative_source_shortfalls": negative_source_shortfalls,
             "negative_prompt_policy": {
-                "rule": "Do not sample arbitrary absent target organs as negatives.",
+                "rule": "This manifest records positive/negative candidate pools. Runtime training samples from these pools with --pos-neg-ratio; do not interpret manifest row counts as the final positive/negative training ratio.",
                 "allowed_sources": [
                     "nonmedical_absent_object",
                     "out_of_scan_anatomy_with_coverage_evidence",
                     "explicit_confirmed_absent_anatomy",
+                    "case_373_expected_absent",
                 ],
-                "zero_mask_note": "A zero mask is only a negative target when attached to an allowed negative prompt. Empty organ outputs by themselves are not treated as negative supervision.",
+                "zero_mask_note": "All-zero masks are valid for target_type=absent_negative when scan coverage/FOV proves the organ is absent; ambiguous missing positives remain review gaps.",
                 "student_prediction_root_note": "Previous student empty/failed outputs are recorded for traceability only and are not used as negative evidence.",
             },
             "prompt_variant_mode": prompt_variant_mode,
@@ -888,7 +942,7 @@ class VoxTellStudent:
             "num_strong_training_items": sum(1 for r in rows if r.get("supervision_type") == "positive" and float(r.get("training_weight") or 0.0) >= 0.5),
             "num_distillation_eligible_items": sum(1 for r in rows if r.get("distillation_eligible") is not False and float(r.get("training_weight") or 0.0) > 0.0),
             "num_zero_weight_items": sum(1 for r in rows if float(r.get("training_weight") or 0.0) == 0.0),
-            "target_type_counts": {target_type: sum(1 for r in rows if str(r.get("target_type") or "hard") == target_type) for target_type in ["hard", "soft", "provisional", "rejected"]},
+            "target_type_counts": {target_type: sum(1 for r in rows if str(r.get("target_type") or "hard") == target_type) for target_type in ["hard", "soft", "provisional", "rejected", "absent_negative"]},
             "training_gate_summary": {
                 "num_included": len(rows),
                 "num_excluded_positive": len(skipped_ineligible_positive),

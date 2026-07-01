@@ -47,6 +47,13 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--max-cases", type=int, default=0, help="Optional smoke-test case limit.")
     ap.add_argument("--prompts", default="", help="Optional comma-separated organ subset. Default: all 373 exact targets.")
     ap.add_argument("--dry-run", action="store_true", help="Write per-case VoxTell commands without running inference.")
+    ap.add_argument("--postprocess", action="store_true", help="After student inference, write anatomy-containment postprocessed masks to a separate root.")
+    ap.add_argument("--postprocess-policy", default=str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"))
+    ap.add_argument("--taxonomy", default=str(PROJECT_ROOT / "configs/organ_taxonomy.json"))
+    ap.add_argument("--teacher-root", default="", help="Optional teacher/selected-pseudo root to provide reliable parent organ masks.")
+    ap.add_argument("--parent-root", action="append", default=[], help="Additional parent-mask root. Can be repeated.")
+    ap.add_argument("--postprocessed-output-root", default="", help="Default: outputs/roundN/student_predictions_postprocessed")
+    ap.add_argument("--postprocess-overwrite", action="store_true")
     ap.add_argument("--restart-vllm", action="store_true", help="Restart LabelCritic VLM server after student inference.")
     return ap.parse_args()
 
@@ -124,6 +131,7 @@ def main() -> int:
     pred_dir.mkdir(parents=True, exist_ok=True)
 
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
+    from cli_anything.medai.core.student_postprocess import process_student_root
 
     organs = load_target_organs(target_config, args.prompts)
     cases = load_cases(case_list, args.max_cases)
@@ -191,6 +199,31 @@ def main() -> int:
     }
     (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     log(f"3D prompt student 推理完成/计划完成: {saved}/{len(cases)} cases")
+
+    if args.postprocess:
+        post_root = Path(args.postprocessed_output_root).resolve() if args.postprocessed_output_root else output_root / f"round{args.round_idx}" / "student_predictions_postprocessed"
+        parent_roots = [Path(x).resolve() for x in args.parent_root]
+        if args.teacher_root:
+            parent_roots.append(Path(args.teacher_root).resolve())
+        parent_roots.append(pred_dir.resolve())
+        log(f"开始 student containment post-processing: {post_root}")
+        post_summary = process_student_root(
+            input_root=pred_dir.resolve(),
+            output_root=post_root.resolve(),
+            parent_roots=parent_roots,
+            taxonomy_path=Path(args.taxonomy).resolve(),
+            policy_path=Path(args.postprocess_policy).resolve(),
+            case_list=case_list,
+            organs=organs,
+            max_cases=args.max_cases,
+            overwrite=args.postprocess_overwrite,
+            write_roi_masks=True,
+            dry_run=args.dry_run,
+        )
+        summary["postprocess"] = post_summary
+        summary["postprocessed_prediction_dir"] = str(post_root)
+        (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        log(f"student containment post-processing 完成: {post_summary.get('processed_masks', 0)} masks")
 
     if args.restart_vllm:
         restart_vllm()

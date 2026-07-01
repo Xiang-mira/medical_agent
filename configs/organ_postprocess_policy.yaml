@@ -1,6 +1,101 @@
 version: 1
 description: Generic organ postprocess and QC policy for CT segmentation.
 
+student_containment:
+  enabled: true
+  description: >
+    Anatomy-aware post-processing for prompt-student masks. Child organs,
+    vessels, ducts, and tubular structures are clipped to a dilated parent-organ
+    ROI. Whole large organs are used as ROI providers and are not clipped by
+    default.
+  output_suffix: student_predictions_postprocessed
+  default_roi_margin_mm: 15.0
+  default_parent_source_priority:
+    - selected_teacher
+    - teacher_updated
+    - teacher_case_root
+    - student_large_organ
+  auto_rules:
+    inherit_taxonomy_parent_ids: true
+    enabled_hierarchy_roles: [child]
+    enabled_comparison_families: [vessel_or_small_structure]
+    disabled_major_organs:
+      - liver
+      - kidney
+      - pancreas
+      - spleen
+      - stomach
+      - colon
+      - duodenum
+      - aorta
+      - postcava
+      - inferior_vena_cava
+  group_margins_mm:
+    vessel_or_duct: 20.0
+    hollow_gi: 20.0
+    core_large_organ: 0.0
+    bone_or_fragmented_structure: 0.0
+    partial_fov: 0.0
+    longtail_uncertain: 15.0
+  component_filter:
+    vessel_or_duct:
+      keep_top_k:
+      min_fraction: 0.001
+      min_voxels: 16
+    sub_organ:
+      keep_top_k: 5
+      min_fraction: 0.003
+      min_voxels: 32
+    hollow_gi:
+      keep_top_k: 5
+      min_fraction: 0.003
+      min_voxels: 64
+    default:
+      keep_top_k: 8
+      min_fraction: 0.002
+      min_voxels: 64
+  containment_rules:
+    liver_portal_vein:
+      parents: [liver]
+      margin_mm: 20.0
+    liver_hepatic_vein:
+      parents: [liver]
+      margin_mm: 20.0
+    pancreatic_duct:
+      parents: [pancreas]
+      margin_mm: 20.0
+    kidney_left:
+      parents: [kidney]
+      margin_mm: 15.0
+    kidney_right:
+      parents: [kidney]
+      margin_mm: 15.0
+    kidney_cortex:
+      parents: [kidney]
+      margin_mm: 15.0
+    kidney_medulla:
+      parents: [kidney]
+      margin_mm: 15.0
+    kidney_pelvicalyceal_system:
+      parents: [kidney]
+      margin_mm: 15.0
+    colostomy_bag:
+      parents: [colon]
+      margin_mm: 20.0
+    stomach:
+      parents: []
+      enabled: false
+    colon:
+      parents: []
+      enabled: false
+    duodenum:
+      parents: []
+      enabled: false
+  atlasnet_note: >
+    AtlasNet is available as a teacher candidate for colon, duodenum, stomach,
+    pancreatic_duct, and abdominal tubular structures. This post-processing
+    policy does not launch AtlasNet automatically.
+
 volume_gate:
   default_min_ratio: 0.2
   default_max_ratio: 3.0

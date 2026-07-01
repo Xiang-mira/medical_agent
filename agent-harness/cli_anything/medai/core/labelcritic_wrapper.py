@@ -30,6 +30,99 @@ def _prompt_target_config() -> Path:
     return Path(os.getenv("MEDAI_PROMPT_TARGET_CONFIG", "configs/student_3d_prompt_target_organs.json")).resolve()
 
 
+def _organ_ct_appearance_config() -> Path:
+    return Path(os.getenv("MEDAI_ORGAN_CT_APPEARANCE_CONFIG", "configs/organ_ct_appearance_373.json")).resolve()
+
+
+LABELCRITIC_SEED_ORGANS = {
+    "aorta", "descending aorta", "postcava", "inferior_vena_cava",
+    "liver", "kidneys", "kidney_left", "kidney_right", "spleen",
+    "stomach", "pancreas", "gall_bladder",
+}
+
+
+def _stable_hash(payload: Any) -> str | None:
+    try:
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        return None
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _organ_description_provenance(organ: str) -> dict[str, Any]:
+    """Return prompt provenance/fingerprint used by the LabelCritic prompt hook.
+
+    The third-party prompt code keeps original LabelCritic seed prompts for seed
+    organs and falls back to the 373-organ CT appearance config for new organs.
+    This provenance is included in cache keys so prompt updates invalidate stale
+    compare/grade outputs.
+    """
+    appearance_path = _organ_ct_appearance_config()
+    prompt_path = _prompt_target_config()
+    if str(organ) in LABELCRITIC_SEED_ORGANS:
+        return {
+            "prompt_source": "labelcritic_seed",
+            "prompt_config_path": str(appearance_path),
+            "prompt_target_config_path": str(prompt_path),
+            "organ_description_hash": _stable_hash({"organ": str(organ), "source": "labelcritic_seed"}),
+            "requires_manual_review": False,
+            "organ_description_available": True,
+            "prompt_config_fingerprint": _file_fingerprint(appearance_path),
+            "prompt_target_config_fingerprint": _file_fingerprint(prompt_path),
+        }
+    try:
+        doc = json.loads(appearance_path.read_text(encoding="utf-8"))
+        entry = (doc.get("organ_ct_appearance", {}) or {}).get(str(organ))
+        if not isinstance(entry, dict):
+            entry = next((e for e in (doc.get("entries", []) or []) if isinstance(e, dict) and e.get("canonical_organ") == str(organ)), None)
+        if isinstance(entry, dict):
+            return {
+                "prompt_source": str(entry.get("source") or "organ_ct_appearance_373"),
+                "prompt_config_path": str(appearance_path),
+                "prompt_target_config_path": str(prompt_path),
+                "organ_description_hash": _stable_hash(entry),
+                "requires_manual_review": bool(entry.get("requires_manual_review", True)),
+                "organ_description_available": True,
+                "prompt_config_fingerprint": _file_fingerprint(appearance_path),
+                "prompt_target_config_fingerprint": _file_fingerprint(prompt_path),
+            }
+    except Exception:
+        pass
+    try:
+        doc = json.loads(prompt_path.read_text(encoding="utf-8"))
+        entry = (doc.get("organ_prompt_bank", {}) or {}).get(str(organ))
+        if isinstance(entry, dict):
+            return {
+                "prompt_source": "student_3d_prompt_target_organs.organ_prompt_bank",
+                "prompt_config_path": str(prompt_path),
+                "prompt_target_config_path": str(prompt_path),
+                "organ_description_hash": _stable_hash(entry),
+                "requires_manual_review": True,
+                "organ_description_available": True,
+                "prompt_config_fingerprint": _file_fingerprint(prompt_path),
+                "prompt_target_config_fingerprint": _file_fingerprint(prompt_path),
+            }
+    except Exception:
+        pass
+    return {
+        "prompt_source": "fallback_generic",
+        "prompt_config_path": str(appearance_path),
+        "prompt_target_config_path": str(prompt_path),
+        "organ_description_hash": _stable_hash({"organ": str(organ), "source": "fallback_generic"}),
+        "requires_manual_review": True,
+        "organ_description_available": False,
+        "prompt_config_fingerprint": _file_fingerprint(appearance_path),
+        "prompt_target_config_fingerprint": _file_fingerprint(prompt_path),
+    }
+
+
+def _same_prompt_provenance(cached: dict[str, Any], current: dict[str, Any]) -> bool:
+    return (
+        cached.get("organ_description_hash") == current.get("organ_description_hash")
+        and cached.get("prompt_source") == current.get("prompt_source")
+    )
+
+
 def _same_file_fingerprint(src: Path, dst: Path) -> bool:
     src_fp = _file_fingerprint(src)
     dst_fp = _file_fingerprint(dst)
@@ -434,11 +527,14 @@ def run_labelcritic_grade_batch(
         organ = str(job["organ"])
         mask = Path(job["mask"])
         ct_image = job["ct_image"]
+        prompt_provenance = _organ_description_provenance(organ)
         base = {
             "stage": "labelcritic_grade", "organ": organ, "mask": str(mask),
             "ct_image": str(ct_image), "output_json": str(out_json),
             "accept_grade": float(job.get("accept_grade", accept_grade)),
             "batch_status": "queued_grade",
+            "grade_prompt_source": "legacy_grade_template",
+            **prompt_provenance,
         }
         if dry_run:
             result = {**base, "status": "dry_run", "grade": None, "accept": None, "reason": "dry-run: VLM grade skipped"}
@@ -544,10 +640,11 @@ def run_labelcritic_grade(
     """
     out_json = Path(output_json).resolve()
     out_json.parent.mkdir(parents=True, exist_ok=True)
+    prompt_provenance = _organ_description_provenance(str(organ))
     if out_json.exists():
         try:
             cached = json.loads(out_json.read_text(encoding="utf-8"))
-            if cached.get("status") in {"success", "skipped", "dry_run"}:
+            if cached.get("status") in {"success", "skipped", "dry_run"} and _same_prompt_provenance(cached, prompt_provenance):
                 cached["cache_status"] = "reused_labelcritic_grade"
                 return cached
         except Exception:
@@ -557,6 +654,8 @@ def run_labelcritic_grade(
         "stage": "labelcritic_grade", "organ": organ, "mask": str(m),
         "ct_image": str(ct_image), "output_json": str(out_json),
         "accept_grade": accept_grade,
+        "grade_prompt_source": "legacy_grade_template",
+        **prompt_provenance,
     }
 
     def _finish(extra: dict[str, Any]) -> dict[str, Any]:
@@ -647,10 +746,11 @@ def run_labelcritic_compare_batch(
         out_json = Path(job["output_json"]).resolve()
         out_dir = out_json.parent
         out_dir.mkdir(parents=True, exist_ok=True)
+        prompt_provenance = _organ_description_provenance(organ)
         if out_json.exists():
             try:
                 cached = json.loads(out_json.read_text(encoding="utf-8"))
-                if cached.get("status") in {"success", "stub", "dry_run"}:
+                if cached.get("status") in {"success", "stub", "dry_run"} and _same_prompt_provenance(cached, prompt_provenance):
                     cached["cache_status"] = "reused_labelcritic_compare"
                     results[idx] = cached
                     continue
@@ -666,6 +766,9 @@ def run_labelcritic_compare_batch(
             "skip_organ_presence_gate": bool(job.get("skip_organ_presence_gate", False)),
             "strict_choice_prompt": bool(job.get("strict_choice_prompt", False)),
             "prompt_target_config": _file_fingerprint(_prompt_target_config()),
+            "organ_ct_appearance_config": _file_fingerprint(_organ_ct_appearance_config()),
+            "organ_description_hash": prompt_provenance.get("organ_description_hash"),
+            "prompt_source": prompt_provenance.get("prompt_source"),
         }
         compare_cache_root = out_dir / "compare_cache"
         compare_key = _compare_cache_key(ct, a, b, organ, preliminary_options)
@@ -702,6 +805,7 @@ def run_labelcritic_compare_batch(
             "compare_key": compare_key,
             "compare_cache_root": str(compare_cache_root),
             "preliminary_options": preliminary_options,
+            "prompt_provenance": prompt_provenance,
             "no_dice_check": bool(job.get("no_dice_check", False)),
             "no_dual_confirmation": bool(job.get("no_dual_confirmation", False)),
             "simple_prompt_ablation": bool(job.get("simple_prompt_ablation", False)),
@@ -721,7 +825,7 @@ def run_labelcritic_compare_batch(
                 "projection": {"status": "skipped", "reason": "batch stub"},
                 "command": None, "normalized_base_url": normalized_base_url, "normalized_port": normalized_port,
                 "decision": decision, "labelcritic_options": item["preliminary_options"],
-                "batch_status": "batched_stub",
+                "batch_status": "batched_stub", **item.get("prompt_provenance", {}),
             }
             _write_compare_cache(Path(item["compare_cache_root"]) / f"{item['compare_key']}.json", result, item["compare_key"], _compare_cache_payload(item["ct"], item["mask_a"], item["mask_b"], item["organ"], item["preliminary_options"]))
             write_json(out_json, result)
@@ -772,6 +876,7 @@ def run_labelcritic_compare_batch(
                 "stdout_tail": completed.stdout[-4000:], "stderr_tail": completed.stderr[-4000:],
                 "log_file": str(log_file), "normalized_base_url": normalized_base_url, "normalized_port": normalized_port,
                 "decision": decision, "labelcritic_options": item["preliminary_options"], "batch_status": "batched_compare",
+                **item.get("prompt_provenance", {}),
             }
             if result.get("status") in {"success", "stub", "dry_run"}:
                 _write_compare_cache(Path(item["compare_cache_root"]) / f"{item['compare_key']}.json", result, item["compare_key"], _compare_cache_payload(item["ct"], item["mask_a"], item["mask_b"], item["organ"], item["preliminary_options"]))
@@ -807,10 +912,11 @@ def run_labelcritic_compare(
     out_json = Path(output_json).resolve()
     out_dir = out_json.parent
     out_dir.mkdir(parents=True, exist_ok=True)
+    prompt_provenance = _organ_description_provenance(str(organ))
     if out_json.exists():
         try:
             cached = json.loads(out_json.read_text(encoding="utf-8"))
-            if cached.get("status") in {"success", "stub", "dry_run"}:
+            if cached.get("status") in {"success", "stub", "dry_run"} and _same_prompt_provenance(cached, prompt_provenance):
                 cached["cache_status"] = "reused_labelcritic_compare"
                 return cached
         except Exception:
@@ -825,6 +931,9 @@ def run_labelcritic_compare(
         "skip_organ_presence_gate": skip_organ_presence_gate,
         "strict_choice_prompt": strict_choice_prompt,
         "prompt_target_config": _file_fingerprint(_prompt_target_config()),
+        "organ_ct_appearance_config": _file_fingerprint(_organ_ct_appearance_config()),
+        "organ_description_hash": prompt_provenance.get("organ_description_hash"),
+        "prompt_source": prompt_provenance.get("prompt_source"),
     }
     compare_cache_root = out_dir / "compare_cache"
     compare_key = _compare_cache_key(ct, a, b, organ, preliminary_options)
@@ -908,7 +1017,7 @@ def run_labelcritic_compare(
             "backend": backend, "organ": organ, "ct_image": str(ct),
             "mask_a": str(a), "mask_b": str(b), "output_json": str(out_json),
             "projection": proj, "command": command, "normalized_base_url": normalized_base_url, "normalized_port": normalized_port, "decision": decision,
-            "labelcritic_options": labelcritic_options,
+            "labelcritic_options": labelcritic_options, **prompt_provenance,
         }
         _write_compare_cache(compare_cache_root / f"{compare_key}.json", result, compare_key, _compare_cache_payload(ct, a, b, organ, preliminary_options))
         write_json(out_json, result)
@@ -945,7 +1054,7 @@ def run_labelcritic_compare(
         "return_code": completed.returncode, "runtime_sec": round(elapsed, 3),
         "stdout_tail": completed.stdout[-4000:], "stderr_tail": completed.stderr[-4000:],
         "log_file": str(log_file), "normalized_base_url": normalized_base_url, "normalized_port": normalized_port, "decision": decision,
-        "labelcritic_options": labelcritic_options,
+        "labelcritic_options": labelcritic_options, **prompt_provenance,
     }
     if result.get("status") in {"success", "stub", "dry_run"}:
         _write_compare_cache(compare_cache_root / f"{compare_key}.json", result, compare_key, _compare_cache_payload(ct, a, b, organ, preliminary_options))

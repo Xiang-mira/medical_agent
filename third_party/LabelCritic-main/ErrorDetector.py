@@ -446,6 +446,45 @@ def _default_prompt_bank_config_path():
     return Path(__file__).resolve().parents[2] / "configs" / "student_3d_prompt_target_organs.json"
 
 
+def _default_organ_ct_appearance_config_path():
+    env_path = os.environ.get("MEDAI_ORGAN_CT_APPEARANCE_CONFIG")
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parents[2] / "configs" / "organ_ct_appearance_373.json"
+
+
+def _format_list_for_prompt(values):
+    if isinstance(values, list):
+        return "; ".join(str(v) for v in values if str(v).strip())
+    return str(values or "")
+
+
+def _appearance_description_for_organ(organ):
+    """Load structured 373-organ CT appearance guidance for LabelCritic."""
+    try:
+        doc = json.loads(_default_organ_ct_appearance_config_path().read_text(encoding="utf-8"))
+        entry = (doc.get("organ_ct_appearance", {}) or {}).get(organ)
+        if not isinstance(entry, dict):
+            entry = next((e for e in (doc.get("entries", []) or []) if isinstance(e, dict) and e.get("canonical_organ") == organ), None)
+        if not isinstance(entry, dict):
+            return None
+        aliases = ", ".join(entry.get("aliases") or [organ.replace("_", " ")])
+        return (
+            "When evaluating and comparing the overlays, consider the following organ-specific CT information:\n"
+            f"a) Target names and synonyms: {aliases}.\n"
+            f"b) Expected location: {entry.get('expected_region') or entry.get('expected_location')}.\n"
+            f"c) CT appearance: {entry.get('ct_appearance')}.\n"
+            f"d) Shape and continuity prior: {entry.get('shape_and_continuity_prior')}.\n"
+            f"e) Nearby structures and exclusion landmarks: {_format_list_for_prompt(entry.get('neighbor_relations'))}.\n"
+            f"f) Anatomical constraints: {_format_list_for_prompt(entry.get('anatomical_constraints'))}.\n"
+            f"g) Common failure modes: {_format_list_for_prompt(entry.get('common_failure_modes'))}.\n"
+            f"h) Rejection rules: {_format_list_for_prompt(entry.get('rejection_rules'))}.\n"
+            f"i) LabelCritic instruction: {entry.get('labelcritic_instruction')}.\n"
+        )
+    except Exception:
+        return None
+
+
 def _prompt_bank_description_for_organ(organ):
     """Load organ-specific CT/anatomy guidance from the project prompt-bank manifest."""
     try:
@@ -469,11 +508,15 @@ def _prompt_bank_description_for_organ(organ):
 def _organ_description(organ_descriptions, organ):
     if organ in organ_descriptions:
         return organ_descriptions[organ]
+    appearance_description = _appearance_description_for_organ(organ)
+    if appearance_description:
+        return appearance_description
     prompt_bank_description = _prompt_bank_description_for_organ(organ)
     if prompt_bank_description:
         return prompt_bank_description
     name = organ.replace("_", " ").replace("gall bladder", "gallbladder")
     return (
+        "Prompt source: fallback_generic.\n"
         "When evaluating and comparing the overlays, use the target organ name, "
         f"its expected CT location, shape, boundaries, and adjacent structures for the {name}. "
         "Penalize overlays that clearly mark a different structure or extend far outside the expected anatomic region.\n"

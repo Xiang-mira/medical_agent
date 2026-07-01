@@ -1,0 +1,317 @@
+{
+  "schema_version": "labelcritic_organ_ct_appearance.v1",
+  "status": "seed_not_full_373",
+  "important_note": "This file intentionally contains only the organ-specific prompts found in the uploaded LabelCritic repository. Run build_organ_ct_appearance_373.py with the project student_3d_prompt_target_organs.json to create the true 373-entry file.",
+  "entry_count": 9,
+  "entries": [
+    {
+      "canonical_organ": "aorta",
+      "display_name": "aorta",
+      "aliases": [
+        "aorta",
+        "aorta"
+      ],
+      "category": "vessel",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "Consider the following questions, were positive answers indicate a correct annotation: Point 1: Does the red shape resemble a line? It does not matter if the line is curved or straight. Also, the line may have a round bulge at the top, representing the aortic arch (upper chest).Point 2: Is the red shape a single connected part? If you see two or more red shapes in the image, it is wrong.",
+      "shape_and_continuity_prior": "tubular or branching vascular structure following an anatomically plausible course; it should be continuous in projection unless naturally branching or partially outside the field of view",
+      "anatomical_constraints": [
+        "Consider the following questions, were positive answers indicate a correct annotation: Point 1: Does the red shape resemble a line? It does not matter if the line is curved or straight. Also, the line may have a round bulge at the top, representing the aortic arch (upper chest).Point 2: Is the red shape a single connected part? If you see two or more red shapes in the image, it is wrong.",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area.",
+        "For tubular/vascular structures, prefer anatomically continuous or branching candidates; penalize broken, random, or over-expanded masks."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for aorta using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "descending_aorta",
+      "display_name": "descending aorta",
+      "aliases": [
+        "descending aorta",
+        "descending_aorta"
+      ],
+      "category": "vessel",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "Consider the following questions, were positive answers indicate a correct annotation: Point 1: Does the red shape resemble a line? It does not matter if the line is curved or straight. Also, the line may have a round bulge at the top, representing the aortic arch (upper chest).Point 2: Is the red shape a single connected part? If you see two or more red shapes in the image, it is wrong.",
+      "shape_and_continuity_prior": "tubular or branching vascular structure following an anatomically plausible course; it should be continuous in projection unless naturally branching or partially outside the field of view",
+      "anatomical_constraints": [
+        "Consider the following questions, were positive answers indicate a correct annotation: Point 1: Does the red shape resemble a line? It does not matter if the line is curved or straight. Also, the line may have a round bulge at the top, representing the aortic arch (upper chest).Point 2: Is the red shape a single connected part? If you see two or more red shapes in the image, it is wrong.",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area.",
+        "For tubular/vascular structures, prefer anatomically continuous or branching candidates; penalize broken, random, or over-expanded masks."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for descending aorta using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "postcava",
+      "display_name": "postcava",
+      "aliases": [
+        "postcava",
+        "postcava"
+      ],
+      "category": "vessel",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "Consider the following questions, were positive answers indicate a correct annotation: Point 1: Does the red shape reach the thoracic region (high ribs)?Point 2: Consider the bones in the image. Is the lumbar spine visible? If it is, does the red shape come down to the lumbar spine height? Point 3: Is the red shape a single connected part? If you see two or more red shapes in the image, it is wrong. ",
+      "shape_and_continuity_prior": "tubular or branching vascular structure following an anatomically plausible course; it should be continuous in projection unless naturally branching or partially outside the field of view",
+      "anatomical_constraints": [
+        "Consider the following questions, were positive answers indicate a correct annotation: Point 1: Does the red shape reach the thoracic region (high ribs)?Point 2: Consider the bones in the image. Is the lumbar spine visible? If it is, does the red shape come down to the lumbar spine height? Point 3: Is the red shape a single connected part? If you see two or more red shapes in the image, it is wrong. ",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area.",
+        "For tubular/vascular structures, prefer anatomically continuous or branching candidates; penalize broken, random, or over-expanded masks."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for postcava using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "liver",
+      "display_name": "liver",
+      "aliases": [
+        "liver",
+        "liver"
+      ],
+      "category": "organ_or_structure",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "When evaluating the overlays, consider the following anatomical information:\na) The liver is a large organ, with triangular or wedge-like shape.\nb) The liver is located in the upper right quadrant of the abdomen (left of the figure, like an AP X-ray), just below the diaphragm. It spans across the midline, partially extending into the left upper quadrant of the abdomen. The liver is not near the pelvis.\nc) The liver position is primarily under the rib cage. The overlay must show red in the ribs region. \n",
+      "shape_and_continuity_prior": "organ-specific shape and soft-tissue appearance consistent with its expected anatomical location",
+      "anatomical_constraints": [
+        "When evaluating the overlays, consider the following anatomical information:\na) The liver is a large organ, with triangular or wedge-like shape.\nb) The liver is located in the upper right quadrant of the abdomen (left of the figure, like an AP X-ray), just below the diaphragm. It spans across the midline, partially extending into the left upper quadrant of the abdomen. The liver is not near the pelvis.\nc) The liver position is primarily under the rib cage. The overlay must show red in the ribs region. \n",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for liver using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "kidneys",
+      "display_name": "kidneys",
+      "aliases": [
+        "kidneys",
+        "kidneys"
+      ],
+      "category": "organ_or_structure",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "When evaluating the overlays, consider the following anatomical information:\na) A person usually has two kidneys, check if the image display one, two or more red objects.\nb) Each kidney has a bean-shaped structure, with a slightly concave surface facing the spine, and a clearly convex surface facing outward. Check if the red objects resemble this shape.\nc) The kidneys are located on either side of the spine, at the level of the lower ribs. Check if the red objects are on either side of the spine and at the level of the lower ribs. \n",
+      "shape_and_continuity_prior": "organ-specific shape and soft-tissue appearance consistent with its expected anatomical location",
+      "anatomical_constraints": [
+        "When evaluating the overlays, consider the following anatomical information:\na) A person usually has two kidneys, check if the image display one, two or more red objects.\nb) Each kidney has a bean-shaped structure, with a slightly concave surface facing the spine, and a clearly convex surface facing outward. Check if the red objects resemble this shape.\nc) The kidneys are located on either side of the spine, at the level of the lower ribs. Check if the red objects are on either side of the spine and at the level of the lower ribs. \n",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for kidneys using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "spleen",
+      "display_name": "spleen",
+      "aliases": [
+        "spleen",
+        "spleen"
+      ],
+      "category": "organ_or_structure",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "Consider the following anatomical information:\na) Shape: The shape of the spleen red overlay should resemble an oval or crescent. It should follow the natural curve of the spleen, with no small recesses.\nb) Shape 2: The spleen red overlay should not have irregular or random shapes. It should not include internal gaps or sharp, angular points.\nc) Unity: The spleen red overlay must be a single, continuous structure. Multiple structures are a significant error.\nd) Location: The spleen red overlay should be located in the upper left quadrant of the abdomen (right side of the image, which is oriented like an AP X-ray), slightly under the ribs and diaphragh, and adjacent to the stomach and left kidney.",
+      "shape_and_continuity_prior": "organ-specific shape and soft-tissue appearance consistent with its expected anatomical location",
+      "anatomical_constraints": [
+        "Consider the following anatomical information:\na) Shape: The shape of the spleen red overlay should resemble an oval or crescent. It should follow the natural curve of the spleen, with no small recesses.\nb) Shape 2: The spleen red overlay should not have irregular or random shapes. It should not include internal gaps or sharp, angular points.\nc) Unity: The spleen red overlay must be a single, continuous structure. Multiple structures are a significant error.\nd) Location: The spleen red overlay should be located in the upper left quadrant of the abdomen (right side of the image, which is oriented like an AP X-ray), slightly under the ribs and diaphragh, and adjacent to the stomach and left kidney.",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for spleen using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "stomach",
+      "display_name": "stomach",
+      "aliases": [
+        "stomach",
+        "stomach"
+      ],
+      "category": "organ_or_structure",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "Consider the following anatomical information:\na) Shape: The shape of the stomach red overlay should resemble the letter J, an inverted letter L, a sac with a downwards curvature, or a hourglass.\nb) Shape 2: The stomach red overlay should not be a random shape. It should not have many random points, nor internal gaps.\nc) Unity: The stomach red overlay must be a single connected structure. Showing multiple strucutres is a major error.\nd) Location: The stomach red overlay should be located mainly in the upper abdomen, starting just below the diaphragm. It lies mostly under the ribs.",
+      "shape_and_continuity_prior": "organ-specific shape and soft-tissue appearance consistent with its expected anatomical location",
+      "anatomical_constraints": [
+        "Consider the following anatomical information:\na) Shape: The shape of the stomach red overlay should resemble the letter J, an inverted letter L, a sac with a downwards curvature, or a hourglass.\nb) Shape 2: The stomach red overlay should not be a random shape. It should not have many random points, nor internal gaps.\nc) Unity: The stomach red overlay must be a single connected structure. Showing multiple strucutres is a major error.\nd) Location: The stomach red overlay should be located mainly in the upper abdomen, starting just below the diaphragm. It lies mostly under the ribs.",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for stomach using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "pancreas",
+      "display_name": "pancreas",
+      "aliases": [
+        "pancreas",
+        "pancreas"
+      ],
+      "category": "organ_or_structure",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "When evaluating the overlays, consider the following anatomical information:\na) Shape: Check if the red overlay resembles the overall shape of a pancreas.\nb) Head: The pancreas is the thickest on its head, which points to the right side of the human body or the left side of the image, which is oriented like an AP X-ray.\nc) Position: The pancreas is located in the upper abdomen, behind the stomach and near the bottom of the rib cage.\nd) Smoothness: The pancreas is a single smooth shape and it does not have very sharp edges.",
+      "shape_and_continuity_prior": "organ-specific shape and soft-tissue appearance consistent with its expected anatomical location",
+      "anatomical_constraints": [
+        "When evaluating the overlays, consider the following anatomical information:\na) Shape: Check if the red overlay resembles the overall shape of a pancreas.\nb) Head: The pancreas is the thickest on its head, which points to the right side of the human body or the left side of the image, which is oriented like an AP X-ray.\nc) Position: The pancreas is located in the upper abdomen, behind the stomach and near the bottom of the rib cage.\nd) Smoothness: The pancreas is a single smooth shape and it does not have very sharp edges.",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for pancreas using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    },
+    {
+      "canonical_organ": "gall_bladder",
+      "display_name": "gall bladder",
+      "aliases": [
+        "gall bladder",
+        "gall_bladder"
+      ],
+      "category": "organ_or_structure",
+      "laterality": null,
+      "expected_region": "as described in original LabelCritic prompt",
+      "landmarks": [],
+      "ct_appearance": "Consider the following anatomical information:\na) Shape: The gallbladder red overlay should be pear-shaped or an elongated curved sack.\nb) Shape 2: The gallbladder red overlay should be smooth. It should not have many random points.\nc) Unity: The gallbladder red overlay must be a single connected structure. Showing multiple strucutres is a major error.\nd) Location: The gallbladder is located in the upper right quadrant of the abdomen (left side of the figure, like an AP X-ray). It sits near the lower edge of the liver and the rib cage.",
+      "shape_and_continuity_prior": "organ-specific shape and soft-tissue appearance consistent with its expected anatomical location",
+      "anatomical_constraints": [
+        "Consider the following anatomical information:\na) Shape: The gallbladder red overlay should be pear-shaped or an elongated curved sack.\nb) Shape 2: The gallbladder red overlay should be smooth. It should not have many random points.\nc) Unity: The gallbladder red overlay must be a single connected structure. Showing multiple strucutres is a major error.\nd) Location: The gallbladder is located in the upper right quadrant of the abdomen (left side of the figure, like an AP X-ray). It sits near the lower edge of the liver and the rib cage.",
+        "Use AP-like CT projection orientation when judging overlay location."
+      ],
+      "common_failure_modes": [
+        "mask leaks into adjacent organs or unrelated structures",
+        "mask is made of many scattered disconnected blobs when a coherent structure is expected",
+        "mask is far outside the expected body region or outside the CT field of view",
+        "mask volume is implausibly large or small relative to the target and candidate alternatives",
+        "mask follows a neighboring structure with a similar appearance rather than the requested target"
+      ],
+      "rejection_rules": [
+        "Reject or downgrade a candidate if it clearly segments a different organ or wrong side.",
+        "Reject or downgrade a candidate if most foreground lies outside the expected region or parent structure.",
+        "Reject or downgrade a candidate if the overlay is dominated by scattered false-positive islands.",
+        "Prefer the candidate with the most anatomically plausible location, continuity, boundary, and relation to landmarks, not the one with the largest area."
+      ],
+      "labelcritic_instruction": "Original LabelCritic-supported target. Compare candidate overlays for gall bladder using the target-specific anatomical prompt.",
+      "source": "uploaded_LabelCritic_ErrorDetector.py_original_prompt_seed",
+      "requires_manual_review": false
+    }
+  ]
+}

@@ -37,6 +37,64 @@ def _sphere_mask(shape=(32, 32, 32), radius=8, offset=(0, 0, 0)):
     return ((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 <= radius ** 2).astype(np.uint8)
 
 
+
+
+class TestLabelCritic373PromptBank:
+    def test_organ_ct_appearance_373_covers_formal_targets(self):
+        root = Path(__file__).resolve().parents[2]
+        targets = json.loads((root / "configs" / "student_3d_prompt_target_organs.json").read_text(encoding="utf-8"))
+        doc = json.loads((root / "configs" / "organ_ct_appearance_373.json").read_text(encoding="utf-8"))
+        organs = targets["target_organs"]
+        bank = doc["organ_ct_appearance"]
+        entries = doc["entries"]
+
+        assert doc["entry_count"] == 373
+        assert len(entries) == 373
+        assert len(organs) == 373
+        assert set(bank) == set(organs)
+        assert {e["canonical_organ"] for e in entries} == set(organs)
+        required = {"ct_appearance", "expected_location", "common_failure_modes", "rejection_rules", "source", "requires_manual_review"}
+        for organ, entry in bank.items():
+            missing = [key for key in required if key not in entry or entry[key] in (None, "", [])]
+            assert not missing, f"{organ} missing {missing}"
+        assert bank["liver"]["source"] == "labelcritic_seed"
+        assert bank["pancreas"]["source"] == "labelcritic_seed"
+        non_seed = next(entry for organ, entry in bank.items() if organ not in {"liver", "pancreas", "aorta", "spleen", "stomach", "gall_bladder"})
+        assert non_seed["requires_manual_review"] is True
+
+    def test_prompt_provenance_prefers_seed_then_373_bank(self):
+        from cli_anything.medai.core import labelcritic_wrapper as lw
+
+        liver = lw._organ_description_provenance("liver")
+        colon = lw._organ_description_provenance("colon")
+
+        assert liver["prompt_source"] == "labelcritic_seed"
+        assert liver["requires_manual_review"] is False
+        assert colon["organ_description_available"] is True
+        assert colon["organ_description_hash"]
+        assert colon["requires_manual_review"] is True
+
+    def test_labelcreator_prompt_template_contains_candidate_ranking_contract(self):
+        from cli_anything.medai.core.labelcreator_prompt_template import build_labelcreator_prompt
+
+        root = Path(__file__).resolve().parents[2]
+        doc = json.loads((root / "configs" / "organ_ct_appearance_373.json").read_text(encoding="utf-8"))
+        entry = next(e for e in doc["entries"] if e["canonical_organ"] == "colon")
+        prompt = build_labelcreator_prompt(
+            entry=entry,
+            case_id="debug_case",
+            candidate_table="candidate_id: c1\nteacher: epai\nfamily: ePAI\n\ncandidate_id: c2\nteacher: vsmtrans\nfamily: VSmTrans",
+            mode="ranking",
+        )
+
+        assert "Target organ/structure: colon" in prompt
+        assert "CT appearance" in prompt
+        assert "candidate_id: c1" in prompt and "candidate_id: c2" in prompt
+        assert "Do not prefer a candidate only because" in prompt
+        assert "selected_reason" in prompt and "rejected_reasons" in prompt
+        assert "Return strict JSON only" in prompt
+
+
 # ─── Test 0 : Label Merger — nearest-neighbor resampling ─────────────────────
 
 class TestLabelMerger:
@@ -510,6 +568,52 @@ class TestVoxTellStudentContracts:
         assert manifest["zero_mask_targets"]
         assert "negative_quota_policy" in manifest
         assert "negative_source_shortfalls" in manifest
+
+
+    def test_manifest_includes_absent_negative_from_selection_metadata(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MEDAI_NEGATIVE_PROMPT_RATIO", "0.0")
+        from cli_anything.medai.core.voxtell_student import VoxTellStudent
+
+        model_dir = tmp_path / "model"
+        (model_dir / "fold_0").mkdir(parents=True)
+        (model_dir / "plans.json").write_text("{}", encoding="utf-8")
+        (model_dir / "fold_0" / "checkpoint_final.pth").write_text("fake", encoding="utf-8")
+        target_config = tmp_path / "targets.json"
+        target_config.write_text(json.dumps({
+            "target_organs": ["liver", "brain"],
+            "organ_to_prompt": {"liver": "liver", "brain": "brain"},
+            "organ_to_student_id": {"liver": 1, "brain": 2},
+        }), encoding="utf-8")
+        ct = _make_nii(np.zeros((8, 8, 8), dtype=np.int16), tmp_path / "ct.nii.gz")
+        case = tmp_path / "cases" / "case_001"
+        upd = case / "updated"
+        upd.mkdir(parents=True)
+        liver = _make_nii(_sphere_mask(shape=(8, 8, 8), radius=2), upd / "liver.nii.gz")
+        (upd / "negative_targets").mkdir(parents=True)
+        zero = _make_nii(np.zeros((8, 8, 8), dtype=np.uint8), upd / "negative_targets" / "zero_mask.nii.gz")
+        (case / "selection_metadata.json").write_text(json.dumps({
+            "case_id": "case_001",
+            "ct_path": str(ct),
+            "selected_organs": [
+                {"organ": "liver", "mask_path": str(liver), "grade": "A", "training_weight": 1.0, "scoring_schema_version": "autolabel_core_v2"},
+                {"organ": "brain", "mask_path": str(zero), "final_mask": str(zero), "target_type": "absent_negative", "grade": "A", "grade_scope": "absence_target", "training_weight": 0.1, "distillation_eligible": True, "scoring_schema_version": "autolabel_core_v3_absent_negative", "negative_source": "case_373_expected_absent"},
+            ],
+        }), encoding="utf-8")
+        case_list = tmp_path / "cases.csv"
+        case_list.write_text(f"case_id,ct_path\ncase_001,{ct}\n", encoding="utf-8")
+
+        student = VoxTellStudent(model_dir=model_dir, target_config=target_config, device="cpu")
+        manifest = student.build_training_manifest(case.parent, tmp_path / "manifest.json", case_list=case_list, require_images=True)
+
+        negatives = [item for item in manifest["items"] if item.get("target_type") == "absent_negative"]
+        assert len(negatives) == 1
+        neg = negatives[0]
+        assert neg["organ"] == "brain"
+        assert neg["supervision_type"] == "negative"
+        assert neg["training_gate_decision"] == "include_absent_negative"
+        assert manifest["expected_targets"] == 2
+        assert manifest["absent_negative_targets"] == 1
+        assert manifest["target_type_counts"]["absent_negative"] == 1
 
     def test_voxtell_manifest_rejects_legacy_and_hard_c_positive_labels(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MEDAI_NEGATIVE_PROMPT_RATIO", "0.0")
@@ -1121,6 +1225,117 @@ class TestVoxTellTrainerContracts:
         assert rows
         assert {row["organ"] for row in rows} == {"negative_nonmedical_cat"}
         assert all(row["negative_source"] == "nonmedical_absent_object" for row in rows)
+
+    def test_runtime_sampler_ratio_and_negative_reason_contracts(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("train_voxtell_prompt_student_test", Path("scripts/train_voxtell_prompt_student.py"))
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        assert module.parse_pos_neg_ratio("2:1") == (2, 1)
+        assert module.parse_pos_neg_ratio("1:1") == (1, 1)
+        assert module.parse_pos_neg_ratio("10:1") == (10, 1)
+        pools = module.build_sample_pools([
+            {"case_id": "c", "organ": "liver", "supervision_type": "positive", "training_weight": 1.0},
+            {"case_id": "c", "organ": "brain", "supervision_type": "negative", "training_weight": 0.1, "negative_source": "case_373_expected_absent"},
+        ])
+        kinds = [module.sample_training_item(i, pools, module.parse_pos_neg_ratio("2:1"))["runtime_sample_kind"] for i in range(30)]
+        assert kinds.count("positive") == 20
+        assert kinds.count("negative") == 10
+        neg = module.sample_training_item(2, pools, module.parse_pos_neg_ratio("2:1"))
+        assert neg["negative_reason"] in {"absent_in_scan", "absent_in_crop"}
+
+    def test_load_manifest_accepts_absent_negative_zero_mask_role(self, tmp_path):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("train_voxtell_prompt_student_test", Path("scripts/train_voxtell_prompt_student.py"))
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        image = _make_nii(np.ones((4, 4, 4), dtype=np.int16), tmp_path / "ct.nii.gz")
+        zero = _make_nii(np.zeros((4, 4, 4), dtype=np.uint8), tmp_path / "zero.nii.gz")
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"items": [{
+            "case_id": "case_001",
+            "image": str(image),
+            "mask": str(zero),
+            "organ": "brain",
+            "prompt": "brain",
+            "supervision_type": "negative",
+            "target_type": "absent_negative",
+            "negative_source": "case_373_expected_absent",
+            "zero_mask_role": "absent_negative_target_mask",
+            "training_weight": 0.1,
+        }]}, indent=2), encoding="utf-8")
+
+        rows = module.load_manifest(manifest)
+
+        assert len(rows) == 1
+        assert rows[0]["negative_reason"] == "absent_in_scan"
+
+    def test_runtime_patch_sampler_positive_and_absent_in_crop_negative(self, tmp_path):
+        import importlib.util
+        import random
+
+        spec = importlib.util.spec_from_file_location("train_voxtell_prompt_student_test", Path("scripts/train_voxtell_prompt_student.py"))
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        random.seed(7)
+        image = _make_nii(np.ones((8, 8, 8), dtype=np.int16), tmp_path / "ct.nii.gz")
+        mask_arr = np.zeros((8, 8, 8), dtype=np.uint8)
+        mask_arr[0, 0, 0] = 1
+        mask = _make_nii(mask_arr, tmp_path / "tiny_organ.nii.gz")
+        base = {"case_id": "case_001", "image": str(image), "mask": str(mask), "organ": "tiny", "prompt": "tiny", "target_type": "hard"}
+
+        pos_image, pos_target, pos_meta = module.load_training_patch_with_metadata({**base, "runtime_sample_kind": "positive"}, (4, 4, 4), 0.0)
+        neg_image, neg_target, neg_meta = module.load_training_patch_with_metadata({**base, "runtime_sample_kind": "negative", "derived_negative_from_positive": True, "negative_reason": "absent_in_crop"}, (4, 4, 4), 0.0)
+
+        assert pos_image.shape == neg_image.shape == (1, 1, 4, 4, 4)
+        assert float(pos_target.sum()) > 0.0
+        assert pos_meta["sample_kind"] == "positive"
+        assert float(neg_target.sum()) == 0.0
+        assert neg_meta["sample_kind"] == "negative"
+        assert neg_meta["negative_reason"] == "absent_in_crop"
+        assert neg_meta["all_zero_target"] is True
+
+    def test_dry_run_reports_candidate_pools_and_sampling_config(self, tmp_path, monkeypatch):
+        import importlib.util
+        import sys
+
+        spec = importlib.util.spec_from_file_location("train_voxtell_prompt_student_test", Path("scripts/train_voxtell_prompt_student.py"))
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        image = _make_nii(np.ones((4, 4, 4), dtype=np.int16), tmp_path / "ct.nii.gz")
+        mask = _make_nii(np.ones((4, 4, 4), dtype=np.uint8), tmp_path / "liver.nii.gz")
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"items": [{
+            "case_id": "case_001", "image": str(image), "mask": str(mask), "organ": "liver", "prompt": "liver",
+            "grade": "A", "training_weight": 1.0, "scoring_schema_version": "autolabel_core_v2", "target_type": "hard",
+        }]}, indent=2), encoding="utf-8")
+        model_dir = tmp_path / "model"
+        (model_dir / "fold_0").mkdir(parents=True)
+        (model_dir / "plans.json").write_text("{}", encoding="utf-8")
+        (model_dir / "fold_0" / "checkpoint_final.pth").write_text("fake", encoding="utf-8")
+        out = tmp_path / "out"
+        monkeypatch.setattr(sys, "argv", [
+            "train_voxtell_prompt_student.py", "--manifest", str(manifest), "--model-dir", str(model_dir),
+            "--output-dir", str(out), "--dry-run", "--device", "cpu", "--pos-neg-ratio", "2:1",
+        ])
+
+        assert module.main() == 0
+        result = json.loads((out / "voxtell_prompt_train_result.json").read_text(encoding="utf-8"))
+        assert result["negative_prompt_sampling"] == "runtime_pool_sampler"
+        assert result["pos_neg_ratio_parsed"] == [2, 1]
+        assert result["candidate_pool_positive_count"] == 1
+        assert result["candidate_pool_derived_crop_negative_count"] == 1
+        assert "num_positive_items" not in result
 
     def test_round1_negative_job_sampler_skips_unsafe_sources(self, tmp_path):
         import importlib.util
@@ -2161,6 +2376,46 @@ class TestTeacherMeetingPipeline:
         assert "fusion_consensus" not in liver_sel["candidate_models"]
         assert any(p.get("fusion_skipped_reason") == "low_or_unknown_pairwise_agreement_blocks_fusion" for p in liver_sel["candidate_predictions"])
 
+
+    def test_materialize_case_373_targets_adds_absent_negative_only_for_expected_absent(self, tmp_path):
+        from cli_anything.medai.core import multimodel_loop as ml
+        import nibabel as nib
+
+        ct = _make_nii(np.zeros((8, 8, 8), dtype=np.int16), tmp_path / "ct.nii.gz")
+        selection_rows = [{
+            "case_id": "case_001", "organ": "liver", "selection_status": "selected",
+            "target_type": "hard", "expected_presence": "expected_present",
+        }]
+        selected_metadata = [{
+            "case_id": "case_001", "organ": "liver", "final_mask": str(ct), "target_type": "hard",
+        }]
+        summary = ml._materialize_case_373_targets(
+            case_id="case_001",
+            ct=ct,
+            organs=["liver", "brain", "pancreas"],
+            case_updated=tmp_path / "updated",
+            selection_rows=selection_rows,
+            selected_metadata=selected_metadata,
+            presence_context={
+                "has_region_evidence": True,
+                "has_abdomen_coverage": True,
+                "has_head_coverage": False,
+            },
+            negative_absent_training_weight=0.2,
+        )
+
+        by_organ = {row["organ"]: row for row in selection_rows}
+        assert summary["expected_targets"] == 3
+        assert by_organ["brain"]["target_type"] == "absent_negative"
+        assert by_organ["brain"]["grade"] == "A"
+        assert by_organ["brain"]["grade_scope"] == "absence_target"
+        assert by_organ["brain"]["training_weight"] == 0.2
+        assert by_organ["brain"]["labelcritic_called"] is False
+        assert "pancreas" not in by_organ  # expected-present missing remains a review gap, not a false negative
+        zero = nib.load(by_organ["brain"]["mask_path"])
+        assert zero.shape[:3] == (8, 8, 8)
+        assert np.asanyarray(zero.dataobj).sum() == 0
+
     def test_gap_rows_distinguish_expected_absent_from_route_failure(self, tmp_path):
         from cli_anything.medai.core import multimodel_loop as ml
 
@@ -2660,6 +2915,42 @@ class TestLabelCriticWrapperSafety:
 # ─── Test 11 : LabelCritic tournament robustness (inconclusive != abort) ──────
 
 class TestLabelCriticTournament:
+    def test_labelcritic_decisive_selection_sets_primary_metadata(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        cands = [
+            {"model": "teacher_a", "prediction": str(tmp_path / "a.nii.gz"), "eligible_for_labelcritic": True, "dice": 0.5},
+            {"model": "teacher_b", "prediction": str(tmp_path / "b.nii.gz"), "eligible_for_labelcritic": True, "dice": 0.7},
+        ]
+
+        def fake_compare(ct, a, b, organ, out_json, **kw):
+            Path(out_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_json).write_text("{}")
+            return {"status": "success", "decision": {"winner": "b", "confidence": 0.91}}
+
+        monkeypatch.setattr(ml, "run_labelcritic_compare", fake_compare)
+        selected, sel = ml._select_candidate(
+            ct=tmp_path / "ct.nii.gz", organ="liver", candidates=cands, out=tmp_path / "out",
+            case_id="c1", enable_critic=True, critic_backend="labelcritic",
+            critic_base_url="http://localhost", critic_port=8000, timeout_sec=30,
+            dry_run=False, labelcritic_options={},
+        )
+
+        assert selected["model"] == "teacher_b"
+        assert sel["selection_method"] == "label_critic"
+        assert sel["primary_selector"] == "labelcritic"
+        assert sel["labelcritic_decisive"] is True
+        assert sel["evidence_used_for"] == "audit_only"
+        assert sel["labelcritic_confidence"] == 0.91
+        assert ml._labelcritic_locks_selection(sel) is True
+
+    def test_labelcritic_lock_helper_rejects_fallback_methods(self):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        assert ml._labelcritic_locks_selection({"selection_method": "label_critic", "comparison_decisive_count": 1}) is True
+        assert ml._labelcritic_locks_selection({"selection_method": "label_critic_inconclusive", "comparison_decisive_count": 0}) is False
+        assert ml._labelcritic_locks_selection({"selection_method": "near_identical_agreement", "comparison_decisive_count": 0}) is False
+
     def test_inconclusive_pair_does_not_abort_tournament(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml
 

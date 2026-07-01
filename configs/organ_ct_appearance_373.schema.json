@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "organ_ct_appearance_373",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "target_source",
+    "entry_count",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "target_source": {
+      "type": "string"
+    },
+    "entry_count": {
+      "type": "integer"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "canonical_organ",
+          "display_name",
+          "aliases",
+          "expected_region",
+          "ct_appearance",
+          "anatomical_constraints",
+          "common_failure_modes",
+          "rejection_rules",
+          "labelcritic_instruction"
+        ],
+        "properties": {
+          "canonical_organ": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "type": "string"
+          },
+          "laterality": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_region": {
+            "type": "string"
+          },
+          "landmarks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ct_appearance": {
+            "type": "string"
+          },
+          "shape_and_continuity_prior": {
+            "type": "string"
+          },
+          "anatomical_constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "common_failure_modes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rejection_rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "labelcritic_instruction": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "requires_manual_review": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

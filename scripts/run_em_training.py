@@ -2010,7 +2010,11 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         result["text_encoder"] = "Qwen/Qwen3-Embedding-4B"
         result["text_encoder_frozen"] = True
         result["official_prompt_training_pipeline_available"] = False
-        result["negative_prompt_sampling"] = "project_specific"
+        result["negative_prompt_sampling"] = train_result.get("negative_prompt_sampling", "runtime_pool_sampler")
+        result["pos_neg_ratio"] = train_result.get("pos_neg_ratio")
+        result["pos_neg_ratio_parsed"] = train_result.get("pos_neg_ratio_parsed")
+        result["candidate_pool_positive_count"] = train_result.get("candidate_pool_positive_count")
+        result["candidate_pool_negative_count"] = train_result.get("candidate_pool_negative_count")
         result["training_provenance_warning"] = (
             "This checkpoint comes from the project prompt-conditioned distillation trainer using official VoxTell components, "
             "not from official voxtell-finetune."

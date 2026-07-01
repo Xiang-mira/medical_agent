@@ -44,8 +44,16 @@ SAFE_NEGATIVE_SOURCES = {
     "nonmedical_absent_object",
     "out_of_scan_anatomy_with_coverage_evidence",
     "explicit_confirmed_absent_anatomy",
+    "case_373_expected_absent",
 }
+SAFE_ZERO_MASK_ROLES = {"negative_target_mask", "absent_negative_target_mask"}
 ACCEPTED_AUTOLABEL_SCHEMAS = {"autolabel_core_v2", "autolabel_core_v3"}
+NEGATIVE_REASON_MAP = {
+    "case_373_expected_absent": "absent_in_scan",
+    "out_of_scan_anatomy_with_coverage_evidence": "absent_in_scan",
+    "explicit_confirmed_absent_anatomy": "absent_in_scan",
+    "nonmedical_absent_object": "wrong_prompt",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,6 +74,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--poly-power", type=float, default=float(env.get("MEDAI_POLY_POWER", "0.9")))
     ap.add_argument("--deep-supervision", action="store_true", default=env.get("MEDAI_DEEP_SUPERVISION", "1").lower() not in {"0", "false", "no"})
     ap.add_argument("--foreground-prob", type=float, default=float(env.get("MEDAI_FOREGROUND_PROB", "0.7")))
+    ap.add_argument("--pos-neg-ratio", default=env.get("MEDAI_POS_NEG_RATIO", "2:1"), help="Runtime positive:negative sampling ratio, e.g. 2:1, 1:1, 10:1, or 2.0.")
+    ap.add_argument("--sampling-log-interval", type=int, default=int(env.get("MEDAI_SAMPLING_LOG_INTERVAL", "10")), help="Steps per sampling-stat log window.")
     ap.add_argument("--seed", type=int, default=int(env.get("MEDAI_SEED", "42")))
     ap.add_argument("--save-every", type=int, default=int(env.get("MEDAI_SAVE_EVERY", "0")), help="0 disables intermediate checkpoints.")
     ap.add_argument("--dry-run", action="store_true", help="Validate inputs and write a training plan without loading Qwen/model weights.")
@@ -206,15 +216,27 @@ def compute_sampling_weight(item: dict[str, Any]) -> float:
     return max(0.0, base * grade_mult * confidence_mult * lineage_mult * quality_mult)
 
 
+def canonical_negative_reason(item: dict[str, Any], default: str = "absent_in_crop") -> str:
+    raw_reason = str(item.get("negative_reason") or "")
+    if raw_reason in {"absent_in_scan", "absent_in_crop", "wrong_prompt"}:
+        return raw_reason
+    source = str(item.get("negative_source") or "")
+    return NEGATIVE_REASON_MAP.get(source, default)
+
+
 def is_allowed_negative_item(item: dict[str, Any]) -> bool:
     if item.get("supervision_type") != "negative":
         return True
     source = str(item.get("negative_source") or "")
     if source not in SAFE_NEGATIVE_SOURCES:
         return False
-    if item.get("zero_mask_role") != "negative_target_mask":
+    if item.get("zero_mask_role") not in SAFE_ZERO_MASK_ROLES:
         return False
-    if source != "nonmedical_absent_object" and not item.get("negative_evidence"):
+    if source in {"case_373_expected_absent", "nonmedical_absent_object"}:
+        return True
+    if str(item.get("target_type") or "") == "absent_negative":
+        return True
+    if not item.get("negative_evidence"):
         return False
     return True
 
@@ -255,17 +277,81 @@ def load_manifest(path: Path, max_items: int = 0) -> list[dict[str, Any]]:
                 continue
             if Path(image).exists() and Path(mask).exists():
                 sampling_weight = compute_sampling_weight({**item, "training_weight": training_weight})
-                repeat = max(1, min(5, int(round(sampling_weight * 2.0))))
                 normalized = {**item, "training_weight": training_weight}
                 normalized["sampling_weight"] = round(float(sampling_weight), 6)
                 normalized["effective_loss_weight"] = round(float(sampling_weight), 6)
-                normalized["sampling_repeat"] = repeat
+                normalized["sampling_repeat"] = 1
                 normalized.setdefault("supervision_type", "positive")
                 normalized.setdefault("distillation_role", normalized["supervision_type"])
-                rows.extend([dict(normalized) for _ in range(repeat)])
+                if normalized.get("supervision_type") == "negative":
+                    normalized["negative_reason"] = canonical_negative_reason(normalized)
+                rows.append(dict(normalized))
     if max_items > 0:
         rows = rows[:max_items]
     return rows
+
+
+def parse_pos_neg_ratio(value: str | float | int) -> tuple[int, int]:
+    text = str(value).strip()
+    if not text:
+        raise ValueError("pos_neg_ratio must not be empty")
+    if ":" in text:
+        left, right = text.split(":", 1)
+        pos = float(left.strip())
+        neg = float(right.strip())
+    else:
+        pos = float(text)
+        neg = 1.0
+    if pos <= 0 or neg < 0:
+        raise ValueError(f"Invalid positive:negative ratio: {value}")
+    if neg == 0:
+        return (max(1, int(round(pos))), 0)
+    scale = 10
+    pos_i = max(1, int(round(pos * scale)))
+    neg_i = max(1, int(round(neg * scale)))
+    import math
+    div = math.gcd(pos_i, neg_i)
+    return pos_i // div, neg_i // div
+
+
+def build_sample_pools(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    positive = [r for r in rows if r.get("supervision_type", "positive") == "positive"]
+    manifest_negative = [r for r in rows if r.get("supervision_type") == "negative"]
+    derived_crop_negative = [dict(r, supervision_type="negative", negative_reason="absent_in_crop", derived_negative_from_positive=True) for r in positive]
+    return {
+        "positive": positive,
+        "negative": manifest_negative + derived_crop_negative,
+        "manifest_negative": manifest_negative,
+        "derived_crop_negative": derived_crop_negative,
+    }
+
+
+def _weighted_choice(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        raise ValueError("Cannot sample from an empty pool")
+    weights = [max(0.0, float(r.get("sampling_weight", r.get("training_weight", 1.0)) or 0.0)) for r in rows]
+    if sum(weights) <= 0:
+        return dict(random.choice(rows))
+    return dict(random.choices(rows, weights=weights, k=1)[0])
+
+
+def choose_sample_kind(step: int, pos_neg_ratio: tuple[int, int], pools: dict[str, list[dict[str, Any]]]) -> str:
+    pos_n, neg_n = pos_neg_ratio
+    if not pools.get("negative") or neg_n <= 0:
+        return "positive"
+    if not pools.get("positive"):
+        return "negative"
+    cycle = ["positive"] * pos_n + ["negative"] * neg_n
+    return cycle[step % len(cycle)]
+
+
+def sample_training_item(step: int, pools: dict[str, list[dict[str, Any]]], pos_neg_ratio: tuple[int, int]) -> dict[str, Any]:
+    kind = choose_sample_kind(step, pos_neg_ratio, pools)
+    item = _weighted_choice(pools[kind])
+    item["runtime_sample_kind"] = kind
+    if kind == "negative":
+        item["negative_reason"] = canonical_negative_reason(item, "absent_in_crop")
+    return item
 
 
 def build_voxtell_network(model_dir: Path, deep_supervision: bool = False) -> nn.Module:
@@ -368,6 +454,21 @@ def choose_patch_start(
     return tuple(random.randint(0, m) if m > 0 else 0 for m in max_start)  # type: ignore[return-value]
 
 
+def patch_slices(start: tuple[int, int, int], patch_size: tuple[int, int, int]) -> tuple[slice, slice, slice]:
+    return tuple(slice(int(s), int(s) + int(p)) for s, p in zip(start, patch_size))  # type: ignore[return-value]
+
+
+def choose_negative_patch_start(mask: np.ndarray, patch_size: tuple[int, int, int], max_attempts: int = 64) -> tuple[int, int, int]:
+    max_start = [max(0, int(s) - int(p)) for s, p in zip(mask.shape, patch_size)]
+    if np.flatnonzero(mask).size == 0:
+        return tuple(random.randint(0, m) if m > 0 else 0 for m in max_start)  # type: ignore[return-value]
+    for _ in range(max_attempts):
+        start = tuple(random.randint(0, m) if m > 0 else 0 for m in max_start)  # type: ignore[assignment]
+        if float(mask[patch_slices(start, patch_size)].sum()) <= 0.0:
+            return start  # type: ignore[return-value]
+    raise ValueError("Could not sample a target-absent negative crop for this organ")
+
+
 @lru_cache(maxsize=max(1, int(os.getenv("MEDAI_IMAGE_CACHE_SIZE", "16"))))
 def _cached_preprocessed_image(path: str) -> tuple[np.ndarray, tuple[tuple[int, int], ...], tuple[int, ...]]:
     image = read_image(Path(path))
@@ -387,7 +488,11 @@ def _cached_cropped_mask(path: str, bbox: tuple[tuple[int, int], ...], original_
     return mask, np.flatnonzero(mask)
 
 
-def load_training_patch(item: dict[str, Any], patch_size: tuple[int, int, int], foreground_prob: float) -> tuple[torch.Tensor, torch.Tensor]:
+def load_training_patch_with_metadata(
+    item: dict[str, Any],
+    patch_size: tuple[int, int, int],
+    foreground_prob: float,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
     image, bbox, original_shape = _cached_preprocessed_image(str(Path(item["image"]).resolve()))
     target_type = str(item.get("target_type") or "hard")
     mask, foreground_flat = _cached_cropped_mask(str(Path(item["mask"]).resolve()), bbox, original_shape, target_type)
@@ -395,11 +500,39 @@ def load_training_patch(item: dict[str, Any], patch_size: tuple[int, int, int], 
     if tuple(mask.shape) != tuple(_cached_cropped_mask(str(Path(item["mask"]).resolve()), bbox, original_shape, target_type)[0].shape):
         foreground_flat = np.flatnonzero(mask)
 
-    sx, sy, sz = choose_patch_start(mask, patch_size, foreground_prob, foreground_flat)
+    sample_kind = str(item.get("runtime_sample_kind") or item.get("supervision_type") or "positive")
+    if sample_kind == "positive":
+        if foreground_flat.size <= 0:
+            raise ValueError("Positive sample has no target foreground")
+        start = choose_patch_start(mask, patch_size, 1.0, foreground_flat)
+    elif item.get("derived_negative_from_positive"):
+        start = choose_negative_patch_start(mask, patch_size)
+    else:
+        start = choose_patch_start(mask, patch_size, foreground_prob, foreground_flat)
+
+    sx, sy, sz = start
     px, py, pz = patch_size
     image_patch = image[:, sx:sx + px, sy:sy + py, sz:sz + pz]
     mask_patch = mask[sx:sx + px, sy:sy + py, sz:sz + pz]
-    return torch.from_numpy(image_patch[None].astype(np.float32)), torch.from_numpy(mask_patch[None, None].astype(np.float32))
+    if sample_kind == "negative" and item.get("derived_negative_from_positive") and float(mask_patch.sum()) > 0.0:
+        raise ValueError("Derived negative crop unexpectedly contains target foreground")
+
+    foreground_voxels = float(mask_patch.sum())
+    voxel_count = int(np.prod(mask_patch.shape)) if mask_patch.size else 0
+    meta = {
+        "sample_kind": sample_kind,
+        "negative_reason": canonical_negative_reason(item) if sample_kind == "negative" else None,
+        "foreground_voxel_count": foreground_voxels,
+        "foreground_voxel_ratio": foreground_voxels / float(voxel_count) if voxel_count else 0.0,
+        "all_zero_target": foreground_voxels <= 0.0,
+        "crop_start": [int(sx), int(sy), int(sz)],
+    }
+    return torch.from_numpy(image_patch[None].astype(np.float32)), torch.from_numpy(mask_patch[None, None].astype(np.float32)), meta
+
+
+def load_training_patch(item: dict[str, Any], patch_size: tuple[int, int, int], foreground_prob: float) -> tuple[torch.Tensor, torch.Tensor]:
+    image, target, _meta = load_training_patch_with_metadata(item, patch_size, foreground_prob)
+    return image, target
 
 
 @torch.inference_mode()
@@ -562,8 +695,17 @@ def main() -> int:
     result_path = output_dir / "voxtell_prompt_train_result.json"
 
     rows = load_manifest(manifest_path, max_items=args.max_items)
+    sample_pools = build_sample_pools(rows)
+    try:
+        pos_neg_ratio = parse_pos_neg_ratio(args.pos_neg_ratio)
+        pos_neg_ratio_error = None
+    except Exception as exc:
+        pos_neg_ratio = (2, 1)
+        pos_neg_ratio_error = str(exc)
     model_files_ok = (model_dir / "plans.json").exists() and (model_dir / "fold_0" / "checkpoint_final.pth").exists()
     validation_errors: list[str] = []
+    if pos_neg_ratio_error:
+        validation_errors.append(f"Invalid --pos-neg-ratio: {pos_neg_ratio_error}")
     if not rows:
         validation_errors.append("No valid manifest items with existing image/mask/prompt paths")
     if not model_files_ok:
@@ -585,19 +727,26 @@ def main() -> int:
         "uses_autolabelcore_confidence": True,
         "uses_abcd_training_weight": True,
         "official_prompt_training_pipeline_available": False,
-        "negative_prompt_sampling": "project_specific",
+        "negative_prompt_sampling": "runtime_pool_sampler",
         "training_provenance_warning": "Project prompt-conditioned distillation trainer using official VoxTell components; not official voxtell-finetune.",
         "manifest": str(manifest_path),
         "model_dir": str(model_dir),
         "output_dir": str(output_dir),
         "num_manifest_items": len(rows),
-        "training_weight_policy": "Items with training_weight <= 0 are skipped; prompt variants are expanded; sampler repeats use training_weight, grade, LabelCritic/quality flags, route confidence, teacher lineage, and student priority.",
+        "candidate_pool_positive_count": len(sample_pools["positive"]),
+        "candidate_pool_negative_count": len(sample_pools["negative"]),
+        "candidate_pool_manifest_negative_count": len(sample_pools["manifest_negative"]),
+        "candidate_pool_derived_crop_negative_count": len(sample_pools["derived_crop_negative"]),
+        "pos_neg_ratio": args.pos_neg_ratio,
+        "pos_neg_ratio_parsed": list(pos_neg_ratio),
+        "sampling_log_interval": args.sampling_log_interval,
+        "training_weight_policy": "Items with training_weight <= 0 are skipped; prompt variants are kept as candidate-pool rows; runtime sampler uses sampling_weight within positive/negative pools, while --pos-neg-ratio controls the actual positive/negative training mix.",
         "loss_mode": "weighted_dice_plus_bce_deep_supervision",
         "optimizer": args.optimizer,
         "poly_power": args.poly_power,
         "deep_supervision": args.deep_supervision,
-        "num_positive_items": sum(1 for r in rows if r.get("supervision_type", "positive") == "positive"),
-        "num_negative_items": sum(1 for r in rows if r.get("supervision_type") == "negative"),
+        "candidate_pool_positive_manifest_items": sum(1 for r in rows if r.get("supervision_type", "positive") == "positive"),
+        "candidate_pool_negative_manifest_items": sum(1 for r in rows if r.get("supervision_type") == "negative"),
         "num_prompt_variant_items": sum(1 for r in rows if r.get("is_prompt_variant")),
         "mean_sampling_weight": float(np.mean([r.get("sampling_weight", 0.0) for r in rows])) if rows else 0.0,
         "mean_effective_loss_weight": float(np.mean([r.get("effective_loss_weight", r.get("training_weight", 0.0)) for r in rows])) if rows else 0.0,
@@ -629,7 +778,7 @@ def main() -> int:
         write_json(result_path, plan)
         print(json.dumps(plan, indent=2, ensure_ascii=False))
         return 0
-    if not rows:
+    if validation_errors:
         plan.update({"status": "failed", "reason": validation_errors[0]})
         write_json(result_path, plan)
         return 2
@@ -656,49 +805,82 @@ def main() -> int:
     losses: list[float] = []
     loss_history: list[dict[str, float | int]] = []
     total_steps = 0
-    max_steps = args.max_steps if args.max_steps > 0 else args.epochs * len(rows)
-    while total_steps < max_steps:
-        epoch_rows = mask_locality_shuffle(rows)
-        for item in epoch_rows:
-            if total_steps >= max_steps:
-                break
-            try:
-                image, target = load_training_patch(item, patch_size, args.foreground_prob)
-            except Exception as exc:
-                losses.append(float("nan"))
-                print(f"[warn] skip {item.get('case_id')} {item.get('organ')}: {exc}", flush=True)
-                continue
-            image = image.to(device, non_blocking=True)
-            target = target.to(device, non_blocking=True)
-            text_embedding = embeddings[str(item["prompt"])].to(device, non_blocking=True)
+    max_steps = args.max_steps if args.max_steps > 0 else args.epochs * max(1, len(rows))
+    sampling_history: list[dict[str, Any]] = []
+    sampling_window: list[dict[str, Any]] = []
+    skipped_attempts = 0
+    max_attempts = max_steps * 20
+    attempts = 0
+    while total_steps < max_steps and attempts < max_attempts:
+        attempts += 1
+        item = sample_training_item(total_steps, sample_pools, pos_neg_ratio)
+        try:
+            image, target, sample_meta = load_training_patch_with_metadata(item, patch_size, args.foreground_prob)
+        except Exception as exc:
+            skipped_attempts += 1
+            print(f"[warn] skip {item.get('case_id')} {item.get('organ')}: {exc}", flush=True)
+            continue
+        image = image.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
+        text_embedding = embeddings[str(item["prompt"])].to(device, non_blocking=True)
 
-            optim.zero_grad(set_to_none=True)
-            set_optimizer_lr(optim, poly_lr(total_steps, max_steps, args.learning_rate, args.poly_power))
-            with torch.autocast(device.type, enabled=device.type == "cuda"):
-                logits = network(image, text_embedding)
-                loss = voxtell_supervision_loss(
-                    logits,
-                    target,
-                    float(item.get("effective_loss_weight", item.get("training_weight", 1.0)) or 0.0),
-                    args.bce_pos_weight_cap,
-                )
-            scaler.scale(loss).backward()
-            scaler.step(optim)
-            scaler.update()
+        optim.zero_grad(set_to_none=True)
+        set_optimizer_lr(optim, poly_lr(total_steps, max_steps, args.learning_rate, args.poly_power))
+        with torch.autocast(device.type, enabled=device.type == "cuda"):
+            logits = network(image, text_embedding)
+            loss = voxtell_supervision_loss(
+                logits,
+                target,
+                float(item.get("effective_loss_weight", item.get("training_weight", 1.0)) or 0.0),
+                args.bce_pos_weight_cap,
+            )
+        scaler.scale(loss).backward()
+        scaler.step(optim)
+        scaler.update()
 
-            total_steps += 1
-            loss_value = float(loss.detach().cpu())
-            losses.append(loss_value)
-            loss_history.append({"step": total_steps, "loss": loss_value, "learning_rate": float(optim.param_groups[0]["lr"])})
-            if total_steps % 10 == 0:
-                recent = [x for x in losses[-10:] if np.isfinite(x)]
-                print(f"step={total_steps} loss={np.mean(recent):.5f}", flush=True)
-            if args.save_every > 0 and total_steps % args.save_every == 0:
-                # Rotate one recovery checkpoint; 3D checkpoints are ~1.7 GB
-                # and retaining every interval can exhaust the experiment disk.
-                torch.save({"eligible_for_next_round_prompt_student": False,
+        total_steps += 1
+        loss_value = float(loss.detach().cpu())
+        losses.append(loss_value)
+        sampling_window.append(sample_meta)
+        loss_history.append({
+            "step": total_steps,
+            "loss": loss_value,
+            "learning_rate": float(optim.param_groups[0]["lr"]),
+            "sample_kind": sample_meta["sample_kind"],
+            "foreground_voxel_ratio": float(sample_meta["foreground_voxel_ratio"]),
+            "all_zero_target": int(bool(sample_meta["all_zero_target"])),
+        })
+        log_interval = max(1, int(args.sampling_log_interval))
+        if total_steps % log_interval == 0 or total_steps == max_steps:
+            recent = [x for x in losses[-log_interval:] if np.isfinite(x)]
+            pos_count = sum(1 for m in sampling_window if m.get("sample_kind") == "positive")
+            neg_count = sum(1 for m in sampling_window if m.get("sample_kind") == "negative")
+            reason_counts: dict[str, int] = {"absent_in_scan": 0, "absent_in_crop": 0, "wrong_prompt": 0}
+            for m in sampling_window:
+                reason = m.get("negative_reason")
+                if reason:
+                    reason_counts[str(reason)] = reason_counts.get(str(reason), 0) + 1
+            stat = {
+                "step": total_steps,
+                "loss": float(np.mean(recent)) if recent else None,
+                "batch_positive_count": pos_count,
+                "batch_negative_count": neg_count,
+                "positive_negative_ratio": (float(pos_count) / float(neg_count)) if neg_count else None,
+                "foreground_voxel_ratio": float(np.mean([m.get("foreground_voxel_ratio", 0.0) for m in sampling_window])) if sampling_window else 0.0,
+                "all_zero_target_count": sum(1 for m in sampling_window if m.get("all_zero_target")),
+                "negative_reason_counts": reason_counts,
+            }
+            sampling_history.append(stat)
+            print(json.dumps(stat, ensure_ascii=False), flush=True)
+            sampling_window = []
+        if args.save_every > 0 and total_steps % args.save_every == 0:
+            # Rotate one recovery checkpoint; 3D checkpoints are ~1.7 GB
+            # and retaining every interval can exhaust the experiment disk.
+            torch.save({"eligible_for_next_round_prompt_student": False,
         "eligible_as_teacher_candidate": False,
         "network_weights": network.state_dict(), "step": total_steps}, output_dir / "checkpoint_latest.pth")
+    if total_steps < max_steps:
+        raise RuntimeError(f"Runtime sampler produced only {total_steps}/{max_steps} steps after {attempts} attempts")
 
     final_ckpt = output_dir / "model_finetune.pth"
     torch.save({
@@ -719,7 +901,7 @@ def main() -> int:
     }, final_ckpt)
     inference_model_dir = write_voxtell_model_dir(model_dir, output_dir, network, total_steps, manifest_path)
     finite_losses = [x for x in losses if np.isfinite(x)]
-    write_json(output_dir / "loss_history.json", {"steps": total_steps, "history": loss_history})
+    write_json(output_dir / "loss_history.json", {"steps": total_steps, "history": loss_history, "sampling_history": sampling_history, "skipped_sampling_attempts": skipped_attempts})
     result = {
         **plan,
         "status": "success",
@@ -731,6 +913,8 @@ def main() -> int:
         "deep_supervision": args.deep_supervision,
         "poly_power": args.poly_power,
         "steps": total_steps,
+        "sampling_history": sampling_history,
+        "skipped_sampling_attempts": skipped_attempts,
         "mean_loss": float(np.mean(finite_losses)) if finite_losses else None,
         "last_loss": finite_losses[-1] if finite_losses else None,
         "finetuned_checkpoint": str(final_ckpt),

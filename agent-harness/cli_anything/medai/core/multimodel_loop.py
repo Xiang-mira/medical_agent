@@ -1385,6 +1385,116 @@ def _run_hierarchical_case_inference(
     }
 
 
+def _zero_mask_path_for_case(ct: Path, case_updated: Path) -> str | None:
+    """Create/reuse a canonical all-zero target aligned to this case CT."""
+    out = case_updated / "negative_targets" / "zero_mask.nii.gz"
+    if out.exists():
+        return str(out.resolve())
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        img = nib.load(str(ct))
+        zero = np.zeros(img.shape[:3], dtype=np.uint8)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        nib.save(nib.Nifti1Image(zero, img.affine, img.header), str(out))
+        return str(out.resolve())
+    except Exception:
+        return None
+
+
+def _materialize_case_373_targets(
+    *,
+    case_id: str,
+    ct: Path,
+    organs: list[str],
+    case_updated: Path,
+    selection_rows: list[dict[str, Any]],
+    selected_metadata: list[dict[str, Any]],
+    presence_context: dict[str, Any],
+    negative_absent_training_weight: float = 0.1,
+) -> dict[str, Any]:
+    """Ensure each formal target has a supervision record for this case."""
+    selection_by_organ = {str(row.get("organ")): row for row in selection_rows if row.get("organ")}
+    zero_mask = _zero_mask_path_for_case(ct, case_updated)
+    absent_added = 0
+    review_gap_missing = 0
+    geometry_failures = 0
+    for organ in organs:
+        if organ in selection_by_organ:
+            continue
+        expected_presence = _expected_presence_for_organ(organ, presence_context)
+        if expected_presence != "expected_absent":
+            review_gap_missing += 1
+            continue
+        if not zero_mask:
+            geometry_failures += 1
+            selection_rows.append({
+                "case_id": case_id, "ct_path": str(ct), "organ": organ,
+                "expected_presence": expected_presence, "target_type": "review_gap",
+                "selection_method": "none", "selection_status": "missing",
+                "reason": "missing_geometry_for_negative", "candidate_count": 0,
+                "candidate_models": [], "review_flags": ["missing_geometry_for_negative"],
+                "quality_flags": ["missing_candidate"],
+            })
+            continue
+        reason = "organ outside scan/body region; all-zero mask is valid negative target"
+        row = {
+            "case_id": case_id, "ct_path": str(ct), "organ": organ,
+            "expected_presence": expected_presence, "fov_status": expected_presence,
+            "target_type": "absent_negative", "grade": "A", "grade_scope": "absence_target",
+            "confidence": 1.0, "label_confidence": 1.0,
+            "training_weight": float(negative_absent_training_weight),
+            "distillation_eligible": float(negative_absent_training_weight) > 0.0,
+            "supervision_type": "negative", "distillation_role": "negative",
+            "selection_method": "absent_negative", "selection_status": "selected",
+            "reason": reason, "selected_reason": reason, "rejected_reasons": {}, "failure_modes": [],
+            "candidate_count": 0, "candidate_models": [],
+            "comparison_candidate_count": 0, "comparison_candidate_models": [],
+            "selected_candidate": None, "selected_candidate_id": None,
+            "selected_teacher": None, "selected_family": None,
+            "selected_model": None, "source_model": None,
+            "selected_prediction": zero_mask,
+            "labelcritic_called": False, "labelcritic_compare_used": False,
+            "labelcritic_skipped_reason": "absent_negative_no_candidate_ranking_needed",
+            "labelcritic_grade_used": False,
+            "mask_path": zero_mask, "mask": zero_mask, "final_mask": zero_mask,
+            "zero_mask_role": "absent_negative_target_mask",
+            "negative_reason": "out_of_scan_by_scan_coverage",
+            "negative_source": "case_373_expected_absent",
+            "dataset_role": "absent_negative",
+            "ground_truth_status": "valid_absent_negative",
+            "metric_family": "absence_supervision",
+            "metric_scope": "all_zero_negative_target_for_absent_organ",
+            "accuracy_warning": "Absent-negative all-zero masks are scan-coverage supervision, not expert positive segmentations.",
+            "scoring_schema_version": "autolabel_core_v3_absent_negative",
+            "quality_flags": [], "review_flags": [], "quality_status": "ok",
+            "publication_status": "accepted_absent_negative",
+            "should_enter_student_training": float(negative_absent_training_weight) > 0.0,
+        }
+        selection_rows.append(dict(row))
+        selected_metadata.append(dict(row))
+        selection_by_organ[organ] = row
+        absent_added += 1
+    target_type_counts: dict[str, int] = {}
+    for row in selection_rows:
+        key = str(row.get("target_type") or "hard")
+        target_type_counts[key] = target_type_counts.get(key, 0) + 1
+    return {
+        "case_id": case_id,
+        "num_classes": len(organs),
+        "expected_targets": len(organs),
+        "selection_rows": len(selection_rows),
+        "selected_metadata": len(selected_metadata),
+        "absent_negative_added": absent_added,
+        "review_gap_missing": review_gap_missing,
+        "negative_geometry_failures": geometry_failures,
+        "zero_mask": zero_mask,
+        "target_type_counts": target_type_counts,
+        "complete_case_373": len({str(r.get("organ")) for r in selection_rows if r.get("organ")}) == len(set(organs)),
+    }
+
+
 def _copy_annotation(src: Path | None, dst_dir: Path, organ: str) -> str | None:
     if src and src.exists():
         dst_dir.mkdir(parents=True, exist_ok=True)
@@ -1430,6 +1540,18 @@ def _export_standard_case_dataset(
         organ = str(meta.get("organ") or "").strip()
         final = Path(str(meta.get("final_mask") or meta.get("mask_path") or ""))
         if not organ or not final.exists():
+            continue
+        if str(meta.get("target_type")) == "absent_negative":
+            exported_metadata.append({
+                **meta,
+                "ct_path": str(image_dst.resolve()),
+                "image": str(image_dst.resolve()),
+                "canonical_organ_name": organ,
+                "student_target_id": student_target_ids.get(organ),
+                "distillation_eligible": bool(meta.get("distillation_eligible", True)),
+                "distillation_exclusion_reason": meta.get("distillation_exclusion_reason"),
+                "standard_dataset_export_status": "metadata_only_absent_negative",
+            })
             continue
         gate = _distillation_gate_for_selected_label(meta)
         export_as_positive = bool(gate["eligible"])
@@ -3232,6 +3354,8 @@ def _select_candidate(
         selection_status = "fallback"
         fallback_reason = "LabelCritic disabled, unavailable, or dry-run"
 
+    explanation = _labelcritic_explanation_fields(critic_records, selected.get("model") if selected else None, fallback_reason=fallback_reason)
+
     return selected, {
         "selection_method": method,
         "selection_status": selection_status,
@@ -3248,6 +3372,15 @@ def _select_candidate(
         "critic_records": critic_records,
         "labelcritic_records": critic_records,
         "fallback_reason": fallback_reason,
+        "primary_selector": "labelcritic",
+        "labelcritic_decisive": bool(method == "label_critic" and decisive > 0),
+        "labelcritic_confidence": explanation.get("labelcritic_confidence") if explanation.get("labelcritic_confidence") is not None else (0.75 if method == "label_critic" and decisive > 0 else None),
+        "fallback_selector": None if method in {"label_critic", "near_identical_agreement", "single_teacher_default"} else "family_evidence_or_reference",
+        "evidence_used_for": "audit_only" if method == "label_critic" and decisive > 0 else "fallback_selection",
+        "selected_reason": explanation.get("selected_reason"),
+        "rejected_reasons": explanation.get("rejected_reasons", {}),
+        "failure_modes": explanation.get("failure_modes", []),
+        "should_enter_student_training": selection_status == "selected",
         "quality_flags": (
             ["labelcritic_selected"] if method == "label_critic"
             else ["multi_teacher_agreement"] if method == "near_identical_agreement"
@@ -3256,6 +3389,74 @@ def _select_candidate(
         "review_flags": ([] if selection_status == "selected" else ["selection_fallback", "labelcritic_uncertain"]) + qc_review_flags,
     }
 
+
+
+
+def _compact_labelcritic_reason(value: Any, *, limit: int = 500) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return "LabelCritic did not provide a textual reason."
+    return text[:limit] + ("..." if len(text) > limit else "")
+
+
+def _labelcritic_explanation_fields(
+    critic_records: list[dict[str, Any]],
+    selected_model: str | None,
+    *,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    """Build explainable selection fields from pairwise LabelCritic records.
+
+    LabelCritic's current parser returns pairwise winner/confidence/reason.  The
+    E-step manifest still needs stable selected/rejected reasons even before the
+    future structured JSON VLM response is available.
+    """
+    rejected: dict[str, str] = {}
+    failure_modes: list[str] = []
+    selected_reasons: list[str] = []
+    confidences: list[float] = []
+    for record in critic_records or []:
+        decision = record.get("decision") or {}
+        winner = decision.get("winner")
+        parse_status = decision.get("parse_status")
+        if parse_status and parse_status not in {"better_path_parse", "success"}:
+            failure_modes.append(str(parse_status))
+        try:
+            if decision.get("confidence") is not None:
+                confidences.append(float(decision.get("confidence")))
+        except Exception:
+            pass
+        winner_model = record.get("candidate_a") if winner == "a" else record.get("candidate_b") if winner == "b" else None
+        loser_model = record.get("candidate_b") if winner == "a" else record.get("candidate_a") if winner == "b" else None
+        reason = _compact_labelcritic_reason(decision.get("reason") or parse_status or record.get("status"))
+        if winner_model and str(winner_model) == str(selected_model):
+            selected_reasons.append(f"LabelCritic preferred {winner_model} over {loser_model}: {reason}")
+        if loser_model:
+            rejected[str(loser_model)] = f"Rejected in LabelCritic pairwise comparison against {winner_model}: {reason}"
+        elif winner == "uncertain":
+            for candidate_key in ("candidate_a", "candidate_b"):
+                candidate = record.get(candidate_key)
+                if candidate and str(candidate) != str(selected_model):
+                    rejected.setdefault(str(candidate), f"LabelCritic was uncertain for this pair: {reason}")
+    if not selected_reasons:
+        selected_reasons.append(fallback_reason or "Selected by LabelCritic/fallback policy; no decisive textual LabelCritic rationale was parsed.")
+    return {
+        "selected_reason": selected_reasons[0],
+        "rejected_reasons": rejected,
+        "failure_modes": sorted(set(failure_modes)),
+        "labelcritic_confidence": max(confidences) if confidences else None,
+    }
+
+def _labelcritic_locks_selection(selection_record: dict[str, Any]) -> bool:
+    """True when a decisive LabelCritic tournament winner owns final selection.
+
+    AutoLabelCore/family evidence may still audit reliability and training
+    weight, but must not replace the selected mask in this state.
+    """
+    return bool(
+        selection_record.get("selection_method") == "label_critic"
+        and int(selection_record.get("comparison_decisive_count") or 0) > 0
+    )
 
 def _fusion_weight(tracker: OrganModelPerformance | None, organ: str, model: str) -> float:
     """Reliability weight for one (organ, model) in weighted-vote fusion.
@@ -4138,6 +4339,7 @@ def run_multimodel_annotation_loop(
                 "route_confidence": route_info.get("route_confidence", "low"),
                 "candidate_mode": candidate_mode,
                 "labelcritic_compare_used": compare_used,
+                "labelcritic_called": compare_used,
                 "labelcritic_compare_reason": compare_reason,
                 "labelcritic_compare_skipped_reason": compare_skipped_reason,
                 "candidate_models": [c["model"] for c in candidates],
@@ -4207,6 +4409,27 @@ def run_multimodel_annotation_loop(
             }
             selection_record["labelcritic_records"] = selection_record.get("critic_records", [])
             selection_record["labelcritic_decision_path"] = _labelcritic_decision_path(selection_record["labelcritic_records"])
+            selection_record["labelcritic_decisive"] = _labelcritic_locks_selection(selection_record)
+            selection_record["primary_selector"] = "labelcritic"
+            selection_record["evidence_used_for"] = "audit_only" if selection_record["labelcritic_decisive"] else "fallback_selection"
+            selection_record["selected_candidate"] = selection_record.get("selected_model")
+            selection_record["selected_candidate_id"] = selection_record.get("selected_model")
+            selection_record["selected_teacher"] = selection_record.get("selected_model")
+            selection_record["selected_family"] = (selected or {}).get("evidence_family") if selected else None
+            selection_record["labelcritic_prompt_version"] = selection_record.get("labelcritic_prompt_source") or selection_record.get("prompt_source")
+            selection_record.setdefault("selected_reason", selection_record.get("fallback_reason") or selection_record.get("selection_method"))
+            selection_record.setdefault("rejected_reasons", {})
+            selection_record.setdefault("failure_modes", [])
+            selection_record.setdefault("should_enter_student_training", selection_record.get("selection_status") == "selected")
+            prompt_sources = [r.get("prompt_source") for r in selection_record["labelcritic_records"] if r.get("prompt_source")]
+            if prompt_sources:
+                selection_record["labelcritic_prompt_source"] = prompt_sources[0]
+                selection_record["prompt_source"] = prompt_sources[0]
+            review_flags = [r.get("requires_manual_review") for r in selection_record["labelcritic_records"] if "requires_manual_review" in r]
+            if review_flags:
+                selection_record["requires_manual_review"] = any(bool(x) for x in review_flags)
+            else:
+                selection_record.setdefault("requires_manual_review", False)
             selection_record["label_critic_decision_path"] = selection_record["labelcritic_decision_path"]
             selection_record["labelcritic_grade_policy"] = grade_policy
             selection_record["labelcritic_grade_used"] = bool(should_run_grade)
@@ -4313,8 +4536,11 @@ def run_multimodel_annotation_loop(
                 selection_record["auto_grade_accept"] = arb.get("final_accept")
                 selection_record["auto_grade_swapped"] = arb.get("swapped")
 
-            # AutoLabelCore is the universal 373-target decision layer.
-            # LabelCritic contributes only an optional, bounded tie-break signal.
+            # LabelCritic is the primary 373-target candidate selector.
+            # AutoLabelCore/family evidence is retained for audit, grading, review
+            # priority, and fallback only; it must not overwrite a decisive
+            # LabelCritic tournament winner.
+            labelcritic_locked_selection = _labelcritic_locks_selection(selection_record)
             critic_records = selection_record.get("labelcritic_records", []) or []
             successful_critic = [r for r in critic_records if r.get("status") == "success"]
             selected_wins = 0
@@ -4372,6 +4598,12 @@ def run_multimodel_annotation_loop(
             selection_record.update(autolabel_record)
             selection_record["labelcritic_supported"] = bool(successful_critic)
             selection_record["labelcritic_tiebreak_adjustment"] = lc_adjustment
+            selection_record["labelcritic_decisive"] = labelcritic_locked_selection
+            selection_record["evidence_used_for"] = "audit_only" if labelcritic_locked_selection else "fallback_selection"
+            if labelcritic_locked_selection:
+                selection_record["primary_selector"] = "labelcritic"
+                selection_record["fallback_selector"] = None
+                selection_record["fallback_reason"] = selection_record.get("fallback_reason")
             selection_record["case_fold"] = stable_case_fold(case_id)
             selection_record["estimated_reliability"] = autolabel_record["evidence_confidence"]
             selection_record["autolabel_candidate_scores"] = [
@@ -4390,7 +4622,7 @@ def run_multimodel_annotation_loop(
             selection_record["metric_family"] = "pseudo_consistency_and_evidence_reliability"
             selection_record["accuracy_warning"] = "AutoLabelCore evidence confidence is not expert accuracy or ground-truth DSC."
             evidence_selected = next((c for c in candidates if str(c.get("model")) == str(autolabel_decision.selected_model)), None)
-            if evidence_selected is not None and evidence_selected is not selected:
+            if (not labelcritic_locked_selection) and evidence_selected is not None and evidence_selected is not selected:
                 selected = evidence_selected
                 selection_record["selected_model"] = selected.get("model")
                 selection_record["source_model"] = selected.get("model")
@@ -4418,6 +4650,7 @@ def run_multimodel_annotation_loop(
             # the candidate used for visual review.
             if (
                 selected
+                and not labelcritic_locked_selection
                 and autolabel_decision.target_type == "hard"
                 and autolabel_decision.independent_family_count >= 2
                 and autolabel_decision.hard_mask_path
@@ -4435,6 +4668,14 @@ def run_multimodel_annotation_loop(
                 selection_record["selected_candidate_qc_status"] = "pass"
                 selection_record["selected_candidate_qc_score"] = 1.0
                 selection_record["selected_candidate_qc_flags"] = []
+
+            if labelcritic_locked_selection:
+                selection_record["selected_candidate"] = selection_record.get("selected_model")
+                selection_record["selected_reason"] = selection_record.get("selected_reason") or "LabelCritic decisive tournament winner retained; AutoLabelCore evidence used for audit only"
+                selection_record["autolabel_selected_model_audit"] = autolabel_decision.selected_model
+                selection_record["autolabel_hard_mask_path_audit"] = autolabel_decision.hard_mask_path
+                selection_record["autolabel_target_type_audit"] = autolabel_decision.target_type
+                selection_record["should_enter_student_training"] = selection_record.get("training_weight", 0.0) > 0.0
 
             selection_rows.append(selection_record)
             all_selection_rows.append(selection_record)
@@ -4655,6 +4896,18 @@ def run_multimodel_annotation_loop(
                 meta["label_passport_path"] = str(passport_path_for_mask(passport_mask))
                 write_json(passport_path_for_mask(passport_mask), passport)
 
+        case_373_summary = _materialize_case_373_targets(
+            case_id=case_id,
+            ct=ct,
+            organs=list(organs),
+            case_updated=case_updated,
+            selection_rows=selection_rows,
+            selected_metadata=selected_metadata,
+            presence_context=presence_context,
+            negative_absent_training_weight=float(os.getenv("MEDAI_NEGATIVE_ABSENT_TRAINING_WEIGHT", "0.1")),
+        )
+        write_json(updated_root / case_id / "case_373_target_summary.json", case_373_summary)
+
         case_gap_rows = _build_gap_rows(
             case_id=case_id,
             ct=ct,
@@ -4702,6 +4955,7 @@ def run_multimodel_annotation_loop(
             "case_presence_context": presence_context,
             "case_execution_plan": case_execution_plan,
             "case_timing": case_timing,
+            "case_373_target_summary": case_373_summary,
             "selected_organs": selected_metadata,
             "selection_rows": selection_rows,
             "gap_rows": case_gap_rows,
@@ -4762,6 +5016,7 @@ def run_multimodel_annotation_loop(
             "body_region": (presence_context.get("metadata") or {}).get("body_region"),
             "ct_region": (presence_context.get("metadata") or {}).get("ct_region"),
             "case_presence_context": presence_context,
+            "case_373_target_summary": case_373_summary,
             "selection_rows": selection_rows,
             "selected_organs": selected_metadata,
             "gap_rows": case_gap_rows,
@@ -4839,6 +5094,34 @@ def run_multimodel_annotation_loop(
     })
     all_selection_rows = _rebuild_selection_rows_from_artifacts(updated_root)
     rebuilt_selected_metadata = _rebuild_selected_metadata_from_artifacts(updated_root)
+    case_373_summaries = []
+    for case in cases:
+        sid = case.get("case_id")
+        sp = updated_root / str(sid) / "case_373_target_summary.json" if sid else None
+        if sp and sp.exists():
+            try:
+                case_373_summaries.append(json.loads(sp.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+    target_type_counts_373: dict[str, int] = {}
+    for row in all_selection_rows:
+        key = str(row.get("target_type") or "hard")
+        target_type_counts_373[key] = target_type_counts_373.get(key, 0) + 1
+    case_373_dataset_summary = {
+        "stage": "case_373_target_summary",
+        "status": "success",
+        "num_cases": len(cases),
+        "num_classes": len(organs),
+        "expected_targets": len(cases) * len(organs),
+        "manifest_targets": len(all_selection_rows),
+        "candidate_pseudo_targets": sum(1 for r in all_selection_rows if str(r.get("target_type") or "hard") != "absent_negative"),
+        "absent_negative_targets": sum(1 for r in all_selection_rows if str(r.get("target_type")) == "absent_negative"),
+        "all_zero_masks": len({str(r.get("final_mask") or r.get("mask_path") or "") for r in all_selection_rows if str(r.get("target_type")) == "absent_negative" and (r.get("final_mask") or r.get("mask_path"))}),
+        "target_type_counts": target_type_counts_373,
+        "complete_case_373": len(all_selection_rows) == len(cases) * len(organs),
+        "cases": case_373_summaries,
+    }
+    write_json(out / "case_373_target_summary.json", case_373_dataset_summary)
     manifest = build_training_manifest(standard_dataset_root, out / "training_manifest.json", organs=organs)
     gap_report = {
         "stage": "pseudo_label_gap_report",
@@ -4849,6 +5132,7 @@ def run_multimodel_annotation_loop(
         "gap_rows": all_gap_rows,
         "target_space_policy": _load_target_space_policy(project_root, organs),
         "formal_373_target_validation": target_validation,
+        "case_373_target_summary": case_373_dataset_summary,
         "teacher_inference_mode": teacher_inference_mode,
         "roi_margin_mm": roi_margin_mm,
         "note": "Rows here are missing selected pseudo labels, ShapeKit fallbacks, or target-policy exclusions; they are not silently dropped.",
@@ -4920,7 +5204,7 @@ def run_multimodel_annotation_loop(
         "vlm_decisions_jsonl": str(vlm_decisions), "patient_traces_jsonl": str(traces_jsonl), "report_supervision_jsonl": str(report_supervision_jsonl),
         "standard_dataset_root": str(standard_dataset_root.resolve()),
         "standard_dataset_index": str((out / "standard_dataset_index.json").resolve()),
-        "training_manifest": manifest, "pseudo_label_gap_report": gap_report, "shapekit_report": str((out / "shapekit_report.json").resolve()), "mstep_config": mcfg, "mstep_model_routing": mstep_routing,
+        "training_manifest": manifest, "pseudo_label_gap_report": gap_report, "case_373_target_summary": case_373_dataset_summary, "shapekit_report": str((out / "shapekit_report.json").resolve()), "mstep_config": mcfg, "mstep_model_routing": mstep_routing,
         "resume_audit": resume_rows,
         "preseeded_parent_only": preseeded_parent_only,
         "round2_competition_audit": _summarize_preseeded_competition(
