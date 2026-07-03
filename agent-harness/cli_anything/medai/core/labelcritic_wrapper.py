@@ -59,17 +59,6 @@ def _organ_description_provenance(organ: str) -> dict[str, Any]:
     """
     appearance_path = _organ_ct_appearance_config()
     prompt_path = _prompt_target_config()
-    if str(organ) in LABELCRITIC_SEED_ORGANS:
-        return {
-            "prompt_source": "labelcritic_seed",
-            "prompt_config_path": str(appearance_path),
-            "prompt_target_config_path": str(prompt_path),
-            "organ_description_hash": _stable_hash({"organ": str(organ), "source": "labelcritic_seed"}),
-            "requires_manual_review": False,
-            "organ_description_available": True,
-            "prompt_config_fingerprint": _file_fingerprint(appearance_path),
-            "prompt_target_config_fingerprint": _file_fingerprint(prompt_path),
-        }
     try:
         doc = json.loads(appearance_path.read_text(encoding="utf-8"))
         entry = (doc.get("organ_ct_appearance", {}) or {}).get(str(organ))
@@ -116,6 +105,37 @@ def _organ_description_provenance(organ: str) -> dict[str, Any]:
     }
 
 
+def _load_organ_description(organ: str) -> dict[str, Any]:
+    path = _organ_ct_appearance_config()
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    entry = (doc.get("organ_ct_appearance", {}) or {}).get(str(organ))
+    if not isinstance(entry, dict):
+        entry = next(
+            (row for row in doc.get("entries", []) if isinstance(row, dict) and row.get("canonical_organ") == str(organ)),
+            None,
+        )
+    if not isinstance(entry, dict):
+        raise ValueError(f"No organ-specific CT appearance entry for {organ}")
+    return entry
+
+
+def _write_organ_description_prompt(
+    organ: str,
+    work_dir: Path,
+    candidate_context: list[dict[str, Any]] | None = None,
+) -> tuple[Path, str, str]:
+    """Persist the exact organ prior consumed by the third-party prompt."""
+    entry = _load_organ_description(organ)
+    if candidate_context:
+        entry = {**entry, "candidate_context": candidate_context}
+    path = work_dir / "organ_description.json"
+    write_json(path, entry)
+    rendered = json.dumps(entry, ensure_ascii=False, sort_keys=True, indent=2)
+    rendered_path = work_dir / "organ_description_rendered.txt"
+    rendered_path.write_text(rendered, encoding="utf-8")
+    return path, rendered_path.read_text(encoding="utf-8"), _stable_hash(entry) or ""
+
+
 def _same_prompt_provenance(cached: dict[str, Any], current: dict[str, Any]) -> bool:
     return (
         cached.get("organ_description_hash") == current.get("organ_description_hash")
@@ -152,6 +172,41 @@ def _invert_compare_decision(decision: dict[str, Any]) -> dict[str, Any]:
     elif out.get("winner") == "b":
         out["winner"] = "a"
     out["cache_orientation"] = "inverted"
+    return out
+
+
+def _structured_pair_decision(
+    decision: dict[str, Any],
+    candidate_context: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Normalize the legacy pairwise result into the formal JSON contract."""
+    out = dict(decision or {})
+    context = list(candidate_context or [])
+    winner = out.get("winner")
+    selected_index = 0 if winner == "a" else 1 if winner == "b" else None
+    selected = context[selected_index] if selected_index is not None and selected_index < len(context) else {}
+    decisive = selected_index is not None and bool(selected.get("candidate_id"))
+    try:
+        confidence = min(1.0, max(0.0, float(out.get("confidence", 0.5))))
+    except Exception:
+        confidence = 0.5
+    reason = str(out.get("reason") or out.get("parse_status") or "No textual rationale returned")
+    out.update({
+        "decision": "select" if decisive else "uncertain_needs_review",
+        "best_candidate_id": selected.get("candidate_id") if decisive else None,
+        "confidence": confidence,
+        "ranking": [row.get("candidate_id") for row in context if row.get("candidate_id")],
+        "selected_reason": reason if decisive else "LabelCritic did not produce a decisive valid candidate ID",
+        "rejected_reasons": {
+            str(row.get("candidate_id")): f"Rejected in pairwise comparison: {reason}"
+            for idx, row in enumerate(context)
+            if idx != selected_index and row.get("candidate_id")
+        },
+        "failure_modes": [] if decisive else ["labelcritic_uncertain"],
+        "recommended_grade": None,
+        "should_enter_student_training": decisive,
+        "review_needed": not decisive,
+    })
     return out
 
 
@@ -219,6 +274,11 @@ def _write_projection_cache_manifest(work_dir: Path, cache_key: str, proj: dict[
         write_json(work_dir / "projection_manifest.json", manifest)
     except Exception:
         pass
+
+
+def _official_labelcritic_projection_ok(proj: dict[str, Any] | None) -> bool:
+    backend = str((proj or {}).get("projection_backend") or "")
+    return backend.startswith("labelcritic") or backend.startswith("official_labelcritic")
 
 
 def _prepare_mask_folder(mask: Path, organ: str, dst_root: Path, label: str) -> Path:
@@ -587,6 +647,20 @@ def run_labelcritic_grade_batch(
                 write_json(item["output_json"], result)
                 results[item["index"]] = result
                 continue
+        if not _official_labelcritic_projection_ok(proj):
+            result = {
+                **item["base"],
+                "status": "skipped",
+                "grade": None,
+                "accept": None,
+                "reason": "formal LabelCritic grade requires official LabelCritic projection; slice/auto fallback is audit-only",
+                "projection": proj,
+                "projection_fallback_audit_only": True,
+                "should_enter_student_training": False,
+            }
+            write_json(item["output_json"], result)
+            results[item["index"]] = result
+            continue
         pngs = [p for p in (proj.get("saved_projections") or []) if str(p).endswith(".png") and Path(p).exists()][:2]
         if not pngs:
             result = {**item["base"], "status": "skipped", "grade": None, "accept": None, "reason": "no projection image produced", "projection": proj}
@@ -700,6 +774,17 @@ def run_labelcritic_grade(
         except Exception as exc:
             return _finish({"status": "failed", "grade": None, "accept": None, "reason": f"projection error: {exc}"})
 
+    if not _official_labelcritic_projection_ok(proj):
+        return _finish({
+            "status": "skipped",
+            "grade": None,
+            "accept": None,
+            "reason": "formal LabelCritic grade requires official LabelCritic projection; slice/auto fallback is audit-only",
+            "projection": proj,
+            "projection_fallback_audit_only": True,
+            "should_enter_student_training": False,
+        })
+
     pngs = [p for p in (proj.get("saved_projections") or []) if str(p).endswith(".png") and Path(p).exists()][:2]
     if not pngs:
         return _finish({"status": "skipped", "grade": None, "accept": None, "reason": "no projection image produced", "projection": proj})
@@ -732,6 +817,27 @@ def run_labelcritic_compare_batch(
     mask_a, mask_b, organ, output_json, plus LabelCritic option booleans. Cached
     jobs are returned immediately and omitted from the manifest.
     """
+    if backend != "stub" and not dry_run:
+        # Pinned upstream CompareOrgan.py deliberately has no project batch API.
+        # Queue official calls in the adapter instead of patching vendor code.
+        return [
+            run_labelcritic_compare(
+                job["ct_image"],
+                job["mask_a"],
+                job["mask_b"],
+                str(job["organ"]),
+                job["output_json"],
+                labelcritic_root=labelcritic_root,
+                backend=backend,
+                base_url=base_url,
+                port=port,
+                dry_run=False,
+                strict_alignment=strict_alignment,
+                timeout_sec=timeout_sec,
+                candidate_context=job.get("candidate_context"),
+            )
+            for job in jobs
+        ]
     results: list[dict[str, Any] | None] = [None] * len(jobs)
     pending: list[dict[str, Any]] = []
     lc_root = Path(labelcritic_root).resolve()
@@ -769,6 +875,7 @@ def run_labelcritic_compare_batch(
             "organ_ct_appearance_config": _file_fingerprint(_organ_ct_appearance_config()),
             "organ_description_hash": prompt_provenance.get("organ_description_hash"),
             "prompt_source": prompt_provenance.get("prompt_source"),
+            "candidate_context_hash": _stable_hash(job.get("candidate_context") or []),
         }
         compare_cache_root = out_dir / "compare_cache"
         compare_key = _compare_cache_key(ct, a, b, organ, preliminary_options)
@@ -777,7 +884,9 @@ def run_labelcritic_compare_batch(
         if cached_compare is not None:
             results[idx] = cached_compare
             continue
-        cached_compare = _load_cached_compare(compare_cache_root / f"{reverse_compare_key}.json", invert=True, output_json=out_json)
+        cached_compare = None if job.get("candidate_context") else _load_cached_compare(
+            compare_cache_root / f"{reverse_compare_key}.json", invert=True, output_json=out_json
+        )
         if cached_compare is not None:
             results[idx] = cached_compare
             continue
@@ -813,11 +922,21 @@ def run_labelcritic_compare_batch(
             "skip_organ_presence_gate": bool(job.get("skip_organ_presence_gate", False)),
             "strict_choice_prompt": bool(job.get("strict_choice_prompt", False)),
         })
+        description_path, rendered_prompt, rendered_hash = _write_organ_description_prompt(
+            organ, work_dir, job.get("candidate_context")
+        )
+        pending[-1]["organ_description_json"] = str(description_path)
+        pending[-1]["rendered_organ_prompt"] = rendered_prompt
+        pending[-1]["rendered_organ_prompt_hash"] = rendered_hash
+        pending[-1]["candidate_context"] = job.get("candidate_context") or []
 
     if pending and (dry_run or backend == "stub"):
         for item in pending:
             out_json = Path(item["output_json"])
-            decision = {"winner": "uncertain", "confidence": 0.5, "reason": "batch stub backend", "parse_status": "stub"}
+            decision = _structured_pair_decision(
+                {"winner": "uncertain", "confidence": 0.5, "reason": "batch stub backend", "parse_status": "stub"},
+                item.get("candidate_context"),
+            )
             result = {
                 "stage": "labelcritic", "status": "dry_run" if dry_run else "stub",
                 "backend": backend, "organ": item["organ"], "ct_image": item["ct"],
@@ -825,7 +944,10 @@ def run_labelcritic_compare_batch(
                 "projection": {"status": "skipped", "reason": "batch stub"},
                 "command": None, "normalized_base_url": normalized_base_url, "normalized_port": normalized_port,
                 "decision": decision, "labelcritic_options": item["preliminary_options"],
-                "batch_status": "batched_stub", **item.get("prompt_provenance", {}),
+                "batch_status": "batched_stub",
+                "rendered_organ_prompt": item.get("rendered_organ_prompt"),
+                "rendered_organ_prompt_hash": item.get("rendered_organ_prompt_hash"),
+                **item.get("prompt_provenance", {}),
             }
             _write_compare_cache(Path(item["compare_cache_root"]) / f"{item['compare_key']}.json", result, item["compare_key"], _compare_cache_payload(item["ct"], item["mask_a"], item["mask_b"], item["organ"], item["preliminary_options"]))
             write_json(out_json, result)
@@ -846,6 +968,7 @@ def run_labelcritic_compare_batch(
             "ct", "mask1", "mask2", "organ", "base_url", "port", "base_output", "base_csv",
             "log_file", "run_id", "no_dice_check", "no_dual_confirmation", "simple_prompt_ablation",
             "conservative_dual", "skip_organ_presence_gate", "strict_choice_prompt"
+            , "organ_description_json"
         }} for item in pending]
         write_json(manifest, {"items": manifest_items, "output_json": str(batch_root / "batch_result.json")})
         command = ["python", str(script), "--batch_manifest", str(manifest), "--base_url", normalized_base_url, "--port", str(normalized_port)]
@@ -866,7 +989,10 @@ def run_labelcritic_compare_batch(
             out_json = Path(item["output_json"])
             log_file = Path(item["log_file"])
             csv_path = Path(item["base_csv"]) / item["run_id"] / f"{item['organ']}.csv"
-            decision = _parse_labelcritic_log(log_file, Path(item["mask1"]), Path(item["mask2"]), run_id=item["run_id"], csv_path=csv_path)
+            decision = _structured_pair_decision(
+                _parse_labelcritic_log(log_file, Path(item["mask1"]), Path(item["mask2"]), run_id=item["run_id"], csv_path=csv_path),
+                item.get("candidate_context"),
+            )
             result = {
                 "stage": "labelcritic", "status": "timed_out" if timed_out else ("success" if completed.returncode == 0 else "failed"),
                 "backend": backend, "organ": item["organ"], "ct_image": item["ct"],
@@ -876,6 +1002,8 @@ def run_labelcritic_compare_batch(
                 "stdout_tail": completed.stdout[-4000:], "stderr_tail": completed.stderr[-4000:],
                 "log_file": str(log_file), "normalized_base_url": normalized_base_url, "normalized_port": normalized_port,
                 "decision": decision, "labelcritic_options": item["preliminary_options"], "batch_status": "batched_compare",
+                "rendered_organ_prompt": item.get("rendered_organ_prompt"),
+                "rendered_organ_prompt_hash": item.get("rendered_organ_prompt_hash"),
                 **item.get("prompt_provenance", {}),
             }
             if result.get("status") in {"success", "stub", "dry_run"}:
@@ -905,6 +1033,7 @@ def run_labelcritic_compare(
     conservative_dual: bool = False,
     skip_organ_presence_gate: bool = False,
     strict_choice_prompt: bool = False,
+    candidate_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     ct = Path(ct_image).resolve()
     a = Path(mask_a).resolve()
@@ -934,6 +1063,7 @@ def run_labelcritic_compare(
         "organ_ct_appearance_config": _file_fingerprint(_organ_ct_appearance_config()),
         "organ_description_hash": prompt_provenance.get("organ_description_hash"),
         "prompt_source": prompt_provenance.get("prompt_source"),
+        "candidate_context_hash": _stable_hash(candidate_context or []),
     }
     compare_cache_root = out_dir / "compare_cache"
     compare_key = _compare_cache_key(ct, a, b, organ, preliminary_options)
@@ -941,7 +1071,9 @@ def run_labelcritic_compare(
     cached_compare = _load_cached_compare(compare_cache_root / f"{compare_key}.json", invert=False, output_json=out_json)
     if cached_compare is not None:
         return cached_compare
-    cached_compare = _load_cached_compare(compare_cache_root / f"{reverse_compare_key}.json", invert=True, output_json=out_json)
+    cached_compare = None if candidate_context else _load_cached_compare(
+        compare_cache_root / f"{reverse_compare_key}.json", invert=True, output_json=out_json
+    )
     if cached_compare is not None:
         return cached_compare
 
@@ -949,7 +1081,7 @@ def run_labelcritic_compare(
     work_dir.mkdir(parents=True, exist_ok=True)
 
     lc_root = Path(labelcritic_root).resolve()
-    script = lc_root / "CompareOrgan.py"
+    script = Path(__file__).resolve().parents[4] / "scripts" / "run_official_labelcritic_pair.py"
     normalized_base_url, normalized_port = _normalize_labelcritic_base_url(base_url, port)
 
     # Stable run_id/work folder lets interrupted compare artifacts be inspected and reused.
@@ -958,41 +1090,41 @@ def run_labelcritic_compare(
     mask1_folder = _prepare_mask_folder(a, organ, work_dir, "mask1")
     mask2_folder = _prepare_mask_folder(b, organ, work_dir, "mask2")
     log_file = work_dir / "comparison_summary.log"
-    csv_path = work_dir / "results" / run_id / f"{organ}.csv"
+    csv_path = work_dir / "official_result.csv"
+    driver_result = work_dir / "official_driver_result.json"
     command = [
         "python", str(script),
         "--ct", str(ct),
-        "--mask1", str(mask1_folder),
-        "--mask2", str(mask2_folder),
+        "--mask-a-dir", str(mask1_folder),
+        "--mask-b-dir", str(mask2_folder),
         "--organ", organ,
         "--port", str(normalized_port),
-        "--log_file", str(log_file),
-        "--base_url", normalized_base_url,
-        "--run_id", run_id,
-        "--base_output", str(work_dir / "comparison_results"),
-        "--base_csv", str(work_dir / "results"),
+        "--base-url", normalized_base_url,
+        "--work-dir", str(work_dir),
+        "--output-json", str(driver_result),
+        "--description-json", str(work_dir / "organ_description.json"),
     ]
-    if no_dice_check:
-        command.append("--no_dice_check")
-    if no_dual_confirmation:
-        command.append("--no_dual_confirmation")
-    if simple_prompt_ablation:
-        command.append("--simple_prompt_ablation")
-    if conservative_dual:
-        command.append("--conservative_dual")
-    if skip_organ_presence_gate:
-        command.append("--skip_organ_presence_gate")
-    if strict_choice_prompt:
-        command.append("--strict_choice_prompt")
+    description_path, rendered_prompt, rendered_hash = _write_organ_description_prompt(
+        organ, work_dir, candidate_context
+    )
     labelcritic_options = {
-        "no_dice_check": no_dice_check,
-        "no_dual_confirmation": no_dual_confirmation,
-        "simple_prompt_ablation": simple_prompt_ablation,
-        "conservative_dual": conservative_dual,
-        "skip_organ_presence_gate": skip_organ_presence_gate,
-        "strict_choice_prompt": strict_choice_prompt,
+        "no_dice_check": False,
+        "no_dual_confirmation": False,
+        "simple_prompt_ablation": False,
+        "conservative_dual": False,
+        "skip_organ_presence_gate": False,
+        "strict_choice_prompt": False,
+        "requested_nonofficial_options_ignored": {
+            "no_dice_check": no_dice_check,
+            "no_dual_confirmation": no_dual_confirmation,
+            "simple_prompt_ablation": simple_prompt_ablation,
+            "conservative_dual": conservative_dual,
+            "skip_organ_presence_gate": skip_organ_presence_gate,
+            "strict_choice_prompt": strict_choice_prompt,
+        },
         "run_id": run_id,
         "csv_path": str(csv_path),
+        "method_contract": "official_ap_projection_dice_gate_dual_confirmation",
     }
 
     if dry_run or backend == "stub":
@@ -1006,18 +1138,21 @@ def run_labelcritic_compare(
             projection_backend="auto", labelcritic_root=labelcritic_root,
             axis=1, device="cpu", num_processes=2, dry_run=dry_run,
         )
-        decision = {
+        decision = _structured_pair_decision({
             "winner": "uncertain",
             "confidence": 0.5,
             "reason": "dry-run/stub backend: LabelCritic command prepared; run with --backend labelcritic and a VLM server for automatic A/B selection.",
             "parse_status": "stub",
-        }
+        }, candidate_context)
         result = {
             "stage": "labelcritic", "status": "dry_run" if dry_run else "stub",
             "backend": backend, "organ": organ, "ct_image": str(ct),
             "mask_a": str(a), "mask_b": str(b), "output_json": str(out_json),
             "projection": proj, "command": command, "normalized_base_url": normalized_base_url, "normalized_port": normalized_port, "decision": decision,
-            "labelcritic_options": labelcritic_options, **prompt_provenance,
+            "labelcritic_options": labelcritic_options,
+            "rendered_organ_prompt": rendered_prompt,
+            "rendered_organ_prompt_hash": rendered_hash,
+            **prompt_provenance,
         }
         _write_compare_cache(compare_cache_root / f"{compare_key}.json", result, compare_key, _compare_cache_payload(ct, a, b, organ, preliminary_options))
         write_json(out_json, result)
@@ -1028,10 +1163,12 @@ def run_labelcritic_compare(
         write_json(out_json, result)
         return result
 
-    # Bug fix: do NOT call build_projection here — CompareOrgan.py calls
-    # ProjectDatasetFlex_single.py internally which runs the projection itself.
-    # Calling it here would double the I/O and compute cost.
-    proj = {"status": "skipped", "reason": "projection handled internally by CompareOrgan.py → ProjectDatasetFlex_single.py"}
+    proj = {
+        "status": "pending",
+        "projection_backend": "official_labelcritic_ap_axis_1",
+        "centered_slice_fallback_used": False,
+        "reason": "projection handled by project driver calling unmodified ProjectDatasetFlex_single.py",
+    }
 
     start = time.time()
     try:
@@ -1046,7 +1183,26 @@ def run_labelcritic_compare(
         )
         timed_out = True
     elapsed = time.time() - start
-    decision = _parse_labelcritic_log(log_file, mask1_folder, mask2_folder, run_id=run_id, csv_path=csv_path)
+    driver_doc = {}
+    if driver_result.exists():
+        try:
+            driver_doc = json.loads(driver_result.read_text(encoding="utf-8"))
+        except Exception:
+            driver_doc = {}
+    raw_decision = driver_doc.get("decision") or {
+        "winner": "uncertain",
+        "confidence": 0.0,
+        "reason": "official driver result missing or unreadable",
+        "parse_status": "missing_driver_result",
+    }
+    decision = _structured_pair_decision(raw_decision, candidate_context)
+    proj = {
+        "status": "success" if driver_doc.get("status") == "success" else "failed",
+        "projection_backend": driver_doc.get("projection_backend"),
+        "centered_slice_fallback_used": driver_doc.get(
+            "centered_slice_fallback_used"
+        ),
+    }
     result = {
         "stage": "labelcritic", "status": "timed_out" if timed_out else ("success" if completed.returncode == 0 else "failed"),
         "backend": backend, "organ": organ, "ct_image": str(ct), "mask_a": str(a), "mask_b": str(b),
@@ -1054,7 +1210,14 @@ def run_labelcritic_compare(
         "return_code": completed.returncode, "runtime_sec": round(elapsed, 3),
         "stdout_tail": completed.stdout[-4000:], "stderr_tail": completed.stderr[-4000:],
         "log_file": str(log_file), "normalized_base_url": normalized_base_url, "normalized_port": normalized_port, "decision": decision,
-        "labelcritic_options": labelcritic_options, **prompt_provenance,
+        "official_driver_result": str(driver_result),
+        "anonymous_candidate_context": driver_doc.get("candidate_context", candidate_context or []),
+        "structured_assessment": driver_doc.get("structured_assessment", {}),
+        "candidate_identity_exposed_to_vlm": False,
+        "labelcritic_options": labelcritic_options,
+        "rendered_organ_prompt": rendered_prompt,
+        "rendered_organ_prompt_hash": rendered_hash,
+        **prompt_provenance,
     }
     if result.get("status") in {"success", "stub", "dry_run"}:
         _write_compare_cache(compare_cache_root / f"{compare_key}.json", result, compare_key, _compare_cache_payload(ct, a, b, organ, preliminary_options))

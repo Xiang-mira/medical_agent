@@ -1,10 +1,35 @@
 # MedAI Agent Loop
 
-MedAI Agent Loop is a registry-driven, multi-model pseudo-label refinement
-system for 3D medical image segmentation. It defines a strict 373-target organ
-label space, runs teacher models through hierarchical ROI inference, scores and
-fuses pseudo-label evidence with AutoLabelCore, and trains a VoxTell-style
-prompt-conditioned 3D student across EM rounds.
+## Current formal status and guardrails
+
+This repository is a registry-driven, multi-model pseudo-label refinement
+system for 3D medical image segmentation. The current formal target space is
+373 exact organ/structure prompts.
+
+The current safe operating contract is:
+
+- **LabelCritic uses the pinned official source** in
+  `third_party/LabelCritic-main` for AP projection and pairwise comparison.
+  Project code is only a wrapper/adapter. The official benchmark data is not
+  available, so LabelCritic remains `audit_only` unless a licensed benchmark
+  with checksums is added and gates pass.
+- **VoxTell inference/baseline uses the official VoxTell source and assets** in
+  `third_party/VoxTell` plus `checkpoints/VoxTell/voxtell_v1.1`.
+  The current M-step is **not official VoxTell finetuning**. It must be reported
+  as: `project prompt-distillation trainer initialized from official VoxTell assets`.
+- **Positive training labels are recovered only by family-free geometric teacher
+  consensus** or later approved gates. `evidence_family` is provenance/audit
+  metadata only; it cannot vote, choose a winner, raise training weight, or
+  enter VLM prompts.
+- **Smoke/debug outputs are not scientific evidence.** Any run using `mock_seg`,
+  LabelCritic `stub`, smoke overrides, or dry-run artifacts is plumbing only and
+  must not enter a formal manifest, M-step claim, or Round2 claim.
+- **Uncalibrated LabelCritic selection is disabled in the formal path.**
+  `MEDAI_LABELCRITIC_ALLOW_UNCALIBRATED_SELECTION=1` is ignored by formal
+  selection and recorded as ignored metadata.
+- **Projection fallback is audit-only.** If a LabelCritic grade/projection path
+  falls back to a project slice projection, the grade is skipped and cannot
+  affect training eligibility.
 
 ## Architecture
 
@@ -22,15 +47,18 @@ Child targets: parent-mask ROI inference and full-geometry restoration
 ShapeKit -> structural QC -> exact-identity validation
                          |
                          v
-AutoLabelCore evidence scoring and family-balanced candidate fusion
-                         |
-                         +----> LabelCritic bounded tie-break (supported cases)
+family-free 3D teacher-consensus check
                          |
                          v
-A/B hard labels + optional C soft labels + auditable rejected/provisional labels
+LabelCritic official pairwise audit when calibrated gates allow/require it
+                         |
+                         +----> select one original teacher medoid or withhold for review
                          |
                          v
-VoxTell-style 3D prompt student M-step
+consensus core manifest + single-teacher ablation + LabelCritic audit manifest
+                         |
+                         v
+project prompt-distillation M-step initialized from official VoxTell assets
                          |
                          v
 Student inference, next E-step, convergence check, early stop
@@ -38,15 +66,20 @@ Student inference, next E-step, convergence check, early stop
 
 ## Technical specifications
 
-- **Exact organ identity:** comparisons, fusion, critic decisions, dashboard
+- **Exact organ identity:** comparisons, critic decisions, dashboard
   rows, and training items are keyed by `(case_id, canonical_id)`.
   `liver`, `liver_segment_1`, `pancreas`, and `pancreas_head` are distinct
   targets. Parent masks define ROIs only and cannot substitute for child masks.
 - **Hierarchical inference:** major organs run first. Child structures run inside
   parent-mask ROIs with a configurable physical margin and are restored to the
   original CT geometry. A missing parent blocks dependent child inference.
-- **Independent evidence:** correlated checkpoints are collapsed into explicit
-  evidence families before confidence scoring and fusion.
+- **Family is audit-only:** correlated checkpoints may be recorded as evidence
+  families for provenance and dashboards, but family membership never selects a
+  winner, increases training eligibility, replaces LabelCritic, or enters VLM
+  prompts.
+- **Geometric consensus:** multi-teacher positives require QC-passing original
+  teacher masks, complete-link 3D Dice agreement at `>=0.95`, a unique largest
+  cluster, and an original teacher medoid winner. Fusion masks cannot win.
 - **Quality control:** geometry, non-empty-mask, containment,
   connected-component, and volume checks are applied before selection.
 - **Audit records:** selection records retain evidence components,
@@ -67,8 +100,8 @@ agent-harness/
       multimodel_loop.py         E-step orchestration and artifact writing
       hierarchical_roi.py       parent-first ROI planning and restoration
       organ_taxonomy.py          canonical identity and hierarchy utilities
-      auto_label_core.py         evidence scoring, grading, and fusion
-      labelcritic_wrapper.py     bounded pairwise VLM comparison
+      auto_label_core.py         audit-only evidence scoring and grading
+      labelcritic_wrapper.py     organ-specific candidate ranking
       voxtell_student.py         prompt-student manifests and inference
 configs/
   README.md                      configuration index
@@ -243,17 +276,43 @@ each M-step.
 1. Normalize teacher outputs to exact canonical NIfTI masks.
 2. Run ShapeKit when enabled.
 3. Apply structural and geometry QC.
-4. Collapse correlated models into evidence families.
-5. Score available evidence with AutoLabelCore.
-6. Fuse eligible candidates with family-balanced weights.
-7. Use LabelCritic only as a bounded tie-break signal for supported organs.
-8. Assign a grade and training weight.
-9. Write selections, review/audit rows, manifests, and run summaries.
+4. Exclude fusion, student, historical pseudo, and QC-failed masks from formal
+   positive recovery.
+5. Compute a full 3D Dice matrix over original teacher masks.
+6. Accept only a unique complete-link geometric consensus cluster
+   (`Dice >= 0.95`) and choose the original teacher medoid.
+7. Run official LabelCritic pairwise/audit artifacts when needed. Until the
+   official benchmark gate is ready, LabelCritic winners are audit-only:
+   `audit_winner` may be written, but `formal_winner=null`,
+   `training_weight=0`, and `should_enter_student_training=false`.
+8. Withhold uncertain/rejected targets for review. No family vote, fusion
+   fallback, uncalibrated LabelCritic winner, or project projection fallback may
+   enter the training manifest.
+9. Materialize one audit record for every case × 373 target, using an all-zero
+   negative only when scan coverage proves absence.
+10. Assign training weights only after the selection gate and lineage checks.
 
-The default `configs/autolabel_core.yaml` policy uses A/B labels as hard
-training targets. C labels have zero hard-label weight and may be used only
-through the explicitly supported VoxTell soft-target path. Provisional and
-rejected labels remain auditable with zero training weight.
+AutoLabelCore/family scoring is an audit and dashboard signal in the formal
+path. It must not overwrite a LabelCritic abstention or geometric consensus
+decision, and it must not make single-teacher labels formal high-confidence
+positives.
+
+### Split manifests after E-step
+
+For repaired runs, split the full 373 manifest into three isolated products:
+
+```bash
+python scripts/split_labelcritic_repair_manifests.py \
+  --input outputs/round1/full_case_373_manifest.json \
+  --output-dir outputs/round1/labelcritic_repair_split_manifests
+```
+
+- `consensus_core_manifest.json`: geometric consensus positives plus reliable
+  `negative_absent` labels.
+- `single_teacher_ablation_manifest.json`: core plus strict single-teacher
+  low-weight ablation labels.
+- `labelcritic_audit_manifest.json`: LabelCritic pairwise/audit records with
+  zero training weight.
 
 ## E-step output artifacts
 
@@ -278,6 +337,14 @@ outputs/round1/
       pseudo_label_selection.json
 ```
 
+`dice_metrics.csv` records E-step candidate/selected pseudo-label consistency
+unless an artifact explicitly marks `metric_target=GT`. Do not report its plain
+`dice` column as expert ground-truth segmentation accuracy. Current evaluation
+tables include metric-contract columns such as `metric_target`,
+`metric_subject`, `metric_comparison`, and `metric_interpretation` so results
+can distinguish real GT performance, teacher imitation, pseudo-label
+consistency, and all-zero negative-target quality.
+
 Audit or rescore AutoLabelCore results:
 
 ```bash
@@ -288,12 +355,46 @@ python scripts/audit_autolabel_core.py \
 python scripts/rescore_autolabel_v3.py --help
 ```
 
+Run the total repair audit after E-step, training, and post-processing:
+
+```bash
+python scripts/audit_repair_plan.py \
+  --selection-manifest outputs/round1/full_case_373_manifest.json \
+  --student-manifest outputs/round1/mstep/voxtell_prompt_student_manifest.json \
+  --sampling-audit outputs/round1/mstep/student/sampling_audit.json \
+  --postprocess-csv outputs/round1/student_postprocessed/student_containment_postprocess_per_mask.csv \
+  --metric-artifact outputs/round1/round_metrics.csv
+```
+
+Generate the 373-class prior and apply parent-ROI containment:
+
+```bash
+python scripts/build_organ_ct_appearance_373.py
+python scripts/apply_organ_type_postprocess.py \
+  --input-root outputs/round1/student_predictions \
+  --output-root outputs/round1/student_predictions_postprocessed \
+  --parent-root outputs/round1/cases
+```
+
+Known limitations: the official LabelCritic benchmark gate is currently blocked
+because licensed benchmark data/checksums are unavailable; generated 373-organ
+descriptions are project extensions; LabelCritic projections are 2D views of 3D
+anatomy; absent negatives require explicit FOV/coverage evidence; metrics
+without expert GT measure teacher/pseudo-label consistency rather than true
+segmentation accuracy.
+
 ## Formal multi-round EM run
 
-`scripts/run_em_training.py` is the single formal end-to-end entry point. It
-drives the registry-based teacher pool, hierarchical E-step, pseudo-label
-selection, VoxTell M-step, student evaluation, cache reuse, and convergence
-stopping.
+`scripts/run_em_training.py` is the formal end-to-end entry point for the
+project EM route. It drives the registry-based teacher pool, hierarchical
+E-step, pseudo-label selection, the **project prompt-distillation trainer
+initialized from official VoxTell assets**, student evaluation, cache reuse,
+and convergence stopping.
+
+Do not describe this route as official VoxTell finetuning. Official VoxTell is
+used for source code, checkpoint initialization, prompt embeddings, pretrained
+baseline inference, and optional baseline-only encoder-transfer experiments;
+the prompt-conditioned M-step trainer is project code.
 
 ```bash
 export PYTHONPATH="$PWD/agent-harness:${PYTHONPATH:-}"
@@ -326,6 +427,7 @@ Environment controls:
 | `MEDAI_INFER_TIMEOUT_SEC` | `3600` | Per-teacher inference timeout |
 | `MEDAI_ENABLE_SHAPEKIT` | enabled | Formal mask post-processing requirement |
 | `MEDAI_ENABLE_CRITIC` | enabled | LabelCritic support |
+| `MEDAI_LABELCRITIC_ALLOW_UNCALIBRATED_SELECTION` | ignored in formal selection | Historical debug flag; formal selector records and ignores it |
 | `MEDAI_CONVERGENCE_AUTOSTOP` | enabled | Stop when student change stabilizes |
 | `MEDAI_CONVERGENCE_DSC_DELTA` | `0.01` | Round-over-round stop threshold |
 | `MEDAI_CONVERGENCE_MIN_ROUNDS` | `2` | Minimum rounds before early stop |
@@ -334,11 +436,24 @@ Environment controls:
 When convergence criteria are met, the runner writes
 `convergence_stop.json`.
 
-## VoxTell prompt student
+## VoxTell usage contract
 
-The student consumes 3D CT volumes and exact organ prompts. Qwen is a frozen text
-encoder: pooled prompt embeddings condition the trainable VoxTell image/decoder
-path through cross-attention and multi-scale mask fusion.
+There are two separate VoxTell paths:
+
+1. **Official VoxTell inference/baseline**
+   - Source: `third_party/VoxTell`.
+   - Assets: `checkpoints/VoxTell/voxtell_v1.1` and the official prompt
+     embedding bank.
+   - Adapter: `OfficialVoxTellPretrainedAdapter`.
+   - Default role: `baseline_only`; it must not silently enter the formal
+     pseudo-label manifest.
+
+2. **Project prompt-distillation M-step**
+   - Script: `scripts/train_voxtell_prompt_student.py`.
+   - Required wording: `project prompt-distillation trainer initialized from
+     official VoxTell assets`.
+   - Not official `voxtell-finetune`.
+   - Any report, paper draft, or experiment log must preserve this distinction.
 
 Trainer validation:
 
@@ -353,6 +468,13 @@ python scripts/train_voxtell_prompt_student.py \
 Prompt-cache metadata includes the text-model identity, prompt hash, cache
 format, and encoder policy. Negative-prompt configuration is defined in
 [VoxTell negative prompt policy](docs/VOXTELL_NEGATIVE_PROMPT_POLICY.md).
+
+Audit the official VoxTell source/assets:
+
+```bash
+python scripts/audit_voxtell_vendor.py --json-out outputs/audit_voxtell_vendor.json
+python scripts/audit_voxtell_official_assets.py --output outputs/audit_voxtell_official_assets.json
+```
 
 ## Selected-model-aware M-step
 
@@ -383,6 +505,12 @@ PYTHONPATH=agent-harness pytest -q \
 PYTHONPATH=agent-harness python scripts/verify_final_v9_integrity.py
 PYTHONPATH=agent-harness python scripts/audit_373_organ_routing.py
 PYTHONPATH=agent-harness python scripts/audit_teacher_readiness.py
+PYTHONPATH=agent-harness python scripts/audit_labelcritic_vendor.py \
+  --output outputs/audit_labelcritic_vendor.json
+PYTHONPATH=agent-harness python scripts/audit_voxtell_vendor.py \
+  --json-out outputs/audit_voxtell_vendor.json
+PYTHONPATH=agent-harness python scripts/audit_voxtell_official_assets.py \
+  --output outputs/audit_voxtell_official_assets.json
 ```
 
 CLI checks:

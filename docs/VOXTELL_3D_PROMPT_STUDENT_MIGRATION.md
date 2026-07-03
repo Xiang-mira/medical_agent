@@ -171,8 +171,9 @@ SAROS organs.
 - VoxTell v1.1 requires a model directory with `plans.json` and `fold_0/checkpoint_final.pth`.
 - Official text embeddings use Qwen3-Embedding-4B and may be memory-heavy.
 - VoxTell inference warns that input images must be in RAS orientation.
-- The official release does not yet include custom fine-tuning scripts, so we
-  need to implement the training loop while reusing the released architecture.
+- The official release includes encoder-transfer nnU-Net fine-tuning, but not
+  the original prompt-conditioned trainer; our M-step supplies only that
+  data/sampling/loss loop while reusing the released full architecture.
 - Prompt batching is important. Running all 373 prompts at once may be too
   memory-heavy.
 - Multi-label overlap handling should remain teacher-merge controlled. VoxTell
@@ -193,3 +194,40 @@ SAROS organs.
    time.
 3. Keep legacy VISTA3D student code available for reproducibility, but stop
    presenting it as the main method.
+
+## Paper-aligned formal M-step (2026-07-02)
+
+The formal M-step now defaults to `MEDAI_VOXTELL_TRAINING_PROFILE=paper_aligned`.
+It reuses VoxTell v1.1 as a complete prompt-conditioned model; it is not the
+authors' original 158/190-dataset training run.
+
+Direct official reuse includes commit `ec517b7`, the complete v1.1 checkpoint,
+`plans.json`, RAS/Z-score/192³ preprocessing, Qwen instruction/pooling, the
+published 14,194-prompt embedding bank, and five-scale Dice+BCE supervision.
+E-step selection, the 373-mask prompt adapter, evidence-gated negatives,
+postprocessing, eligibility and rollback remain explicitly project-specific.
+
+The official GitHub and Hugging Face repositories are read-only inputs. Formal
+jobs never push or upload project data, masks, checkpoints, logs or mappings.
+
+```bash
+python scripts/audit_voxtell_official_assets.py \
+  --output /tmp/voxtell_official_asset_audit.json
+python scripts/build_voxtell_official_prompt_map.py
+
+export MEDAI_VOXTELL_TRAINING_PROFILE=paper_aligned
+export MEDAI_VOXTELL_EMBEDDING_BANK="$PWD/checkpoints/VoxTell/embeddings/voxtell_v1.1/text_embeddings.npz"
+python scripts/train_voxtell_prompt_student.py \
+  --manifest outputs/<run>/round1/mstep/voxtell_prompt_student_manifest.json \
+  --model-dir checkpoints/VoxTell/voxtell_v1.1 \
+  --output-dir /tmp/voxtell-paper-aligned-dry \
+  --training-profile paper_aligned \
+  --dry-run
+```
+
+The formal sampler fails closed unless a case has two A/B hard positives and
+one scan-coverage-proven `absent_negative`. It never substitutes an empty crop,
+an unannotated class, a teacher failure or a non-medical prompt. The previous
+behavior remains available only as
+`--training-profile quality_weighted_ablation` and must be reported as an
+ablation rather than paper-aligned training.

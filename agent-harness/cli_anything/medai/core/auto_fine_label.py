@@ -32,7 +32,7 @@ def infer_label_maturity(selection: dict[str, Any]) -> str:
         return "L5"
     if selection.get("auto_fine_label_status") == "auto_fine_label_accepted":
         return "L4"
-    if selection.get("selection_method") in {"label_critic", "near_identical_agreement", "single_teacher_default", "candidate_qc_fallback", "label_critic_fallback"}:
+    if selection.get("selection_method") in {"label_critic", "near_identical_agreement", "geometric_teacher_consensus", "single_teacher_default", "candidate_qc_fallback", "label_critic_fallback"}:
         return "L3"
     if selection.get("selected_candidate_qc_status") in {"pass", "review"}:
         return "L2"

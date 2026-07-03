@@ -52,6 +52,26 @@ def test_voxtell_student_official_cli_dry_run_uses_only_official_cli_args(tmp_pa
     assert "--text-encoding-model" not in result["command"]
 
 
+def test_voxtell_student_reports_official_prompt_filename_collisions(tmp_path: Path) -> None:
+    from cli_anything.medai.core.voxtell_student import VoxTellStudent
+
+    targets = tmp_path / "targets.json"
+    targets.write_text(json.dumps({
+        "target_organs": ["alias_a", "alias_b"],
+        "organ_to_prompt": {"alias_a": "same prompt", "alias_b": "same prompt"},
+    }), encoding="utf-8")
+    student = VoxTellStudent(model_dir=tmp_path / "model", device="cpu", target_config=targets)
+    result = student.segment(
+        tmp_path / "ct.nii.gz",
+        tmp_path / "out",
+        prompts=["alias_a", "alias_b"],
+        prompt_overrides={"alias_a": "same prompt", "alias_b": "same prompt"},
+        dry_run=True,
+    )
+    assert result["official_output_name_collision_count"] == 1
+    assert list(result["official_output_name_collisions"].values()) == [["alias_a", "alias_b"]]
+
+
 def test_voxtell_vendor_audit_script_reports_clean_vendor_metadata() -> None:
     from scripts.audit_voxtell_vendor import build_audit
 

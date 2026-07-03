@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import SimpleITK as sitk
+import sys
 
 try:
     import yaml
@@ -22,6 +23,8 @@ except Exception:  # pragma: no cover
     ndi = None
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agent-harness"))
+from cli_anything.medai.core.student_postprocess import process_student_root
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +33,13 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--output-root", type=Path, required=True, help="postprocessed case_id/*.nii.gz masks")
     ap.add_argument("--case-list", type=Path, default=None)
     ap.add_argument("--policy", type=Path, default=ROOT / "configs/organ_postprocess_policy.yaml")
+    ap.add_argument("--taxonomy", type=Path, default=ROOT / "configs/organ_taxonomy.json")
+    ap.add_argument(
+        "--parent-root", type=Path, action="append", default=[],
+        help="Teacher/selected-mask root used to construct anatomical parent ROIs; repeatable.",
+    )
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--max-cases", type=int, default=0)
     ap.add_argument("--overwrite", action="store_true")
     return ap.parse_args()
 
@@ -104,60 +114,26 @@ def postprocess(mask: np.ndarray, group: str) -> tuple[np.ndarray, dict[str, Any
 
 def main() -> int:
     args = parse_args()
-    policy = load_yaml(args.policy)
-    args.output_root.mkdir(parents=True, exist_ok=True)
-    rows: list[dict[str, Any]] = []
-    processed = 0
-    copied_meta = 0
-    for case_id in case_ids(args.case_list, args.input_root):
-        in_case = args.input_root / case_id
-        if not in_case.exists():
-            continue
-        out_case = args.output_root / case_id
-        out_case.mkdir(parents=True, exist_ok=True)
-        for src in sorted(in_case.glob("*.nii.gz")):
-            dst = out_case / src.name
-            if dst.exists() and not args.overwrite:
-                continue
-            organ = src.name[:-7]
-            group = organ_group(organ)
-            img = sitk.ReadImage(str(src))
-            arr = sitk.GetArrayFromImage(img)
-            pp, stats = postprocess(arr, group)
-            out = sitk.GetImageFromArray(pp.astype(np.uint8))
-            out.CopyInformation(img)
-            sitk.WriteImage(out, str(dst))
-            processed += 1
-            rows.append({
-                "case_id": case_id,
-                "organ": organ,
-                "organ_group": group,
-                "input_path": str(src),
-                "output_path": str(dst),
-                "voxels_before": int((arr > 0).sum()),
-                "voxels_after": int(pp.sum()),
-                **stats,
-            })
-        for meta in ["voxtell_student_result.json"]:
-            src_meta = in_case / meta
-            if src_meta.exists():
-                shutil.copy2(src_meta, out_case / meta)
-                copied_meta += 1
-    manifest = {
-        "status": "success",
-        "input_root": str(args.input_root),
-        "output_root": str(args.output_root),
-        "policy": str(args.policy),
-        "policy_version": policy.get("version"),
-        "processed_masks": processed,
-        "copied_metadata_files": copied_meta,
-        "description": "Conservative organ-type postprocess: hollow GI keeps top-k components; vessel/duct preserves thin structures and removes only tiny isolated blobs; bones allow multiple components.",
-    }
-    (args.output_root / "organ_type_postprocess_summary.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
-    if rows:
-        with open(args.output_root / "organ_type_postprocess_per_mask.csv", "w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            w.writeheader(); w.writerows(rows)
+    parent_roots = [p.resolve() for p in args.parent_root]
+    if not parent_roots:
+        parent_roots = [args.input_root.resolve()]
+    manifest = process_student_root(
+        input_root=args.input_root.resolve(),
+        output_root=args.output_root.resolve(),
+        parent_roots=parent_roots,
+        taxonomy_path=args.taxonomy.resolve(),
+        policy_path=args.policy.resolve(),
+        case_list=args.case_list.resolve() if args.case_list else None,
+        overwrite=args.overwrite,
+        dry_run=args.dry_run,
+        max_cases=args.max_cases,
+        write_roi_masks=True,
+    )
+    manifest["entrypoint"] = "apply_organ_type_postprocess.py"
+    manifest["description"] = "Anatomy-aware parent-ROI containment followed by organ-specific component filtering."
+    (args.output_root / "organ_type_postprocess_summary.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print(json.dumps(manifest, indent=2, ensure_ascii=False))
     return 0
 

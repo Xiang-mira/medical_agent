@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/PedroRASB/LabelCritic",
+  "commit": "b0ab54e9eea26b4e409542f304db5e6927471b0d",
+  "policy": "read_only_vendor_project_extensions_live_in_agent_harness",
+  "files": {
+    "CompareOrgan.py": "6b1cf465d5634351284c811b9f835e1d7c058602f963ea380ee364a91fad0581",
+    "ErrorDetector.py": "75655f067c393975d8cbe4d9cc8690aad44d5c9bfda746a0c2ec145391876418",
+    "LICENSE.txt": "662d742b53d1f6e0f7b290c3fc823afe0551073f750bd2d81b3badb35b43db56",
+    "ProjectDatasetFlex.py": "5a0244b646715770d0fe2d13814bcbcd9aad6919d43a755f6137ec1232ee453b",
+    "ProjectDatasetFlex_single.py": "f1df39321ad91f0a1976efd8795543c5d5c2b643271365482ab2a881154e478d",
+    "README.md": "725b8570bde31510084551c38de4957e46c51d60e523205c301a01b2c4054bf7",
+    "RunAPI_single.py": "5be686ef245c64bdc0b45eff6e1d3539001d51ffc954910be4e85404369a209c",
+    "projection.py": "0e5bc659e166a4249a88d0c615ee537d22fa965da8c0fb584c1a4442dee0a47d"
+  }
+}

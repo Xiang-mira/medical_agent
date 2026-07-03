@@ -100,7 +100,7 @@ CURATED_ORGAN_FACTS: dict[str, dict[str, Any]] = {
         "aliases": ["aorta", "aortic vessel"],
         "region": "midline to left paraspinal thoracoabdominal course",
         "landmarks": ["heart", "spine", "diaphragm", "iliac bifurcation"],
-        "appearance": "long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase",
+        "appearance": "long tubular arterial vessel; segment the full aortic vessel cross-section according to the dataset label definition",
     },
     "inferior_vena_cava": {
         "aliases": ["inferior vena cava", "IVC", "caval vein"],

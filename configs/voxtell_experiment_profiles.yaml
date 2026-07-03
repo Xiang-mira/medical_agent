@@ -1,6 +1,9 @@
 experiment_profile: advisor_aligned_default
 
 advisor_aligned_default:
+  prompt_training_profile: paper_aligned
+  official_sources_access: read_only
+  external_uploads_allowed: false
   official_voxtell_pretrained:
     mode: baseline_only
   mstep_backend: project_voxtell_prompt_distillation_student
@@ -10,6 +13,9 @@ advisor_aligned_default:
     explicit_baseline_mode: false
 
 enhanced_candidate_pool:
+  prompt_training_profile: paper_aligned
+  official_sources_access: read_only
+  external_uploads_allowed: false
   official_voxtell_pretrained:
     mode: candidate
   mstep_backend: project_voxtell_prompt_distillation_student

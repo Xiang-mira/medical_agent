@@ -23,17 +23,33 @@
       "items": {
         "type": "object",
         "required": [
+          "canonical_name",
           "canonical_organ",
           "display_name",
           "aliases",
-          "expected_region",
+          "parent_structures",
+          "expected_body_regions",
+          "ct_location",
           "ct_appearance",
-          "anatomical_constraints",
+          "morphology",
+          "adjacent_structures",
+          "continuity_prior",
+          "symmetry_prior",
+          "partial_fov_behavior",
           "common_failure_modes",
-          "rejection_rules",
-          "labelcritic_instruction"
+          "penalty_rules",
+          "provenance",
+          "field_provenance",
+          "source_type",
+          "validation_status",
+          "capability_level",
+          "formal_selection_eligible"
         ],
         "properties": {
+          "canonical_name": {
+            "type": "string",
+            "minLength": 1
+          },
           "canonical_organ": {
             "type": "string"
           },
@@ -55,6 +71,23 @@
               "null"
             ]
           },
+          "parent_structures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expected_body_regions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "ct_location": {
+            "type": "string",
+            "minLength": 1
+          },
           "expected_region": {
             "type": "string"
           },
@@ -66,6 +99,28 @@
           },
           "ct_appearance": {
             "type": "string"
+          },
+          "morphology": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adjacent_structures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "continuity_prior": {
+            "type": "string",
+            "minLength": 1
+          },
+          "symmetry_prior": {
+            "type": "string",
+            "minLength": 1
+          },
+          "partial_fov_behavior": {
+            "type": "string",
+            "minLength": 1
           },
           "shape_and_continuity_prior": {
             "type": "string"
@@ -87,6 +142,47 @@
             "items": {
               "type": "string"
             }
+          },
+          "penalty_rules": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "provenance": {
+            "type": "object"
+          },
+          "field_provenance": {
+            "type": "object",
+            "minProperties": 14,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "source_type": {
+            "enum": [
+              "official_labelcritic_seed",
+              "project_extension"
+            ]
+          },
+          "validation_status": {
+            "enum": [
+              "eligible",
+              "runtime_only"
+            ]
+          },
+          "capability_level": {
+            "enum": [
+              "runtime_supported",
+              "official_benchmark_calibrated_7b",
+              "class_agnostic_extrapolation",
+              "runtime_only_unverified"
+            ]
+          },
+          "formal_selection_eligible": {
+            "type": "boolean"
           },
           "labelcritic_instruction": {
             "type": "string"

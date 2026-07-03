@@ -30,7 +30,7 @@ def main() -> int:
     ap.add_argument("--case-list", default=str(ROOT / "data_manifest/case_list_50_tumor.csv"))
     ap.add_argument("--old-estep", default=str(ROOT / "outputs/stage4b_round1_50cases_20260611/round1/estep"))
     ap.add_argument("--output-dir", default=str(ROOT / "outputs/round1_373_hierarchical_repair_20260620/estep"))
-    ap.add_argument("--critic-backend", choices=["stub", "labelcritic"], default="stub")
+    ap.add_argument("--critic-backend", choices=["stub", "labelcritic"], default="labelcritic")
     ap.add_argument("--num-cases", type=int, default=50)
     ap.add_argument("--timeout-sec", type=int, default=1800)
     ap.add_argument("--device", default="cuda")
@@ -93,9 +93,11 @@ def main() -> int:
         "old_child_policy": "quarantined_from_candidates_and_mstep",
         "teacher_inference_mode": "hierarchical_roi",
         "critic_backend": args.critic_backend,
+        "formal_experiment_eligible": args.critic_backend == "labelcritic",
+        "formal_exclusion_reason": None if args.critic_backend == "labelcritic" else "stub LabelCritic is debug-only and cannot produce formal manifests",
         "auto_arbitration": args.critic_backend == "labelcritic",
         "enable_shapekit": not args.no_shapekit,
-        "fusion_method": "weighted_vote",
+        "fusion_mode": "disabled_formal_mainline",
     }
     (output.parent / "repair_run_config.json").write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -118,7 +120,7 @@ def main() -> int:
         preseeded_parent_only=True,
         teacher_inference_mode="hierarchical_roi",
         roi_margin_mm=20.0,
-        enable_fusion=True,
+        enable_fusion=False,
         fusion_method="weighted_vote",
         enable_auto_arbitration=args.critic_backend == "labelcritic",
         candidate_mode="route_pruned_with_competition",

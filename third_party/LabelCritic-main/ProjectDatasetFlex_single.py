@@ -50,9 +50,8 @@ def main():
 
     args = parser.parse_args()
     
-    # Normalize organ name: strip any existing .nii.gz suffix before adding it,
-    # so callers passing "pancreas.nii.gz" don't get "pancreas.nii.gz.nii.gz".
-    args.organ = args.organ.removesuffix('.nii.gz') + '.nii.gz'
+    if not args.organ.endswith('.nii.gz'):
+        args.organ += '.nii.gz'
 
     is_combined = args.mask_good.endswith('.nii.gz') and args.mask_bad.endswith('.nii.gz')
 
@@ -130,20 +129,11 @@ def main():
         for organ in organs:
             organ = organ.replace(".nii.gz", "")
             if 'left' in organ:
-                left_dir = os.path.join(args.output_dir, organ)
-                right_dir = os.path.join(args.output_dir, organ.replace('left', 'right'))
-                if os.path.isdir(left_dir) and os.path.isdir(right_dir):
-                    pj.join_left_and_right_dataset(
-                        left_dir,
-                        right_dir,
-                        os.path.join(args.output_dir, organ.replace('_left', 's'))
-                    )
-                else:
-                    print(
-                        "Skipping left/right join for single-organ projection; "
-                        f"missing companion projection: left={os.path.isdir(left_dir)}, "
-                        f"right={os.path.isdir(right_dir)}"
-                    )
+                pj.join_left_and_right_dataset(
+                    os.path.join(args.output_dir, organ),
+                    os.path.join(args.output_dir, organ.replace('left', 'right')),
+                    os.path.join(args.output_dir, organ.replace('_left', 's'))
+                )
     finally:
         try:
             shutil.rmtree(temp_ct_good)

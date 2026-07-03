@@ -121,6 +121,39 @@ def restart_vllm() -> bool:
     return False
 
 
+def inference_case_acceptable(result: dict[str, Any], expected_organs: int) -> bool:
+    """True when the case produced the requested standardized mask files.
+
+    VoxTell may legitimately output an empty mask for an absent/out-of-FOV
+    prompt (for example ``brain`` on an abdomen CT).  That makes the per-case
+    result ``partial_success`` for review purposes, but it should still count as
+    an inference-layout success when all requested masks were materialized and
+    no organ failed.
+    """
+    status = str(result.get("status") or "")
+    if status in {"success", "skipped_existing"}:
+        return True
+    if status != "partial_success":
+        return False
+    if int(result.get("num_failed_organs") or 0) > 0:
+        return False
+    return int(result.get("num_masks") or 0) >= int(expected_organs)
+
+
+def existing_case_complete(case_pred_dir: Path, organs: list[str]) -> bool:
+    """Only resume-skip a case with a successful result and every exact mask."""
+    result_path = case_pred_dir / "voxtell_student_result.json"
+    if not result_path.exists():
+        return False
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not inference_case_acceptable(result, len(organs)):
+        return False
+    return all((case_pred_dir / f"{organ}.nii.gz").is_file() for organ in organs)
+
+
 def main() -> int:
     args = parse_args()
     output_root = Path(args.output_root).resolve()
@@ -162,10 +195,15 @@ def main() -> int:
             results.append({"case_id": case_id, "status": "skipped", "reason": f"CT not found: {ct_path}"})
             continue
         case_pred_dir = pred_dir / case_id
-        if case_pred_dir.exists() and any(case_pred_dir.glob("*.nii.gz")) and not args.dry_run:
+        if not args.dry_run and existing_case_complete(case_pred_dir, organs):
             saved += 1
-            log(f"  [{i}/{len(cases)}] {case_id}: 已存在 masks，跳过")
-            results.append({"case_id": case_id, "status": "skipped_existing", "output_dir": str(case_pred_dir)})
+            log(f"  [{i}/{len(cases)}] {case_id}: 已存在完整的 {len(organs)} masks，跳过")
+            results.append({
+                "case_id": case_id,
+                "status": "skipped_existing",
+                "num_masks": len(organs),
+                "output_dir": str(case_pred_dir),
+            })
             continue
         result = student.segment(
             ct_image=ct_path,
@@ -177,21 +215,24 @@ def main() -> int:
         )
         result["case_id"] = case_id
         results.append(result)
-        if result.get("status") == "success":
+        if inference_case_acceptable(result, len(organs)):
             saved += 1
-            log(f"  [{i}/{len(cases)}] {case_id}: ✓ {result.get('num_masks', 0)}/{len(organs)} masks")
+            status_note = "empty masks present" if result.get("status") == "partial_success" else "ok"
+            log(f"  [{i}/{len(cases)}] {case_id}: ✓ {result.get('num_masks', 0)}/{len(organs)} masks ({status_note})")
         else:
             log(f"  [{i}/{len(cases)}] {case_id}: {result.get('status')} ({result.get('reason', 'see result json')})")
 
+    run_complete = saved == len(cases)
     summary = {
         "stage": "round_student_inference",
         "student_backend": "voxtell_style_3d_prompt",
         "round": args.round_idx,
-        "status": "dry_run" if args.dry_run else "success",
+        "status": "dry_run" if args.dry_run else ("success" if run_complete else "failed"),
         "num_cases": len(cases),
         "num_prompts": len(organs),
         "prompt_batch_size": args.prompt_batch_size,
         "num_success_or_existing": saved,
+        "success_count_policy": "success, skipped_existing, or partial_success with all requested masks materialized and no failed organs",
         "model_dir": str(model_dir),
         "target_config": str(target_config),
         "prediction_dir": str(pred_dir),
@@ -227,7 +268,7 @@ def main() -> int:
 
     if args.restart_vllm:
         restart_vllm()
-    return 0
+    return 0 if args.dry_run or run_complete else 1
 
 
 if __name__ == "__main__":

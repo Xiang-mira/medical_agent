@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,15 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "agent-harness"))
 
 from cli_anything.medai.core.student_postprocess import containment_rule_for_organ, process_mask, process_student_root
+
+
+def load_script(name: str):
+    path = ROOT / "scripts" / name
+    spec = importlib.util.spec_from_file_location(name.replace(".py", ""), path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 def _save(array: np.ndarray, path: Path, spacing=(1.0, 1.0, 1.0)) -> Path:
@@ -247,3 +257,27 @@ def test_before_after_evaluator_writes_empty_summary(tmp_path: Path):
     assert summary.exists()
     header = summary.read_text(encoding="utf-8").splitlines()[0]
     assert "before_postprocessing_dice" in header
+
+
+def test_before_after_evaluator_visual_copy_skips_empty_paths(tmp_path: Path):
+    evaluator = load_script("evaluate_student_postprocess.py")
+    raw = _save(np.zeros((3, 3, 3), dtype=np.uint8), tmp_path / "raw.nii.gz")
+    post = _save(np.zeros((3, 3, 3), dtype=np.uint8), tmp_path / "post.nii.gz")
+
+    evaluator.copy_review_masks(
+        {
+            "case_id": "case001",
+            "organ": "brain",
+            "raw_path": str(raw),
+            "post_path": str(post),
+            "reference_path": "",
+            "parent_roi_path": "",
+        },
+        tmp_path / "visuals",
+    )
+
+    out = tmp_path / "visuals" / "case001" / "brain"
+    assert (out / "raw_student.nii.gz").exists()
+    assert (out / "postprocessed_student.nii.gz").exists()
+    assert not (out / "reference.nii.gz").exists()
+    assert not (out / "parent_organ_roi.nii.gz").exists()

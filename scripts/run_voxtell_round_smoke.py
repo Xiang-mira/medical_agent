@@ -55,15 +55,23 @@ def normalize_manifest_for_smoke(path: Path) -> dict[str, Any]:
         item["training_weight"] = 1.0
         item["target_type"] = "hard"
         item["distillation_eligible"] = True
+        item["formal_experiment_eligible"] = False
+        item["formal_manifest_allowed"] = False
+        item["scientific_training_evidence"] = False
         item["training_gate_decision"] = "include_hard_A_smoke_override"
         item["human_review_status"] = "accepted"
         item["selected_provider"] = item.get("selected_provider") or item.get("selected_model") or item.get("source_model") or "mock_seg"
         item["selection_reason"] = item.get("selection_reason") or item.get("selection_method") or "round_smoke_selected_mock"
         item["smoke_override_applied"] = True
         item["smoke_override_reason"] = "mock_seg E-step does not produce full AutoLabelCore v2 scores; override is for plumbing smoke only"
+        item["distillation_exclusion_reason_formal"] = "mock_seg_stub_smoke_plumbing_only"
     doc["items"] = items
     doc["num_distillation_eligible_items"] = sum(1 for i in items if i.get("distillation_eligible") and float(i.get("training_weight") or 0) > 0)
     doc["smoke_override_applied"] = True
+    doc["formal_experiment_eligible"] = False
+    doc["formal_manifest_allowed"] = False
+    doc["scientific_training_evidence"] = False
+    doc["formal_exclusion_reason"] = "mock_seg/stub smoke manifest is for plumbing only and must not enter formal M-step/Round2 claims"
     path.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
     return doc
 
@@ -182,6 +190,10 @@ def main() -> int:
     summary = {
         "stage": "round0_mstep_student_prediction_smoke",
         "status": "success" if pass_checks else "failed",
+        "formal_experiment_eligible": False,
+        "formal_manifest_allowed": False,
+        "scientific_training_evidence": False,
+        "formal_exclusion_reason": "mock_seg + LabelCritic stub smoke validates plumbing only",
         "output_dir": str(out),
         "cases": [c["case_id"] for c in cases],
         "organs": organs,

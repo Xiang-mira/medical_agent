@@ -108,6 +108,10 @@ def main() -> int:
     summary = {
         "stage": "round2_competition_check",
         "status": status,
+        "formal_experiment_eligible": args.critic_backend == "labelcritic" and "mock_seg" not in set(models),
+        "formal_manifest_allowed": False,
+        "scientific_training_evidence": False,
+        "formal_exclusion_reason": "round2 competition check is wiring/audit only; mock_seg or stub outputs must not enter formal manifest",
         "failures": failures,
         "output_dir": str(out),
         "estep_status": result.get("status"),

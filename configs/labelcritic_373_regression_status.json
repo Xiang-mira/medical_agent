@@ -1,0 +1,34 @@
+{
+  "schema_version": "labelcritic_373_regression_status.v1",
+  "policy": "Failed or untested extensions may be audited, but only passed extensions may produce a formal LabelCritic winner.",
+  "classes": {
+    "colon": {
+      "status": "failed",
+      "passed": 1,
+      "total": 6,
+      "evidence": "outputs/labelcritic_373_repair_20260703/stage9_colon_regression/results.json",
+      "failure_action": "automatic_abstention"
+    },
+    "liver": {
+      "status": "failed",
+      "passed": 1,
+      "total": 6,
+      "evidence": "outputs/labelcritic_373_repair_20260703/stage9_liver_regression/results.json",
+      "failure_action": "automatic_abstention"
+    },
+    "pancreas": {
+      "status": "partial_only",
+      "passed": 1,
+      "total": 1,
+      "evidence": "outputs/labelcritic_373_repair_20260703/stage9_pancreas_regression/results.json",
+      "failure_action": "audit_only_until_full_suite"
+    },
+    "pancreatic_duct": {
+      "status": "partial_only",
+      "passed": 1,
+      "total": 1,
+      "evidence": "outputs/labelcritic_373_repair_20260703/stage9_pancreatic_duct_regression/results.json",
+      "failure_action": "audit_only_until_full_suite"
+    }
+  }
+}

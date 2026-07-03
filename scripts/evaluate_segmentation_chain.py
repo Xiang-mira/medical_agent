@@ -25,6 +25,12 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
+METRIC_TARGET_GT = "GT"
+METRIC_TARGET_PSEUDO = "pseudo-label"
+METRIC_TARGET_TEACHER = "teacher"
+INTERPRETATION_REAL_GT = "real_gt_segmentation_performance"
+INTERPRETATION_TEACHER_IMITATION = "teacher_imitation"
+
 
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Generic teacher/student/GT segmentation evaluation chain.")
@@ -188,6 +194,57 @@ def metric_block(prefix: str, reference: np.ndarray | None, pred: np.ndarray | N
     }
 
 
+def long_metric_row(
+    *,
+    base: dict[str, Any],
+    metric_name: str,
+    metric_subject: str,
+    metric_target: str,
+    metric_comparison: str,
+    metric_interpretation: str,
+    reference_path: Path | None,
+    prediction_path: Path | None,
+    reference: np.ndarray | None,
+    prediction: np.ndarray | None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "case_id": base["case_id"],
+        "organ": base["organ"],
+        "organ_group": base["organ_group"],
+        "metric_name": metric_name,
+        "metric_subject": metric_subject,
+        "metric_target": metric_target,
+        "metric_comparison": metric_comparison,
+        "metric_interpretation": metric_interpretation,
+        "reference_path": str(reference_path) if reference_path else "",
+        "prediction_path": str(prediction_path) if prediction_path else "",
+        "available": False,
+        "dice": None,
+        "iou": None,
+        "reference_voxels": None,
+        "prediction_voxels": None,
+        "volume_ratio": None,
+    }
+    if reference is None or prediction is None:
+        row["not_evaluable_reason"] = "reference_or_prediction_missing"
+        return row
+    if reference.shape != prediction.shape:
+        row["not_evaluable_reason"] = "shape_mismatch"
+        return row
+    rv = int(reference.sum())
+    pv = int(prediction.sum())
+    row.update({
+        "available": True,
+        "dice": dice(reference, prediction),
+        "iou": iou(reference, prediction),
+        "reference_voxels": rv,
+        "prediction_voxels": pv,
+        "volume_ratio": float(pv / rv) if rv > 0 else None,
+        "not_evaluable_reason": None,
+    })
+    return row
+
+
 def gate_flags(*, teacher_voxels: int | None, student_voxels: int | None, ratio: float | None, min_ratio: float, max_ratio: float) -> list[str]:
     flags = []
     if teacher_voxels is None or student_voxels is None:
@@ -234,6 +291,7 @@ def main() -> int:
 
     rows: list[dict[str, Any]] = []
     sweep_rows: list[dict[str, Any]] = []
+    long_rows: list[dict[str, Any]] = []
     for case_id in cases:
         for m in mappings:
             organ = m["organ"]
@@ -267,6 +325,58 @@ def main() -> int:
             row.update(metric_block("student_teacher", teacher, student))
             row.update(metric_block("teacher_gt", gt, teacher))
             row.update(metric_block("student_gt", gt, student))
+            row.update({
+                "student_teacher_metric_target": METRIC_TARGET_TEACHER,
+                "student_teacher_metric_subject": "student",
+                "student_teacher_metric_comparison": "student_vs_selected_teacher",
+                "student_teacher_metric_interpretation": INTERPRETATION_TEACHER_IMITATION,
+                "teacher_gt_metric_target": METRIC_TARGET_GT,
+                "teacher_gt_metric_subject": "teacher",
+                "teacher_gt_metric_comparison": "teacher_vs_expert_gt",
+                "teacher_gt_metric_interpretation": INTERPRETATION_REAL_GT,
+                "student_gt_metric_target": METRIC_TARGET_GT,
+                "student_gt_metric_subject": "student",
+                "student_gt_metric_comparison": "student_vs_expert_gt",
+                "student_gt_metric_interpretation": INTERPRETATION_REAL_GT,
+            })
+            long_rows.extend([
+                long_metric_row(
+                    base=row,
+                    metric_name="dice",
+                    metric_subject="student",
+                    metric_target=METRIC_TARGET_TEACHER,
+                    metric_comparison="student_vs_selected_teacher",
+                    metric_interpretation=INTERPRETATION_TEACHER_IMITATION,
+                    reference_path=teacher_path,
+                    prediction_path=student_path,
+                    reference=teacher,
+                    prediction=student,
+                ),
+                long_metric_row(
+                    base=row,
+                    metric_name="dice",
+                    metric_subject="teacher",
+                    metric_target=METRIC_TARGET_GT,
+                    metric_comparison="teacher_vs_expert_gt",
+                    metric_interpretation=INTERPRETATION_REAL_GT,
+                    reference_path=gt_path,
+                    prediction_path=teacher_path,
+                    reference=gt,
+                    prediction=teacher,
+                ),
+                long_metric_row(
+                    base=row,
+                    metric_name="dice",
+                    metric_subject="student",
+                    metric_target=METRIC_TARGET_GT,
+                    metric_comparison="student_vs_expert_gt",
+                    metric_interpretation=INTERPRETATION_REAL_GT,
+                    reference_path=gt_path,
+                    prediction_path=student_path,
+                    reference=gt,
+                    prediction=student,
+                ),
+            ])
             if student is not None:
                 row.update({f"student_{k}": v for k, v in component_stats(student).items()})
             teacher_voxels = int(teacher.sum()) if teacher is not None else None
@@ -285,8 +395,20 @@ def main() -> int:
 
             ref_for_sweep = gt_raw if gt_raw is not None else teacher_raw
             ref_kind = "gt" if gt_raw is not None else ("teacher" if teacher_raw is not None else "")
+            metric_target = METRIC_TARGET_GT if gt_raw is not None else (METRIC_TARGET_TEACHER if teacher_raw is not None else "")
+            metric_interpretation = INTERPRETATION_REAL_GT if metric_target == METRIC_TARGET_GT else (INTERPRETATION_TEACHER_IMITATION if metric_target == METRIC_TARGET_TEACHER else "")
+            metric_comparison = "student_vs_expert_gt_threshold_sweep" if metric_target == METRIC_TARGET_GT else ("student_vs_selected_teacher_threshold_sweep" if metric_target == METRIC_TARGET_TEACHER else "")
             for srow in threshold_sweep(student_raw, ref_for_sweep, thresholds):
-                sweep_rows.append({"case_id": case_id, "organ": organ, "reference_kind": ref_kind, **srow})
+                sweep_rows.append({
+                    "case_id": case_id,
+                    "organ": organ,
+                    "reference_kind": ref_kind,
+                    "metric_target": metric_target,
+                    "metric_subject": "student",
+                    "metric_comparison": metric_comparison,
+                    "metric_interpretation": metric_interpretation,
+                    **srow,
+                })
 
     per_case = pd.DataFrame(rows)
     for optional_col in [
@@ -299,6 +421,8 @@ def main() -> int:
         if optional_col not in per_case.columns:
             per_case[optional_col] = np.nan
     per_case.to_csv(args.output_dir / "evaluation_chain_per_case_organ.csv", index=False)
+    metrics_long = pd.DataFrame(long_rows)
+    metrics_long.to_csv(args.output_dir / "evaluation_chain_metrics_long.csv", index=False)
     if sweep_rows:
         sweep = pd.DataFrame(sweep_rows)
         sweep.to_csv(args.output_dir / "threshold_sweep_case_organ.csv", index=False)
@@ -316,6 +440,9 @@ def main() -> int:
             "student_teacher_mean_dice": pd.to_numeric(g.get("student_teacher_dice"), errors="coerce").mean(),
             "teacher_gt_mean_dice": pd.to_numeric(g.get("teacher_gt_dice"), errors="coerce").mean(),
             "student_gt_mean_dice": pd.to_numeric(g.get("student_gt_dice"), errors="coerce").mean(),
+            "student_vs_teacher_mean_dice": pd.to_numeric(g.get("student_teacher_dice"), errors="coerce").mean(),
+            "teacher_vs_expert_gt_mean_dice": pd.to_numeric(g.get("teacher_gt_dice"), errors="coerce").mean(),
+            "student_vs_expert_gt_mean_dice": pd.to_numeric(g.get("student_gt_dice"), errors="coerce").mean(),
             "student_teacher_mean_volume_ratio": pd.to_numeric(g.get("student_teacher_volume_ratio"), errors="coerce").mean(),
             "student_gt_mean_volume_ratio": pd.to_numeric(g.get("student_gt_volume_ratio"), errors="coerce").mean(),
             "overseg_cases": int(g["qc_flags"].astype(str).str.contains("oversegmentation_volume_ratio").sum()),
@@ -333,12 +460,18 @@ def main() -> int:
         student_gt_mean_dice=("student_gt_dice", "mean"),
         review_cases=("volume_gate_status", lambda s: int((s == "review").sum())),
     ).reset_index()
+    case_summary["student_vs_teacher_mean_dice"] = case_summary["student_teacher_mean_dice"]
+    case_summary["teacher_vs_expert_gt_mean_dice"] = case_summary["teacher_gt_mean_dice"]
+    case_summary["student_vs_expert_gt_mean_dice"] = case_summary["student_gt_mean_dice"]
     case_summary.to_csv(args.output_dir / "evaluation_chain_case_summary.csv", index=False)
     group_summary = organ_summary.groupby("organ_group").agg(
         organs=("organ", "size"),
         student_teacher_mean_dice=("student_teacher_mean_dice", "mean"),
         teacher_gt_mean_dice=("teacher_gt_mean_dice", "mean"),
         student_gt_mean_dice=("student_gt_mean_dice", "mean"),
+        student_vs_teacher_mean_dice=("student_vs_teacher_mean_dice", "mean"),
+        teacher_vs_expert_gt_mean_dice=("teacher_vs_expert_gt_mean_dice", "mean"),
+        student_vs_expert_gt_mean_dice=("student_vs_expert_gt_mean_dice", "mean"),
         overseg_cases=("overseg_cases", "sum"),
         review_cases=("review_cases", "sum"),
     ).reset_index()
@@ -364,6 +497,7 @@ def main() -> int:
         "volume_gate_flag_counts": Counter(flag for row in rows for flag in str(row.get("qc_flags", "")).split(";") if flag),
         "outputs": {
             "per_case_organ": str(args.output_dir / "evaluation_chain_per_case_organ.csv"),
+            "metrics_long": str(args.output_dir / "evaluation_chain_metrics_long.csv"),
             "organ_summary": str(args.output_dir / "evaluation_chain_organ_summary.csv"),
             "case_summary": str(args.output_dir / "evaluation_chain_case_summary.csv"),
             "group_summary": str(args.output_dir / "organ_group_summary.csv"),

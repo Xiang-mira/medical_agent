@@ -1,0 +1,4501 @@
+{
+  "schema_version": "voxtell_official_prompt_map_v1",
+  "official_bank_prompt_count": 14194,
+  "target_count": 373,
+  "official_exact_match_count": 192,
+  "project_extension_count": 181,
+  "project_extensions": [
+    "abdominal_cavity",
+    "airway",
+    "airway_wall",
+    "anterior_eyeball_segment_left",
+    "anterior_eyeball_segment_right",
+    "anterior_scalene_left",
+    "anterior_scalene_right",
+    "blood",
+    "body",
+    "body_extremities",
+    "body_trunc",
+    "both_lips",
+    "brain_ventricle",
+    "bronchus",
+    "carpal",
+    "cbd_stent",
+    "celiac_aa (celiac_artery)",
+    "central_sulcus",
+    "colostomy_bag",
+    "compact_bone",
+    "costal_cartilages",
+    "cricoid_cartilage",
+    "cricopharyngeus",
+    "digastric_left",
+    "digastric_right",
+    "face",
+    "frontal_lobe",
+    "gland_structure",
+    "hard_palate",
+    "heart_atrium_right",
+    "heart_myocardium",
+    "heart_tissue",
+    "heart_ventricle_right",
+    "hyoid",
+    "hypopharynx",
+    "iliac_vena_left",
+    "iliac_vena_right",
+    "inferior_oblique_muscle_left",
+    "inferior_oblique_muscle_right",
+    "inferior_rectus_muscle_left",
+    "inferior_rectus_muscle_right",
+    "insular_cortex",
+    "internal_capsule",
+    "intestine",
+    "kidney_cortex",
+    "kidney_medulla",
+    "kidney_pelvicalyceal_system",
+    "lateral_pterygoid_left",
+    "lateral_pterygoid_right",
+    "lateral_rectus_muscle_left",
+    "lateral_rectus_muscle_right",
+    "levator_palpebrae_superioris_left",
+    "levator_palpebrae_superioris_right",
+    "levator_scapulae_left",
+    "levator_scapulae_right",
+    "liver_hepatic_vein",
+    "liver_portal_vein",
+    "lung_lower_left_lobe",
+    "lung_lower_right_lobe",
+    "lung_middle_right_lobe",
+    "lung_pulmonary_arteries",
+    "lung_pulmonary_veins",
+    "lung_trachea_bronchia",
+    "lung_upper_left_lobe",
+    "lung_upper_right_lobe",
+    "masseter_left",
+    "masseter_right",
+    "medial_pterygoid_left",
+    "medial_pterygoid_right",
+    "medial_rectus_muscle_left",
+    "medial_rectus_muscle_right",
+    "mediastinum",
+    "metacarpal",
+    "metatarsal",
+    "middle_scalene_left",
+    "middle_scalene_right",
+    "muscle",
+    "muscle_of_head",
+    "nasal_cavity_left",
+    "nasal_cavity_right",
+    "nasopharynx",
+    "occipital_lobe",
+    "oropharynx",
+    "pancreas_body",
+    "pancreas_head",
+    "pancreas_tail",
+    "parietal_lobe",
+    "pericardium",
+    "phalanges_feet",
+    "phalanges_hand",
+    "platysma_left",
+    "platysma_right",
+    "posterior_eyeball_segment_left",
+    "posterior_eyeball_segment_right",
+    "posterior_scalene_left",
+    "posterior_scalene_right",
+    "prevertebral_left",
+    "prevertebral_right",
+    "prosthetic_breast_implant",
+    "pulmonary_artery",
+    "rib_left_1",
+    "rib_left_10",
+    "rib_left_11",
+    "rib_left_12",
+    "rib_left_2",
+    "rib_left_3",
+    "rib_left_4",
+    "rib_left_5",
+    "rib_left_6",
+    "rib_left_7",
+    "rib_left_8",
+    "rib_left_9",
+    "rib_right_1",
+    "rib_right_10",
+    "rib_right_11",
+    "rib_right_12",
+    "rib_right_2",
+    "rib_right_3",
+    "rib_right_4",
+    "rib_right_5",
+    "rib_right_6",
+    "rib_right_7",
+    "rib_right_8",
+    "rib_right_9",
+    "scalp",
+    "seminal_vesicle",
+    "septum_pellucidum",
+    "soft_palate",
+    "spongy_bone",
+    "sterno_thyroid_left",
+    "sterno_thyroid_right",
+    "sternocleidomastoid_left",
+    "sternocleidomastoid_right",
+    "styloid_process_left",
+    "styloid_process_right",
+    "subarachnoid_space",
+    "subcutaneous_adipose_tissue",
+    "superior_oblique_muscle_left",
+    "superior_oblique_muscle_right",
+    "superior_rectus_muscle_left",
+    "superior_rectus_muscle_right",
+    "tarsal",
+    "temporalis_left",
+    "temporalis_right",
+    "thoracic_cavity",
+    "thyrohyoid_left",
+    "thyrohyoid_right",
+    "thyroid_cartilage",
+    "tongue",
+    "trapezius_left",
+    "trapezius_right",
+    "uterocervix",
+    "veins",
+    "venous_sinuses",
+    "vertebrae_C1",
+    "vertebrae_C2",
+    "vertebrae_C3",
+    "vertebrae_C4",
+    "vertebrae_C5",
+    "vertebrae_C6",
+    "vertebrae_C7",
+    "vertebrae_L1",
+    "vertebrae_L2",
+    "vertebrae_L3",
+    "vertebrae_L4",
+    "vertebrae_L5",
+    "vertebrae_S1",
+    "vertebrae_T1",
+    "vertebrae_T10",
+    "vertebrae_T11",
+    "vertebrae_T12",
+    "vertebrae_T2",
+    "vertebrae_T3",
+    "vertebrae_T4",
+    "vertebrae_T5",
+    "vertebrae_T6",
+    "vertebrae_T7",
+    "vertebrae_T8",
+    "vertebrae_T9",
+    "zygomatic_arch_left",
+    "zygomatic_arch_right"
+  ],
+  "policy": "Exact official-bank strings are reused; semantic-neighbor suggestions are never auto-approved.",
+  "mappings": [
+    {
+      "project_class": "abdominal_cavity",
+      "canonical_prompt": "abdominal cavity",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "adrenal_gland_left",
+      "canonical_prompt": "left adrenal gland",
+      "canonical_bank_index": 4518,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "adrenal_gland_right",
+      "canonical_prompt": "right adrenal gland",
+      "canonical_bank_index": 9745,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "airway",
+      "canonical_prompt": "airway",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "airway_tree",
+      "canonical_prompt": "airway tree",
+      "canonical_bank_index": 198,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "airway_wall",
+      "canonical_prompt": "airway wall",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "anterior_eyeball_segment_left",
+      "canonical_prompt": "left anterior eyeball segment",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "anterior_eyeball_segment_right",
+      "canonical_prompt": "right anterior eyeball segment",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "anterior_scalene_left",
+      "canonical_prompt": "left anterior scalene",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "anterior_scalene_right",
+      "canonical_prompt": "right anterior scalene",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "aorta",
+      "canonical_prompt": "aorta",
+      "canonical_bank_index": 336,
+      "approved_variants": [
+        {
+          "text": "aortic vessel",
+          "bank_index": 436
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_brachiocephalic",
+      "canonical_prompt": "brachiocephalic artery",
+      "canonical_bank_index": 1297,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_common_carotid_left",
+      "canonical_prompt": "left common carotid artery",
+      "canonical_bank_index": 4981,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_common_carotid_right",
+      "canonical_prompt": "right common carotid artery",
+      "canonical_bank_index": 10101,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_internal_carotid_left",
+      "canonical_prompt": "left internal carotid artery",
+      "canonical_bank_index": 5602,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_internal_carotid_right",
+      "canonical_prompt": "right internal carotid artery",
+      "canonical_bank_index": 10728,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_subclavian_left",
+      "canonical_prompt": "left subclavian artery",
+      "canonical_bank_index": 6689,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "artery_subclavian_right",
+      "canonical_prompt": "right subclavian artery",
+      "canonical_bank_index": 11909,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "arytenoid_cartilage",
+      "canonical_prompt": "arytenoid cartilage",
+      "canonical_bank_index": 500,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "atrial_appendage_left",
+      "canonical_prompt": "left atrial appendage",
+      "canonical_bank_index": 4686,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "auditory_canal_left",
+      "canonical_prompt": "left auditory canal",
+      "canonical_bank_index": 4734,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "auditory_canal_right",
+      "canonical_prompt": "right auditory canal",
+      "canonical_bank_index": 9875,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "autochthon_left",
+      "canonical_prompt": "left autochthon",
+      "canonical_bank_index": 4742,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "autochthon_right",
+      "canonical_prompt": "right autochthon",
+      "canonical_bank_index": 9882,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "bladder",
+      "canonical_prompt": "urinary bladder",
+      "canonical_bank_index": 13900,
+      "approved_variants": [
+        {
+          "text": "bladder",
+          "bank_index": 1172
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "blood",
+      "canonical_prompt": "blood",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "body",
+      "canonical_prompt": "body",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "body_extremities",
+      "canonical_prompt": "body extremities",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "body_trunc",
+      "canonical_prompt": "body trunc",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "bones",
+      "canonical_prompt": "bones",
+      "canonical_bank_index": 1197,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "both_lips",
+      "canonical_prompt": "both lips",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "brachiocephalic_trunk",
+      "canonical_prompt": "brachiocephalic trunk",
+      "canonical_bank_index": 1301,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "brachiocephalic_vein_left",
+      "canonical_prompt": "left brachiocephalic vein",
+      "canonical_bank_index": 4787,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "brachiocephalic_vein_right",
+      "canonical_prompt": "right brachiocephalic vein",
+      "canonical_bank_index": 9922,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "brain",
+      "canonical_prompt": "brain",
+      "canonical_bank_index": 1317,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "brain_ventricle",
+      "canonical_prompt": "brain ventricle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "brainstem",
+      "canonical_prompt": "brainstem",
+      "canonical_bank_index": 1368,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "breast_left",
+      "canonical_prompt": "left breast",
+      "canonical_bank_index": 4794,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "breast_right",
+      "canonical_prompt": "right breast",
+      "canonical_bank_index": 9929,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "bronchus",
+      "canonical_prompt": "bronchus",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "buccal_mucosa",
+      "canonical_prompt": "buccal mucosa",
+      "canonical_bank_index": 1405,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "carotid_artery_left",
+      "canonical_prompt": "left carotid artery",
+      "canonical_bank_index": 4854,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "carotid_artery_right",
+      "canonical_prompt": "right carotid artery",
+      "canonical_bank_index": 9983,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "carpal",
+      "canonical_prompt": "carpal",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "carpal_left",
+      "canonical_prompt": "carpal left",
+      "canonical_bank_index": 1579,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "carpal_right",
+      "canonical_prompt": "carpal right",
+      "canonical_bank_index": 1580,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "caudate_nucleus",
+      "canonical_prompt": "caudate nucleus",
+      "canonical_bank_index": 1603,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cbd_stent",
+      "canonical_prompt": "cbd stent",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "celiac_aa (celiac_artery)",
+      "canonical_prompt": "celiac aa celiac artery",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "celiac_trunk",
+      "canonical_prompt": "celiac trunk",
+      "canonical_bank_index": 1627,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "central_sulcus",
+      "canonical_prompt": "central sulcus",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "cerebellum",
+      "canonical_prompt": "cerebellum",
+      "canonical_bank_index": 1734,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cerebrospinal_fluid",
+      "canonical_prompt": "cerebrospinal fluid",
+      "canonical_bank_index": 1796,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cervical_esophagus",
+      "canonical_prompt": "cervical esophagus",
+      "canonical_bank_index": 1818,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cheek_left",
+      "canonical_prompt": "left cheek",
+      "canonical_bank_index": 4934,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cheek_right",
+      "canonical_prompt": "right cheek",
+      "canonical_bank_index": 10064,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "clavicula_left",
+      "canonical_prompt": "left clavicula",
+      "canonical_bank_index": 4957,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "clavicula_right",
+      "canonical_prompt": "right clavicula",
+      "canonical_bank_index": 10084,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cochlear_left",
+      "canonical_prompt": "cochlear left",
+      "canonical_bank_index": 2008,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "cochlear_right",
+      "canonical_prompt": "cochlear right",
+      "canonical_bank_index": 2011,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "colon",
+      "canonical_prompt": "colon",
+      "canonical_bank_index": 2022,
+      "approved_variants": [
+        {
+          "text": "large bowel",
+          "bank_index": 4385
+        },
+        {
+          "text": "colonic lumen",
+          "bank_index": 2036
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "colostomy_bag",
+      "canonical_prompt": "colostomy bag",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "common_bile_duct",
+      "canonical_prompt": "common bile duct",
+      "canonical_bank_index": 2058,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "common_carotid_artery_left",
+      "canonical_prompt": "left common carotid artery",
+      "canonical_bank_index": 4981,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "common_carotid_artery_right",
+      "canonical_prompt": "right common carotid artery",
+      "canonical_bank_index": 10101,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "common_iliac_artery_left",
+      "canonical_prompt": "left common iliac artery",
+      "canonical_bank_index": 4994,
+      "approved_variants": [
+        {
+          "text": "common iliac artery left",
+          "bank_index": 2077
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "common_iliac_artery_right",
+      "canonical_prompt": "right common iliac artery",
+      "canonical_bank_index": 10112,
+      "approved_variants": [
+        {
+          "text": "common iliac artery right",
+          "bank_index": 2079
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "common_iliac_vein_left",
+      "canonical_prompt": "left common iliac vein",
+      "canonical_bank_index": 4997,
+      "approved_variants": [
+        {
+          "text": "common iliac vein left",
+          "bank_index": 2082
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "common_iliac_vein_right",
+      "canonical_prompt": "right common iliac vein",
+      "canonical_bank_index": 10114,
+      "approved_variants": [
+        {
+          "text": "common iliac vein right",
+          "bank_index": 2083
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "compact_bone",
+      "canonical_prompt": "compact bone",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "coronary_artery",
+      "canonical_prompt": "coronary artery",
+      "canonical_bank_index": 2184,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "costal_cartilages",
+      "canonical_prompt": "costal cartilages",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "cricoid_cartilage",
+      "canonical_prompt": "cricoid cartilage",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "cricopharyngeus",
+      "canonical_prompt": "cricopharyngeus",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "digastric_left",
+      "canonical_prompt": "left digastric",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "digastric_right",
+      "canonical_prompt": "right digastric",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "duodenum",
+      "canonical_prompt": "duodenum",
+      "canonical_bank_index": 2640,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "esophagus",
+      "canonical_prompt": "esophagus",
+      "canonical_bank_index": 2774,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "eye_lens_left",
+      "canonical_prompt": "left eye lens",
+      "canonical_bank_index": 5213,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "eye_lens_right",
+      "canonical_prompt": "right eye lens",
+      "canonical_bank_index": 10333,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "eyeball",
+      "canonical_prompt": "eyeball",
+      "canonical_bank_index": 2837,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "eyeball_left",
+      "canonical_prompt": "left eyeball",
+      "canonical_bank_index": 5217,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "eyeball_right",
+      "canonical_prompt": "right eyeball",
+      "canonical_bank_index": 10337,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "face",
+      "canonical_prompt": "face",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "fat",
+      "canonical_prompt": "fat",
+      "canonical_bank_index": 2866,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "femur_left",
+      "canonical_prompt": "left femur",
+      "canonical_bank_index": 5245,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "femur_right",
+      "canonical_prompt": "right femur",
+      "canonical_bank_index": 10366,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "fibula",
+      "canonical_prompt": "fibula",
+      "canonical_bank_index": 2962,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "fibula_left",
+      "canonical_prompt": "left fibula",
+      "canonical_bank_index": 5252,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "fibula_right",
+      "canonical_prompt": "right fibula",
+      "canonical_bank_index": 10373,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "fingers_left",
+      "canonical_prompt": "left fingers",
+      "canonical_bank_index": 5265,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "fingers_right",
+      "canonical_prompt": "right fingers",
+      "canonical_bank_index": 10386,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "frontal_lobe",
+      "canonical_prompt": "frontal lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "gall_bladder",
+      "canonical_prompt": "gallbladder",
+      "canonical_bank_index": 3105,
+      "approved_variants": [
+        {
+          "text": "gall bladder",
+          "bank_index": 3103
+        },
+        {
+          "text": "cholecystic sac",
+          "bank_index": 1914
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gland_structure",
+      "canonical_prompt": "gland structure",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "glottis",
+      "canonical_prompt": "glottis",
+      "canonical_bank_index": 3184,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gluteus_maximus_left",
+      "canonical_prompt": "left gluteus maximus",
+      "canonical_bank_index": 5332,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gluteus_maximus_right",
+      "canonical_prompt": "right gluteus maximus",
+      "canonical_bank_index": 10460,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gluteus_medius_left",
+      "canonical_prompt": "left gluteus medius",
+      "canonical_bank_index": 5335,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gluteus_medius_right",
+      "canonical_prompt": "right gluteus medius",
+      "canonical_bank_index": 10463,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gluteus_minimus_left",
+      "canonical_prompt": "left gluteus minimus",
+      "canonical_bank_index": 5338,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gluteus_minimus_right",
+      "canonical_prompt": "right gluteus minimus",
+      "canonical_bank_index": 10466,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gonads",
+      "canonical_prompt": "gonads",
+      "canonical_bank_index": 3255,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "gray_matter",
+      "canonical_prompt": "gray matter",
+      "canonical_bank_index": 3260,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "hard_palate",
+      "canonical_prompt": "hard palate",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "heart",
+      "canonical_prompt": "heart",
+      "canonical_bank_index": 3359,
+      "approved_variants": [
+        {
+          "text": "cardiac chambers",
+          "bank_index": 1521
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "heart_atrium_left",
+      "canonical_prompt": "left heart atrium",
+      "canonical_bank_index": 5369,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "heart_atrium_right",
+      "canonical_prompt": "right heart atrium",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "heart_myocardium",
+      "canonical_prompt": "heart myocardium",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "heart_tissue",
+      "canonical_prompt": "heart tissue",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "heart_ventricle_left",
+      "canonical_prompt": "left heart ventricle",
+      "canonical_bank_index": 5380,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "heart_ventricle_right",
+      "canonical_prompt": "right heart ventricle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "hepatic_vessel",
+      "canonical_prompt": "hepatic vasculature",
+      "canonical_bank_index": 3488,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "hip_left",
+      "canonical_prompt": "left hip",
+      "canonical_bank_index": 5412,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "hip_right",
+      "canonical_prompt": "right hip",
+      "canonical_bank_index": 10532,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "humerus_left",
+      "canonical_prompt": "left humerus",
+      "canonical_bank_index": 5473,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "humerus_right",
+      "canonical_prompt": "right humerus",
+      "canonical_bank_index": 10592,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "hyoid",
+      "canonical_prompt": "hyoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "hypopharynx",
+      "canonical_prompt": "hypopharynx",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "iliac_artery_left",
+      "canonical_prompt": "left iliac artery",
+      "canonical_bank_index": 5494,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "iliac_artery_right",
+      "canonical_prompt": "right iliac artery",
+      "canonical_bank_index": 10613,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "iliac_vena_left",
+      "canonical_prompt": "left iliac vena",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "iliac_vena_right",
+      "canonical_prompt": "right iliac vena",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "iliopsoas_left",
+      "canonical_prompt": "left iliopsoas",
+      "canonical_bank_index": 5515,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "iliopsoas_right",
+      "canonical_prompt": "right iliopsoas",
+      "canonical_bank_index": 10635,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "inferior_oblique_muscle_left",
+      "canonical_prompt": "left inferior oblique muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "inferior_oblique_muscle_right",
+      "canonical_prompt": "right inferior oblique muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "inferior_pharyngeal_constrictor",
+      "canonical_prompt": "inferior pharyngeal constrictor",
+      "canonical_bank_index": 3727,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "inferior_rectus_muscle_left",
+      "canonical_prompt": "left inferior rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "inferior_rectus_muscle_right",
+      "canonical_prompt": "right inferior rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "inferior_vena_cava",
+      "canonical_prompt": "inferior vena cava",
+      "canonical_bank_index": 3735,
+      "approved_variants": [
+        {
+          "text": "ivc",
+          "bank_index": 3932
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "insular_cortex",
+      "canonical_prompt": "insular cortex",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "internal_capsule",
+      "canonical_prompt": "internal capsule",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "internal_carotid_artery_left",
+      "canonical_prompt": "left internal carotid artery",
+      "canonical_bank_index": 5602,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "internal_carotid_artery_right",
+      "canonical_prompt": "right internal carotid artery",
+      "canonical_bank_index": 10728,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "internal_jugular_vein_left",
+      "canonical_prompt": "left internal jugular vein",
+      "canonical_bank_index": 5618,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "internal_jugular_vein_right",
+      "canonical_prompt": "right internal jugular vein",
+      "canonical_bank_index": 10745,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "intestine",
+      "canonical_prompt": "intestine",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "kidney",
+      "canonical_prompt": "kidney",
+      "canonical_bank_index": 3979,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "kidney_cortex",
+      "canonical_prompt": "kidney cortex",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "kidney_left",
+      "canonical_prompt": "left kidney",
+      "canonical_bank_index": 5655,
+      "approved_variants": [
+        {
+          "text": "left renal parenchyma",
+          "bank_index": 6496
+        },
+        {
+          "text": "left renal organ",
+          "bank_index": 6494
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "kidney_medulla",
+      "canonical_prompt": "kidney medulla",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "kidney_pelvicalyceal_system",
+      "canonical_prompt": "kidney pelvicalyceal system",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "kidney_right",
+      "canonical_prompt": "right kidney",
+      "canonical_bank_index": 10784,
+      "approved_variants": [
+        {
+          "text": "right renal parenchyma",
+          "bank_index": 11719
+        },
+        {
+          "text": "right renal organ",
+          "bank_index": 11717
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lacrimal_gland_left",
+      "canonical_prompt": "left lacrimal gland",
+      "canonical_bank_index": 5694,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lacrimal_gland_right",
+      "canonical_prompt": "right lacrimal gland",
+      "canonical_bank_index": 10820,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "larynx",
+      "canonical_prompt": "larynx",
+      "canonical_bank_index": 4410,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lateral_pterygoid_left",
+      "canonical_prompt": "left lateral pterygoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lateral_pterygoid_right",
+      "canonical_prompt": "right lateral pterygoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lateral_rectus_muscle_left",
+      "canonical_prompt": "left lateral rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lateral_rectus_muscle_right",
+      "canonical_prompt": "right lateral rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lentiform_nucleus",
+      "canonical_prompt": "lentiform nucleus",
+      "canonical_bank_index": 7064,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "levator_palpebrae_superioris_left",
+      "canonical_prompt": "left levator palpebrae superioris",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "levator_palpebrae_superioris_right",
+      "canonical_prompt": "right levator palpebrae superioris",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "levator_scapulae_left",
+      "canonical_prompt": "left levator scapulae",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "levator_scapulae_right",
+      "canonical_prompt": "right levator scapulae",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "liver",
+      "canonical_prompt": "liver",
+      "canonical_bank_index": 7220,
+      "approved_variants": [
+        {
+          "text": "hepatic parenchyma",
+          "bank_index": 3449
+        },
+        {
+          "text": "hepatic organ",
+          "bank_index": 3446
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_hepatic_vein",
+      "canonical_prompt": "hepatic vein",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "liver_portal_vein",
+      "canonical_prompt": "portal vein",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "liver_segment_1",
+      "canonical_prompt": "hepatic segment 1",
+      "canonical_bank_index": 3456,
+      "approved_variants": [
+        {
+          "text": "liver segment 1",
+          "bank_index": 7270
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_2",
+      "canonical_prompt": "hepatic segment 2",
+      "canonical_bank_index": 3457,
+      "approved_variants": [
+        {
+          "text": "liver segment 2",
+          "bank_index": 7271
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_3",
+      "canonical_prompt": "hepatic segment 3",
+      "canonical_bank_index": 3458,
+      "approved_variants": [
+        {
+          "text": "liver segment 3",
+          "bank_index": 7272
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_4",
+      "canonical_prompt": "liver segment 4",
+      "canonical_bank_index": 7273,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_5",
+      "canonical_prompt": "hepatic segment 5",
+      "canonical_bank_index": 3461,
+      "approved_variants": [
+        {
+          "text": "liver segment 5",
+          "bank_index": 7276
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_6",
+      "canonical_prompt": "hepatic segment 6",
+      "canonical_bank_index": 3462,
+      "approved_variants": [
+        {
+          "text": "liver segment 6",
+          "bank_index": 7278
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_7",
+      "canonical_prompt": "hepatic segment 7",
+      "canonical_bank_index": 3463,
+      "approved_variants": [
+        {
+          "text": "liver segment 7",
+          "bank_index": 7279
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "liver_segment_8",
+      "canonical_prompt": "hepatic segment 8",
+      "canonical_bank_index": 3464,
+      "approved_variants": [
+        {
+          "text": "liver segment 8",
+          "bank_index": 7281
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lung",
+      "canonical_prompt": "lungs",
+      "canonical_bank_index": 7609,
+      "approved_variants": [
+        {
+          "text": "lung",
+          "bank_index": 7556
+        },
+        {
+          "text": "pulmonary parenchyma",
+          "bank_index": 9242
+        },
+        {
+          "text": "lung fields",
+          "bank_index": 7571
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lung_left",
+      "canonical_prompt": "left lung",
+      "canonical_bank_index": 5850,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lung_lower_left_lobe",
+      "canonical_prompt": "lung lower left lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_lower_right_lobe",
+      "canonical_prompt": "lung lower right lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_middle_right_lobe",
+      "canonical_prompt": "lung middle right lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_pulmonary_arteries",
+      "canonical_prompt": "lung pulmonary arteries",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_pulmonary_veins",
+      "canonical_prompt": "lung pulmonary veins",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_right",
+      "canonical_prompt": "right lung",
+      "canonical_bank_index": 11000,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "lung_trachea_bronchia",
+      "canonical_prompt": "lung trachea bronchia",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_upper_left_lobe",
+      "canonical_prompt": "lung upper left lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_upper_right_lobe",
+      "canonical_prompt": "lung upper right lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "lung_vessels",
+      "canonical_prompt": "lung vessels",
+      "canonical_bank_index": 7606,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "mammary_gland_left",
+      "canonical_prompt": "left mammary gland",
+      "canonical_bank_index": 5900,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "mammary_gland_right",
+      "canonical_prompt": "right mammary gland",
+      "canonical_bank_index": 11069,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "mandible",
+      "canonical_prompt": "mandible",
+      "canonical_bank_index": 7732,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "masseter_left",
+      "canonical_prompt": "left masseter",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "masseter_right",
+      "canonical_prompt": "right masseter",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "medial_pterygoid_left",
+      "canonical_prompt": "left medial pterygoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "medial_pterygoid_right",
+      "canonical_prompt": "right medial pterygoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "medial_rectus_muscle_left",
+      "canonical_prompt": "left medial rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "medial_rectus_muscle_right",
+      "canonical_prompt": "right medial rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "mediastinal_tissue",
+      "canonical_prompt": "mediastinal tissue",
+      "canonical_bank_index": 7960,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "mediastinum",
+      "canonical_prompt": "mediastinum",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "metacarpal",
+      "canonical_prompt": "metacarpal",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "metacarpal_left",
+      "canonical_prompt": "left metacarpal",
+      "canonical_bank_index": 6038,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "metacarpal_right",
+      "canonical_prompt": "right metacarpal",
+      "canonical_bank_index": 11204,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "metatarsal",
+      "canonical_prompt": "metatarsal",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "metatarsal_left",
+      "canonical_prompt": "left metatarsal",
+      "canonical_bank_index": 6041,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "metatarsal_right",
+      "canonical_prompt": "right metatarsal",
+      "canonical_bank_index": 11207,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "middle_pharyngeal_constrictor",
+      "canonical_prompt": "middle pharyngeal constrictor",
+      "canonical_bank_index": 8144,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "middle_scalene_left",
+      "canonical_prompt": "left middle scalene",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "middle_scalene_right",
+      "canonical_prompt": "right middle scalene",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "muscle",
+      "canonical_prompt": "muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "muscle_of_head",
+      "canonical_prompt": "muscle of head",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "nasal_cavity_left",
+      "canonical_prompt": "left nasal cavity",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "nasal_cavity_right",
+      "canonical_prompt": "right nasal cavity",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "nasopharynx",
+      "canonical_prompt": "nasopharynx",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "occipital_lobe",
+      "canonical_prompt": "occipital lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "optic_chiasm",
+      "canonical_prompt": "optic chiasm",
+      "canonical_bank_index": 8446,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "optic_nerve_left",
+      "canonical_prompt": "left optic nerve",
+      "canonical_bank_index": 6149,
+      "approved_variants": [
+        {
+          "text": "optic nerve left",
+          "bank_index": 8455
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "optic_nerve_right",
+      "canonical_prompt": "right optic nerve",
+      "canonical_bank_index": 11322,
+      "approved_variants": [
+        {
+          "text": "optic nerve right",
+          "bank_index": 8462
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "oral_cavity",
+      "canonical_prompt": "oral cavity",
+      "canonical_bank_index": 8473,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "oropharynx",
+      "canonical_prompt": "oropharynx",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "pancreas",
+      "canonical_prompt": "pancreas",
+      "canonical_bank_index": 8544,
+      "approved_variants": [
+        {
+          "text": "pancreatic gland",
+          "bank_index": 8588
+        },
+        {
+          "text": "pancreatic parenchyma",
+          "bank_index": 8606
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "pancreas_body",
+      "canonical_prompt": "pancreas body",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "pancreas_head",
+      "canonical_prompt": "pancreas head",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "pancreas_tail",
+      "canonical_prompt": "pancreas tail",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "pancreatic_duct",
+      "canonical_prompt": "pancreatic duct",
+      "canonical_bank_index": 8576,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "parietal_lobe",
+      "canonical_prompt": "parietal lobe",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "parotid_gland_left",
+      "canonical_prompt": "left parotid gland",
+      "canonical_bank_index": 6227,
+      "approved_variants": [
+        {
+          "text": "parotid gland left",
+          "bank_index": 8661
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "parotid_gland_right",
+      "canonical_prompt": "right parotid gland",
+      "canonical_bank_index": 11410,
+      "approved_variants": [
+        {
+          "text": "parotid gland right",
+          "bank_index": 8664
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "parotid_glands",
+      "canonical_prompt": "parotid glands",
+      "canonical_bank_index": 8667,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "patella",
+      "canonical_prompt": "patella",
+      "canonical_bank_index": 8677,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "patella_left",
+      "canonical_prompt": "left patella",
+      "canonical_bank_index": 6234,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "patella_right",
+      "canonical_prompt": "right patella",
+      "canonical_bank_index": 11420,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "pericardium",
+      "canonical_prompt": "pericardium",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "phalanges_feet",
+      "canonical_prompt": "phalanges feet",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "phalanges_hand",
+      "canonical_prompt": "phalanges hand",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "pituitary_gland",
+      "canonical_prompt": "pituitary gland",
+      "canonical_bank_index": 8817,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "platysma_left",
+      "canonical_prompt": "left platysma",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "platysma_right",
+      "canonical_prompt": "right platysma",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "portal_vein_and_splenic_vein",
+      "canonical_prompt": "portal vein and splenic vein",
+      "canonical_bank_index": 8847,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "postcava",
+      "canonical_prompt": "inferior vena cava",
+      "canonical_bank_index": 3735,
+      "approved_variants": [
+        {
+          "text": "postcava",
+          "bank_index": 8878
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "posterior_eyeball_segment_left",
+      "canonical_prompt": "left posterior eyeball segment",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "posterior_eyeball_segment_right",
+      "canonical_prompt": "right posterior eyeball segment",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "posterior_scalene_left",
+      "canonical_prompt": "left posterior scalene",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "posterior_scalene_right",
+      "canonical_prompt": "right posterior scalene",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "prevertebral_left",
+      "canonical_prompt": "left prevertebral",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "prevertebral_right",
+      "canonical_prompt": "right prevertebral",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "prostate",
+      "canonical_prompt": "prostate",
+      "canonical_bank_index": 9053,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "prosthetic_breast_implant",
+      "canonical_prompt": "prosthetic breast implant",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "psoas_major_muscle_left",
+      "canonical_prompt": "left psoas major muscle",
+      "canonical_bank_index": 6435,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "psoas_major_muscle_right",
+      "canonical_prompt": "right psoas major muscle",
+      "canonical_bank_index": 11653,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "pulmonary_artery",
+      "canonical_prompt": "pulmonary artery",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "pulmonary_vein",
+      "canonical_prompt": "pulmonary vein",
+      "canonical_bank_index": 9262,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "radius",
+      "canonical_prompt": "radius",
+      "canonical_bank_index": 9525,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "radius_left",
+      "canonical_prompt": "left radius",
+      "canonical_bank_index": 6479,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "radius_right",
+      "canonical_prompt": "right radius",
+      "canonical_bank_index": 11701,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "rectum",
+      "canonical_prompt": "rectum",
+      "canonical_bank_index": 9560,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "rectus_abdominis_muscle_left",
+      "canonical_prompt": "left rectus abdominis muscle",
+      "canonical_bank_index": 6483,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "rectus_abdominis_muscle_right",
+      "canonical_prompt": "right rectus abdominis muscle",
+      "canonical_bank_index": 11705,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "renal_vein_left",
+      "canonical_prompt": "left renal vein",
+      "canonical_bank_index": 6503,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "renal_vein_right",
+      "canonical_prompt": "right renal vein",
+      "canonical_bank_index": 11725,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "rib_cartilage",
+      "canonical_prompt": "rib cartilage",
+      "canonical_bank_index": 9683,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "rib_left_1",
+      "canonical_prompt": "rib left 1",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_10",
+      "canonical_prompt": "rib left 10",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_11",
+      "canonical_prompt": "rib left 11",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_12",
+      "canonical_prompt": "rib left 12",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_2",
+      "canonical_prompt": "rib left 2",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_3",
+      "canonical_prompt": "rib left 3",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_4",
+      "canonical_prompt": "rib left 4",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_5",
+      "canonical_prompt": "rib left 5",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_6",
+      "canonical_prompt": "rib left 6",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_7",
+      "canonical_prompt": "rib left 7",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_8",
+      "canonical_prompt": "rib left 8",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_left_9",
+      "canonical_prompt": "rib left 9",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_1",
+      "canonical_prompt": "rib right 1",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_10",
+      "canonical_prompt": "rib right 10",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_11",
+      "canonical_prompt": "rib right 11",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_12",
+      "canonical_prompt": "rib right 12",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_2",
+      "canonical_prompt": "rib right 2",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_3",
+      "canonical_prompt": "rib right 3",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_4",
+      "canonical_prompt": "rib right 4",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_5",
+      "canonical_prompt": "rib right 5",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_6",
+      "canonical_prompt": "rib right 6",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_7",
+      "canonical_prompt": "rib right 7",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_8",
+      "canonical_prompt": "rib right 8",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "rib_right_9",
+      "canonical_prompt": "rib right 9",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sacrum",
+      "canonical_prompt": "sacrum",
+      "canonical_bank_index": 12321,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "scalp",
+      "canonical_prompt": "scalp",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "scapula_left",
+      "canonical_prompt": "left scapula",
+      "canonical_bank_index": 6591,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "scapula_right",
+      "canonical_prompt": "right scapula",
+      "canonical_bank_index": 11814,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "seminal_vesicle",
+      "canonical_prompt": "seminal vesicle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "septum_pellucidum",
+      "canonical_prompt": "septum pellucidum",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sigmoid_colon",
+      "canonical_prompt": "sigmoid colon",
+      "canonical_bank_index": 12469,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "skin",
+      "canonical_prompt": "skin",
+      "canonical_bank_index": 12615,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "skull",
+      "canonical_prompt": "skull",
+      "canonical_bank_index": 12617,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "small_bowel",
+      "canonical_prompt": "small bowel",
+      "canonical_bank_index": 12624,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "soft_palate",
+      "canonical_prompt": "soft palate",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "spinal_canal",
+      "canonical_prompt": "spinal canal",
+      "canonical_bank_index": 12684,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "spinal_cord",
+      "canonical_prompt": "spinal cord",
+      "canonical_bank_index": 12690,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "spleen",
+      "canonical_prompt": "spleen",
+      "canonical_bank_index": 12714,
+      "approved_variants": [
+        {
+          "text": "splenic organ",
+          "bank_index": 12733
+        },
+        {
+          "text": "splenic parenchyma",
+          "bank_index": 12734
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "spongy_bone",
+      "canonical_prompt": "spongy bone",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sterno_thyroid_left",
+      "canonical_prompt": "left sterno thyroid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sterno_thyroid_right",
+      "canonical_prompt": "right sterno thyroid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sternocleidomastoid_left",
+      "canonical_prompt": "left sternocleidomastoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sternocleidomastoid_right",
+      "canonical_prompt": "right sternocleidomastoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "sternum",
+      "canonical_prompt": "sternum",
+      "canonical_bank_index": 12761,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "sternum_corpus",
+      "canonical_prompt": "sternum corpus",
+      "canonical_bank_index": 12763,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "sternum_manubrium",
+      "canonical_prompt": "sternum manubrium",
+      "canonical_bank_index": 12765,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "stomach",
+      "canonical_prompt": "stomach",
+      "canonical_bank_index": 12767,
+      "approved_variants": [
+        {
+          "text": "gastric lumen",
+          "bank_index": 3134
+        },
+        {
+          "text": "gastric organ",
+          "bank_index": 3137
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "styloid_process_left",
+      "canonical_prompt": "left styloid process",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "styloid_process_right",
+      "canonical_prompt": "right styloid process",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "subarachnoid_space",
+      "canonical_prompt": "subarachnoid space",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "subclavian_artery_left",
+      "canonical_prompt": "left subclavian artery",
+      "canonical_bank_index": 6689,
+      "approved_variants": [
+        {
+          "text": "subclavian artery left",
+          "bank_index": 12815
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "subclavian_artery_right",
+      "canonical_prompt": "right subclavian artery",
+      "canonical_bank_index": 11909,
+      "approved_variants": [
+        {
+          "text": "subclavian artery right",
+          "bank_index": 12817
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "subcutaneous_adipose_tissue",
+      "canonical_prompt": "subcutaneous adipose tissue",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "submandibular_gland_left",
+      "canonical_prompt": "left submandibular gland",
+      "canonical_bank_index": 6701,
+      "approved_variants": [
+        {
+          "text": "submandibular gland left",
+          "bank_index": 12844
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "submandibular_gland_right",
+      "canonical_prompt": "right submandibular gland",
+      "canonical_bank_index": 11917,
+      "approved_variants": [
+        {
+          "text": "submandibular gland right",
+          "bank_index": 12847
+        }
+      ],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "submandibular_glands",
+      "canonical_prompt": "submandibular glands",
+      "canonical_bank_index": 12849,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "superior_mesenteric_artery",
+      "canonical_prompt": "superior mesenteric artery",
+      "canonical_bank_index": 12899,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "superior_oblique_muscle_left",
+      "canonical_prompt": "left superior oblique muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "superior_oblique_muscle_right",
+      "canonical_prompt": "right superior oblique muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "superior_rectus_muscle_left",
+      "canonical_prompt": "left superior rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "superior_rectus_muscle_right",
+      "canonical_prompt": "right superior rectus muscle",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "superior_vena_cava",
+      "canonical_prompt": "superior vena cava",
+      "canonical_bank_index": 12929,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "supraglottis",
+      "canonical_prompt": "supraglottis",
+      "canonical_bank_index": 12945,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "tarsal",
+      "canonical_prompt": "tarsal",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "tarsal_left",
+      "canonical_prompt": "left tarsal",
+      "canonical_bank_index": 6777,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "tarsal_right",
+      "canonical_prompt": "right tarsal",
+      "canonical_bank_index": 12003,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "temporal_lobe",
+      "canonical_prompt": "temporal lobe",
+      "canonical_bank_index": 13185,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "temporalis_left",
+      "canonical_prompt": "left temporalis",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "temporalis_right",
+      "canonical_prompt": "right temporalis",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "thalamus",
+      "canonical_prompt": "thalamus",
+      "canonical_bank_index": 13239,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "thoracic_cavity",
+      "canonical_prompt": "thoracic cavity",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "thymus",
+      "canonical_prompt": "thymus",
+      "canonical_bank_index": 13435,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "thyrohyoid_left",
+      "canonical_prompt": "left thyrohyoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "thyrohyoid_right",
+      "canonical_prompt": "right thyrohyoid",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "thyroid_cartilage",
+      "canonical_prompt": "thyroid cartilage",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "thyroid_gland",
+      "canonical_prompt": "thyroid gland",
+      "canonical_bank_index": 13440,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "thyroid_left",
+      "canonical_prompt": "left thyroid",
+      "canonical_bank_index": 6852,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "thyroid_right",
+      "canonical_prompt": "right thyroid",
+      "canonical_bank_index": 12090,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "tibia",
+      "canonical_prompt": "tibia",
+      "canonical_bank_index": 13460,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "tibia_left",
+      "canonical_prompt": "left tibia",
+      "canonical_bank_index": 6858,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "tibia_right",
+      "canonical_prompt": "right tibia",
+      "canonical_bank_index": 12096,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "toes_left",
+      "canonical_prompt": "left toes",
+      "canonical_bank_index": 6883,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "toes_right",
+      "canonical_prompt": "right toes",
+      "canonical_bank_index": 12118,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "tongue",
+      "canonical_prompt": "tongue",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "trachea",
+      "canonical_prompt": "trachea",
+      "canonical_bank_index": 13598,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "trapezius_left",
+      "canonical_prompt": "left trapezius",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "trapezius_right",
+      "canonical_prompt": "right trapezius",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "ulna",
+      "canonical_prompt": "ulna",
+      "canonical_bank_index": 13739,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "ulna_left",
+      "canonical_prompt": "left ulna",
+      "canonical_bank_index": 6903,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "ulna_right",
+      "canonical_prompt": "right ulna",
+      "canonical_bank_index": 12141,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "uterocervix",
+      "canonical_prompt": "uterocervix",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "uterus",
+      "canonical_prompt": "uterus",
+      "canonical_bank_index": 13930,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "veins",
+      "canonical_prompt": "veins",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "venous_sinuses",
+      "canonical_prompt": "venous sinuses",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C1",
+      "canonical_prompt": "vertebrae c1",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C2",
+      "canonical_prompt": "vertebrae c2",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C3",
+      "canonical_prompt": "vertebrae c3",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C4",
+      "canonical_prompt": "vertebrae c4",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C5",
+      "canonical_prompt": "vertebrae c5",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C6",
+      "canonical_prompt": "vertebrae c6",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_C7",
+      "canonical_prompt": "vertebrae c7",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_L1",
+      "canonical_prompt": "vertebrae l1",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_L2",
+      "canonical_prompt": "vertebrae l2",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_L3",
+      "canonical_prompt": "vertebrae l3",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_L4",
+      "canonical_prompt": "vertebrae l4",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_L5",
+      "canonical_prompt": "vertebrae l5",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_S1",
+      "canonical_prompt": "vertebrae s1",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T1",
+      "canonical_prompt": "vertebrae t1",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T10",
+      "canonical_prompt": "vertebrae t10",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T11",
+      "canonical_prompt": "vertebrae t11",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T12",
+      "canonical_prompt": "vertebrae t12",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T2",
+      "canonical_prompt": "vertebrae t2",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T3",
+      "canonical_prompt": "vertebrae t3",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T4",
+      "canonical_prompt": "vertebrae t4",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T5",
+      "canonical_prompt": "vertebrae t5",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T6",
+      "canonical_prompt": "vertebrae t6",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T7",
+      "canonical_prompt": "vertebrae t7",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T8",
+      "canonical_prompt": "vertebrae t8",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "vertebrae_T9",
+      "canonical_prompt": "vertebrae t9",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "white_matter",
+      "canonical_prompt": "white matter",
+      "canonical_bank_index": 14139,
+      "approved_variants": [],
+      "mapping_source": "official_exact_match",
+      "review_status": "official_bank_exact_match",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_precomputed_embedding_bank",
+      "mapping_provenance": "VoxTell labels.json exact string match"
+    },
+    {
+      "project_class": "zygomatic_arch_left",
+      "canonical_prompt": "left zygomatic arch",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    },
+    {
+      "project_class": "zygomatic_arch_right",
+      "canonical_prompt": "right zygomatic arch",
+      "canonical_bank_index": null,
+      "approved_variants": [],
+      "mapping_source": "project_extension",
+      "review_status": "runtime_supported_canonical_anatomical_term",
+      "manual_semantic_review_required": false,
+      "encoding_source": "official_qwen3_embedding_4b_instruction_wrapper",
+      "mapping_provenance": "project class canonical name; no medical-description rewrite"
+    }
+  ]
+}

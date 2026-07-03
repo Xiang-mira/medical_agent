@@ -422,6 +422,20 @@ def _load_case_presence_context(case: dict[str, str], ct: Path, case_id: str, ca
     has_thorax = bool(coverage_terms & {"thorax", "chest", "lung", "cardiac"})
     has_extremities = bool(coverage_terms & {"extremity", "extremities", "arms", "legs"})
     coverage_evidence: list[str] = []
+    dataset_prior = None
+    dataset_text = " ".join([
+        str(case.get("dataset") or ""),
+        str(case.get("dataset_name") or ""),
+        str(case_id),
+        str(ct),
+    ]).lower()
+    if "pants" in dataset_text:
+        dataset_prior = "PanTS_abdomen_only_not_373_whole_body"
+        has_abdomen = True
+        # PanTS may include lung bases, but the dataset prior cannot establish
+        # complete thorax, head/neck, pelvis, or extremity coverage.
+        has_thorax = False
+        coverage_evidence.append(f"dataset_prior:{dataset_prior}")
     if auto_coverage:
         has_abdomen = bool(auto_coverage.get("has_abdomen_coverage", has_abdomen))
         has_pelvis = bool(auto_coverage.get("has_pelvis_coverage", has_pelvis))
@@ -440,9 +454,13 @@ def _load_case_presence_context(case: dict[str, str], ct: Path, case_id: str, ca
         "has_pelvis_coverage": has_pelvis,
         "has_head_coverage": has_head,
         "has_thorax_coverage": has_thorax,
+        "has_partial_thorax_coverage": bool(
+            auto_coverage.get("has_partial_thorax_coverage", False)
+        ) if auto_coverage else False,
         "has_extremity_coverage": has_extremities,
         "has_region_evidence": has_region_evidence,
         "coverage_evidence": coverage_evidence,
+        "dataset_prior": dataset_prior,
         "excludes_head": excludes_head,
     }
 
@@ -485,6 +503,16 @@ def _augment_presence_from_model_landmarks(
     evidence = list(updated.get("coverage_evidence", []))
     for region, models in support.items():
         if len(models) >= 2:
+            if (
+                updated.get("dataset_prior") == "PanTS_abdomen_only_not_373_whole_body"
+                and region != "abdomen"
+            ):
+                if region == "thorax":
+                    updated["has_partial_thorax_coverage"] = True
+                evidence.append(
+                    f"independent_model_landmarks_partial_only:{region}:{','.join(sorted(models))}"
+                )
+                continue
             updated[key_map[region]] = True
             evidence.append(f"independent_model_landmarks:{region}:{','.join(sorted(models))}")
     updated["coverage_evidence"] = evidence
@@ -1415,6 +1443,76 @@ def _materialize_case_373_targets(
     negative_absent_training_weight: float = 0.1,
 ) -> dict[str, Any]:
     """Ensure each formal target has a supervision record for this case."""
+    formal_organs = set(organs)
+    selection_rows[:] = [row for row in selection_rows if str(row.get("organ") or "") in formal_organs]
+    selected_metadata[:] = [row for row in selected_metadata if str(row.get("organ") or "") in formal_organs]
+    contract_type_map = {
+        "hard": "positive_hard",
+        "soft": "positive_soft",
+        "provisional": "rejected",
+        "review_gap": "unresolved_visible",
+        "unresolved_review": "unresolved_visible",
+        "absent_negative": "negative_absent",
+    }
+    for row in [*selection_rows, *selected_metadata]:
+        legacy_type = str(row.get("target_type") or "hard")
+        row.setdefault("legacy_target_type", legacy_type)
+        row["target_type"] = contract_type_map.get(legacy_type, legacy_type)
+        existing_fov = str(row.get("fov_status") or "")
+        row["fov_status"] = (
+            existing_fov
+            if existing_fov in {"fully_visible", "partially_visible", "out_of_fov", "unknown"}
+            else _fov_status_for_organ(str(row.get("organ") or ""), presence_context)
+        )
+        if (
+            row["fov_status"] == "partially_visible"
+            and row["target_type"] in {"positive_hard", "positive_soft"}
+        ):
+            row["legacy_target_type_before_partial_fov"] = row["target_type"]
+            row["target_type"] = "partial_fov"
+        if row["target_type"] == "negative_absent":
+            if row["fov_status"] != "out_of_fov":
+                row["target_type"] = (
+                    "partial_fov"
+                    if row["fov_status"] == "partially_visible"
+                    else "unresolved_visible"
+                )
+                row["absence_confidence"] = "not_established"
+                row["zero_mask_role"] = "io_placeholder_not_training_target"
+                row["negative_source"] = None
+                row["negative_reason"] = None
+            else:
+                row.update({
+                    "absence_confidence": "high",
+                    "grade_scope": "absence",
+                    "record_type": "negative_absent",
+                    "selection_method": "negative_absent",
+                    "zero_mask_role": "negative_absent_target_mask",
+                    "negative_source": "case_373_expected_absent",
+                    "dataset_role": "semantic_absent_negative",
+                    "fov_evidence": list(presence_context.get("coverage_evidence") or []),
+                })
+        if row["target_type"] in {"unresolved_visible", "partial_fov", "rejected"}:
+            row["training_weight"] = 0.0
+            row["distillation_eligible"] = False
+            row["should_enter_student_training"] = False
+        if (
+            row["target_type"] in {"positive_hard", "positive_soft"}
+            and (
+                row.get("should_enter_student_training") is False
+                or row.get("selection_method") in {
+                    "label_critic_audit_only",
+                    "label_critic_inconclusive",
+                    "single_teacher_provisional",
+                }
+            )
+        ):
+            row["training_weight"] = 0.0
+            row["distillation_eligible"] = False
+            row["should_enter_student_training"] = False
+            row["training_block_reason"] = (
+                "selection_not_formally_eligible_under_current_gate"
+            )
     selection_by_organ = {str(row.get("organ")): row for row in selection_rows if row.get("organ")}
     zero_mask = _zero_mask_path_for_case(ct, case_updated)
     absent_added = 0
@@ -1423,15 +1521,58 @@ def _materialize_case_373_targets(
     for organ in organs:
         if organ in selection_by_organ:
             continue
+        fov_status = _fov_status_for_organ(organ, presence_context)
         expected_presence = _expected_presence_for_organ(organ, presence_context)
-        if expected_presence != "expected_absent":
+        if fov_status != "out_of_fov":
             review_gap_missing += 1
+            reason = "no teacher candidate and absence is not proven by scan coverage"
+            target_type = "partial_fov" if fov_status == "partially_visible" else "unresolved_visible"
+            row = {
+                "case_id": case_id, "ct_path": str(ct), "organ": organ,
+                "expected_presence": expected_presence, "fov_status": fov_status,
+                "target_type": target_type,
+                "legacy_target_type": "unresolved_review",
+                "record_type": target_type,
+                "grade": "D", "grade_scope": "unresolved_target",
+                "confidence": 0.0, "label_confidence": 0.0,
+                "training_weight": 0.0, "distillation_eligible": False,
+                "supervision_type": "none", "distillation_role": "review_only",
+                "selection_method": "none", "selection_status": "review_required",
+                "reason": reason, "selected_reason": reason,
+                "rejected_reasons": {}, "failure_modes": ["missing_candidate"],
+                "candidate_count": 0, "candidate_ids": [], "candidate_models": [],
+                "teacher_names": [], "teacher_families": [],
+                "selected_candidate": None, "selected_candidate_id": None,
+                "selected_teacher": None, "selected_family": None,
+                "selected_model": None, "source_model": None,
+                "selected_prediction": zero_mask, "mask_path": zero_mask,
+                "mask": zero_mask, "final_mask": zero_mask, "overlay_path": None,
+                "zero_mask_role": "io_placeholder_not_training_target",
+                "labelcritic_called": False,
+                "labelcritic_skipped_reason": "no_candidate_and_absence_unproven",
+                "labelcritic_prompt_version": None,
+                "quality_flags": ["missing_candidate"],
+                "review_flags": ["missing_candidate", "absence_unproven"],
+                "quality_status": "review_required",
+                "publication_status": "withheld_unresolved",
+                "should_enter_student_training": False,
+                "absence_confidence": "not_established",
+                "fov_evidence": list(presence_context.get("coverage_evidence") or []),
+                "metric_target": "none",
+                "metric_subject": "E-step unresolved target",
+                "metric_comparison": "none",
+                "metric_interpretation": "not_evaluable",
+            }
+            selection_rows.append(dict(row))
+            selected_metadata.append(dict(row))
+            selection_by_organ[organ] = row
             continue
         if not zero_mask:
             geometry_failures += 1
             selection_rows.append({
                 "case_id": case_id, "ct_path": str(ct), "organ": organ,
-                "expected_presence": expected_presence, "target_type": "review_gap",
+                "expected_presence": expected_presence, "fov_status": fov_status,
+                "target_type": "unresolved_visible", "legacy_target_type": "review_gap",
                 "selection_method": "none", "selection_status": "missing",
                 "reason": "missing_geometry_for_negative", "candidate_count": 0,
                 "candidate_models": [], "review_flags": ["missing_geometry_for_negative"],
@@ -1441,15 +1582,20 @@ def _materialize_case_373_targets(
         reason = "organ outside scan/body region; all-zero mask is valid negative target"
         row = {
             "case_id": case_id, "ct_path": str(ct), "organ": organ,
-            "expected_presence": expected_presence, "fov_status": expected_presence,
-            "target_type": "absent_negative", "grade": "A", "grade_scope": "absence_target",
+            "expected_presence": expected_presence, "fov_status": fov_status,
+            "target_type": "negative_absent", "legacy_target_type": "absent_negative",
+            "grade": "A", "grade_scope": "absence",
+            "record_type": "negative_absent",
+            "absence_confidence": "high",
+            "fov_evidence": list(presence_context.get("coverage_evidence") or []),
             "confidence": 1.0, "label_confidence": 1.0,
             "training_weight": float(negative_absent_training_weight),
             "distillation_eligible": float(negative_absent_training_weight) > 0.0,
             "supervision_type": "negative", "distillation_role": "negative",
-            "selection_method": "absent_negative", "selection_status": "selected",
+            "selection_method": "negative_absent", "selection_status": "selected",
             "reason": reason, "selected_reason": reason, "rejected_reasons": {}, "failure_modes": [],
-            "candidate_count": 0, "candidate_models": [],
+            "candidate_count": 0, "candidate_ids": [], "candidate_models": [],
+            "teacher_names": [], "teacher_families": [],
             "comparison_candidate_count": 0, "comparison_candidate_models": [],
             "selected_candidate": None, "selected_candidate_id": None,
             "selected_teacher": None, "selected_family": None,
@@ -1457,15 +1603,20 @@ def _materialize_case_373_targets(
             "selected_prediction": zero_mask,
             "labelcritic_called": False, "labelcritic_compare_used": False,
             "labelcritic_skipped_reason": "absent_negative_no_candidate_ranking_needed",
+            "labelcritic_prompt_version": None,
             "labelcritic_grade_used": False,
-            "mask_path": zero_mask, "mask": zero_mask, "final_mask": zero_mask,
-            "zero_mask_role": "absent_negative_target_mask",
+            "mask_path": zero_mask, "mask": zero_mask, "final_mask": zero_mask, "overlay_path": None,
+            "zero_mask_role": "negative_absent_target_mask",
             "negative_reason": "out_of_scan_by_scan_coverage",
             "negative_source": "case_373_expected_absent",
-            "dataset_role": "absent_negative",
+            "dataset_role": "semantic_absent_negative",
             "ground_truth_status": "valid_absent_negative",
             "metric_family": "absence_supervision",
             "metric_scope": "all_zero_negative_target_for_absent_organ",
+            "metric_target": "all-zero target",
+            "metric_subject": "E-step output",
+            "metric_comparison": "e_step_all_zero_absent_negative_target",
+            "metric_interpretation": "negative_absence_quality",
             "accuracy_warning": "Absent-negative all-zero masks are scan-coverage supervision, not expert positive segmentations.",
             "scoring_schema_version": "autolabel_core_v3_absent_negative",
             "quality_flags": [], "review_flags": [], "quality_status": "ok",
@@ -1491,7 +1642,12 @@ def _materialize_case_373_targets(
         "negative_geometry_failures": geometry_failures,
         "zero_mask": zero_mask,
         "target_type_counts": target_type_counts,
-        "complete_case_373": len({str(r.get("organ")) for r in selection_rows if r.get("organ")}) == len(set(organs)),
+        "complete_case_373": (
+            len(selection_rows) == len(organs)
+            and len({str(r.get("organ")) for r in selection_rows if r.get("organ")}) == len(set(organs))
+        ),
+        "complete_case_373_semantics": "record_and_output_contract_only_not_visibility_or_accuracy",
+        "target_identity_holds": sum(target_type_counts.values()) == len(organs),
     }
 
 
@@ -1935,6 +2091,154 @@ def _mask_dice_3d(a_path: str | Path, b_path: str | Path, cache: _CaseMaskCache 
         return None
 
 
+def _geometric_teacher_consensus_selection(
+    candidates: list[dict[str, Any]],
+    *,
+    near_identical_dice: float,
+    mask_cache: _CaseMaskCache | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Family-free complete-link teacher consensus selection.
+
+    This is intentionally based only on original teacher masks, model keys,
+    geometry/QC eligibility already enforced upstream, and the complete 3D Dice
+    matrix. ``evidence_family`` is retained in the returned audit metadata but
+    never participates in cluster membership, winner selection, or training
+    eligibility.
+    """
+    excluded: list[dict[str, Any]] = []
+    real_teachers: list[dict[str, Any]] = []
+    non_teacher_families = {"voxtell_student", "prior_pseudo_label"}
+    for candidate in candidates:
+        model = str(candidate.get("model") or candidate.get("model_key") or "")
+        family = str(candidate.get("evidence_family") or "")
+        if (
+            candidate.get("is_fusion")
+            or family in non_teacher_families
+            or model in {"fusion_consensus", "round_prev_selected", "previous_round_selected"}
+            or "student" in model.lower()
+        ):
+            excluded.append({
+                "model": model,
+                "reason": "not_original_teacher_for_geometric_consensus",
+                "evidence_family": family or None,
+            })
+            continue
+        if not candidate.get("prediction") or not Path(str(candidate["prediction"])).exists():
+            excluded.append({"model": model, "reason": "missing_prediction"})
+            continue
+        real_teachers.append(candidate)
+
+    model_keys = {str(c.get("model") or c.get("model_key") or "") for c in real_teachers}
+    base: dict[str, Any] = {
+        "primary_selector": "complete_link_geometric_teacher_consensus",
+        "geometric_consensus_threshold": float(near_identical_dice),
+        "geometric_consensus_policy": "family_free_original_teacher_complete_link",
+        "family_role": "audit_only_not_used_for_selection_or_training_gate",
+        "geometric_consensus_excluded_candidates": excluded,
+    }
+    if len(model_keys) < 2 or len(real_teachers) < 2:
+        return None, {**base, "geometric_consensus_status": "insufficient_teacher_models"}
+
+    n = len(real_teachers)
+    dice_by_pair: dict[tuple[int, int], float | None] = {}
+    matrix: list[dict[str, Any]] = []
+    geometry_failed = False
+    for i in range(n):
+        for j in range(i + 1, n):
+            d3 = _mask_dice_3d(
+                real_teachers[i]["prediction"],
+                real_teachers[j]["prediction"],
+                cache=mask_cache,
+            )
+            dice_by_pair[(i, j)] = d3
+            if d3 is None:
+                geometry_failed = True
+            matrix.append({
+                "candidate_a": real_teachers[i].get("model"),
+                "candidate_b": real_teachers[j].get("model"),
+                "dice_3d": round(float(d3), 6) if d3 is not None else None,
+                "passes_threshold": bool(d3 is not None and d3 >= near_identical_dice),
+            })
+    if geometry_failed:
+        return None, {
+            **base,
+            "geometric_consensus_status": "abstain_geometry_unreadable_or_mismatch",
+            "geometric_pairwise_dice": matrix,
+        }
+
+    adjacency = {i: set() for i in range(n)}
+    for (i, j), d3 in dice_by_pair.items():
+        if d3 is not None and d3 >= near_identical_dice:
+            adjacency[i].add(j)
+            adjacency[j].add(i)
+
+    # Bron-Kerbosch maximal clique enumeration is compact and gives exact
+    # complete-link clusters for the small candidate sets used here.
+    cliques: list[set[int]] = []
+
+    def bronk(r: set[int], p: set[int], x: set[int]) -> None:
+        if not p and not x:
+            cliques.append(set(r))
+            return
+        pivot = next(iter(p | x), None)
+        search = set(p - (adjacency[pivot] if pivot is not None else set()))
+        for vertex in sorted(search, key=lambda idx: str(real_teachers[idx].get("model") or "")):
+            bronk(r | {vertex}, p & adjacency[vertex], x & adjacency[vertex])
+            p.remove(vertex)
+            x.add(vertex)
+
+    bronk(set(), set(range(n)), set())
+    eligible_cliques = [
+        clique for clique in cliques
+        if len({str(real_teachers[idx].get("model") or "") for idx in clique}) >= 2
+    ]
+    if not eligible_cliques:
+        return None, {
+            **base,
+            "geometric_consensus_status": "abstain_no_complete_link_cluster",
+            "geometric_pairwise_dice": matrix,
+        }
+    max_size = max(len(clique) for clique in eligible_cliques)
+    largest = [clique for clique in eligible_cliques if len(clique) == max_size]
+    cluster_summaries = [
+        {
+            "models": sorted(str(real_teachers[idx].get("model") or "") for idx in clique),
+            "size": len(clique),
+        }
+        for clique in eligible_cliques
+    ]
+    if len(largest) != 1:
+        return None, {
+            **base,
+            "geometric_consensus_status": "abstain_tied_largest_clusters",
+            "geometric_pairwise_dice": matrix,
+            "geometric_consensus_clusters": cluster_summaries,
+        }
+
+    cluster = largest[0]
+    medoid_scores: list[tuple[float, str, str, dict[str, Any]]] = []
+    for idx in cluster:
+        others = [other for other in cluster if other != idx]
+        avg = sum(float(dice_by_pair[tuple(sorted((idx, other)))]) for other in others) / max(1, len(others))
+        medoid_scores.append((
+            avg,
+            str(real_teachers[idx].get("model") or ""),
+            str(Path(real_teachers[idx].get("prediction") or "").resolve()),
+            real_teachers[idx],
+        ))
+    # Higher mean Dice wins; ties are deterministic by model/path.
+    winner = sorted(medoid_scores, key=lambda item: (-item[0], item[1], item[2]))[0][3]
+    return winner, {
+        **base,
+        "geometric_consensus_status": "selected",
+        "geometric_pairwise_dice": matrix,
+        "geometric_consensus_clusters": cluster_summaries,
+        "geometric_consensus_cluster_models": sorted(str(real_teachers[idx].get("model") or "") for idx in cluster),
+        "geometric_consensus_cluster_size": len(cluster),
+        "geometric_consensus_medoid_mean_dice": round(float(sorted(medoid_scores, key=lambda item: (-item[0], item[1], item[2]))[0][0]), 6),
+    }
+
+
 def _pick_reference_fallback(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     """Fallback selection when LabelCritic is unavailable or inconclusive.
 
@@ -1946,6 +2250,48 @@ def _pick_reference_fallback(candidates: list[dict[str, Any]]) -> dict[str, Any]
     if with_dice:
         return max(with_dice, key=lambda c: float(c.get("dice") or -1))
     return primary_pool[0]
+
+
+def _candidate_id(case_id: str, organ: str, candidate: dict[str, Any]) -> str:
+    payload = "|".join([
+        str(case_id),
+        str(organ),
+        str(candidate.get("model") or ""),
+        str(Path(candidate.get("prediction") or "").resolve()),
+    ])
+    return f"cand_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _candidate_prompt_context(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Return only anonymous, objective mask evidence for the VLM adapter."""
+    qc = candidate.get("candidate_qc") or {}
+    return {
+        "candidate_id": candidate.get("candidate_id"),
+        "qc_status": candidate.get("candidate_qc_status"),
+        "qc_flags": candidate.get("candidate_qc_flags", []),
+        "foreground_voxel_count": qc.get("mask_voxels"),
+        "volume_mm3": qc.get("mask_volume_mm3"),
+        "bbox_voxel": qc.get("bbox_voxel"),
+        "connected_components": qc.get("connected_components"),
+        "boundary_contacts": qc.get("boundary_contacts"),
+        "centroid_ras_mm": qc.get("centroid_ras_mm"),
+        "centroid_laterality": qc.get("centroid_laterality"),
+        "truncation_suspected": qc.get("truncation_suspected"),
+        "fov_status": candidate.get("fov_status") or candidate.get("expected_presence"),
+    }
+
+
+def _sha256_file(path: str | Path | None) -> str | None:
+    if not path:
+        return None
+    try:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except Exception:
+        return None
 
 
 def _mask_voxel_count(path: str | Path | None, cache: _CaseMaskCache | None = None) -> int | None:
@@ -1978,6 +2324,10 @@ def _verify_annotation_cached(
         "organ": organ,
         "metric_family": "pseudo_consistency",
         "metric_scope": "prediction_vs_prior_or_selected_pseudo_reference",
+        "metric_target": "pseudo-label",
+        "metric_subject": "E-step output",
+        "metric_comparison": "candidate_vs_prior_or_selected_pseudo_reference",
+        "metric_interpretation": "pseudo_label_consistency",
         "ground_truth_status": "pseudo_label_candidate",
         "accuracy_warning": "DSC is pseudo-label consistency unless the caller explicitly supplies expert fine labels.",
         "dsc_replace_threshold": dsc_replace_threshold,
@@ -2114,6 +2464,10 @@ def _evaluate_candidate_for_organ(
         "reference_provenance": _historical_reference_provenance(current_ref) if current_ref_exists else None,
         "metric_family": "pseudo_consistency",
         "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
+        "metric_target": "pseudo-label",
+        "metric_subject": "E-step output",
+        "metric_comparison": "candidate_vs_prior_or_selected_pseudo_reference",
+        "metric_interpretation": "pseudo_label_consistency",
         "ground_truth_status": "pseudo_label_candidate",
         "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
         "dice": dice,
@@ -2132,6 +2486,9 @@ def _evaluate_candidate_for_organ(
         "candidate_qc_status": candidate_qc.get("status"),
         "candidate_qc_score": candidate_qc.get("score"),
         "candidate_qc_flags": candidate_qc.get("flags", []),
+        "fov_status": _candidate_adjusted_fov_status(
+            organ, presence_context, candidate_qc
+        ),
         "eligible_for_labelcritic": candidate_qc.get("eligible_for_labelcritic", True) and identity["identity_status"] == "valid",
         **identity,
     }
@@ -2260,6 +2617,44 @@ def _compute_candidate_qc(
         checks["mask_availability"] = "zero_volume_mask"
     else:
         checks["mask_availability"] = "nonzero_mask"
+        coordinates = np.argwhere(mask_arr)
+        lower = coordinates.min(axis=0)
+        upper = coordinates.max(axis=0)
+        centroid_voxel = coordinates.mean(axis=0)
+        centroid_ras = nib.affines.apply_affine(mask_img.affine, centroid_voxel)
+        shape = np.asarray(mask_arr.shape, dtype=int)
+        ct_center_voxel = (shape.astype(float) - 1.0) / 2.0
+        ct_center_ras = nib.affines.apply_affine(ct_img.affine, ct_center_voxel)
+        boundary_contacts = {
+            "axis0_min": bool(lower[0] == 0),
+            "axis0_max": bool(upper[0] == shape[0] - 1),
+            "axis1_min": bool(lower[1] == 0),
+            "axis1_max": bool(upper[1] == shape[1] - 1),
+            "axis2_min": bool(lower[2] == 0),
+            "axis2_max": bool(upper[2] == shape[2] - 1),
+        }
+        checks.update({
+            "bbox_voxel": {
+                "min": [int(x) for x in lower],
+                "max": [int(x) for x in upper],
+            },
+            "centroid_voxel": [round(float(x), 4) for x in centroid_voxel],
+            "centroid_ras_mm": [round(float(x), 4) for x in centroid_ras],
+            "ct_center_ras_mm": [round(float(x), 4) for x in ct_center_ras],
+            "centroid_laterality": (
+                "left" if float(centroid_ras[0]) > float(ct_center_ras[0])
+                else "right" if float(centroid_ras[0]) < float(ct_center_ras[0])
+                else "midline"
+            ),
+            "boundary_contacts": boundary_contacts,
+            "touches_volume_boundary": any(boundary_contacts.values()),
+            "touches_inferior_superior_boundary": bool(
+                boundary_contacts["axis2_min"] or boundary_contacts["axis2_max"]
+            ),
+            "truncation_suspected": bool(
+                boundary_contacts["axis2_min"] or boundary_contacts["axis2_max"]
+            ),
+        })
 
     try:
         voxel_volume = float(abs(np.linalg.det(mask_img.affine[:3, :3])))
@@ -2474,52 +2869,108 @@ _KEY_ABDOMINAL_ORGANS = {
     "colon",
     "small_bowel",
     "bladder",
+    "gall_bladder",
 }
 
 
 def _expected_presence_for_organ(organ: str, presence_context: dict[str, Any] | None = None) -> str:
+    status = _fov_status_for_organ(organ, presence_context)
+    return {
+        "fully_visible": "expected_present",
+        "out_of_fov": "expected_absent",
+        "partially_visible": "unknown",
+        "unknown": "unknown",
+    }[status]
+
+
+def _fov_status_for_organ(organ: str, presence_context: dict[str, Any] | None = None) -> str:
+    """Return the conservative four-state case-organ FOV contract.
+
+    Only explicit absence or a trusted, mutually exclusive region observation
+    may produce ``out_of_fov``.  A missing teacher or an empty mask is never
+    consulted here.
+    """
     norm = _norm_organ_key(organ)
     context = presence_context or {}
     confirmed_absent = {_norm_organ_key(item) for item in context.get("confirmed_absent_organs", []) or []}
     if norm in confirmed_absent:
-        return "expected_absent"
+        return "out_of_fov"
     has_abdomen = bool(context.get("has_abdomen_coverage"))
     has_pelvis = bool(context.get("has_pelvis_coverage"))
-    if norm in _KEY_ABDOMINAL_ORGANS:
-        if norm == "bladder" and not has_pelvis and has_abdomen:
-            return "expected_absent"
-        if norm != "bladder" and not has_abdomen and has_pelvis:
-            return "expected_absent"
-        if has_abdomen or has_pelvis:
-            if norm == "bladder":
-                return "expected_present" if has_pelvis else "expected_absent"
-            return "expected_present" if has_abdomen else "expected_absent"
+    has_thorax = bool(context.get("has_thorax_coverage"))
+    partial_thorax = bool(context.get("has_partial_thorax_coverage"))
+    has_head = bool(context.get("has_head_coverage"))
+    has_extremity = bool(context.get("has_extremity_coverage"))
+    has_any_region = any(
+        bool(context.get(key))
+        for key in (
+            "has_abdomen_coverage", "has_pelvis_coverage",
+            "has_thorax_coverage", "has_partial_thorax_coverage",
+            "has_head_coverage", "has_extremity_coverage",
+        )
+    )
+    if not context.get("has_region_evidence") and not has_any_region:
         return "unknown"
-    if not context.get("has_region_evidence"):
+    if norm == "esophagus":
+        if has_thorax:
+            return "fully_visible"
+        return "partially_visible" if has_abdomen or partial_thorax else "unknown"
+    if norm in {"hip_left", "hip_right"} and not has_pelvis:
+        return "unknown"
+    if norm in _KEY_ABDOMINAL_ORGANS:
+        if norm == "bladder":
+            if has_pelvis:
+                return "fully_visible"
+            return "unknown"
+        if has_abdomen:
+            return "fully_visible"
+        if has_pelvis:
+            return "partially_visible"
         return "unknown"
     hinted_region = _organ_region_hint(norm)
     if hinted_region == "head_neck":
-        return "expected_present" if context.get("has_head_coverage") else "expected_absent"
+        return "fully_visible" if has_head else (
+            "out_of_fov" if has_abdomen and not has_thorax and not has_pelvis else "unknown"
+        )
     if hinted_region == "thorax":
-        return "expected_present" if context.get("has_thorax_coverage") else "expected_absent"
+        if has_thorax:
+            return "fully_visible"
+        if partial_thorax:
+            return "partially_visible"
+        return "unknown"
     if hinted_region == "abdomen":
-        return "expected_present" if has_abdomen else "expected_absent"
+        return "fully_visible" if has_abdomen else "unknown"
     if hinted_region == "pelvis":
-        return "expected_present" if has_pelvis else "expected_absent"
+        return "fully_visible" if has_pelvis else "unknown"
     if hinted_region == "extremity":
-        return "expected_present" if context.get("has_extremity_coverage") else "expected_absent"
+        return "fully_visible" if has_extremity else (
+            "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+        )
     region, _ = _infer_region_and_landmarks(norm)
     if region == "head and craniofacial region" or region == "neck and upper aerodigestive tract":
-        return "expected_present" if context.get("has_head_coverage") else "expected_absent"
+        return "fully_visible" if has_head else "unknown"
     if region == "thorax or upper mediastinum":
-        return "expected_present" if context.get("has_thorax_coverage") else "expected_absent"
+        return "fully_visible" if has_thorax else ("partially_visible" if partial_thorax else "unknown")
     if region == "abdomen and retroperitoneum":
-        return "expected_present" if has_abdomen else "expected_absent"
+        return "fully_visible" if has_abdomen else "unknown"
     if region == "pelvis and lower abdomen":
-        return "expected_present" if has_pelvis else "expected_absent"
+        return "fully_visible" if has_pelvis else "unknown"
     if region == "appendicular skeleton or extremity field of view":
-        return "expected_present" if context.get("has_extremity_coverage") else "expected_absent"
+        return "fully_visible" if has_extremity else "unknown"
     return "unknown"
+
+
+def _candidate_adjusted_fov_status(
+    organ: str,
+    presence_context: dict[str, Any] | None,
+    candidate_qc: dict[str, Any] | None,
+) -> str:
+    """Combine case coverage with candidate truncation evidence conservatively."""
+    base = _fov_status_for_organ(organ, presence_context)
+    qc = candidate_qc or {}
+    if base != "out_of_fov" and qc.get("truncation_suspected"):
+        return "partially_visible"
+    return base
 
 
 def _fov_pruned_organs(
@@ -2713,7 +3164,7 @@ def _build_gap_rows(
             severity = "action_required_expected_present"
         return {
             "expected_presence": expected_presence,
-            "fov_status": expected_presence,
+            "fov_status": selection.get("fov_status") or _fov_status_for_organ(organ, presence_context),
             "anatomic_region": region,
             "region_landmarks": landmarks,
             "gap_severity": severity,
@@ -2984,7 +3435,7 @@ def _build_formal_organ_audit_rows(
         rows.append({
             "case_id": selection.get("case_id"),
             "organ": selection.get("organ"),
-            "fov_status": selection.get("expected_presence", selected.get("expected_presence", "unknown")),
+            "fov_status": selection.get("fov_status", selected.get("fov_status", "unknown")),
             "route_primary_teacher": selection.get("route_primary_teacher"),
             "route_backup_teachers": selection.get("route_backup_teachers", []),
             "route_competition_teachers": selection.get("route_competition_teachers", []),
@@ -3078,6 +3529,428 @@ def _should_fuse_candidates(
     return False, {"reason": "low_or_unknown_pairwise_agreement_blocks_fusion", **agreement}
 
 
+def _official_pairwise_condorcet_selection(
+    *,
+    ct: Path,
+    organ: str,
+    candidates: list[dict[str, Any]],
+    out: Path,
+    case_id: str,
+    critic_backend: str,
+    critic_base_url: str,
+    critic_port: int,
+    timeout_sec: int,
+    near_identical_dice: float,
+    mask_cache: _CaseMaskCache | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Run order-independent official pairwise comparisons and abstain on cycles."""
+    from itertools import combinations
+
+    status_path = Path(__file__).resolve().parents[4] / "configs" / "labelcritic_373_regression_status.json"
+    regression_status = {}
+    if status_path.is_file():
+        try:
+            regression_status = (
+                json.loads(status_path.read_text(encoding="utf-8"))
+                .get("classes", {})
+                .get(organ, {})
+            )
+        except Exception:
+            regression_status = {}
+    class_regression_failed = regression_status.get("status") == "failed"
+
+    # Fused/consensus masks are audit artifacts, never LabelCritic competitors.
+    # A winner must always trace to one original teacher mask.
+    fusion_candidates = [row for row in candidates if row.get("is_fusion")]
+    teacher_candidates = [row for row in candidates if not row.get("is_fusion")]
+    if not teacher_candidates:
+        return None, {
+            "selection_method": "label_critic_inconclusive",
+            "selection_status": "review_required",
+            "candidate_count": len(candidates),
+            "comparison_candidate_count": 0,
+            "comparison_candidate_models": [],
+            "excluded_fusion_candidates": [
+                str(row.get("model") or "") for row in fusion_candidates
+            ],
+            "critic_records": [],
+            "labelcritic_records": [],
+            "fallback_reason": "no_original_teacher_candidate",
+            "primary_selector": "official_labelcritic_pairwise_condorcet",
+            "should_enter_student_training": False,
+            "quality_flags": ["no_original_teacher_candidate"],
+            "review_flags": ["automatic_abstention"],
+        }
+    if len(teacher_candidates) == 1:
+        selected = teacher_candidates[0]
+        selected.setdefault(
+            "candidate_id", _candidate_id(case_id, organ, selected)
+        )
+        return selected, {
+            "selection_method": "single_teacher_provisional",
+            "selection_status": "provisional",
+            "candidate_count": len(candidates),
+            "comparison_candidate_count": 1,
+            "comparison_candidate_models": [str(selected.get("model") or "")],
+            "comparison_decisive_count": 0,
+            "comparison_inconclusive_count": 0,
+            "comparison_agreed_count": 0,
+            "selected_model": selected.get("model"),
+            "selected_prediction": selected.get("prediction"),
+            "critic_records": [],
+            "labelcritic_records": [],
+            "excluded_fusion_candidates": [
+                str(row.get("model") or "") for row in fusion_candidates
+            ],
+            "primary_selector": "deterministic_single_teacher_qc",
+            "winner_is_original_teacher": True,
+            "should_enter_student_training": False,
+            "quality_flags": ["single_teacher_provisional"],
+            "review_flags": ["single_teacher_no_pairwise_comparison"],
+        }
+
+    consensus_selected, consensus_evidence = _geometric_teacher_consensus_selection(
+        teacher_candidates,
+        near_identical_dice=near_identical_dice,
+        mask_cache=mask_cache,
+    )
+    if consensus_selected is not None:
+        consensus_selected.setdefault(
+            "candidate_id", _candidate_id(case_id, organ, consensus_selected)
+        )
+        near_records = [
+            {
+                "candidate_a": row.get("candidate_a"),
+                "candidate_b": row.get("candidate_b"),
+                "status": "skipped_geometric_consensus",
+                "decision": {
+                    "winner": "agree" if row.get("passes_threshold") else "disagree",
+                    "dice_3d": row.get("dice_3d"),
+                    "threshold": near_identical_dice,
+                },
+            }
+            for row in consensus_evidence.get("geometric_pairwise_dice", [])
+        ]
+        return consensus_selected, {
+            "selection_method": "geometric_teacher_consensus",
+            "legacy_selection_method": "near_identical_agreement",
+            "selection_status": "selected",
+            "candidate_count": len(candidates),
+            "comparison_candidate_count": len(consensus_evidence.get("geometric_consensus_cluster_models", [])),
+            "comparison_candidate_models": list(consensus_evidence.get("geometric_consensus_cluster_models", [])),
+            "comparison_decisive_count": 0,
+            "comparison_inconclusive_count": 0,
+            "comparison_agreed_count": len([
+                row for row in consensus_evidence.get("geometric_pairwise_dice", [])
+                if row.get("passes_threshold")
+            ]),
+            "selected_model": consensus_selected.get("model"),
+            "selected_prediction": consensus_selected.get("prediction"),
+            "formal_winner": consensus_selected.get("model"),
+            "audit_winner": None,
+            "critic_records": near_records,
+            "labelcritic_records": near_records,
+            "excluded_fusion_candidates": [
+                str(row.get("model") or "") for row in fusion_candidates
+            ],
+            "primary_selector": "complete_link_geometric_teacher_consensus",
+            "winner_is_original_teacher": True,
+            "candidate_identity_exposed_to_vlm": False,
+            "should_enter_student_training": True,
+            "family_role": "audit_only_not_used_for_selection_or_training_gate",
+            "ground_truth_status": "geometric_consensus_pseudo_label_not_expert_accuracy",
+            "accuracy_warning": "Geometric teacher consensus is a pseudo-label safety signal, not expert accuracy.",
+            "quality_flags": ["geometric_teacher_consensus"],
+            "review_flags": [],
+            **consensus_evidence,
+        }
+
+    for candidate in teacher_candidates:
+        candidate.setdefault(
+            "candidate_id", _candidate_id(case_id, organ, candidate)
+        )
+    ordered = sorted(
+        teacher_candidates,
+        key=lambda row: (
+            -float(row.get("candidate_qc_score") or 0.0),
+            str(row.get("model") or ""),
+            str(Path(row.get("prediction") or "").resolve()),
+            str(row.get("candidate_id") or ""),
+        ),
+    )
+    representatives: list[dict[str, Any]] = []
+    near_records: list[dict[str, Any]] = []
+    for candidate in ordered:
+        duplicate_of = None
+        duplicate_dice = None
+        for representative in representatives:
+            d3 = _mask_dice_3d(
+                representative["prediction"],
+                candidate["prediction"],
+                cache=mask_cache,
+            )
+            if d3 is not None and d3 >= near_identical_dice:
+                duplicate_of = representative
+                duplicate_dice = d3
+                break
+        if duplicate_of is None:
+            representatives.append(candidate)
+        else:
+            near_records.append(
+                {
+                    "candidate_a": duplicate_of.get("model"),
+                    "candidate_b": candidate.get("model"),
+                    "status": "skipped_near_identical",
+                    "decision": {
+                        "winner": "agree",
+                        "dice_3d": round(float(duplicate_dice), 6),
+                    },
+                }
+            )
+
+    shortlist_truncated = len(representatives) > 4
+    representatives = representatives[:4]
+    if len(representatives) == 1:
+        selected = representatives[0]
+        return selected, {
+            "selection_method": "geometric_teacher_consensus",
+            "legacy_selection_method": "near_identical_agreement",
+            "selection_status": "selected",
+            "candidate_count": len(candidates),
+            "comparison_candidate_count": 1,
+            "comparison_candidate_models": [selected["model"]],
+            "comparison_decisive_count": 0,
+            "comparison_inconclusive_count": 0,
+            "comparison_agreed_count": len(near_records),
+            "selected_model": selected["model"],
+            "selected_prediction": selected["prediction"],
+            "critic_records": near_records,
+            "labelcritic_records": near_records,
+            "excluded_fusion_candidates": [
+                str(row.get("model") or "") for row in fusion_candidates
+            ],
+            "primary_selector": "complete_link_geometric_teacher_consensus",
+            "formal_winner": selected["model"],
+            "audit_winner": None,
+            "winner_is_original_teacher": True,
+            "should_enter_student_training": True,
+            "shortlist_truncated": shortlist_truncated,
+            "family_role": "audit_only_not_used_for_selection_or_training_gate",
+            "ground_truth_status": "geometric_consensus_pseudo_label_not_expert_accuracy",
+            "accuracy_warning": "Geometric teacher consensus is a pseudo-label safety signal, not expert accuracy.",
+            "quality_flags": ["geometric_teacher_consensus"],
+            "review_flags": [],
+        }
+
+    benchmark_gate_path = (
+        Path(__file__).resolve().parents[4]
+        / "outputs" / "labelcritic_373_repair_20260703"
+        / "stage8_benchmark_gate.json"
+    )
+    benchmark_gate = {}
+    if benchmark_gate_path.is_file():
+        try:
+            benchmark_gate = json.loads(
+                benchmark_gate_path.read_text(encoding="utf-8")
+            )
+        except Exception:
+            benchmark_gate = {}
+    requested_uncalibrated = (
+        os.getenv("MEDAI_LABELCRITIC_ALLOW_UNCALIBRATED_SELECTION", "0")
+        .strip().lower() in {"1", "true", "yes"}
+    )
+    # Formal 373 selection must not be enabled by an environment override when
+    # the official LabelCritic benchmark is unavailable. The env var is kept
+    # visible in metadata for debugging, but the formal path ignores it.
+    allow_uncalibrated = False
+    audit_only = (
+        (benchmark_gate.get("status") != "ready" and not allow_uncalibrated)
+        or class_regression_failed
+    )
+
+    wins = {str(row["candidate_id"]): set() for row in representatives}
+    losses = {str(row["candidate_id"]): set() for row in representatives}
+    uncertain_pairs = []
+    critic_records = list(near_records)
+    reverse_inconsistent_pairs = []
+    for candidate_a, candidate_b in combinations(representatives, 2):
+        output_json = (
+            out
+            / "critic"
+            / case_id
+            / f"{organ}_{candidate_a['model']}_vs_{candidate_b['model']}.json"
+        )
+        critic = run_labelcritic_compare(
+            ct,
+            Path(candidate_a["prediction"]),
+            Path(candidate_b["prediction"]),
+            organ,
+            output_json,
+            backend=critic_backend,
+            base_url=critic_base_url,
+            port=critic_port,
+            dry_run=False,
+            timeout_sec=min(timeout_sec, 900),
+            candidate_context=[
+                _candidate_prompt_context(candidate_a),
+                _candidate_prompt_context(candidate_b),
+            ],
+        )
+        winner = (critic.get("decision") or {}).get("winner")
+        record = {
+            "candidate_a": candidate_a["model"],
+            "candidate_b": candidate_b["model"],
+            "candidate_a_id": candidate_a["candidate_id"],
+            "candidate_b_id": candidate_b["candidate_id"],
+            "output_json": str(output_json),
+            "status": critic.get("status"),
+            "decision": critic.get("decision", {}),
+            "vlm_vote": (critic.get("decision") or {}).get("winner"),
+            "objective_qc_evidence": {
+                "candidate_a": _candidate_prompt_context(candidate_a),
+                "candidate_b": _candidate_prompt_context(candidate_b),
+            },
+            "vlm_rationale_available": bool(
+                (critic.get("decision") or {}).get("reason")
+                or (critic.get("decision") or {}).get("rationale")
+            ),
+        }
+        critic_records.append(record)
+        if audit_only:
+            reverse_output_json = (
+                out
+                / "critic"
+                / case_id
+                / f"{organ}_{candidate_b['model']}_vs_{candidate_a['model']}_reverse.json"
+            )
+            reverse = run_labelcritic_compare(
+                ct,
+                Path(candidate_b["prediction"]),
+                Path(candidate_a["prediction"]),
+                organ,
+                reverse_output_json,
+                backend=critic_backend,
+                base_url=critic_base_url,
+                port=critic_port,
+                dry_run=False,
+                timeout_sec=min(timeout_sec, 900),
+                candidate_context=[
+                    _candidate_prompt_context(candidate_b),
+                    _candidate_prompt_context(candidate_a),
+                ],
+            )
+            reverse_winner = (reverse.get("decision") or {}).get("winner")
+            reverse_record = {
+                "candidate_a": candidate_b["model"],
+                "candidate_b": candidate_a["model"],
+                "candidate_a_id": candidate_b["candidate_id"],
+                "candidate_b_id": candidate_a["candidate_id"],
+                "output_json": str(reverse_output_json),
+                "status": reverse.get("status"),
+                "decision": reverse.get("decision", {}),
+                "vlm_vote": reverse_winner,
+                "objective_qc_evidence": {
+                    "candidate_a": _candidate_prompt_context(candidate_b),
+                    "candidate_b": _candidate_prompt_context(candidate_a),
+                },
+                "vlm_rationale_available": bool(
+                    (reverse.get("decision") or {}).get("reason")
+                    or (reverse.get("decision") or {}).get("rationale")
+                ),
+                "audit_reverse_order": True,
+            }
+            critic_records.append(reverse_record)
+            forward_model = candidate_a["model"] if winner == "a" else candidate_b["model"] if winner == "b" else None
+            reverse_model = candidate_b["model"] if reverse_winner == "a" else candidate_a["model"] if reverse_winner == "b" else None
+            if forward_model and reverse_model and forward_model != reverse_model:
+                reverse_inconsistent_pairs.append((candidate_a["candidate_id"], candidate_b["candidate_id"]))
+        a_id = str(candidate_a["candidate_id"])
+        b_id = str(candidate_b["candidate_id"])
+        if critic.get("status") == "success" and winner == "a":
+            wins[a_id].add(b_id)
+            losses[b_id].add(a_id)
+        elif critic.get("status") == "success" and winner == "b":
+            wins[b_id].add(a_id)
+            losses[a_id].add(b_id)
+        else:
+            uncertain_pairs.append((a_id, b_id))
+
+    required_wins = len(representatives) - 1
+    condorcet = [
+        row
+        for row in representatives
+        if len(wins[str(row["candidate_id"])]) == required_wins
+    ]
+    selected = condorcet[0] if len(condorcet) == 1 else None
+    if audit_only:
+        audit_winner = selected.get("model") if selected else None
+        return None, {
+            "selection_method": "label_critic_audit_only",
+            "selection_status": "review_required",
+            "candidate_count": len(candidates),
+            "comparison_candidate_count": len(representatives),
+            "comparison_candidate_models": [row["model"] for row in representatives],
+            "comparison_decisive_count": sum(len(value) for value in wins.values()),
+            "comparison_inconclusive_count": len(uncertain_pairs),
+            "comparison_agreed_count": len(near_records),
+            "selected_model": None,
+            "selected_prediction": None,
+            "formal_winner": None,
+            "audit_winner": audit_winner,
+            "audit_condorcet_status": "unique_condorcet" if selected else "no_unique_condorcet",
+            "audit_reverse_inconsistent_pair_count": len(reverse_inconsistent_pairs),
+            "critic_records": critic_records,
+            "labelcritic_records": critic_records,
+            "excluded_fusion_candidates": [
+                str(row.get("model") or "") for row in fusion_candidates
+            ],
+            "fallback_reason": (
+                "class_corruption_regression_failed_labelcritic_audit_only"
+                if class_regression_failed
+                else "official_benchmark_not_ready_labelcritic_audit_only"
+            ),
+            "benchmark_gate_status": benchmark_gate.get("status", "missing"),
+            "uncalibrated_selection_env_requested": requested_uncalibrated,
+            "uncalibrated_selection_env_ignored": requested_uncalibrated,
+            "class_regression_status": regression_status if class_regression_failed else None,
+            "primary_selector": "official_labelcritic_pairwise_condorcet_audit_only",
+            "fallback_selector": None,
+            "should_enter_student_training": False,
+            "candidate_identity_exposed_to_vlm": False,
+            "winner_is_original_teacher": False,
+            "quality_flags": ["labelcritic_audit_only"] + (["class_regression_failed"] if class_regression_failed else []),
+            "review_flags": ["automatic_abstention"],
+        }
+    return selected, {
+        "selection_method": "label_critic" if selected else "label_critic_inconclusive",
+        "selection_status": "selected" if selected else "review_required",
+        "candidate_count": len(candidates),
+        "comparison_candidate_count": len(representatives),
+        "comparison_candidate_models": [row["model"] for row in representatives],
+        "comparison_decisive_count": sum(len(value) for value in wins.values()),
+        "comparison_inconclusive_count": len(uncertain_pairs),
+        "comparison_agreed_count": len(near_records),
+        "selected_model": selected.get("model") if selected else None,
+        "selected_prediction": selected.get("prediction") if selected else None,
+        "formal_winner": selected.get("model") if selected else None,
+        "audit_winner": None,
+        "critic_records": critic_records,
+        "labelcritic_records": critic_records,
+        "excluded_fusion_candidates": [
+            str(row.get("model") or "") for row in fusion_candidates
+        ],
+        "fallback_reason": None if selected else "no_unique_condorcet_winner",
+        "primary_selector": "official_labelcritic_pairwise_condorcet",
+        "fallback_selector": None,
+        "should_enter_student_training": selected is not None,
+        "shortlist_truncated": shortlist_truncated,
+        "candidate_identity_exposed_to_vlm": False,
+        "winner_is_original_teacher": selected is not None,
+        "quality_flags": ["labelcritic_selected"] if selected else ["labelcritic_uncertain"],
+        "review_flags": [] if selected else ["labelcritic_uncertain", "automatic_abstention"],
+    }
+
+
 def _select_candidate(
     *,
     ct: Path,
@@ -3096,6 +3969,7 @@ def _select_candidate(
     mask_cache: _CaseMaskCache | None = None,
     compare_batch_enabled: bool = True,
     compare_batch_max_candidates: int = 2,
+    strict_labelcritic_selection: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Select the pseudo-label candidate for one organ.
 
@@ -3160,8 +4034,9 @@ def _select_candidate(
     if len(comparison_candidates) == 1:
         selected = comparison_candidates[0]
         return selected, {
-            "selection_method": "single_teacher_default",
-            "selection_status": "selected",
+            "selection_method": "single_teacher_provisional",
+            "legacy_selection_method": "single_teacher_default",
+            "selection_status": "provisional",
             "candidate_count": len(candidates),
             "comparison_candidate_count": 1,
             "comparison_candidate_models": [selected["model"]],
@@ -3172,9 +4047,31 @@ def _select_candidate(
             "critic_records": [],
             "labelcritic_records": [],
             "fallback_reason": None,
-            "quality_flags": ["single_candidate", *qc_quality_flags],
-            "review_flags": qc_review_flags,
+            "quality_flags": ["single_candidate", "single_teacher_provisional", *qc_quality_flags],
+            "review_flags": ["single_teacher_no_pairwise_comparison", *qc_review_flags],
         }
+
+    if enable_critic and not dry_run:
+        selected, selection = _official_pairwise_condorcet_selection(
+            ct=ct,
+            organ=organ,
+            candidates=comparison_candidates,
+            out=out,
+            case_id=case_id,
+            critic_backend=critic_backend,
+            critic_base_url=critic_base_url,
+            critic_port=critic_port,
+            timeout_sec=timeout_sec,
+            near_identical_dice=near_identical_dice,
+            mask_cache=mask_cache,
+        )
+        selection["qc_rejected_candidates"] = [
+            _candidate_qc_summary(candidate) for candidate in qc_rejected
+        ]
+        selection["candidate_qc_policy"] = (
+            "hard_fail_candidates_excluded_before_labelcritic"
+        )
+        return selected, selection
 
     critic_records: list[dict[str, Any]] = []
     labelcritic_options = labelcritic_options or {}
@@ -3234,6 +4131,10 @@ def _select_candidate(
                         "mask_b": Path(challenger["prediction"]),
                         "organ": organ,
                         "output_json": critic_out,
+                        "candidate_context": [
+                            _candidate_prompt_context(incumbent),
+                            _candidate_prompt_context(challenger),
+                        ],
                         **lc_opts,
                     })
                 pair_meta.append((incumbent, challenger, d3, critic_out))
@@ -3303,6 +4204,10 @@ def _select_candidate(
                     port=critic_port,
                     dry_run=False,
                     timeout_sec=min(timeout_sec, 300),
+                    candidate_context=[
+                        _candidate_prompt_context(selected),
+                        _candidate_prompt_context(challenger),
+                    ],
                     **lc_opts,
                 )
                 record = {
@@ -3342,16 +4247,14 @@ def _select_candidate(
             selection_status = "selected"
             fallback_reason = "All eligible candidates agree above the near-identical 3D Dice threshold; VLM tie-break skipped"
         else:
-            # No decisive VLM decision. Fall back to the fusion consensus /
-            # highest-Dice pick and keep the fallback auditable.
-            selected = _pick_reference_fallback(comparison_candidates)
             method = "label_critic_inconclusive"
-            selection_status = "fallback"
+            selection_status = "review_required" if strict_labelcritic_selection else "fallback"
             fallback_reason = "LabelCritic produced no decisive comparison (all pairs inconclusive or skipped)"
+            selected = None if strict_labelcritic_selection else _pick_reference_fallback(comparison_candidates)
     else:
-        selected = _pick_reference_fallback(comparison_candidates)
+        selected = None if strict_labelcritic_selection else _pick_reference_fallback(comparison_candidates)
         method = "critic_disabled_fallback"
-        selection_status = "fallback"
+        selection_status = "review_required" if strict_labelcritic_selection else "fallback"
         fallback_reason = "LabelCritic disabled, unavailable, or dry-run"
 
     explanation = _labelcritic_explanation_fields(critic_records, selected.get("model") if selected else None, fallback_reason=fallback_reason)
@@ -3367,20 +4270,20 @@ def _select_candidate(
         "comparison_candidate_models": [c["model"] for c in comparison_candidates],
         "qc_rejected_candidates": [_candidate_qc_summary(c) for c in qc_rejected],
         "candidate_qc_policy": "hard_fail_candidates_excluded_before_labelcritic",
-        "selected_model": selected["model"],
-        "selected_prediction": selected["prediction"],
+        "selected_model": selected["model"] if selected else None,
+        "selected_prediction": selected["prediction"] if selected else None,
         "critic_records": critic_records,
         "labelcritic_records": critic_records,
         "fallback_reason": fallback_reason,
         "primary_selector": "labelcritic",
         "labelcritic_decisive": bool(method == "label_critic" and decisive > 0),
         "labelcritic_confidence": explanation.get("labelcritic_confidence") if explanation.get("labelcritic_confidence") is not None else (0.75 if method == "label_critic" and decisive > 0 else None),
-        "fallback_selector": None if method in {"label_critic", "near_identical_agreement", "single_teacher_default"} else "family_evidence_or_reference",
+        "fallback_selector": None if method in {"label_critic", "near_identical_agreement", "single_teacher_default", "single_teacher_provisional"} else "family_evidence_or_reference",
         "evidence_used_for": "audit_only" if method == "label_critic" and decisive > 0 else "fallback_selection",
         "selected_reason": explanation.get("selected_reason"),
         "rejected_reasons": explanation.get("rejected_reasons", {}),
         "failure_modes": explanation.get("failure_modes", []),
-        "should_enter_student_training": selection_status == "selected",
+        "should_enter_student_training": selection_status == "selected" and selected is not None,
         "quality_flags": (
             ["labelcritic_selected"] if method == "label_critic"
             else ["multi_teacher_agreement"] if method == "near_identical_agreement"
@@ -3545,7 +4448,7 @@ def _labelcritic_grade_policy_decision(
         reasons.append("candidate_qc_review_high_risk")
     if (
         compare_used
-        and selection_method not in {"near_identical_agreement"}
+        and selection_method not in {"near_identical_agreement", "geometric_teacher_consensus"}
         and (high_risk or low_dice or (review_qc and route_confidence != "high"))
     ):
         reasons.append("post_compare_absolute_quality_gate")
@@ -3556,7 +4459,7 @@ def _labelcritic_grade_policy_decision(
         reasons.append("route_confidence_low_with_risk")
     if (
         non_fusion_count > 1
-        and selection_method not in {"near_identical_agreement"}
+        and selection_method not in {"near_identical_agreement", "geometric_teacher_consensus"}
         and (high_risk or low_dice or review_qc)
     ):
         reasons.append("multi_candidate_conflict_or_diversity")
@@ -3569,7 +4472,7 @@ def _labelcritic_grade_policy_decision(
 
     if non_fusion_count <= 1 and selected_qc_status in (None, "pass") and route_confidence == "high":
         return {"run": False, "reason": None, "skipped_reason": "stable_single_candidate_qc_pass"}
-    if selection_method == "near_identical_agreement" and selected_qc_status in (None, "pass"):
+    if selection_method in {"near_identical_agreement", "geometric_teacher_consensus"} and selected_qc_status in (None, "pass"):
         return {"run": False, "reason": None, "skipped_reason": "high_agreement_qc_pass"}
     return {"run": False, "reason": None, "skipped_reason": "risk_aware_grade_not_required"}
 
@@ -3698,7 +4601,7 @@ def run_multimodel_annotation_loop(
     resume: bool = True,
     preseeded_model_dirs: dict[str, Path] | None = None,
     labelcritic_options: dict[str, Any] | None = None,
-    enable_fusion: bool = True,
+    enable_fusion: bool = False,
     fusion_method: str = "weighted_vote",
     enable_auto_arbitration: bool = True,
     arbitration_accept_grade: float = 0.5,
@@ -3708,6 +4611,7 @@ def run_multimodel_annotation_loop(
     teacher_inference_mode: str = "hierarchical_roi",
     roi_margin_mm: float = 20.0,
     preseeded_parent_only: bool = False,
+    strict_labelcritic_selection: bool = True,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -3920,7 +4824,9 @@ def run_multimodel_annotation_loop(
         organ_task_state_path = updated_root / case_id / "organ_task_state.json"
         organ_task_state = _load_organ_task_state(organ_task_state_path)
         mask_cache = _CaseMaskCache(max_arrays=int(os.getenv("MEDAI_MASK_CACHE_MAX_ARRAYS", "96")))
-        grade_policy = os.getenv("MEDAI_LABELCRITIC_GRADE_POLICY", "risk_aware")
+        # Formal selection is pairwise. The legacy project single-mask grader
+        # used a non-official centered-slice fallback and is audit-only.
+        grade_policy = os.getenv("MEDAI_LABELCRITIC_GRADE_POLICY", "off")
         grade_batch_concurrency = max(1, int(os.getenv("MEDAI_LABELCRITIC_GRADE_CONCURRENCY", "2")))
         compare_batch_enabled = os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH", "1").strip().lower() not in {"0", "false", "no"}
         stage_counts["labelcritic_grade_batch_concurrency"] = grade_batch_concurrency
@@ -3949,6 +4855,12 @@ def run_multimodel_annotation_loop(
                     if not preseeded_parent_only:
                         model_seg_dirs[seed_key] = seed_seg
                     print(f"[{_time.strftime('%H:%M:%S')}]   [preseeded] {seed_key} ✓ ({sum(1 for _ in seed_seg.glob('*.nii.gz'))} masks)", flush=True)
+        # A resolved preseed is the authoritative cached output for this run;
+        # never launch the same teacher again.
+        case_models = [
+            model_key for model_key in case_models
+            if model_key not in resolved_preseeded_seg_dirs
+        ]
 
         if teacher_inference_mode == "hierarchical_roi":
             _teacher_t0 = _time.time()
@@ -4220,6 +5132,10 @@ def run_multimodel_annotation_loop(
                             "reference_role": "prior_or_selected_pseudo_reference" if current_ref_exists else "none",
                             "metric_family": "pseudo_consistency",
                             "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
+                            "metric_target": "pseudo-label",
+                            "metric_subject": "E-step output",
+                            "metric_comparison": "candidate_vs_prior_or_selected_pseudo_reference",
+                            "metric_interpretation": "pseudo_label_consistency",
                             "ground_truth_status": "pseudo_label_candidate",
                             "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
                             "dice": fv.get("dice"),
@@ -4256,9 +5172,9 @@ def run_multimodel_annotation_loop(
                         }
                         dice_rows.append(fused_row)
                         if fused_row.get("candidate_qc_status") == "pass" and fused_row.get("eligible_for_labelcritic", True):
-                            # Conservative v1: fusion joins the candidate set but
-                            # does not become the incumbent automatically.
-                            candidates.append(fused_row)
+                            # Ablation-only artifact. A fused mask must never enter
+                            # the formal LabelCritic candidate set.
+                            fused_row["fusion_ablation_only"] = True
                         else:
                             fused_row["fusion_rejected"] = True
                             fused_row["fusion_rejected_reason"] = "fusion_qc_not_pass_or_ineligible"
@@ -4266,6 +5182,9 @@ def run_multimodel_annotation_loop(
                             dice_rows[-1] = fused_row
 
             _select_t0 = _time.time()
+            for candidate in candidates:
+                candidate["candidate_id"] = _candidate_id(case_id, organ, candidate)
+                candidate["mask_sha256"] = _sha256_file(candidate.get("prediction"))
             selected, selection = _select_candidate(
                 ct=ct,
                 organ=organ,
@@ -4282,6 +5201,7 @@ def run_multimodel_annotation_loop(
                 mask_cache=mask_cache,
                 compare_batch_enabled=compare_batch_enabled,
                 compare_batch_max_candidates=int(os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH_MAX_CANDIDATES", "2")),
+                strict_labelcritic_selection=strict_labelcritic_selection,
             )
             stage_timing["labelcritic_compare_sec"] += _time.time() - _select_t0
             stage_counts["labelcritic_compare_records"] += len(selection.get("critic_records", []) or [])
@@ -4323,7 +5243,7 @@ def run_multimodel_annotation_loop(
             else:
                 if len(candidates) <= 1:
                     compare_skipped_reason = "single_candidate_or_route_unique"
-                elif selection.get("selection_method") == "near_identical_agreement":
+                elif selection.get("selection_method") in {"near_identical_agreement", "geometric_teacher_consensus"}:
                     compare_skipped_reason = "high_agreement"
                 else:
                     compare_skipped_reason = "critic_disabled_or_not_needed"
@@ -4346,6 +5266,8 @@ def run_multimodel_annotation_loop(
                 "candidate_predictions": [
                     {
                         "model": c["model"],
+                        "candidate_id": c.get("candidate_id"),
+                        "mask_sha256": c.get("mask_sha256"),
                         "prediction": c["prediction"],
                         "pre_shapekit_prediction": c.get("pre_shapekit_prediction"),
                         "dice": c.get("dice"),
@@ -4389,7 +5311,8 @@ def run_multimodel_annotation_loop(
                 "selected_reference_quality_bucket": selected_reference_quality_bucket,
                 "selected_dice": best_dice,
                 "selected_pseudo_consistency_dice": best_dice,
-                "expected_presence": selected.get("expected_presence") if selected else _expected_presence_for_organ(organ),
+                "expected_presence": selected.get("expected_presence") if selected else _expected_presence_for_organ(organ, presence_context),
+                "fov_status": selected.get("fov_status") if selected else _fov_status_for_organ(organ, presence_context),
                 "requested_canonical_id": selected.get("requested_canonical_id") if selected else organ,
                 "source_local_label": selected.get("source_local_label") if selected else None,
                 "resolved_canonical_id": selected.get("resolved_canonical_id") if selected else None,
@@ -4401,6 +5324,10 @@ def run_multimodel_annotation_loop(
                 "identity_mismatch_reasons": selected.get("identity_mismatch_reasons", []) if selected else ["no_selected_candidate"],
                 "metric_family": "pseudo_consistency",
                 "metric_scope": "selected_candidate_vs_prior_or_selected_pseudo_reference",
+                "metric_target": "pseudo-label",
+                "metric_subject": "E-step output",
+                "metric_comparison": "selected_candidate_vs_prior_or_selected_pseudo_reference",
+                "metric_interpretation": "pseudo_label_consistency",
                 "accuracy_warning": "Selected Dice is pseudo-label consistency, not true expert-label accuracy.",
                 "comparison_input_stage": "post_shapekit_candidate" if enable_shapekit and not dry_run else "raw_candidate",
                 "dataset_type": "pseudo_label_dataset",
@@ -4413,7 +5340,16 @@ def run_multimodel_annotation_loop(
             selection_record["primary_selector"] = "labelcritic"
             selection_record["evidence_used_for"] = "audit_only" if selection_record["labelcritic_decisive"] else "fallback_selection"
             selection_record["selected_candidate"] = selection_record.get("selected_model")
-            selection_record["selected_candidate_id"] = selection_record.get("selected_model")
+            selection_record["selected_candidate_id"] = selected.get("candidate_id") if selected else None
+            selection_record["candidate_ids"] = [c.get("candidate_id") for c in candidates if c.get("candidate_id")]
+            selection_record["teacher_names"] = [c.get("model") for c in candidates if c.get("model")]
+            selection_record["teacher_families"] = [
+                c.get("evidence_family") or c.get("comparison_family")
+                for c in candidates
+                if c.get("evidence_family") or c.get("comparison_family")
+            ]
+            selection_record["record_type"] = "candidate_pseudo" if selected else "unresolved_review"
+            selection_record["selected_source_mask_sha256"] = selected.get("mask_sha256") if selected else None
             selection_record["selected_teacher"] = selection_record.get("selected_model")
             selection_record["selected_family"] = (selected or {}).get("evidence_family") if selected else None
             selection_record["labelcritic_prompt_version"] = selection_record.get("labelcritic_prompt_source") or selection_record.get("prompt_source")
@@ -4425,6 +5361,16 @@ def run_multimodel_annotation_loop(
             if prompt_sources:
                 selection_record["labelcritic_prompt_source"] = prompt_sources[0]
                 selection_record["prompt_source"] = prompt_sources[0]
+            prompt_hashes = [
+                r.get("rendered_organ_prompt_hash")
+                for r in selection_record["labelcritic_records"]
+                if r.get("rendered_organ_prompt_hash")
+            ]
+            selection_record["labelcritic_prompt_version"] = (
+                prompt_hashes[0] if prompt_hashes
+                else selection_record.get("labelcritic_prompt_source")
+                or selection_record.get("prompt_source")
+            )
             review_flags = [r.get("requires_manual_review") for r in selection_record["labelcritic_records"] if "requires_manual_review" in r]
             if review_flags:
                 selection_record["requires_manual_review"] = any(bool(x) for x in review_flags)
@@ -4509,6 +5455,8 @@ def run_multimodel_annotation_loop(
                     selected_reference_quality_bucket = selected.get("reference_quality_bucket")
                     empty_reference_nonempty_prediction = selected_reference_quality_bucket == "empty_reference_nonempty_prediction"
                     selection_record["selected_model"] = selected.get("model")
+                    selection_record["selected_candidate_id"] = selected.get("candidate_id")
+                    selection_record["selected_source_mask_sha256"] = selected.get("mask_sha256")
                     selection_record["source_model"] = selected.get("model")
                     selection_record["selected_prediction"] = selected.get("prediction")
                     selection_record["selected_pre_shapekit_prediction"] = selected.get("pre_shapekit_prediction")
@@ -4535,6 +5483,7 @@ def run_multimodel_annotation_loop(
                 selection_record["auto_grade"] = arb.get("grade_after")
                 selection_record["auto_grade_accept"] = arb.get("final_accept")
                 selection_record["auto_grade_swapped"] = arb.get("swapped")
+                selection_record["labelcritic_called"] = True
 
             # LabelCritic is the primary 373-target candidate selector.
             # AutoLabelCore/family evidence is retained for audit, grading, review
@@ -4596,10 +5545,60 @@ def run_multimodel_annotation_loop(
             )
             autolabel_record = autolabel_decision.to_dict()
             selection_record.update(autolabel_record)
+            if strict_labelcritic_selection:
+                # AutoLabelCore is audit-only in the formal path. Its serialized
+                # decision must not overwrite the strict LabelCritic selection,
+                # including the explicit no-selection/review state.
+                selection_record["selected_model"] = selected.get("model") if selected else None
+                selection_record["source_model"] = selected.get("model") if selected else None
+                selection_record["selected_prediction"] = selected.get("prediction") if selected else None
+                selection_record["selected_candidate_id"] = selected.get("candidate_id") if selected else None
+                selection_record["selected_source_mask_sha256"] = selected.get("mask_sha256") if selected else None
+                selection_record["should_enter_student_training"] = bool(
+                    selected is not None and selection.get("selection_status") == "selected"
+                )
+                if (
+                    selected is not None
+                    and selection.get("selection_status") == "selected"
+                    and selection.get("selection_method") == "geometric_teacher_consensus"
+                ):
+                    # Geometric consensus is the formal, family-free safety
+                    # signal. Preserve AutoLabelCore/family output as audit
+                    # fields, but do not let family-weighted reliability
+                    # scoring alter training eligibility for this path.
+                    selection_record["autolabel_grade_audit"] = autolabel_record.get("grade")
+                    selection_record["autolabel_training_weight_audit"] = autolabel_record.get("training_weight")
+                    selection_record["autolabel_evidence_confidence_audit"] = autolabel_record.get("evidence_confidence")
+                    selection_record["grade"] = "A"
+                    selection_record["training_weight"] = 1.0
+                    selection_record["target_type"] = "hard"
+                    selection_record["decision_status"] = "accepted"
+                    selection_record["distillation_eligible"] = True
+                    selection_record["distillation_exclusion_reason"] = None
+                    selection_record["evidence_confidence"] = 1.0
+                    selection_record["auto_fine_label_reliability_score"] = 1.0
+                    selection_record["evidence_scores"] = {
+                        **(selection_record.get("evidence_scores") or {}),
+                        "geometric_teacher_consensus": 1.0,
+                    }
+                    selection_record["missing_evidence"] = []
+                    selection_record["decision_reasons"] = [
+                        "family_free_complete_link_geometric_teacher_consensus",
+                        "winner_is_original_teacher_medoid",
+                    ]
+                    selection_record["scoring_schema_version"] = "autolabel_core_v3"
+                    selection_record["ground_truth_status"] = "geometric_consensus_pseudo_label_not_expert_accuracy"
+                    selection_record["accuracy_warning"] = (
+                        "Geometric teacher consensus is a pseudo-label safety signal, not expert accuracy."
+                    )
             selection_record["labelcritic_supported"] = bool(successful_critic)
             selection_record["labelcritic_tiebreak_adjustment"] = lc_adjustment
             selection_record["labelcritic_decisive"] = labelcritic_locked_selection
-            selection_record["evidence_used_for"] = "audit_only" if labelcritic_locked_selection else "fallback_selection"
+            selection_record["evidence_used_for"] = (
+                "audit_only" if labelcritic_locked_selection
+                else "formal_selection" if selection_record.get("selection_method") == "geometric_teacher_consensus"
+                else "fallback_selection"
+            )
             if labelcritic_locked_selection:
                 selection_record["primary_selector"] = "labelcritic"
                 selection_record["fallback_selector"] = None
@@ -4620,9 +5619,13 @@ def run_multimodel_annotation_loop(
                 for c in candidates
             ]
             selection_record["metric_family"] = "pseudo_consistency_and_evidence_reliability"
+            selection_record["metric_target"] = "pseudo-label"
+            selection_record["metric_subject"] = "E-step output"
+            selection_record["metric_comparison"] = "selected_candidate_vs_prior_or_selected_pseudo_reference"
+            selection_record["metric_interpretation"] = "pseudo_label_consistency"
             selection_record["accuracy_warning"] = "AutoLabelCore evidence confidence is not expert accuracy or ground-truth DSC."
             evidence_selected = next((c for c in candidates if str(c.get("model")) == str(autolabel_decision.selected_model)), None)
-            if (not labelcritic_locked_selection) and evidence_selected is not None and evidence_selected is not selected:
+            if (not strict_labelcritic_selection) and (not labelcritic_locked_selection) and evidence_selected is not None and evidence_selected is not selected:
                 selected = evidence_selected
                 selection_record["selected_model"] = selected.get("model")
                 selection_record["source_model"] = selected.get("model")
@@ -4645,29 +5648,11 @@ def run_multimodel_annotation_loop(
                     "identity_status", "identity_mismatch_reasons",
                 ):
                     selection_record[identity_field] = selected.get(identity_field)
-            # For accepted multi-family labels, the family-balanced hard mask is
-            # the actual selected artifact. C/D remain auditable but never replace
-            # the candidate used for visual review.
-            if (
-                selected
-                and not labelcritic_locked_selection
-                and autolabel_decision.target_type == "hard"
-                and autolabel_decision.independent_family_count >= 2
-                and autolabel_decision.hard_mask_path
-                and Path(autolabel_decision.hard_mask_path).exists()
-            ):
-                selected = {
-                    **selected,
-                    "model": "family_balanced_consensus",
-                    "prediction": autolabel_decision.hard_mask_path,
-                    "is_fusion": True,
-                }
-                selection_record["selected_model"] = "family_balanced_consensus"
-                selection_record["source_model"] = "family_balanced_consensus"
-                selection_record["selected_prediction"] = autolabel_decision.hard_mask_path
-                selection_record["selected_candidate_qc_status"] = "pass"
-                selection_record["selected_candidate_qc_score"] = 1.0
-                selection_record["selected_candidate_qc_flags"] = []
+            # AutoLabelCore fusion remains an audit artifact. It must never
+            # replace a real teacher candidate or an abstention.
+            selection_record["family_balanced_consensus_policy"] = (
+                "audit_only_never_selected"
+            )
 
             if labelcritic_locked_selection:
                 selection_record["selected_candidate"] = selection_record.get("selected_model")
@@ -4808,6 +5793,16 @@ def run_multimodel_annotation_loop(
             meta["final_mask"] = final
             meta["mask_path"] = final
             meta["mask"] = final
+            meta["final_mask_sha256"] = _sha256_file(final)
+            meta["mask_lineage_verified"] = bool(
+                meta.get("selected_source_mask_sha256")
+                and meta.get("selected_source_mask_sha256") == meta.get("final_mask_sha256")
+            )
+            if not meta["mask_lineage_verified"]:
+                _add_unique(meta.setdefault("review_flags", []), "mask_lineage_mismatch")
+                _add_unique(meta.setdefault("quality_flags", []), "mask_lineage_mismatch")
+                meta["training_weight"] = 0.0
+                meta["should_enter_student_training"] = False
             if enable_shapekit and not dry_run and meta.get("shapekit_status") != "success":
                 shapekit_unsupported = meta.get("shapekit_status") in {"unsupported_target", "unsupported_target_skipped_by_policy"}
                 _add_unique(meta.setdefault("review_flags", []), "shapekit_fallback")
@@ -4874,7 +5869,7 @@ def run_multimodel_annotation_loop(
             status = str(meta.get("selection_status") or "")
             if grade == "D":
                 publication_status = "rejected_but_recorded"
-            elif method in {"near_identical_agreement", "consensus"}:
+            elif method in {"near_identical_agreement", "geometric_teacher_consensus", "consensus"}:
                 publication_status = "accepted_by_consensus"
             elif status == "fallback":
                 publication_status = "accepted_by_fallback"
@@ -5076,6 +6071,7 @@ def run_multimodel_annotation_loop(
     _write_csv(dice_csv, dice_rows, [
         "case_id", "organ", "model", "prediction", "reference", "reference_role",
         "metric_family", "metric_scope", "ground_truth_status", "accuracy_warning",
+        "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
         "dice", "pseudo_consistency_dice", "decision", "status", "reason",
         "candidate_exists", "alias_match", "requested_canonical_id", "source_local_label",
         "resolved_canonical_id", "comparison_family", "parent_ids", "mapping_type",
@@ -5114,14 +6110,21 @@ def run_multimodel_annotation_loop(
         "num_classes": len(organs),
         "expected_targets": len(cases) * len(organs),
         "manifest_targets": len(all_selection_rows),
-        "candidate_pseudo_targets": sum(1 for r in all_selection_rows if str(r.get("target_type") or "hard") != "absent_negative"),
-        "absent_negative_targets": sum(1 for r in all_selection_rows if str(r.get("target_type")) == "absent_negative"),
-        "all_zero_masks": len({str(r.get("final_mask") or r.get("mask_path") or "") for r in all_selection_rows if str(r.get("target_type")) == "absent_negative" and (r.get("final_mask") or r.get("mask_path"))}),
+        "candidate_pseudo_targets": sum(1 for r in all_selection_rows if str(r.get("record_type")) == "candidate_pseudo"),
+        "absent_negative_targets": sum(1 for r in all_selection_rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"}),
+        "unresolved_review_targets": sum(1 for r in all_selection_rows if str(r.get("target_type")) in {"unresolved_review", "unresolved_visible", "partial_fov"}),
+        "all_zero_masks": len({str(r.get("final_mask") or r.get("mask_path") or "") for r in all_selection_rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"} and (r.get("final_mask") or r.get("mask_path"))}),
         "target_type_counts": target_type_counts_373,
         "complete_case_373": len(all_selection_rows) == len(cases) * len(organs),
         "cases": case_373_summaries,
     }
     write_json(out / "case_373_target_summary.json", case_373_dataset_summary)
+    write_json(out / "full_case_373_manifest.json", {
+        "stage": "full_case_373_estep_manifest",
+        "status": "success" if case_373_dataset_summary["complete_case_373"] else "failed",
+        "summary": case_373_dataset_summary,
+        "items": all_selection_rows,
+    })
     manifest = build_training_manifest(standard_dataset_root, out / "training_manifest.json", organs=organs)
     gap_report = {
         "stage": "pseudo_label_gap_report",

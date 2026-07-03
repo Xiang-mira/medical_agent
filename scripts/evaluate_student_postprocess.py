@@ -78,6 +78,29 @@ def dice(a: np.ndarray, b: np.ndarray) -> float:
     return float(2 * np.logical_and(a, b).sum() / (av + bv))
 
 
+def metric_contract_for_reference(ref_kind: str) -> dict[str, str]:
+    if ref_kind == "gt":
+        return {
+            "metric_target": "GT",
+            "metric_subject": "postprocessed student",
+            "metric_comparison": "postprocessed_student_vs_expert_gt",
+            "metric_interpretation": "real_gt_segmentation_performance",
+        }
+    if ref_kind == "teacher":
+        return {
+            "metric_target": "teacher",
+            "metric_subject": "postprocessed student",
+            "metric_comparison": "postprocessed_student_vs_selected_teacher",
+            "metric_interpretation": "teacher_imitation",
+        }
+    return {
+        "metric_target": "",
+        "metric_subject": "postprocessed student",
+        "metric_comparison": "",
+        "metric_interpretation": "",
+    }
+
+
 def ratio(pred: np.ndarray, ref: np.ndarray) -> float | None:
     rv = int(ref.sum())
     return float(pred.sum() / rv) if rv else None
@@ -94,11 +117,17 @@ def copy_review_masks(row: dict[str, Any], visual_root: Path) -> None:
         ("post_path", "postprocessed_student.nii.gz"),
         ("reference_path", "reference.nii.gz"),
     ]:
-        p = Path(str(row.get(key) or ""))
-        if p.exists():
+        raw_value = str(row.get(key) or "").strip()
+        if not raw_value:
+            continue
+        p = Path(raw_value)
+        if p.exists() and p.is_file():
             shutil.copy2(p, out / name)
-    roi = Path(str(row.get("parent_roi_path") or ""))
-    if roi.exists():
+    roi_value = str(row.get("parent_roi_path") or "").strip()
+    if not roi_value:
+        return
+    roi = Path(roi_value)
+    if roi.exists() and roi.is_file():
         shutil.copy2(roi, out / "parent_organ_roi.nii.gz")
 
 
@@ -127,6 +156,7 @@ def main() -> int:
             teacher_path = first_existing(candidate_paths(args.teacher_root, case_id, organ))
             ref_path = gt_path or teacher_path
             ref_kind = "gt" if gt_path else ("teacher" if teacher_path else "")
+            metric_contract = metric_contract_for_reference(ref_kind)
             ref = None
             if ref_path is not None:
                 _, ref = read_bool(ref_path, raw_img)
@@ -140,6 +170,7 @@ def main() -> int:
                 "raw_path": str(raw_path),
                 "post_path": str(post_path),
                 "reference_kind": ref_kind,
+                **metric_contract,
                 "reference_path": str(ref_path) if ref_path else "",
                 "parent_roi_path": str(args.post_root / "parent_rois" / case_id / f"{organ}_allowed_roi.nii.gz"),
                 "before_voxels": int(raw.sum()),
@@ -170,6 +201,7 @@ def main() -> int:
 
     required_columns = [
         "case_id", "organ", "organ_group", "raw_path", "post_path", "reference_kind", "reference_path",
+        "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
         "parent_roi_path", "before_voxels", "after_voxels", "false_positive_voxels_removed",
         "connected_component_count_before", "connected_component_count_after",
         "largest_component_ratio_before", "largest_component_ratio_after",
@@ -181,13 +213,16 @@ def main() -> int:
     df.to_csv(per_case_path, index=False)
     summary_path = args.output_dir / "student_postprocess_before_after_organ_summary.csv"
     summary_columns = [
-        "organ", "n", "before_postprocessing_dice", "after_postprocessing_dice",
+        "organ", "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
+        "n", "before_postprocessing_dice", "after_postprocessing_dice",
         "before_volume_ratio", "after_volume_ratio", "false_positive_voxels_removed",
         "connected_component_count_before", "connected_component_count_after",
         "largest_component_ratio_before", "largest_component_ratio_after",
     ]
     if not df.empty:
-        summary = df.groupby("organ").agg(
+        summary = df.groupby([
+            "organ", "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
+        ], dropna=False).agg(
             n=("organ", "size"),
             before_postprocessing_dice=("before_postprocessing_dice", "mean"),
             after_postprocessing_dice=("after_postprocessing_dice", "mean"),

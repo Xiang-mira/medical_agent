@@ -144,6 +144,10 @@ def main() -> int:
         student_vs_gt.append({
             "case_id": case_id,
             "organ": organ,
+            "metric_target": "GT",
+            "metric_subject": "student",
+            "metric_comparison": "student_vs_expert_gt",
+            "metric_interpretation": "real_gt_segmentation_performance",
             "student_mask": str(student_path) if student_path else "",
             "gt_mask": str(ref_path) if ref_path else "",
             "reference_kind": ref_kind,
@@ -154,6 +158,10 @@ def main() -> int:
         student_vs_pseudo.append({
             "case_id": case_id,
             "organ": organ,
+            "metric_target": "pseudo-label",
+            "metric_subject": "student",
+            "metric_comparison": "student_vs_selected_pseudo_label",
+            "metric_interpretation": "pseudo_label_consistency",
             "student_mask": str(student_path) if student_path else "",
             "pseudo_mask": str(pseudo_path) if pseudo_path else "",
             "pseudo_available": pseudo_exists,
@@ -172,6 +180,10 @@ def main() -> int:
             teacher_vs_gt.append({
                 "case_id": case_id,
                 "organ": organ,
+                "metric_target": "GT",
+                "metric_subject": "teacher",
+                "metric_comparison": "teacher_vs_expert_gt",
+                "metric_interpretation": "real_gt_segmentation_performance",
                 "teacher": model,
                 "teacher_mask": pred,
                 "gt_mask": str(ref_path) if ref_path else "",
@@ -186,6 +198,10 @@ def main() -> int:
         student_minus_teacher.append({
             "case_id": case_id,
             "organ": organ,
+            "metric_target": "GT",
+            "metric_subject": "student",
+            "metric_comparison": "student_vs_best_teacher_on_expert_gt",
+            "metric_interpretation": "real_gt_segmentation_performance_delta",
             "student_mask": str(student_path) if student_path else "",
             "best_teacher": best_teacher[0],
             "best_teacher_mask": best_teacher[2],

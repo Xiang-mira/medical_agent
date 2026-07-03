@@ -246,16 +246,22 @@ def build_organ_qc(round_dir: Path) -> pd.DataFrame:
     qc["likely_failure_mode"] = qc.apply(likely_failure_mode, axis=1)
     qc["recommended_action"] = qc.apply(recommended_action, axis=1)
     qc["metric_warning"] = "student-vs-selected-pseudo-label consistency, not expert-GT accuracy"
+    qc["metric_target"] = "pseudo-label"
+    qc["metric_subject"] = "student"
+    qc["metric_comparison"] = "student_vs_selected_pseudo_label"
+    qc["metric_interpretation"] = "pseudo_label_consistency"
+    qc["student_vs_selected_pseudo_mean_dsc"] = qc["mean_dsc"]
 
     preferred = [
         "organ", "qc_category", "recommended_action", "likely_failure_mode",
         "anatomy_region", "organ_complexity", "coverage", "selected_count",
         "distillation_eligible_count", "distillation_eligible_rate",
         "A_count", "B_count", "C_count", "D_count", "AB_count", "AB_rate", "D_rate",
-        "mean_reliability_score", "n", "mean_dsc", "std_dsc",
+        "mean_reliability_score", "n", "mean_dsc", "student_vs_selected_pseudo_mean_dsc", "std_dsc",
         "fallback_count", "fallback_rate_among_selected", "single_family_count",
         "single_family_rate", "shapekit_fallback_count", "missing_case_count",
         "training_excluded_count", "status", "student_checkpoint_status",
+        "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
         "metric_warning",
     ]
     return qc[[c for c in preferred if c in qc.columns]].sort_values(
@@ -310,6 +316,11 @@ def build_case_qc(round_dir: Path) -> pd.DataFrame:
         "lower": "usable_for_filtered_training_with_monitoring",
     })
     qc["metric_warning"] = "student-vs-selected-pseudo-label consistency, not expert-GT accuracy"
+    qc["metric_target"] = "pseudo-label"
+    qc["metric_subject"] = "student"
+    qc["metric_comparison"] = "student_vs_selected_pseudo_label"
+    qc["metric_interpretation"] = "pseudo_label_consistency"
+    qc["student_vs_selected_pseudo_mean_dsc"] = qc["mean_dsc"]
     return qc.sort_values(["case_risk", "mean_dsc"], ascending=[True, True])
 
 
@@ -329,12 +340,18 @@ def build_summary(organ_qc: pd.DataFrame, case_qc: pd.DataFrame, round_dir: Path
     return {
         "scope": str(round_dir),
         "metric_warning": "QC uses pseudo-label consistency and auto-label evidence. It is not expert-ground-truth accuracy.",
+        "metric_target": "pseudo-label",
+        "metric_subject": "student",
+        "metric_comparison": "student_vs_selected_pseudo_label",
+        "metric_interpretation": "pseudo_label_consistency",
         "round_status": {
             "estep_status": gate.get("status"),
             "num_cases": gate.get("num_cases_with_selection_metadata"),
             "num_selected_organs": gate.get("num_selected_organs"),
             "grade_counts": gate.get("grade_counts"),
             "overall_student_pseudo_consistency_mean_dsc": metrics.get("overall_mean_dsc"),
+            "metric_target": metrics.get("metric_target", "pseudo-label"),
+            "metric_comparison": metrics.get("metric_comparison", "student_vs_selected_pseudo_label"),
             "n_student_evaluations": metrics.get("n_evaluations"),
         },
         "organ_qc_category_counts": category_counts,
@@ -360,12 +377,12 @@ def write_markdown(path: Path, summary: dict[str, Any], organ_qc: pd.DataFrame, 
     lines.append(f"- Cases: {rs.get('num_cases')}")
     lines.append(f"- Selected pseudo-labels: {rs.get('num_selected_organs')}")
     lines.append(f"- Grade counts: {rs.get('grade_counts')}")
-    lines.append(f"- Student-vs-pseudo mean Dice: {rs.get('overall_student_pseudo_consistency_mean_dsc')}\n")
+    lines.append(f"- Student-vs-selected-pseudo mean DSC: {rs.get('overall_student_pseudo_consistency_mean_dsc')}\n")
     lines.append("## Organ QC category counts\n")
     for key, value in summary["organ_qc_category_counts"].items():
         lines.append(f"- {key}: {value}")
     lines.append("\n## Case risk table\n")
-    lines.append("| case_id | risk | mean Dice | median Dice | Dice<0.2 % | selected | fallback % | recommendation |")
+    lines.append("| case_id | risk | Student vs selected pseudo-label Dice | median student-vs-pseudo Dice | student-vs-pseudo Dice<0.2 % | selected | fallback % | recommendation |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|---|")
     for _, row in case_qc.iterrows():
         lines.append(
@@ -379,7 +396,7 @@ def write_markdown(path: Path, summary: dict[str, Any], organ_qc: pd.DataFrame, 
     lines.append("\n## Best current organs\n")
     best = organ_qc[organ_qc["qc_category"].isin(["good", "usable_needs_improvement"])].sort_values("mean_dsc", ascending=False).head(30)
     for _, row in best.iterrows():
-        lines.append(f"- {row['organ']}: {row['qc_category']}, mean_dsc={row['mean_dsc']:.3f}, action={row['recommended_action']}")
+        lines.append(f"- {row['organ']}: {row['qc_category']}, student_vs_selected_pseudo_mean_dsc={row['mean_dsc']:.3f}, action={row['recommended_action']}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

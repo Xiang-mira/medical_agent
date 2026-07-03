@@ -1,10 +1,5 @@
-try:
-    from IPython.display import display
-except Exception:
-    def display(*args, **kwargs):
-        return None
+from IPython.display import display
 import os
-import json
 import random
 import requests
 from PIL import Image
@@ -22,7 +17,6 @@ except:
 import tempfile
 import shutil
 import copy
-from pathlib import Path
 import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor
 import csv
@@ -437,90 +431,6 @@ DescriptionsED={
     "stomach":StomachDescriptionED,
     "pancreas":PancreasDescriptionED,
     "gall_bladder":GallbladderDescriptionED}
-
-
-def _default_prompt_bank_config_path():
-    env_path = os.environ.get("MEDAI_PROMPT_TARGET_CONFIG")
-    if env_path:
-        return Path(env_path)
-    return Path(__file__).resolve().parents[2] / "configs" / "student_3d_prompt_target_organs.json"
-
-
-def _default_organ_ct_appearance_config_path():
-    env_path = os.environ.get("MEDAI_ORGAN_CT_APPEARANCE_CONFIG")
-    if env_path:
-        return Path(env_path)
-    return Path(__file__).resolve().parents[2] / "configs" / "organ_ct_appearance_373.json"
-
-
-def _format_list_for_prompt(values):
-    if isinstance(values, list):
-        return "; ".join(str(v) for v in values if str(v).strip())
-    return str(values or "")
-
-
-def _appearance_description_for_organ(organ):
-    """Load structured 373-organ CT appearance guidance for LabelCritic."""
-    try:
-        doc = json.loads(_default_organ_ct_appearance_config_path().read_text(encoding="utf-8"))
-        entry = (doc.get("organ_ct_appearance", {}) or {}).get(organ)
-        if not isinstance(entry, dict):
-            entry = next((e for e in (doc.get("entries", []) or []) if isinstance(e, dict) and e.get("canonical_organ") == organ), None)
-        if not isinstance(entry, dict):
-            return None
-        aliases = ", ".join(entry.get("aliases") or [organ.replace("_", " ")])
-        return (
-            "When evaluating and comparing the overlays, consider the following organ-specific CT information:\n"
-            f"a) Target names and synonyms: {aliases}.\n"
-            f"b) Expected location: {entry.get('expected_region') or entry.get('expected_location')}.\n"
-            f"c) CT appearance: {entry.get('ct_appearance')}.\n"
-            f"d) Shape and continuity prior: {entry.get('shape_and_continuity_prior')}.\n"
-            f"e) Nearby structures and exclusion landmarks: {_format_list_for_prompt(entry.get('neighbor_relations'))}.\n"
-            f"f) Anatomical constraints: {_format_list_for_prompt(entry.get('anatomical_constraints'))}.\n"
-            f"g) Common failure modes: {_format_list_for_prompt(entry.get('common_failure_modes'))}.\n"
-            f"h) Rejection rules: {_format_list_for_prompt(entry.get('rejection_rules'))}.\n"
-            f"i) LabelCritic instruction: {entry.get('labelcritic_instruction')}.\n"
-        )
-    except Exception:
-        return None
-
-
-def _prompt_bank_description_for_organ(organ):
-    """Load organ-specific CT/anatomy guidance from the project prompt-bank manifest."""
-    try:
-        doc = json.loads(_default_prompt_bank_config_path().read_text(encoding="utf-8"))
-        entry = (doc.get("organ_prompt_bank", {}) or {}).get(organ)
-        if not isinstance(entry, dict):
-            return None
-        aliases = ", ".join(entry.get("aliases") or [organ.replace("_", " ")])
-        landmarks = ", ".join(entry.get("landmarks") or [])
-        return (
-            "When evaluating and comparing the overlays, consider the following organ-specific CT information:\n"
-            f"a) Target names and synonyms: {aliases}.\n"
-            f"b) Expected location: {entry.get('region')}.\n"
-            f"c) CT appearance: {entry.get('ct_appearance')}.\n"
-            f"d) Nearby structures and exclusion landmarks: {landmarks}.\n"
-        )
-    except Exception:
-        return None
-
-
-def _organ_description(organ_descriptions, organ):
-    if organ in organ_descriptions:
-        return organ_descriptions[organ]
-    appearance_description = _appearance_description_for_organ(organ)
-    if appearance_description:
-        return appearance_description
-    prompt_bank_description = _prompt_bank_description_for_organ(organ)
-    if prompt_bank_description:
-        return prompt_bank_description
-    name = organ.replace("_", " ").replace("gall bladder", "gallbladder")
-    return (
-        "Prompt source: fallback_generic.\n"
-        "When evaluating and comparing the overlays, use the target organ name, "
-        f"its expected CT location, shape, boundaries, and adjacent structures for the {name}. "
-        "Penalize overlays that clearly mark a different structure or extend far outside the expected anatomic region.\n"
-    )
 
 StomachDescriptionEDShapeless="""When evaluating and comparing the overlays, consider only the overlay unity and location, do NOT consider its shape:
 a) Unity: The stomach red overlay should be a single connected structure. If it has multiple structures or small disconnected parts, the overlay has a big error.
@@ -1323,7 +1233,7 @@ def ErrorDetectionLMDeployZeroShot(clean, y,
     #organ should be present in image. Let's evaluate the label y
     #Analyze image
     if not simple_prompt_ablation:
-        text=instructions % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}+_organ_description(organ_descriptions, organ)
+        text=instructions % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}+organ_descriptions[organ]
     else:
         text='The image I am sending you is a frontal projection of a CT scan, which looks like and is oriented like an AP X-ray. It has a red overlay representing the ' +organ.replace('_',' ').replace('gall bladder','gallbladder')+'. Considering the organ shape and position, evaluate if the red overlay is a good or a bad annotation for the '+organ.replace('_',' ').replace('gall bladder','gallbladder')+'. Justify your answer.'
     imgs=[y]
@@ -1416,7 +1326,7 @@ def ErrorDetectionLMDeployFewShot(clean, y, good_examples,bad_examples,
     #organ should be present in image. Let's evaluate the label y
     #create few shot prompt
     if isinstance(organ_descriptions, dict):
-        organ_description=_organ_description(organ_descriptions, organ)
+        organ_description=organ_descriptions[organ]
     
 
     if len(good_examples)==1 and len(bad_examples)==0:
@@ -1757,7 +1667,6 @@ def ZeroShotErrorDetectionSystematicEvalLMDeploy(pth,
         answers=[]
         labels=[]
         outputs={}
-        skipped_by_projection_dice=[]
 
         print('Getting files')
         files_good,files_bad=get_files(pth,file_list,anno_window,organ,location_window,best,file_structure=file_structure)
@@ -3103,21 +3012,6 @@ CompareSummarize2Figs=("The text below represents a comparisons of 2 overlays, '
                 "The text explains which overlay (or image) is better. I want you to answer me which overlay is better according to the text. Answer me with only these words: 'Overlay 1', 'Overlay 2' or 'Neither'. "
                 "The text is:\n")
 
-StrictChoiceCompare2Images=(
-    "You are comparing two segmentation overlays for the %(organ)s on the same CT projection. "
-    "Overlay 1 is shown on Image 1. Overlay 2 is shown on Image 2. "
-    "Choose the overlay that better matches the %(organ)s anatomy, considering location, shape, completeness, and false-positive red regions. "
-    "If both are similarly good or similarly bad, choose tie. "
-    "Your final line must be exactly one of: overlay 1, overlay 2, tie."
-)
-
-StrictChoiceSummarize=(
-    "Extract only the final decision from the text below. "
-    "Answer exactly one of: Overlay 1, Overlay 2, Neither. "
-    "Use Neither only if the text says tie, neither, no clear winner, or both are similarly good/bad. "
-    "Text:\n"
-)
-
 CompareSummarize6Figs=("The text below represents a comparisons of 2 overlays, 'Overlay 1' and 'Overlay 2'. "
                 " Image 1 and 4 showed Overlay 1 in red, and Images 2 and 5 showed Overlay 2 in yellow. Images 3 and 6 showed the superposition of both overlays. "
                 "A LVLM like you compared the 2 overlays by analyzing the 6 images. Its answer is the text below."
@@ -3256,8 +3150,7 @@ def Prompt3MessagesSepFiguresLMDeploy(clean, y1, y2,
                             text_y2=ZeroShotInstructions,
                             text_compare=TextCompareAdd,
                             text_summarize=CompareSummarize, organ='liver',
-                            save_memory=False, window='bone',solid_overlay=False,
-                            skip_organ_presence_gate=False):
+                            save_memory=False, window='bone',solid_overlay=False):
     
     organRegion=text_region % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}
     if organ=='liver':
@@ -3278,9 +3171,6 @@ def Prompt3MessagesSepFiguresLMDeploy(clean, y1, y2,
     if 'skeleton' in window:
         q='q4'
     AnswerNo=('no' in answer.lower()[answer.lower().rfind(q):answer.lower().rfind(q)+7])
-    if skip_organ_presence_gate:
-        print('Diagnostic mode: skipping organ-presence gate; ignoring AnswerNo =', AnswerNo)
-        AnswerNo=False
     if organ=='aorta':
         if 'skeleton' in window:
             if ('no' in answer.lower()[answer.lower().rfind('q6'):answer.lower().rfind('q6')+7]):#no lungs
@@ -3334,17 +3224,16 @@ def Prompt3MessagesSepFiguresLMDeploy(clean, y1, y2,
     
     
     text_y1 = text_y1 % {'organ': organ.replace('_',' '), 'number': 1} 
-    organ_description = _organ_description(organ_descriptions, organ)
-    if isinstance(organ_description, list):
-        text_y1 += organ_description[0]
+    if isinstance(organ_descriptions[organ], list):
+        text_y1 += organ_descriptions[organ][0]
     else:
-        text_y1 += organ_description
+        text_y1 += organ_descriptions[organ]
 
     text_y2 = text_y2 % {'organ': organ.replace('_',' '), 'number': 2} 
-    if isinstance(organ_description, list):
-        text_y2 += organ_description[1]
+    if isinstance(organ_descriptions[organ], list):
+        text_y2 += organ_descriptions[organ][1]
     else:
-        text_y2 += organ_description
+        text_y2 += organ_descriptions[organ]
 
     if save_memory:
         conversation=[]
@@ -3429,8 +3318,7 @@ def Prompt3MessagesSepFiguresLMDeployDualConfirmation(clean, y1, y2,
                             text_compare=TextCompareAdd,
                             text_summarize=CompareSummarize, organ='liver',
                             save_memory=False, window='bone',solid_overlay=False,
-                            conservative=True,
-                            skip_organ_presence_gate=False):
+                            conservative=True):
     #sends 2 prompts, each one with one image order, checks if the answer is the same, if not, returns 0.5
     
     organRegion=text_region % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}
@@ -3452,9 +3340,6 @@ def Prompt3MessagesSepFiguresLMDeployDualConfirmation(clean, y1, y2,
     if 'skeleton' in window:
         q='q4'
     AnswerNo=('no' in answer.lower()[answer.lower().rfind(q):answer.lower().rfind(q)+7])
-    if skip_organ_presence_gate:
-        print('Diagnostic mode: skipping organ-presence gate; ignoring AnswerNo =', AnswerNo)
-        AnswerNo=False
     if organ=='aorta':
         if 'skeleton' in window:
             if ('no' in answer.lower()[answer.lower().rfind('q6'):answer.lower().rfind('q6')+7]):#no lungs
@@ -3506,17 +3391,16 @@ def Prompt3MessagesSepFiguresLMDeployDualConfirmation(clean, y1, y2,
     
     
     text_y1 = text_y1 % {'organ': organ.replace('_',' '), 'number': 1} 
-    organ_description = _organ_description(organ_descriptions, organ)
-    if isinstance(organ_description, list):
-        text_y1 += organ_description[0]
+    if isinstance(organ_descriptions[organ], list):
+        text_y1 += organ_descriptions[organ][0]
     else:
-        text_y1 += organ_description
+        text_y1 += organ_descriptions[organ]
 
     text_y2 = text_y2 % {'organ': organ.replace('_',' '), 'number': 2} 
-    if isinstance(organ_description, list):
-        text_y2 += organ_description[1]
+    if isinstance(organ_descriptions[organ], list):
+        text_y2 += organ_descriptions[organ][1]
     else:
-        text_y2 += organ_description
+        text_y2 += organ_descriptions[organ]
 
     if save_memory:
         conversation=[]
@@ -4080,8 +3964,7 @@ def Prompt2MessagesSepFiguresLMDeploy(clean, y1, y2,
                             organ_descriptions=None,
                             text_compare=Compare2Images,
                             text_summarize=CompareSummarize, organ='liver',
-                            save_memory=False, window='bone',solid_overlay=False,
-                            skip_organ_presence_gate=False):
+                            save_memory=False, window='bone',solid_overlay=False):
     
     organRegion=text_region % {'organ': organ.replace('_',' ').replace('gall bladder','gallbladder')}
 
@@ -4102,9 +3985,6 @@ def Prompt2MessagesSepFiguresLMDeploy(clean, y1, y2,
     if 'skeleton' in window:
         q='q4'
     AnswerNo=('no' in answer.lower()[answer.lower().rfind(q):answer.lower().rfind(q)+7])
-    if skip_organ_presence_gate:
-        print('Diagnostic mode: skipping organ-presence gate; ignoring AnswerNo =', AnswerNo)
-        AnswerNo=False
     if organ=='aorta':
         if 'skeleton' in window:
             if ('no' in answer.lower()[answer.lower().rfind('q6'):answer.lower().rfind('q6')+7]):#no lungs
@@ -4189,8 +4069,7 @@ def Prompt2MessagesSepFiguresLMDeployDualConfirmation(clean, y1, y2,
                             text_compare=Compare2Images,
                             text_summarize=CompareSummarize, organ='liver',
                             save_memory=False, window='bone',solid_overlay=False,
-                            conservative=False,
-                            skip_organ_presence_gate=False):
+                            conservative=False):
 
     print("=== Start Prompt2MessagesSepFiguresLMDeployDualConfirmation ===")
     print("Organ:", organ, "| Window:", window)
@@ -4220,9 +4099,6 @@ def Prompt2MessagesSepFiguresLMDeployDualConfirmation(clean, y1, y2,
     if 'skeleton' in window:
         q='q4'
     AnswerNo=('no' in answer.lower()[answer.lower().rfind(q):answer.lower().rfind(q)+7])
-    if skip_organ_presence_gate:
-        print('Diagnostic mode: skipping organ-presence gate; ignoring AnswerNo =', AnswerNo)
-        AnswerNo=False
     print("AnswerNo detected:", AnswerNo, organ)
 
     if organ=='aorta':
@@ -4499,10 +4375,10 @@ def Prompt4MessagesSepFiguresLMDeploy(clean, y1, y2,
     
     
     text_y1 = text_y1 % {'organ': organ.replace('_',' '), 'number': 1} 
-    text_y1 += _organ_description(organ_descriptions, organ)
+    text_y1 += organ_descriptions[organ]
 
     text_y2 = text_y2 % {'organ': organ.replace('_',' '), 'number': 2} 
-    text_y2 += _organ_description(organ_descriptions, organ)
+    text_y2 += organ_descriptions[organ]
 
     if save_memory:
         conversation=[]
@@ -5102,8 +4978,6 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                             csv_file=None,restart=True,
                             examples=0,dice_list=None,
                             shapeless=False,simple_prompt_ablation=False,
-                            skip_organ_presence_gate=False,
-                            strict_choice_prompt=False,
                             min_cases=100,max_cases=10000):
 
         if examples>0:
@@ -5126,12 +5000,6 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
             text_multi_image_prompt_2=Compare2ImagesSimple
             if examples>0:
                 raise ValueError('Examples not implemented for simple prompt ablation.')
-
-        if strict_choice_prompt:
-            text_compare=StrictChoiceCompare2Images
-            text_multi_image_prompt_2=StrictChoiceCompare2Images
-            text_summarize=StrictChoiceSummarize
-            multi_image_prompt_2=True
 
         
 
@@ -5188,7 +5056,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
             elif organ in ['aorta','postcava','spleen','stomach','gall_bladder']:
                 multi_image_prompt_2=True
             else:
-                multi_image_prompt_2=False  # default for unrecognized organs
+                raise ValueError('Organ not recognized for multi_image_prompt_2=auto')
             
         if solid_overlay=='auto':
             if organ in ['aorta','postcava']:
@@ -5205,7 +5073,6 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
         answers=[]
         labels=[]
         outputs={}
-        skipped_by_projection_dice=[]
 
         if file_list is not None:
             with open(file_list, 'r') as file:
@@ -5267,8 +5134,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                 dice=check_dice(y1,y2)
                 print('2D dice coefficient between 2 projections on axis 1:',dice)
                 if dice>dice_th:
-                    print(f'The projections are too similar for case {target}, skipping the comparison. Try another axis or ct slices (holes?).')
-                    skipped_by_projection_dice.append({"case": target, "dice": float(dice), "dice_th": float(dice_th)})
+                    print('The projections are too similar for case {target}, skipping the comparison. Try another axis or ct slices (holes?).')
                     continue
             
             if window=='skeleton':
@@ -5335,8 +5201,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                                     text_summarize=text_summarize,
                                     organ=organ,save_memory=save_memory,
                                     window=window,solid_overlay=solid_overlay,
-                                    conservative=conservative_dual,
-                                    skip_organ_presence_gate=skip_organ_presence_gate)
+                                    conservative=conservative_dual)
                 else:
                     raise ValueError('Examples are only implemented for dual confirmation and multiple images in one prompt.')
 
@@ -5353,8 +5218,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                                     text_summarize=text_summarize,
                                     organ=organ,save_memory=save_memory,
                                     window=window,solid_overlay=solid_overlay,
-                                    conservative=conservative_dual,
-                                    skip_organ_presence_gate=skip_organ_presence_gate)
+                                    conservative=conservative_dual)
                     else:
                         print('Using dual confirmation and sending images separately.')
                         answer,answer_dual=Prompt3MessagesSepFiguresLMDeployDualConfirmation(
@@ -5368,8 +5232,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                                         text_summarize=text_summarize,
                                         organ=organ,save_memory=save_memory,
                                         window=window,solid_overlay=solid_overlay,
-                                        conservative=conservative_dual,
-                                        skip_organ_presence_gate=skip_organ_presence_gate)
+                                        conservative=conservative_dual)
                 elif superpose:
                     answer=Prompt4MessagesSepFiguresLMDeploySuperposition(
                                 clean=fake_file,y1=y1,y2=y2,y_super=fake_file,
@@ -5391,8 +5254,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                                     text_compare=text_multi_image_prompt_2,
                                     text_summarize=text_summarize,
                                     organ=organ,save_memory=save_memory,
-                                    window=window,solid_overlay=solid_overlay,
-                                    skip_organ_presence_gate=skip_organ_presence_gate)
+                                    window=window,solid_overlay=solid_overlay)
 
                 else:
                     answer=Prompt3MessagesSepFiguresLMDeploy(
@@ -5405,8 +5267,7 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
                                     text_compare=text_compare,
                                     text_summarize=text_summarize,
                                     organ=organ,save_memory=save_memory,
-                                    window=window,solid_overlay=solid_overlay,
-                                    skip_organ_presence_gate=skip_organ_presence_gate)
+                                    window=window,solid_overlay=solid_overlay)
             
             print('Traget:',target,'Answer:',answer,'Label: Overlay '+str(best), 'Correct:',best==answer)
             if csv_file is not None:
@@ -5446,7 +5307,6 @@ def SystematicComparisonLMDeploySepFigures(pth,base_url='http://0.0.0.0:8000/v1'
 
         for k,v in outputs.items():
             print(k,v)
-        print('Skipped by projection dice:', skipped_by_projection_dice)
 organ_list=['adrenal_gland_left',
  'adrenal_gland_right',
  'aorta',

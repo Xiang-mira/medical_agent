@@ -900,9 +900,14 @@ def test_expected_presence_uses_case_coverage_metadata():
     }
 
     assert loop._expected_presence_for_organ("liver", abdomen_only) == "expected_present"
-    assert loop._expected_presence_for_organ("bladder", abdomen_only) == "expected_absent"
+    assert loop._expected_presence_for_organ("bladder", abdomen_only) == "unknown"
+    assert loop._expected_presence_for_organ("gall_bladder", abdomen_only) == "expected_present"
+    assert loop._expected_presence_for_organ(
+        "esophagus", {**abdomen_only, "has_thorax_coverage": True}
+    ) == "expected_present"
+    assert loop._expected_presence_for_organ("hip_right", abdomen_only) == "unknown"
     assert loop._expected_presence_for_organ("bladder", pelvis_only) == "expected_present"
-    assert loop._expected_presence_for_organ("kidney_left", pelvis_only) == "expected_absent"
+    assert loop._expected_presence_for_organ("kidney_left", pelvis_only) == "unknown"
     assert loop._expected_presence_for_organ("pancreas", explicit_absent) == "expected_absent"
     assert loop._expected_presence_for_organ("liver", {}) == "unknown"
     assert loop._expected_presence_for_organ("bladder", {}) == "unknown"

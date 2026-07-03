@@ -29,6 +29,14 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
+def metric_target_from_reference_kind(reference_kind: str) -> tuple[str, str, str]:
+    if reference_kind == "expert_gt":
+        return ("GT", "prediction_vs_expert_gt", "real_gt_segmentation_performance")
+    if reference_kind in {"all_zero", "all-zero", "all_zero_target", "absent_negative"}:
+        return ("all-zero target", "prediction_vs_all_zero_target", "negative_absence_quality")
+    return ("pseudo-label", "prediction_vs_held_out_pseudo_label", "pseudo_label_consistency")
+
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -89,6 +97,7 @@ def metric_row(pred: np.ndarray, ref: np.ndarray, spacing: tuple[float, ...]) ->
         "relative_volume_error": float((pred_n - ref_n) / ref_n) if ref_n else (float("inf") if pred_n else 0.0),
         "pred_voxels": pred_n,
         "reference_voxels": ref_n,
+        "false_positive_voxels": fp,
         "connected_components": int(label(pred)[1]) if pred_n else 0,
     }
     result.update(surface_metrics(pred, ref, spacing))
@@ -136,6 +145,7 @@ def main() -> int:
 
     rows = []
     geometry_errors = []
+    metric_target, metric_comparison, metric_interpretation = metric_target_from_reference_kind(args.reference_kind)
     for case in cases:
         case_id = case["case_id"]
         ct = nib.load(case["ct_path"])
@@ -164,6 +174,11 @@ def main() -> int:
                 "reference_geometry_status": reference_geometry_status,
                 "ct_path": case["ct_path"], "prediction_path": str(pred_path),
                 "reference_path": str(ref_path),
+                "reference_kind": args.reference_kind,
+                "metric_target": metric_target,
+                "metric_subject": "student",
+                "metric_comparison": metric_comparison,
+                "metric_interpretation": metric_interpretation,
             }
             row.update(metric_row(pred, ref, tuple(float(x) for x in ct.header.get_zooms()[:3])))
             rows.append(row)
@@ -179,6 +194,10 @@ def main() -> int:
     summary = {
         "status": "success" if rows and not geometry_errors else "failed",
         "reference_kind": args.reference_kind,
+        "metric_target": metric_target,
+        "metric_subject": "student",
+        "metric_comparison": metric_comparison,
+        "metric_interpretation": metric_interpretation,
         "accuracy_wording": "held-out reference agreement" if args.reference_kind != "expert_gt" else "held-out expert-ground-truth accuracy",
         "cases": len(cases),
         "case_organ_pairs": len(rows),
@@ -193,6 +212,7 @@ def main() -> int:
         "catastrophic_failure_rate": float(np.mean([r["catastrophic_failure"] for r in rows])) if rows else None,
         "presence_sensitivity": present_tp / max(1, present_tp + present_fn),
         "presence_specificity": absent_tn / max(1, absent_tn + absent_fp),
+        "false_positive_voxels": int(sum(int(r["false_positive_voxels"]) for r in rows)),
         "dice_bootstrap_95ci": bootstrap_ci(rows, "dice", args.bootstrap_samples),
         "nsd_3mm_bootstrap_95ci": bootstrap_ci(rows, "nsd_3mm", args.bootstrap_samples),
         "geometry_errors": geometry_errors,

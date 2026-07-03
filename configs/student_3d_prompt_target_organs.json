@@ -1520,7 +1520,7 @@
       "display_name": "aorta",
       "aliases": [
         "aorta",
-        "aortic lumen",
+        "aortic structure",
         "aortic vessel"
       ],
       "region": "midline to left paraspinal thoracoabdominal course",
@@ -1530,7 +1530,7 @@
         "diaphragm",
         "iliac bifurcation"
       ],
-      "ct_appearance": "long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase",
+      "ct_appearance": "long tubular arterial vessel; segment the full aortic vessel cross-section according to the dataset label definition",
       "prompts": {
         "simple_instruction": [
           "segment the aorta",
@@ -1541,12 +1541,12 @@
           "Find the aorta by its expected location in the midline to left paraspinal thoracoabdominal course, adjacent to heart, spine, diaphragm, iliac bifurcation."
         ],
         "ct_appearance": [
-          "Identify the aorta on CT as a long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase.",
-          "Create a mask for the aorta, following its CT appearance as a long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase."
+          "Identify the aorta on CT as a long tubular arterial vessel and segment the full aortic vessel cross-section according to the dataset label definition.",
+          "Create a mask for the aorta, following its CT appearance as a long tubular arterial vessel while preserving the full target boundary."
         ],
         "synonyms_medical_terms": [
           "segment the aorta",
-          "segment the aortic lumen",
+          "segment the aorta according to the dataset label definition",
           "segment the aortic vessel"
         ],
         "natural_language": [
@@ -15026,9 +15026,9 @@
       "outline the aorta",
       "Segment the aorta in the midline to left paraspinal thoracoabdominal course; use nearby landmarks such as heart, spine, diaphragm, iliac bifurcation.",
       "Find the aorta by its expected location in the midline to left paraspinal thoracoabdominal course, adjacent to heart, spine, diaphragm, iliac bifurcation.",
-      "Identify the aorta on CT as a long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase.",
-      "Create a mask for the aorta, following its CT appearance as a long tubular arterial structure with contrast-filled or soft-tissue-density lumen depending on CT phase.",
-      "segment the aortic lumen",
+      "Identify the aorta on CT as a long tubular arterial vessel and segment the full aortic vessel cross-section according to the dataset label definition.",
+      "Create a mask for the aorta, following its CT appearance as a long tubular arterial vessel while preserving the full target boundary.",
+      "segment the aorta according to the dataset label definition",
       "segment the aortic vessel",
       "Please delineate the aorta on this CT volume while respecting its expected shape, location, and boundaries.",
       "Mark only the voxels belonging to the aorta; avoid adjacent structures such as heart, spine, diaphragm, iliac bifurcation."

@@ -33,6 +33,8 @@ from .target_space import validate_formal_373_target_space
 
 
 DEFAULT_TARGETS = "configs/student_3d_prompt_target_organs.json"
+DEFAULT_OFFICIAL_PROMPT_MAP = "configs/voxtell_official_prompt_map.json"
+DEFAULT_OFFICIAL_EMBEDDING_BANK = "checkpoints/VoxTell/embeddings/voxtell_v1.1/text_embeddings.npz"
 DEFAULT_SANITY_PROMPTS = ["liver", "spleen", "pancreas", "kidney_left", "aorta"]
 NONMEDICAL_NEGATIVE_PROMPTS = [
     ("negative_nonmedical_cat", "segment the cat"),
@@ -313,6 +315,13 @@ class VoxTellStudent:
     def _select_organs(self, prompts: list[str] | None = None) -> tuple[list[str], dict[str, str]]:
         doc = self._target_doc()
         prompt_sampling = os.getenv("MEDAI_PROMPT_SAMPLING", "canonical").strip().lower() or "canonical"
+        prompt_map_path = resolve_path(os.getenv("MEDAI_VOXTELL_OFFICIAL_PROMPT_MAP", DEFAULT_OFFICIAL_PROMPT_MAP))
+        prompt_map_doc = read_json(prompt_map_path, default={}) or {}
+        official_prompt_map = {
+            str(row.get("project_class")): row
+            for row in prompt_map_doc.get("mappings", [])
+            if isinstance(row, dict) and row.get("project_class")
+        }
         if prompts:
             organs = [p for p in prompts if p in set(doc.get("target_organs", []))]
             unknown = [p for p in prompts if p not in set(doc.get("target_organs", []))]
@@ -320,10 +329,16 @@ class VoxTellStudent:
                 raise ValueError(f"Unknown or non-target organs for VoxTell student: {unknown[:20]}")
         else:
             organs = list(doc.get("target_organs", []))
-        return organs, {
-            organ: select_prompt_for_organ(doc, organ, mode=prompt_sampling, seed=str(self.target_config))
-            for organ in organs
-        }
+        selected = {}
+        for organ in organs:
+            official = official_prompt_map.get(organ, {})
+            if prompt_sampling == "canonical" and official.get("canonical_prompt"):
+                selected[organ] = str(official["canonical_prompt"])
+            else:
+                selected[organ] = select_prompt_for_organ(
+                    doc, organ, mode=prompt_sampling, seed=str(self.target_config)
+                )
+        return organs, selected
 
     def segment(
         self,
@@ -412,6 +427,14 @@ class VoxTellStudent:
             organ: str(out / f"{_input_stem_for_voxtell(ct)}_{_safe_prompt_name(organ_to_prompt[organ])}{_voxtell_suffix(ct)}")
             for organ in organs
         }
+        official_path_to_organs: dict[str, list[str]] = {}
+        for organ, path in official_output_masks.items():
+            official_path_to_organs.setdefault(path, []).append(organ)
+        official_output_name_collisions = {
+            path: aliases
+            for path, aliases in official_path_to_organs.items()
+            if len(aliases) > 1
+        }
         result: dict[str, Any] = {
             "stage": "voxtell_3d_prompt_student_inference",
             "status": "dry_run" if dry_run else "pending",
@@ -433,6 +456,8 @@ class VoxTellStudent:
             "prompt_sampling": os.getenv("MEDAI_PROMPT_SAMPLING", "canonical"),
             "expected_masks": expected_masks,
             "official_output_masks": official_output_masks,
+            "official_output_name_collisions": official_output_name_collisions,
+            "official_output_name_collision_count": len(official_output_name_collisions),
             "command": command,
             "official_api_or_cli_command": command,
             "prompt_batch_size": prompt_batch_size,
@@ -487,28 +512,34 @@ class VoxTellStudent:
                 import torch
                 if VOXTELL_VENDOR_ROOT.exists() and str(VOXTELL_VENDOR_ROOT) not in sys.path:
                     sys.path.insert(0, str(VOXTELL_VENDOR_ROOT))
-                from voxtell.inference.predict_from_raw_data import get_reader_writer, save_segmentation
+                from nnunetv2.imageio.nibabel_reader_writer import NibabelIOWithReorient
                 from voxtell.inference.predictor import VoxTellPredictor
 
                 if self.device == "cuda":
                     device = torch.device(f"cuda:{self.gpu}" if torch.cuda.is_available() else "cpu")
                 else:
                     device = torch.device("cpu")
-                reader_writer = get_reader_writer(str(ct))
+                reader_writer = NibabelIOWithReorient()
                 img, props = reader_writer.read_images([str(ct)])
+                embedding_bank_path = resolve_path(
+                    os.getenv("MEDAI_VOXTELL_EMBEDDING_BANK", DEFAULT_OFFICIAL_EMBEDDING_BANK)
+                )
                 predictor = VoxTellPredictor(
                     model_dir=str(self.model_dir),
                     device=device,
                     text_encoding_model=self.text_encoding_model,
+                    embedding_bank=str(embedding_bank_path) if embedding_bank_path.exists() else None,
+                    use_precomputed_embeddings=embedding_bank_path.exists(),
                 )
                 api_context = {
                     "device": str(device),
                     "img": img,
                     "props": props,
                     "predictor": predictor,
-                    "save_segmentation": save_segmentation,
+                    "reader_writer": reader_writer,
                     "input_filename": _input_stem_for_voxtell(ct),
                     "suffix": _voxtell_suffix(ct),
+                    "embedding_bank": str(embedding_bank_path) if embedding_bank_path.exists() else None,
                 }
             except Exception as exc:
                 result.update({
@@ -550,13 +581,18 @@ class VoxTellStudent:
                     assert api_context is not None
                     segmentations = api_context["predictor"].predict_single_image(api_context["img"], batch_prompt_texts)
                     for i, prompt_text in enumerate(batch_prompt_texts):
-                        api_context["save_segmentation"](
+                        official_path = (
+                            out
+                            / (
+                                f"{api_context['input_filename']}_"
+                                f"{_safe_prompt_name(prompt_text)}"
+                                f"{api_context['suffix']}"
+                            )
+                        )
+                        api_context["reader_writer"].write_seg(
                             segmentations[i],
-                            out,
-                            api_context["input_filename"],
+                            str(official_path),
                             api_context["props"],
-                            prompt_name=prompt_text,
-                            suffix=api_context["suffix"],
                         )
                 except Exception as exc:
                     return_code = 1
@@ -677,13 +713,20 @@ class VoxTellStudent:
         doc = self._target_doc()
         target_organs = set(doc.get("target_organs", []))
         organ_to_prompt = doc.get("organ_to_prompt", {}) or {}
+        prompt_map_path = resolve_path(os.getenv("MEDAI_VOXTELL_OFFICIAL_PROMPT_MAP", DEFAULT_OFFICIAL_PROMPT_MAP))
+        prompt_map_doc = read_json(prompt_map_path, default={}) or {}
+        official_prompt_map = {
+            str(row.get("project_class")): row
+            for row in prompt_map_doc.get("mappings", [])
+            if isinstance(row, dict) and row.get("project_class")
+        }
         rows: list[dict[str, Any]] = []
         skipped_missing_image: list[dict[str, Any]] = []
         skipped_ineligible_positive: list[dict[str, Any]] = []
         max_negative_ratio = float(os.getenv("MEDAI_NEGATIVE_PROMPT_RATIO", "0.25"))
         expand_setting = os.getenv("MEDAI_EXPAND_PROMPT_VARIANTS")
         if expand_setting is None:
-            prompt_variant_mode = os.getenv("MEDAI_PROMPT_VARIANT_MODE", "category_balanced").strip().lower()
+            prompt_variant_mode = os.getenv("MEDAI_PROMPT_VARIANT_MODE", "canonical").strip().lower()
         elif expand_setting.strip().lower() in {"1", "true", "yes"}:
             prompt_variant_mode = "all"
         else:
@@ -719,8 +762,16 @@ class VoxTellStudent:
                 meta = selection_index.get(organ, {})
                 if organ in label_mapping_index:
                     meta = {**label_mapping_index[organ], **meta}
-                canonical_prompt = str(organ_to_prompt.get(organ, organ.replace("_", " ")))
-                prompt_variants = _prompt_variants(organ, canonical_prompt, doc)
+                official_mapping = official_prompt_map.get(organ, {})
+                canonical_prompt = str(
+                    official_mapping.get("canonical_prompt")
+                    or organ_to_prompt.get(organ, organ.replace("_", " "))
+                )
+                # The formal VoxTell path uses exactly the official bank string
+                # when mapped, otherwise the canonical anatomical term.  CT
+                # descriptions and project-authored rewrites belong only to
+                # LabelCritic and must never leak into VoxTell encoding.
+                prompt_variants = [canonical_prompt]
                 item = _manifest_base_item(
                     case_id=case_id, image=image, organ=organ, prompt=canonical_prompt,
                     prompt_variants=prompt_variants, doc=doc, meta=meta,
@@ -731,10 +782,17 @@ class VoxTellStudent:
                     "supervision_type": "positive",
                     "distillation_role": "positive",
                     "negative_reason": None,
+                    "official_prompt_mapping": official_mapping,
+                    "official_prompt_map_version": prompt_map_doc.get("schema_version"),
                 })
                 scoring_schema_version = str(meta.get("scoring_schema_version") or "legacy")
                 grade = str(item.get("grade") or "D").upper()
                 target_type = str(item.get("target_type") or "hard").lower()
+                target_type = {
+                    "positive_hard": "hard",
+                    "positive_soft": "soft",
+                    "negative_absent": "absent_negative",
+                }.get(target_type, target_type)
                 training_weight = float(item.get("training_weight") or 0.0)
                 schema_supported = scoring_schema_version in ACCEPTED_SCORING_SCHEMA_VERSIONS
                 soft_probability_missing = (
@@ -795,6 +853,10 @@ class VoxTellStudent:
                         "shapekit_status": item.get("shapekit_status"),
                     })
                     continue
+                item["legacy_target_type"] = item.get("target_type")
+                item["target_type"] = (
+                    "positive_soft" if target_type == "soft" else "positive_hard"
+                )
                 rows.extend(_expand_prompt_manifest_item(item, prompt_variant_mode, doc))
                 positive_organs.add(organ)
                 if float(item.get("training_weight") or 0.0) > 0.0:
@@ -802,7 +864,7 @@ class VoxTellStudent:
 
             absent_negative_count = 0
             for organ, meta in sorted(selection_index.items()):
-                if organ not in target_organs or str(meta.get("target_type")) != "absent_negative":
+                if organ not in target_organs or str(meta.get("target_type")) not in {"absent_negative", "negative_absent"}:
                     continue
                 zero_mask = meta.get("mask_path") or meta.get("mask") or meta.get("final_mask") or _zero_mask_path_for_case(case_dir, image)
                 if not zero_mask or not Path(str(zero_mask)).exists():
@@ -811,12 +873,16 @@ class VoxTellStudent:
                         "organ": organ,
                         "grade": meta.get("grade", "A"),
                         "training_weight": meta.get("training_weight"),
-                        "target_type": "absent_negative",
+                        "target_type": "negative_absent",
                         "reason": "absent_negative_zero_mask_missing",
                         "exclusion_category": "absent_negative_zero_mask_missing",
                     })
                     continue
-                canonical_prompt = str(organ_to_prompt.get(organ, organ.replace("_", " ")))
+                official_mapping = official_prompt_map.get(organ, {})
+                canonical_prompt = str(
+                    official_mapping.get("canonical_prompt")
+                    or organ_to_prompt.get(organ, organ.replace("_", " "))
+                )
                 prompt_variants = [canonical_prompt]
                 item = _manifest_base_item(
                     case_id=case_id, image=image, organ=organ, prompt=canonical_prompt,
@@ -832,13 +898,15 @@ class VoxTellStudent:
                     "student_training_priority": "negative_absent",
                     "supervision_type": "negative",
                     "distillation_role": "negative",
-                    "target_type": "absent_negative",
+                    "target_type": "negative_absent",
                     "negative_reason": meta.get("negative_reason") or "out_of_scan_by_scan_coverage",
                     "negative_source": meta.get("negative_source") or "case_373_expected_absent",
-                    "zero_mask_role": meta.get("zero_mask_role") or "absent_negative_target_mask",
+                    "zero_mask_role": meta.get("zero_mask_role") or "negative_absent_target_mask",
                     "source_quality": "valid_absent_negative",
                     "training_gate_decision": "include_absent_negative",
                     "training_gate_policy": "Absent-negative all-zero masks are valid negative supervision targets, separate from A/B/C/D positive quality grades.",
+                    "official_prompt_mapping": official_mapping,
+                    "official_prompt_map_version": prompt_map_doc.get("schema_version"),
                 })
                 rows.extend(_expand_prompt_manifest_item(item, prompt_variant_mode, doc))
                 absent_negative_count += 1
@@ -893,6 +961,10 @@ class VoxTellStudent:
             "status": "success",
             "student_backend": "voxtell_style_3d_prompt",
             "target_config": str(self.target_config),
+            "official_prompt_map": str(prompt_map_path),
+            "official_prompt_map_version": prompt_map_doc.get("schema_version"),
+            "official_prompt_exact_match_count": prompt_map_doc.get("official_exact_match_count"),
+            "official_prompt_project_extension_count": prompt_map_doc.get("project_extension_count"),
             "formal_373_target_validation": validate_formal_373_target_space(
                 self.target_config,
                 requested_organs=list(target_organs),
@@ -907,8 +979,8 @@ class VoxTellStudent:
             "expected_targets": len(case_dirs) * len(target_organs),
             "manifest_targets": len(rows),
             "candidate_pseudo_targets": sum(1 for r in rows if r.get("supervision_type") == "positive"),
-            "absent_negative_targets": sum(1 for r in rows if str(r.get("target_type")) == "absent_negative"),
-            "all_zero_masks": len({str(r.get("mask_path") or r.get("mask") or "") for r in rows if str(r.get("target_type")) == "absent_negative" and (r.get("mask_path") or r.get("mask"))}),
+            "absent_negative_targets": sum(1 for r in rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"}),
+            "all_zero_masks": len({str(r.get("mask_path") or r.get("mask") or "") for r in rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"} and (r.get("mask_path") or r.get("mask"))}),
             "num_items_missing_image": sum(1 for r in rows if not r.get("image")),
             "grade_counts": {grade: sum(1 for r in rows if r.get("grade") == grade) for grade in ["A", "B", "C", "D"]},
             "num_positive_items": sum(1 for r in rows if r.get("supervision_type") == "positive"),
@@ -926,7 +998,7 @@ class VoxTellStudent:
                     "explicit_confirmed_absent_anatomy",
                     "case_373_expected_absent",
                 ],
-                "zero_mask_note": "All-zero masks are valid for target_type=absent_negative when scan coverage/FOV proves the organ is absent; ambiguous missing positives remain review gaps.",
+                "zero_mask_note": "All-zero masks are trainable only for target_type=negative_absent when scan coverage/FOV proves the organ is absent; unresolved/partial zeros are I/O placeholders with weight 0.",
                 "student_prediction_root_note": "Previous student empty/failed outputs are recorded for traceability only and are not used as negative evidence.",
             },
             "prompt_variant_mode": prompt_variant_mode,
@@ -942,7 +1014,16 @@ class VoxTellStudent:
             "num_strong_training_items": sum(1 for r in rows if r.get("supervision_type") == "positive" and float(r.get("training_weight") or 0.0) >= 0.5),
             "num_distillation_eligible_items": sum(1 for r in rows if r.get("distillation_eligible") is not False and float(r.get("training_weight") or 0.0) > 0.0),
             "num_zero_weight_items": sum(1 for r in rows if float(r.get("training_weight") or 0.0) == 0.0),
-            "target_type_counts": {target_type: sum(1 for r in rows if str(r.get("target_type") or "hard") == target_type) for target_type in ["hard", "soft", "provisional", "rejected", "absent_negative"]},
+            "target_type_counts": {
+                target_type: sum(
+                    1 for r in rows
+                    if str(r.get("target_type") or "positive_hard") == target_type
+                )
+                for target_type in [
+                    "positive_hard", "positive_soft", "negative_absent",
+                    "unresolved_visible", "partial_fov", "rejected",
+                ]
+            },
             "training_gate_summary": {
                 "num_included": len(rows),
                 "num_excluded_positive": len(skipped_ineligible_positive),
