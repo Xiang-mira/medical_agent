@@ -427,8 +427,12 @@ def process_student_root(
         if not dry_run:
             out_case.mkdir(parents=True, exist_ok=True)
         for src in sorted(in_case.glob("*.nii.gz")):
-            organ = normalize_canonical_id(src.name[:-7])
-            if wanted and organ not in wanted:
+            source_name = src.name[:-7]
+            organ = normalize_canonical_id(source_name)
+            # When an explicit target list is supplied, require the on-disk
+            # canonical filename. Historical ``ct_*`` aliases must not be
+            # normalized into duplicate formal candidates.
+            if wanted and source_name not in wanted:
                 continue
             dst = out_case / f"{organ}.nii.gz"
             if dst.exists() and not overwrite and not dry_run:
@@ -448,6 +452,24 @@ def process_student_root(
                     "roi_margin_mm": rule.margin_mm,
                     "status": "dry_run",
                 })
+                continue
+            if not rule.enabled:
+                # Preserve the raw prediction byte-for-byte. Avoid loading and
+                # rewriting hundreds of large NIfTIs that have no containment
+                # rule, and make it explicit that this is not cascaded inference.
+                shutil.copy2(src, dst)
+                rows.append({
+                    "case_id": case_id,
+                    "organ": organ,
+                    "input_path": str(src),
+                    "output_path": str(dst),
+                    "containment_enabled": False,
+                    "containment_source": rule.source,
+                    "parents": ";".join(rule.parents),
+                    "roi_margin_mm": rule.margin_mm,
+                    "status": "copied_no_containment_rule",
+                })
+                processed += 1
                 continue
             roi_path = roi_root / case_id / f"{organ}_allowed_roi.nii.gz" if write_roi_masks and rule.enabled else None
             rows.append(process_mask(

@@ -64,12 +64,54 @@ student_containment:
     pancreatic_duct:
       parents: [pancreas]
       margin_mm: 20.0
+    lung_upper_left_lobe:
+      parents: [lung_left]
+      margin_mm: 15.0
+    lung_lower_left_lobe:
+      parents: [lung_left]
+      margin_mm: 15.0
+    lung_upper_right_lobe:
+      parents: [lung_right]
+      margin_mm: 15.0
+    lung_middle_right_lobe:
+      parents: [lung_right]
+      margin_mm: 15.0
+    lung_lower_right_lobe:
+      parents: [lung_right]
+      margin_mm: 15.0
+    lung_vessels:
+      parents: [lung_left, lung_right]
+      margin_mm: 15.0
+    liver_segment_1:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_2:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_3:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_4:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_5:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_6:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_7:
+      parents: [liver]
+      margin_mm: 15.0
+    liver_segment_8:
+      parents: [liver]
+      margin_mm: 15.0
     kidney_left:
-      parents: [kidney]
-      margin_mm: 15.0
+      parents: []
+      enabled: false
     kidney_right:
-      parents: [kidney]
-      margin_mm: 15.0
+      parents: []
+      enabled: false
     kidney_cortex:
       parents: [kidney]
       margin_mm: 15.0

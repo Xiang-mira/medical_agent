@@ -34,8 +34,11 @@ def main() -> int:
     parent_roots = [p.resolve() for p in args.parent_root]
     if args.teacher_root is not None:
         parent_roots.append(args.teacher_root.resolve())
-    # Let large-organ student predictions serve as a last-resort ROI provider when no teacher root is supplied.
-    parent_roots.append(args.input_root.resolve())
+    if not parent_roots:
+        raise SystemExit(
+            "At least one reliable --teacher-root/--parent-root is required; "
+            "raw student masks are not an implicit parent fallback."
+        )
     organs = [x.strip() for x in args.organs.split(",") if x.strip()]
     summary = process_student_root(
         input_root=args.input_root.resolve(),

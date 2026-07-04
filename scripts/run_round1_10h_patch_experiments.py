@@ -35,7 +35,11 @@ SAFE_NEGATIVE_SOURCES = {
     "explicit_confirmed_absent_anatomy",
     "case_373_expected_absent",
 }
-SAFE_ZERO_MASK_ROLES = {"negative_target_mask", "absent_negative_target_mask"}
+SAFE_ZERO_MASK_ROLES = {
+    "negative_target_mask",
+    "absent_negative_target_mask",
+    "negative_absent_target_mask",
+}
 
 
 def parse_args() -> argparse.Namespace:

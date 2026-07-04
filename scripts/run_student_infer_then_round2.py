@@ -48,10 +48,13 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--prompts", default="", help="Optional comma-separated organ subset. Default: all 373 exact targets.")
     ap.add_argument("--dry-run", action="store_true", help="Write per-case VoxTell commands without running inference.")
     ap.add_argument("--postprocess", action="store_true", help="After student inference, write anatomy-containment postprocessed masks to a separate root.")
+    ap.add_argument("--cascade", action="store_true", help="Run true parent-ROI cropped inference for configured child organs.")
     ap.add_argument("--postprocess-policy", default=str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"))
     ap.add_argument("--taxonomy", default=str(PROJECT_ROOT / "configs/organ_taxonomy.json"))
     ap.add_argument("--teacher-root", default="", help="Optional teacher/selected-pseudo root to provide reliable parent organ masks.")
     ap.add_argument("--parent-root", action="append", default=[], help="Additional parent-mask root. Can be repeated.")
+    ap.add_argument("--student-parent-allowlist", default="", help="Allowlist proving which student masks may provide a parent ROI.")
+    ap.add_argument("--cascaded-output-root", default="", help="Default: outputs/roundN/student_predictions_cascaded")
     ap.add_argument("--postprocessed-output-root", default="", help="Default: outputs/roundN/student_predictions_postprocessed")
     ap.add_argument("--postprocess-overwrite", action="store_true")
     ap.add_argument("--restart-vllm", action="store_true", help="Restart LabelCritic VLM server after student inference.")
@@ -165,6 +168,7 @@ def main() -> int:
 
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
     from cli_anything.medai.core.student_postprocess import process_student_root
+    from cli_anything.medai.core.student_cascade import cascade_case
 
     organs = load_target_organs(target_config, args.prompts)
     cases = load_cases(case_list, args.max_cases)
@@ -241,12 +245,76 @@ def main() -> int:
     (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     log(f"3D prompt student 推理完成/计划完成: {saved}/{len(cases)} cases")
 
+    cascade_summary: dict[str, Any] | None = None
+    if args.cascade:
+        if not args.teacher_root and not args.parent_root:
+            raise SystemExit("--cascade requires at least one reliable --teacher-root/--parent-root; raw student fallback is forbidden")
+        cascade_root = (
+            Path(args.cascaded_output_root).resolve()
+            if args.cascaded_output_root
+            else output_root / f"round{args.round_idx}" / "student_predictions_cascaded"
+        )
+        policy = __import__("yaml").safe_load(Path(args.postprocess_policy).read_text(encoding="utf-8")) or {}
+        taxonomy = __import__("cli_anything.medai.core.organ_taxonomy", fromlist=["load_taxonomy"]).load_taxonomy(
+            Path(args.taxonomy).resolve()
+        )
+        from cli_anything.medai.core.student_postprocess import containment_rule_for_organ
+        cascade_organs = [
+            organ for organ in organs
+            if containment_rule_for_organ(organ, taxonomy, policy).enabled
+        ]
+        teacher_roots = [Path(x).resolve() for x in args.parent_root]
+        if args.teacher_root:
+            teacher_roots.insert(0, Path(args.teacher_root).resolve())
+
+        def infer_roi(cropped_ct: Path, organ: str, roi_output: Path) -> dict[str, Any]:
+            return student.segment(
+                ct_image=cropped_ct,
+                prompts=[organ],
+                output_dir=roi_output,
+                dry_run=args.dry_run,
+                timeout_sec=args.timeout_sec,
+                prompt_batch_size=1,
+            )
+
+        cascade_results = []
+        for case in cases:
+            cascade_results.append(cascade_case(
+                case_id=case["case_id"],
+                ct_path=Path(case["ct_path"]).resolve(),
+                output_root=cascade_root,
+                inference=infer_roi,
+                teacher_parent_roots=teacher_roots,
+                student_parent_root=pred_dir,
+                student_parent_allowlist=Path(args.student_parent_allowlist).resolve() if args.student_parent_allowlist else None,
+                taxonomy_path=Path(args.taxonomy).resolve(),
+                policy_path=Path(args.postprocess_policy).resolve(),
+                organs=cascade_organs,
+                dry_run=args.dry_run,
+            ))
+        cascade_summary = {
+            "stage": "parent_roi_cascaded_student_inference",
+            "status": "dry_run" if args.dry_run else "success",
+            "cases": len(cascade_results),
+            "target_organs": cascade_organs,
+            "output_root": str(cascade_root),
+            "results": cascade_results,
+        }
+        (cascade_root / "student_cascade_summary.json").write_text(
+            json.dumps(cascade_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        summary["cascade"] = cascade_summary
+        (pred_dir / "student_inference_summary.json").write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
     if args.postprocess:
         post_root = Path(args.postprocessed_output_root).resolve() if args.postprocessed_output_root else output_root / f"round{args.round_idx}" / "student_predictions_postprocessed"
         parent_roots = [Path(x).resolve() for x in args.parent_root]
         if args.teacher_root:
             parent_roots.append(Path(args.teacher_root).resolve())
-        parent_roots.append(pred_dir.resolve())
+        if args.student_parent_allowlist:
+            parent_roots.append(pred_dir.resolve())
         log(f"开始 student containment post-processing: {post_root}")
         post_summary = process_student_root(
             input_root=pred_dir.resolve(),

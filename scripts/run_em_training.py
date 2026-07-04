@@ -595,6 +595,90 @@ def _filtered_student_prediction_root_for_next_round(round_idx: int, source_root
     return filtered_root, summary
 
 
+def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[Path, dict]:
+    """Fail-closed validation for the organ-level Round2 student candidate pool."""
+    previous = round_idx - 1
+    source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_postprocessed"
+    gate_dir = OUTPUT_ROOT / f"round{previous}" / "metrics" / "student_round2_gate"
+    allowlist_path = Path(os.getenv(
+        "MEDAI_STUDENT_ORGAN_ALLOWLIST",
+        str(gate_dir / "student_round2_organ_allowlist.json"),
+    ))
+    audit = {
+        "status": "failed",
+        "source_root": str(source_root),
+        "allowlist_path": str(allowlist_path),
+        "allowed_organs": [],
+        "validated_masks": 0,
+        "reasons": [],
+    }
+    if not allowlist_path.is_file():
+        audit["reasons"].append("organ_allowlist_missing")
+        return source_root, audit
+    try:
+        doc = json.loads(allowlist_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        audit["reasons"].append(f"organ_allowlist_invalid_json:{exc}")
+        return source_root, audit
+    if doc.get("schema_version") != 2 or doc.get("status") != "success":
+        audit["reasons"].append("organ_allowlist_schema_or_status_invalid")
+    if int(doc.get("case_count") or 0) != 10 or int(doc.get("expected_case_count") or 0) != 10:
+        audit["reasons"].append("organ_allowlist_not_10_case_complete")
+    if "pseudo-label consistency" not in str(doc.get("metric_interpretation") or ""):
+        audit["reasons"].append("metric_interpretation_missing")
+    routing = doc.get("routing_contract") or {}
+    if (
+        int(routing.get("target_organs") or 0) != 373
+        or int(routing.get("resolved_organs") or 0) != 373
+        or int(routing.get("student_competition") or 0)
+        + int(routing.get("teacher_or_fov_negative") or 0) != 373
+    ):
+        audit["reasons"].append("round2_373_routing_contract_incomplete")
+    routes = {
+        str(row.get("round2_route") or "")
+        for row in doc.get("organs", [])
+        if isinstance(row, dict)
+    }
+    if not routes.issubset({"student_competition", "teacher_or_fov_negative"}) or len(doc.get("organs", [])) != 373:
+        audit["reasons"].append("invalid_or_missing_per_organ_routes")
+    allowed = {
+        str(row.get("organ") or "")
+        for row in doc.get("organs", [])
+        if isinstance(row, dict) and row.get("decision") == "allow"
+    }
+    if not allowed:
+        audit["reasons"].append("no_organs_allowed")
+    audit["allowed_organs"] = sorted(allowed)
+    if not source_root.is_dir():
+        audit["reasons"].append("postprocessed_student_root_missing")
+        return source_root, audit
+    expected_cases = load_case_rows()
+    expected_case_ids = {str(row.get("case_id") or "") for row in expected_cases}
+    actual_case_ids = {p.name for p in source_root.iterdir() if p.is_dir()}
+    if actual_case_ids != expected_case_ids:
+        audit["reasons"].append("postprocessed_case_set_mismatch")
+    unexpected: list[str] = []
+    missing: list[str] = []
+    for case_id in sorted(expected_case_ids):
+        case_dir = source_root / case_id
+        names = {p.name[:-7] for p in case_dir.glob("*.nii.gz")}
+        unexpected.extend(f"{case_id}/{name}" for name in sorted(names - allowed))
+        missing.extend(f"{case_id}/{name}" for name in sorted(allowed - names))
+        audit["validated_masks"] += len(names & allowed)
+    if unexpected:
+        audit["reasons"].append(f"non_allowlisted_masks_present:{unexpected[:20]}")
+    if missing:
+        audit["reasons"].append(f"allowlisted_masks_missing:{missing[:20]}")
+    raw_root_text = str(doc.get("raw_root") or "")
+    if Path(raw_root_text).resolve() == source_root.resolve() if raw_root_text else False:
+        audit["reasons"].append("postprocessed_root_aliases_raw_root")
+    if "round2_aborted_" in str(source_root):
+        audit["reasons"].append("aborted_round2_path_forbidden")
+    if not audit["reasons"]:
+        audit["status"] = "success"
+    return source_root, audit
+
+
 def _formal_round1_key_organs() -> list[str]:
     return [
         "liver",
@@ -890,7 +974,16 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
 
 def _round_selected_pseudo_label_root(round_idx: int) -> Path:
     """Directory containing the previous round's selected/ShapeKit-final masks."""
-    return OUTPUT_ROOT / f"round{round_idx}" / "estep" / "annotation_versions"
+    local = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "annotation_versions"
+    if local.exists() and any(local.iterdir()):
+        return local
+    if round_idx == 1:
+        override = os.getenv("MEDAI_ROUND1_SELECTED_ROOT", "").strip()
+        if override:
+            candidate = Path(override).expanduser().resolve()
+            if candidate.exists() and any(candidate.iterdir()):
+                return candidate
+    return local
 
 
 def _round_teacher_cache_dirs(round_idx: int) -> dict[str, Path]:
@@ -1039,7 +1132,7 @@ def run_estep(round_idx: int) -> dict:
         else:
             log(f"  上一轮 selected pseudo labels 不存在，跳过注入: {prev_selected_dir}")
 
-        prev_pred_dir = _round_student_prediction_root_for_qc(round_idx - 1)
+        prev_pred_dir = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions_postprocessed"
         prev_mstep_result = OUTPUT_ROOT / f"round{round_idx - 1}" / "mstep" / "voxtell_prompt_mstep_result.json"
         prev_student_eligible = False
         if prev_mstep_result.exists():
@@ -1048,17 +1141,20 @@ def run_estep(round_idx: int) -> dict:
                 prev_student_eligible = bool(prev_doc.get("eligible_for_next_round_prompt_student", prev_doc.get("checkpoint_eligible_for_next_round")))
             except Exception:
                 prev_student_eligible = False
-        if prev_student_eligible and prev_pred_dir.exists() and any(prev_pred_dir.iterdir()):
-            filtered_prev_pred_dir, qc_filter_summary = _filtered_student_prediction_root_for_next_round(round_idx, prev_pred_dir)
-            preseeded["student_prev"] = filtered_prev_pred_dir
-            if qc_filter_summary.get("blocked_case_organs", 0):
-                log(
-                    "  注入上一轮合格 student 预测参与竞争（已按 evaluation_chain blocklist 过滤）: "
-                    f"{filtered_prev_pred_dir}; skipped={qc_filter_summary.get('skipped_masks', 0)}, "
-                    f"blocklist={qc_filter_summary.get('blocklist_path')}"
+        if prev_student_eligible:
+            validated_prev_pred_dir, organ_gate_audit = _validated_student_prediction_root_for_next_round(round_idx)
+            if organ_gate_audit.get("status") != "success":
+                raise RuntimeError(
+                    "Round 2 student injection is fail-closed: organ-level 10-case allowlist "
+                    f"validation failed: {organ_gate_audit}"
                 )
-            else:
-                log(f"  注入上一轮合格 student 预测参与竞争: {filtered_prev_pred_dir}")
+            preseeded["student_prev"] = validated_prev_pred_dir
+            log(
+                "  注入上一轮器官级白名单 student 预测参与竞争: "
+                f"{validated_prev_pred_dir}; organs={len(organ_gate_audit.get('allowed_organs', []))}, "
+                f"masks={organ_gate_audit.get('validated_masks')}, "
+                f"allowlist={organ_gate_audit.get('allowlist_path')}"
+            )
         else:
             log(f"  上一轮 student 预测未通过质量门槛或不存在，跳过注入: {prev_pred_dir}")
 
@@ -2161,12 +2257,26 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             return finish(result)
 
     stop_vllm_for_mstep()
+    previous_student_model = (
+        OUTPUT_ROOT / f"round{round_idx - 1}" / "mstep" / "voxtell_finetuned_model"
+        if round_idx > 1
+        else VOXTELL_MODEL_DIR
+    )
+    if round_idx > 1 and not (
+        (previous_student_model / "plans.json").is_file()
+        and (previous_student_model / "fold_0" / "checkpoint_final.pth").is_file()
+    ):
+        raise RuntimeError(
+            "Round 2+ prompt-student M-step must continue from the previous "
+            f"student checkpoint; missing or incomplete: {previous_student_model}"
+        )
     env = os.environ.copy()
     env.update({
         "MEDAI_PROMPT_STUDENT_MANIFEST": str(manifest_path),
         "MEDAI_PROMPT_STUDENT_OUTPUT_DIR": str(out_dir),
         "MEDAI_PROMPT_TARGET_CONFIG": str(PROMPT_TARGET_CONFIG),
-        "MEDAI_VOXTELL_MODEL_DIR": str(VOXTELL_MODEL_DIR),
+        "MEDAI_VOXTELL_MODEL_DIR": str(previous_student_model),
+        "MEDAI_STUDENT_CONTINUAL_SOURCE_ROUND": str(max(0, round_idx - 1)),
         "MEDAI_TEXT_ENCODING_MODEL": str(VOXTELL_TEXT_ENCODING_MODEL),
         "MEDAI_MSTEP_EPOCHS": str(CONSOLIDATION_EPOCHS if global_consolidation else FINETUNE_EPOCHS),
         "MEDAI_MSTEP_LR": str(

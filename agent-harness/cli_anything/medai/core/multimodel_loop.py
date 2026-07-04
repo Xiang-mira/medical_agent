@@ -4982,6 +4982,25 @@ def run_multimodel_annotation_loop(
                     if k in eligible_teachers or k in preseeded_keys
                 }
 
+            # Round 2+ is a challenger match, not a replay of the unchanged
+            # teacher tournament.  When the previous selected mask exists,
+            # compare it only with an available project-student challenger.
+            # If this organ has no qualified student mask, carry the previous
+            # winner forward.  Fall back to the teacher pool only when the
+            # previous round did not produce this organ.
+            if (
+                candidate_mode == "route_pruned_with_competition"
+                and "round_prev_selected" in organ_model_seg_dirs
+            ):
+                previous_dir = organ_model_seg_dirs["round_prev_selected"]
+                previous_mask = _mask_path(previous_dir, organ)
+                if previous_mask.exists():
+                    challenger_dirs = {"round_prev_selected": previous_dir}
+                    student_dir = organ_model_seg_dirs.get("student_prev")
+                    if student_dir is not None and _mask_path(student_dir, organ).exists():
+                        challenger_dirs["student_prev"] = student_dir
+                    organ_model_seg_dirs = challenger_dirs
+
             _qc_t0 = _time.time()
             organ_worker_count = max(1, int(os.getenv("MEDAI_ORGAN_WORKER_COUNT", "4")))
             organ_items = list(organ_model_seg_dirs.items())
