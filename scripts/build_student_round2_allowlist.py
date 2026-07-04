@@ -42,7 +42,14 @@ def args() -> argparse.Namespace:
     p.add_argument("--postprocessed-root", type=Path, required=True)
     p.add_argument("--taxonomy", type=Path, default=ROOT / "configs/organ_taxonomy.json")
     p.add_argument("--policy", type=Path, default=ROOT / "configs/organ_postprocess_policy.yaml")
+    p.add_argument("--target-config", type=Path, default=ROOT / "configs/student_3d_prompt_target_organs.json")
     p.add_argument("--expected-cases", type=int, default=10)
+    p.add_argument(
+        "--case-organ-blocklist",
+        type=Path,
+        default=None,
+        help="Optional CSV with case_id,organ[,reason] rows that must not enter student competition.",
+    )
     return p.parse_args()
 
 
@@ -75,6 +82,76 @@ def reference_path(
     return None, ""
 
 
+def selection_metadata_path(root: Path, case_id: str) -> Path | None:
+    for path in [
+        root / case_id / "selection_metadata.json",
+        root / "cases" / case_id / "selection_metadata.json",
+        root / "annotation_versions" / case_id / "selection_metadata.json",
+    ]:
+        if path.is_file():
+            return path
+    return None
+
+
+def selection_metadata_for(roots: list[Path], case_id: str, organ: str) -> dict[str, Any]:
+    for root in roots:
+        meta_path = selection_metadata_path(root, case_id)
+        if not meta_path:
+            continue
+        try:
+            doc = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for collection in ("selection_rows", "selected_organs"):
+            for row in doc.get(collection, []) or []:
+                if isinstance(row, dict) and str(row.get("organ") or "") == organ:
+                    return {"metadata_path": str(meta_path), "metadata_collection": collection, **row}
+    return {}
+
+
+def has_explicit_fov_negative_evidence(row: dict[str, Any]) -> bool:
+    target_type = str(row.get("target_type") or row.get("legacy_target_type") or "").lower()
+    fov_status = str(row.get("fov_status") or row.get("expected_presence") or "").lower()
+    selection_method = str(row.get("selection_method") or "").lower()
+    zero_mask_role = str(row.get("zero_mask_role") or "").lower()
+    return (
+        target_type in {"negative_absent", "absent_negative"}
+        or selection_method == "negative_absent"
+        or zero_mask_role == "negative_absent_target_mask"
+        or (fov_status == "out_of_fov" and str(row.get("expected_presence") or "").lower() == "expected_absent")
+    )
+
+
+def load_case_organ_blocklist(path: Path | None) -> dict[tuple[str, str], str]:
+    if path is None or not path.is_file():
+        return {}
+    blocked: dict[tuple[str, str], str] = {}
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            case_id = str(row.get("case_id") or "").strip()
+            organ = normalize_canonical_id(str(row.get("organ") or "").strip())
+            if not case_id or not organ:
+                continue
+            reason = str(row.get("reason") or row.get("block_reason") or "targeted_repair_blocklist").strip()
+            blocked[(case_id, organ)] = reason or "targeted_repair_blocklist"
+    return blocked
+
+
+def load_target_organs(path: Path | None) -> set[str]:
+    if path is None or not path.is_file():
+        return set()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    items = doc.get("target_organs") if isinstance(doc, dict) else doc
+    return {
+        normalize_canonical_id(str(item if isinstance(item, str) else item.get("organ") or item.get("id") or ""))
+        for item in (items or [])
+        if str(item if isinstance(item, str) else item.get("organ") or item.get("id") or "").strip()
+    }
+
+
 def read(path: Path, reference: nib.Nifti1Image | None = None) -> tuple[nib.Nifti1Image, np.ndarray]:
     image = nib.load(str(path))
     if reference is not None and (
@@ -89,6 +166,15 @@ def dice(a: np.ndarray, b: np.ndarray) -> float:
     return 1.0 if denom == 0 else float(2 * np.logical_and(a, b).sum() / denom)
 
 
+def volume_limits(policy: dict[str, Any], group: str) -> tuple[float, float]:
+    gate = policy.get("volume_gate", {}) if isinstance(policy, dict) else {}
+    groups = gate.get("groups", {}) if isinstance(gate, dict) else {}
+    spec = groups.get(group, {}) if isinstance(groups, dict) else {}
+    low = spec.get("min_ratio", gate.get("default_min_ratio", 0.5))
+    high = spec.get("max_ratio", gate.get("default_max_ratio", 1.8))
+    return float(low), float(high)
+
+
 def main() -> int:
     a = args()
     rows_by_case = {row["case_id"]: row for row in case_rows(a.case_list)}
@@ -99,12 +185,16 @@ def main() -> int:
         raise SystemExit(f"expected exactly {a.expected_cases} cases, got {len(cases)}")
     taxonomy = load_taxonomy(a.taxonomy)
     policy = load_yaml(a.policy)
+    case_organ_blocklist = load_case_organ_blocklist(a.case_organ_blocklist)
+    target_organs = load_target_organs(a.target_config)
     organs = sorted({
         normalize_canonical_id(p.name[:-7])
         for case in cases
         for p in (a.raw_root / case).glob("*.nii.gz")
         if not p.name.startswith("ct_")
     })
+    if target_organs:
+        organs = [organ for organ in organs if organ in target_organs]
     per_case: list[dict[str, Any]] = []
     by_organ: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for organ in organs:
@@ -129,6 +219,17 @@ def main() -> int:
                 "cascade_path": str(cascade_path if cascade_path.is_file() else ""),
                 "has_parent_rule": rule.enabled,
             }
+            selected_meta = selection_metadata_for(a.reference_root, case, organ)
+            row.update({
+                "selection_metadata_path": selected_meta.get("metadata_path", ""),
+                "selection_target_type": selected_meta.get("target_type", ""),
+                "selection_fov_status": selected_meta.get("fov_status", ""),
+                "selection_expected_presence": selected_meta.get("expected_presence", ""),
+                "selection_method": selected_meta.get("selection_method", ""),
+                "explicit_fov_negative": has_explicit_fov_negative_evidence(selected_meta),
+                "case_organ_blocklisted": (case, organ) in case_organ_blocklist,
+                "case_organ_block_reason": case_organ_blocklist.get((case, organ), ""),
+            })
             if ref_path is None or not raw_path.is_file():
                 row["status"] = "missing_reference_or_raw"
                 per_case.append(row)
@@ -173,7 +274,7 @@ def main() -> int:
         evaluated = [r for r in rows if r.get("status") == "evaluated"]
         ref_positive = [r for r in evaluated if r.get("reference_nonempty")]
         negative_rows = [r for r in evaluated if not r.get("reference_nonempty")]
-        low, high = (0.2, 3.0) if organ_group(organ) == "vessel_or_duct" else (0.5, 1.8)
+        low, high = volume_limits(policy, organ_group(organ))
 
         def summarize(version: str) -> dict[str, Any]:
             metric_key = f"{version}_dice"
@@ -266,12 +367,64 @@ def main() -> int:
         if organ in HARD_BLOCK:
             reasons.insert(0, "explicit_safety_block")
             selected_version = ""
+        case_organ_routes: list[dict[str, Any]] = []
+        if not reasons and selected_version:
+            rows_by_case = {str(r.get("case_id") or ""): r for r in rows}
+            for case in cases:
+                row = rows_by_case.get(case, {})
+                source_path = Path(str(row.get(f"{selected_version}_path") or ""))
+                source_available = bool(source_path.is_file())
+                source_nonempty = bool(row.get(f"{selected_version}_nonempty"))
+                explicit_negative = bool(row.get("explicit_fov_negative"))
+                block_reason = case_organ_blocklist.get((case, organ), "")
+                if block_reason:
+                    route = "teacher_or_fov_negative"
+                    route_reason = block_reason
+                elif source_available and source_nonempty:
+                    route = "student_competition"
+                    route_reason = "nonempty_student_mask_passed_organ_gate"
+                elif source_available and not source_nonempty and explicit_negative:
+                    route = "student_empty_fov_negative"
+                    route_reason = "empty_mask_allowed_only_with_explicit_fov_negative_evidence"
+                elif source_available and not source_nonempty:
+                    route = "teacher_or_fov_negative"
+                    route_reason = "empty_student_mask_without_explicit_fov_negative_evidence"
+                else:
+                    route = "teacher_or_fov_negative"
+                    route_reason = "selected_student_mask_missing"
+                case_organ_routes.append({
+                    "case_id": case,
+                    "organ": organ,
+                    "route": route,
+                    "reason": route_reason,
+                    "selected_version": selected_version if route.startswith("student") else "",
+                    "source_path": str(source_path) if source_available else "",
+                    "source_nonempty": source_nonempty,
+                    "explicit_fov_negative": explicit_negative,
+                })
+            if not any(row["route"].startswith("student") for row in case_organ_routes):
+                reasons.append("no_safe_case_organ_student_masks")
+                selected_version = ""
+        else:
+            for case in cases:
+                block_reason = case_organ_blocklist.get((case, organ), "")
+                case_organ_routes.append({
+                    "case_id": case,
+                    "organ": organ,
+                    "route": "teacher_or_fov_negative",
+                    "reason": block_reason or ";".join(reasons) or "organ_not_allowlisted",
+                    "selected_version": "",
+                    "source_path": "",
+                    "source_nonempty": False,
+                    "explicit_fov_negative": False,
+                })
         entry = taxonomy_entry(taxonomy, organ) or {}
         decisions.append({
             "organ": organ,
             "decision": "allow" if not reasons else "block",
             "round2_route": "student_competition" if not reasons else "teacher_or_fov_negative",
             "selected_version": selected_version if not reasons else "",
+            "case_organ_routes": case_organ_routes,
             "parents": list(rule.parents),
             "reference_nonempty_cases": len(ref_positive),
             "evaluated_cases": len(evaluated),
@@ -297,6 +450,16 @@ def main() -> int:
         })
 
     allowed = [d for d in decisions if d["decision"] == "allow"]
+    allowed_case_organs = [
+        route
+        for decision in decisions
+        for route in decision.get("case_organ_routes", [])
+        if str(route.get("route") or "").startswith("student")
+    ]
+    allowed_case_organ_keys = {
+        (str(route["case_id"]), str(route["organ"]))
+        for route in allowed_case_organs
+    }
     for decision in allowed:
         organ = decision["organ"]
         source_root = {
@@ -305,6 +468,8 @@ def main() -> int:
             "cascade": a.cascade_root,
         }[decision["selected_version"]]
         for case in cases:
+            if (case, organ) not in allowed_case_organ_keys:
+                continue
             src = source_root / case / f"{organ}.nii.gz"
             if not src.is_file():
                 raise RuntimeError(f"allowlisted mask missing: {src}")
@@ -324,7 +489,7 @@ def main() -> int:
         for row in decisions:
             writer.writerow({**row, "reasons": ";".join(row["reasons"])})
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "stage": "student_round2_organ_quality_gate",
         "status": "success" if len(decisions) == 373 else "failed",
         "metric_interpretation": "per-organ metrics use expert GT when available; selected-teacher metrics remain pseudo-label consistency",
@@ -335,18 +500,28 @@ def main() -> int:
             "resolved_organs": len(decisions),
             "student_competition": len(allowed),
             "teacher_or_fov_negative": len(decisions) - len(allowed),
+            "case_organ_routes": len(decisions) * len(cases),
+            "student_case_organs": len(allowed_case_organs),
+            "student_nonempty_case_organs": sum(1 for row in allowed_case_organs if row.get("route") == "student_competition"),
+            "student_empty_fov_negative_case_organs": sum(1 for row in allowed_case_organs if row.get("route") == "student_empty_fov_negative"),
+            "blocked_case_organs": len(decisions) * len(cases) - len(allowed_case_organs),
             "teacher_fallback_semantics": "Visible organs rejected by the student gate remain teacher-selected positive supervision for the next M-step.",
             "fov_negative_semantics": "Case-organ targets proven outside scan coverage use an aligned all-zero mask and remain trainable negative supervision.",
             "unresolved_visible_semantics": "Visible/partial targets without a reliable teacher are withheld with zero training weight; they are not false negative labels.",
+            "empty_student_mask_policy": "Empty student masks are excluded from competition unless the same case-organ has explicit fov-negative/negative_absent evidence.",
         },
         "case_count": len(cases),
         "expected_case_count": a.expected_cases,
+        "case_organ_blocklist": str(a.case_organ_blocklist.resolve()) if a.case_organ_blocklist else "",
+        "case_organ_blocklist_count": len(case_organ_blocklist),
         "raw_root": str(a.raw_root.resolve()),
         "containment_root": str(a.containment_root.resolve()),
         "cascade_root": str(a.cascade_root.resolve()),
         "postprocessed_root": str(a.postprocessed_root.resolve()),
         "allowed_count": len(allowed),
         "blocked_count": len(decisions) - len(allowed),
+        "allowed_case_organ_count": len(allowed_case_organs),
+        "allowed_case_organs": allowed_case_organs,
         "organs": decisions,
     }
     (a.output_dir / "student_round2_organ_allowlist.json").write_text(

@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--case-list", type=Path, default=None)
     ap.add_argument("--policy", type=Path, default=ROOT / "configs/organ_postprocess_policy.yaml")
     ap.add_argument("--taxonomy", type=Path, default=ROOT / "configs/organ_taxonomy.json")
+    ap.add_argument("--target-config", type=Path, default=None, help="Optional student target config JSON; limits processing to target_organs.")
+    ap.add_argument("--organs", default="", help="Optional comma-separated organ subset; overrides --target-config when provided.")
     ap.add_argument(
         "--parent-root", type=Path, action="append", default=[],
         help="Teacher/selected-mask root used to construct anatomical parent ROIs; repeatable.",
@@ -73,6 +75,26 @@ def case_ids(case_list: Path | None, input_root: Path) -> list[str]:
             col = "case_id" if "case_id" in rows[0] else next(iter(rows[0]))
             return [str(row.get(col) or "") for row in rows if row.get(col)]
     return sorted(p.name for p in input_root.iterdir() if p.is_dir())
+
+
+def target_organs(args: argparse.Namespace) -> list[str] | None:
+    if args.organs.strip():
+        return [x.strip() for x in args.organs.replace(";", ",").split(",") if x.strip()]
+    if args.target_config and args.target_config.exists():
+        try:
+            doc = json.loads(args.target_config.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        if isinstance(doc, dict):
+            items = doc.get("target_organs") or doc.get("organs") or []
+        else:
+            items = doc
+        organs = [
+            str(item if isinstance(item, str) else item.get("organ") or item.get("id") or "").strip()
+            for item in items
+        ]
+        return [organ for organ in organs if organ]
+    return None
 
 
 def _component_filter(mask: np.ndarray, *, keep_top_k: int | None, min_fraction: float, min_voxels: int) -> tuple[np.ndarray, dict[str, Any]]:
@@ -124,6 +146,7 @@ def main() -> int:
         taxonomy_path=args.taxonomy.resolve(),
         policy_path=args.policy.resolve(),
         case_list=args.case_list.resolve() if args.case_list else None,
+        organs=target_organs(args),
         overwrite=args.overwrite,
         dry_run=args.dry_run,
         max_cases=args.max_cases,

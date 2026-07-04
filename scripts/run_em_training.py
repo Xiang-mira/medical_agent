@@ -62,6 +62,8 @@ from cli_anything.medai.core.target_space import canonical_target_name
 VOXTELL_MSTEP_MODES = {"manifest_only", PROJECT_PROMPT_STUDENT, LEGACY_PROJECT_DISTILLATION, OFFICIAL_NNUNET_BASELINE, LEGACY_OFFICIAL_NNUNET_FINETUNE}
 LEGACY_VOXTELL_MSTEP_MODE = LEGACY_AMBIGUOUS_OFFICIAL_FINETUNE
 OFFICIAL_VOXTELL_ENCODER_MODE = OFFICIAL_NNUNET_BASELINE
+QUALITY_CONTRACT_VERSION = "estep_quality_contract_v3"
+FOV_POLICY_VERSION = "fov_appearance_regions_v4"
 
 
 def resolve_voxtell_mstep_mode() -> dict:
@@ -422,6 +424,34 @@ def completed_cases(round_idx: int) -> set:
         if TEACHER_INFERENCE_MODE == "hierarchical_roi" and not _valid_hierarchical_manifest(hierarchy_manifest):
             continue
         if selection_meta.exists() and updated_dir.exists() and any(updated_dir.glob("*.nii.gz")):
+            try:
+                meta = json.loads(selection_meta.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if meta.get("quality_contract_version") != QUALITY_CONTRACT_VERSION:
+                continue
+            if meta.get("fov_policy_version") != FOV_POLICY_VERSION:
+                continue
+            if str(meta.get("case_id") or "") != case_dir.name:
+                continue
+            expected_organs = set(load_student_target_organs())
+            selection_rows = meta.get("selection_rows") or []
+            row_organs = [
+                str(row.get("organ") or "")
+                for row in selection_rows
+                if isinstance(row, dict) and row.get("organ")
+            ]
+            if len(row_organs) != len(expected_organs) or set(row_organs) != expected_organs:
+                continue
+            selected_organs = meta.get("selected_organs") or []
+            if any(
+                isinstance(item, dict)
+                and item.get("organ")
+                and item.get("publication_status") != "rejected_but_recorded"
+                and not (updated_dir / f"{item['organ']}.nii.gz").is_file()
+                for item in selected_organs
+            ):
+                continue
             done.add(case_dir.name)
     return done
 
@@ -599,11 +629,16 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
     """Fail-closed validation for the organ-level Round2 student candidate pool."""
     previous = round_idx - 1
     source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_postprocessed"
-    gate_dir = OUTPUT_ROOT / f"round{previous}" / "metrics" / "student_round2_gate"
-    allowlist_path = Path(os.getenv(
-        "MEDAI_STUDENT_ORGAN_ALLOWLIST",
-        str(gate_dir / "student_round2_organ_allowlist.json"),
-    ))
+    next_round_gate_dir = OUTPUT_ROOT / f"round{previous}" / "metrics" / f"student_round{round_idx}_gate"
+    legacy_gate_dir = OUTPUT_ROOT / f"round{previous}" / "metrics" / "student_round2_gate"
+    default_allowlist = next_round_gate_dir / "student_round2_organ_allowlist.json"
+    if not default_allowlist.is_file():
+        default_allowlist = legacy_gate_dir / "student_round2_organ_allowlist.json"
+    allowlist_path = Path(os.getenv("MEDAI_STUDENT_ORGAN_ALLOWLIST", str(default_allowlist)))
+    if next_round_gate_dir.exists():
+        source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_round{round_idx}_competition"
+        if not source_root.exists():
+            source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_postprocessed"
     audit = {
         "status": "failed",
         "source_root": str(source_root),
@@ -620,7 +655,15 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
     except Exception as exc:
         audit["reasons"].append(f"organ_allowlist_invalid_json:{exc}")
         return source_root, audit
-    if doc.get("schema_version") != 2 or doc.get("status") != "success":
+    doc_postprocessed_root = Path(str(doc.get("postprocessed_root") or "")).expanduser()
+    if doc_postprocessed_root and str(doc_postprocessed_root) != ".":
+        if not doc_postprocessed_root.is_absolute():
+            doc_postprocessed_root = PROJECT_ROOT / doc_postprocessed_root
+        if doc_postprocessed_root.is_dir():
+            source_root = doc_postprocessed_root.resolve()
+            audit["source_root"] = str(source_root)
+    schema_version = int(doc.get("schema_version") or 0)
+    if schema_version not in {2, 3} or doc.get("status") != "success":
         audit["reasons"].append("organ_allowlist_schema_or_status_invalid")
     if int(doc.get("case_count") or 0) != 10 or int(doc.get("expected_case_count") or 0) != 10:
         audit["reasons"].append("organ_allowlist_not_10_case_complete")
@@ -649,6 +692,23 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
     if not allowed:
         audit["reasons"].append("no_organs_allowed")
     audit["allowed_organs"] = sorted(allowed)
+    allowed_case_organs: set[tuple[str, str]] | None = None
+    if schema_version >= 3:
+        route_rows = [
+            row for row in doc.get("allowed_case_organs", [])
+            if isinstance(row, dict)
+        ]
+        allowed_case_organs = {
+            (str(row.get("case_id") or ""), str(row.get("organ") or ""))
+            for row in route_rows
+            if str(row.get("case_id") or "") and str(row.get("organ") or "")
+        }
+        audit["allowed_case_organs"] = sorted(f"{case_id}/{organ}" for case_id, organ in allowed_case_organs)
+        audit["allowed_case_organ_count"] = len(allowed_case_organs)
+        if int(doc.get("allowed_case_organ_count") or 0) != len(allowed_case_organs):
+            audit["reasons"].append("allowed_case_organ_count_mismatch")
+        if any(organ not in allowed for _, organ in allowed_case_organs):
+            audit["reasons"].append("case_organ_route_contains_non_allowlisted_organ")
     if not source_root.is_dir():
         audit["reasons"].append("postprocessed_student_root_missing")
         return source_root, audit
@@ -659,12 +719,29 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
         audit["reasons"].append("postprocessed_case_set_mismatch")
     unexpected: list[str] = []
     missing: list[str] = []
+    actual_allowed_pairs: set[tuple[str, str]] = set()
     for case_id in sorted(expected_case_ids):
         case_dir = source_root / case_id
         names = {p.name[:-7] for p in case_dir.glob("*.nii.gz")}
-        unexpected.extend(f"{case_id}/{name}" for name in sorted(names - allowed))
-        missing.extend(f"{case_id}/{name}" for name in sorted(allowed - names))
-        audit["validated_masks"] += len(names & allowed)
+        if allowed_case_organs is None:
+            unexpected.extend(f"{case_id}/{name}" for name in sorted(names - allowed))
+            missing.extend(f"{case_id}/{name}" for name in sorted(allowed - names))
+            audit["validated_masks"] += len(names & allowed)
+        else:
+            actual_pairs = {(case_id, name) for name in names}
+            expected_pairs = {pair for pair in allowed_case_organs if pair[0] == case_id}
+            actual_allowed_pairs |= (actual_pairs & allowed_case_organs)
+            unexpected.extend(
+                f"{case_id}/{name}"
+                for _, name in sorted(actual_pairs - expected_pairs)
+            )
+            missing.extend(
+                f"{case_id}/{name}"
+                for _, name in sorted(expected_pairs - actual_pairs)
+            )
+            audit["validated_masks"] += len(actual_pairs & allowed_case_organs)
+    if allowed_case_organs is not None and actual_allowed_pairs != allowed_case_organs:
+        audit["reasons"].append("allowed_case_organ_materialization_mismatch")
     if unexpected:
         audit["reasons"].append(f"non_allowlisted_masks_present:{unexpected[:20]}")
     if missing:
@@ -760,6 +837,46 @@ def _cohort_coverage(
     return coverage, failures, not_applicable
 
 
+def _persist_formal_estep_gate(
+    round_idx: int,
+    gate: dict,
+    estep_result: dict,
+    manifest_path: Path | None = None,
+) -> None:
+    """Persist gate artifacts for both the full EM loop and replay/repair paths."""
+    round_root = OUTPUT_ROOT / f"round{round_idx}"
+    gate_path = round_root / "estep" / "formal_gate.json"
+    gate_path.parent.mkdir(parents=True, exist_ok=True)
+    gate_path.write_text(json.dumps(gate, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    summary_path = round_root / "round_summary.json"
+    summary = _load_json(summary_path) if summary_path.exists() else {}
+    if not isinstance(summary, dict):
+        summary = {}
+    prior_mstep_status = summary.get("mstep_status")
+    if gate.get("status") == "success":
+        mstep_status = (
+            prior_mstep_status
+            if prior_mstep_status and prior_mstep_status != "blocked_by_estep_gate"
+            else "pending_after_estep_gate_success"
+        )
+    else:
+        mstep_status = prior_mstep_status or "blocked_by_estep_gate"
+    summary.update({
+        "round": round_idx,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "estep_status": estep_result.get("status"),
+        "estep_formal_gate": gate,
+        "formal_gate_path": str(gate_path),
+        "student_backend": summary.get("student_backend", STUDENT_BACKEND),
+        "mstep_status": mstep_status,
+    })
+    if manifest_path is not None:
+        summary["mstep_manifest"] = str(manifest_path)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | None = None) -> dict:
     estep_root = OUTPUT_ROOT / f"round{round_idx}" / "estep"
     ann_root = estep_root / "annotation_versions"
@@ -767,10 +884,13 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
     selected_organs: list[dict] = []
     selection_rows: list[dict] = []
     quality_contract_mismatches = 0
+    fov_policy_mismatches = 0
     for path in meta_paths:
         doc = _load_json(path)
-        if doc.get("quality_contract_version") != "estep_quality_contract_v3":
+        if doc.get("quality_contract_version") != QUALITY_CONTRACT_VERSION:
             quality_contract_mismatches += 1
+        if doc.get("fov_policy_version") != FOV_POLICY_VERSION:
+            fov_policy_mismatches += 1
         for item in doc.get("selected_organs", []) or []:
             if isinstance(item, dict):
                 selected_organs.append(item)
@@ -902,20 +1022,25 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
     cohort_coverage, cohort_coverage_failures, fov_not_applicable_key_organs = _cohort_coverage(
         key_organs, selection_rows, selected_by_key
     )
-    non_blocking_key_organs = set(fov_not_applicable_key_organs)
+    cohort_failed_key_organs = {
+        str(row.get("organ") or "")
+        for row in cohort_coverage_failures
+        if isinstance(row, dict)
+    }
     blocking_shapekit_coverage_failures = [
         row for row in shapekit_coverage_failures
-        if str(row.get("organ") or "") not in non_blocking_key_organs
+        if str(row.get("organ") or "") in cohort_failed_key_organs
     ]
     blocking_labelcritic_coverage_failures = [
         row for row in labelcritic_coverage_failures
-        if str(row.get("organ") or "") not in non_blocking_key_organs
+        if str(row.get("organ") or "") in cohort_failed_key_organs
     ]
     expected_num_cases = int(estep_result.get("num_cases") or 0)
     missing_case_metadata = max(0, expected_num_cases - len(meta_paths))
     passed = (
         estep_result.get("status") == "success"
         and quality_contract_mismatches == 0
+        and fov_policy_mismatches == 0
         and missing_case_metadata == 0
         and not cohort_coverage_failures
         and not blocking_shapekit_coverage_failures
@@ -926,7 +1051,7 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         and geometry_error_labels == 0
         and ab_nonzero > 0
     )
-    return {
+    gate = {
         "stage": "formal_estep_gate",
         "status": "success" if passed else "failed",
         "round": round_idx,
@@ -938,6 +1063,7 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         "fov_not_applicable_key_organs": fov_not_applicable_key_organs,
         "cohort_key_organ_coverage": cohort_coverage,
         "cohort_key_organ_coverage_failures": cohort_coverage_failures,
+        "cohort_failed_key_organs": sorted(cohort_failed_key_organs),
         "expected_present_coverage_failures": expected_present_coverage_failures,
         "multi_candidate_failures": multi_candidate_failures,
         "voxtell_competition_failures": voxtell_competition_failures,
@@ -952,6 +1078,7 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         "published_d_labels": published_d_labels,
         "geometry_error_labels": geometry_error_labels,
         "quality_contract_mismatches": quality_contract_mismatches,
+        "fov_policy_mismatches": fov_policy_mismatches,
         "uncertain_selection_count": uncertain_count,
         "uncertain_selection_rows": uncertain_rows[:100],
         "auto_grade_reject_count": auto_grade_reject_count,
@@ -959,6 +1086,7 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         "ab_nonzero": ab_nonzero,
         "reason": None if passed else (
             "quality_contract_mismatch" if quality_contract_mismatches else
+            "fov_policy_mismatch" if fov_policy_mismatches else
             "missing_case_metadata" if missing_case_metadata else
             "cohort_key_organ_coverage_failed" if cohort_coverage_failures else
             "shapekit_coverage_failed" if blocking_shapekit_coverage_failures else
@@ -970,6 +1098,8 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
             "A_plus_B_zero"
         ),
     }
+    _persist_formal_estep_gate(round_idx, gate, estep_result, manifest_path)
+    return gate
 
 
 def _round_selected_pseudo_label_root(round_idx: int) -> Path:
@@ -983,6 +1113,9 @@ def _round_selected_pseudo_label_root(round_idx: int) -> Path:
             candidate = Path(override).expanduser().resolve()
             if candidate.exists() and any(candidate.iterdir()):
                 return candidate
+        formal_default = PROJECT_ROOT / "outputs" / "formal_round1_final_20260627" / "round1" / "estep" / "annotation_versions"
+        if formal_default.exists() and any(formal_default.iterdir()):
+            return formal_default
     return local
 
 
@@ -1110,12 +1243,9 @@ def run_estep(round_idx: int) -> dict:
     models_to_run = list(ALL_TEACHERS)
     if round_idx > 1:
         teacher_cache = _round_teacher_cache_dirs(1)
-        if TEACHER_INFERENCE_MODE == "hierarchical_roi":
-            missing_teacher_cache = []
-            if not teacher_cache:
-                missing_teacher_cache = ["no_hierarchical_teacher_cache_found"]
-        else:
-            missing_teacher_cache = sorted(set(ALL_TEACHERS) - set(teacher_cache))
+        missing_teacher_cache = sorted(set(ALL_TEACHERS) - set(teacher_cache))
+        if TEACHER_INFERENCE_MODE == "hierarchical_roi" and not teacher_cache:
+            missing_teacher_cache = ["no_hierarchical_teacher_cache_found"]
         if missing_teacher_cache:
             raise RuntimeError(
                 "Round 2+ requires Round 1 teacher cache so teachers are not rerun. "
@@ -1195,6 +1325,7 @@ def run_estep(round_idx: int) -> dict:
         candidate_mode=CANDIDATE_MODE,
         teacher_inference_mode=TEACHER_INFERENCE_MODE,
         roi_margin_mm=ROI_MARGIN_MM,
+        reuse_preseeded_only=round_idx > 1,
     )
 
     status = result.get("status", "unknown")
@@ -2927,6 +3058,8 @@ def apply_round_organ_type_postprocess(round_idx: int) -> dict:
         "--output-root", str(output_root),
         "--case-list", str(CASE_LIST),
         "--policy", str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"),
+        "--parent-root", str(_round_selected_pseudo_label_root(round_idx)),
+        "--parent-root", str(_round_selected_pseudo_label_root(max(round_idx - 1, 1))),
         "--overwrite",
     ]
     try:

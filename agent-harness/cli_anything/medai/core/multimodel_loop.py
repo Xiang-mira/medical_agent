@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 
 try:
     import yaml
@@ -42,6 +43,7 @@ from .scan_coverage import infer_scan_coverage
 from .case_quality_report import build_case_quality_report
 
 QUALITY_CONTRACT_VERSION = "estep_quality_contract_v3"
+FOV_POLICY_VERSION = "fov_appearance_regions_v4"
 
 def _file_sha256(path: str | Path | None) -> str | None:
     if not path or not Path(path).exists():
@@ -236,13 +238,14 @@ PELVIS_ONLY_COVERAGE_TERMS = {
 HEAD_COVERAGE_TERMS = {"head", "brain", "cranial", "skull", "neck", "head_neck", "head-neck"}
 
 HEAD_NECK_ORGAN_TOKENS = {
-    "brain", "brainstem", "cerebellum", "cerebrospinal", "cranial", "skull",
+    "head", "neck", "brain", "brainstem", "cerebellum", "cerebrospinal", "cranial", "skull",
     "eyeball", "eye", "lens", "cochlear", "auditory", "nasal", "oral",
     "buccal", "lips", "cheek", "face", "carotid", "pharynx", "larynx",
     "glottis", "cricoid", "arytenoid", "scalene", "digastric",
 }
 PELVIS_ORGAN_TOKENS = {
     "bladder", "prostate", "uterus", "rectum", "pelvic", "gluteus",
+    "gonad", "gonads", "seminal", "sacrum", "uterocervix",
 }
 EXTREMITY_ORGAN_TOKENS = {
     "humerus", "radius", "ulna", "carpal", "metacarpal", "fingers",
@@ -306,6 +309,39 @@ def _organ_region_hint(norm: str) -> str | None:
     if tokens & ABDOMEN_ORGAN_TOKENS or any(f"_{token}_" in haystack for token in ABDOMEN_ORGAN_TOKENS):
         return "abdomen"
     return None
+
+
+@lru_cache(maxsize=1)
+def _appearance_region_index() -> dict[str, tuple[str, ...]]:
+    """Load the structured 373-organ region map used by LabelCritic.
+
+    Token matching misses anatomy names such as ``caudate_nucleus`` and
+    ``lentiform_nucleus``. Those must not remain absence-unproven on a
+    high-confidence abdomen-only scan when the maintained appearance contract
+    already identifies them as head/neck structures.
+    """
+    project_root = Path(__file__).resolve().parents[4]
+    path = project_root / "configs" / "organ_ct_appearance_373.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        entries = doc.get("organ_ct_appearance", {}) or {}
+    except Exception:
+        return {}
+    index: dict[str, tuple[str, ...]] = {}
+    for organ, entry in entries.items():
+        regions = tuple(
+            str(region).strip().lower()
+            for region in (entry.get("expected_body_regions", []) or [])
+            if str(region).strip() and str(region).strip().lower() != "unknown"
+        )
+        if regions:
+            index[_norm_organ_key(organ)] = regions
+    # TotalSegmentator's "autochthon" denotes paraspinal intrinsic back
+    # muscles, which are visible on abdominal CT; the generated appearance
+    # seed incorrectly classified them as appendicular/extremity anatomy.
+    index["autochthon_left"] = ("abdomen",)
+    index["autochthon_right"] = ("abdomen",)
+    return index
 
 
 def _presence_context_summary(presence_context: dict[str, Any] | None) -> dict[str, Any]:
@@ -1446,6 +1482,21 @@ def _materialize_case_373_targets(
     formal_organs = set(organs)
     selection_rows[:] = [row for row in selection_rows if str(row.get("organ") or "") in formal_organs]
     selected_metadata[:] = [row for row in selected_metadata if str(row.get("organ") or "") in formal_organs]
+    zero_mask = _zero_mask_path_for_case(ct, case_updated)
+
+    def publish_absent_negative_mask(organ: str) -> str | None:
+        """Publish an organ-named all-zero mask for absent-negative targets."""
+        if not zero_mask:
+            return None
+        out = case_updated / f"{organ}.nii.gz"
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if not out.exists():
+                shutil.copy2(zero_mask, out)
+            return str(out.resolve())
+        except Exception:
+            return zero_mask
+
     contract_type_map = {
         "hard": "positive_hard",
         "soft": "positive_soft",
@@ -1482,6 +1533,8 @@ def _materialize_case_373_targets(
                 row["negative_source"] = None
                 row["negative_reason"] = None
             else:
+                organ_name = str(row.get("organ") or "")
+                published_zero = publish_absent_negative_mask(organ_name) if organ_name else zero_mask
                 row.update({
                     "absence_confidence": "high",
                     "grade_scope": "absence",
@@ -1491,6 +1544,10 @@ def _materialize_case_373_targets(
                     "negative_source": "case_373_expected_absent",
                     "dataset_role": "semantic_absent_negative",
                     "fov_evidence": list(presence_context.get("coverage_evidence") or []),
+                    "selected_prediction": published_zero,
+                    "mask_path": published_zero,
+                    "mask": published_zero,
+                    "final_mask": published_zero,
                 })
         if row["target_type"] in {"unresolved_visible", "partial_fov", "rejected"}:
             row["training_weight"] = 0.0
@@ -1514,7 +1571,6 @@ def _materialize_case_373_targets(
                 "selection_not_formally_eligible_under_current_gate"
             )
     selection_by_organ = {str(row.get("organ")): row for row in selection_rows if row.get("organ")}
-    zero_mask = _zero_mask_path_for_case(ct, case_updated)
     absent_added = 0
     review_gap_missing = 0
     geometry_failures = 0
@@ -1579,6 +1635,7 @@ def _materialize_case_373_targets(
                 "quality_flags": ["missing_candidate"],
             })
             continue
+        published_zero = publish_absent_negative_mask(organ) or zero_mask
         reason = "organ outside scan/body region; all-zero mask is valid negative target"
         row = {
             "case_id": case_id, "ct_path": str(ct), "organ": organ,
@@ -1600,12 +1657,12 @@ def _materialize_case_373_targets(
             "selected_candidate": None, "selected_candidate_id": None,
             "selected_teacher": None, "selected_family": None,
             "selected_model": None, "source_model": None,
-            "selected_prediction": zero_mask,
+            "selected_prediction": published_zero,
             "labelcritic_called": False, "labelcritic_compare_used": False,
             "labelcritic_skipped_reason": "absent_negative_no_candidate_ranking_needed",
             "labelcritic_prompt_version": None,
             "labelcritic_grade_used": False,
-            "mask_path": zero_mask, "mask": zero_mask, "final_mask": zero_mask, "overlay_path": None,
+            "mask_path": published_zero, "mask": published_zero, "final_mask": published_zero, "overlay_path": None,
             "zero_mask_role": "negative_absent_target_mask",
             "negative_reason": "out_of_scan_by_scan_coverage",
             "negative_source": "case_373_expected_absent",
@@ -2915,6 +2972,12 @@ def _fov_status_for_organ(organ: str, presence_context: dict[str, Any] | None = 
         if has_thorax:
             return "fully_visible"
         return "partially_visible" if has_abdomen or partial_thorax else "unknown"
+    if norm == "superior_vena_cava":
+        if has_thorax:
+            return "fully_visible"
+        return "partially_visible" if partial_thorax else (
+            "out_of_fov" if has_abdomen else "unknown"
+        )
     if norm in {"hip_left", "hip_right"} and not has_pelvis:
         return "unknown"
     if norm in _KEY_ABDOMINAL_ORGANS:
@@ -2928,6 +2991,28 @@ def _fov_status_for_organ(organ: str, presence_context: dict[str, Any] | None = 
             return "partially_visible"
         return "unknown"
     hinted_region = _organ_region_hint(norm)
+    appearance_regions = (
+        set(_appearance_region_index().get(norm, ()))
+        if hinted_region is None else set()
+    )
+    if "abdomen" in appearance_regions and has_abdomen:
+        return "fully_visible"
+    if "pelvis" in appearance_regions and has_pelvis:
+        return "fully_visible"
+    if "head_neck" in appearance_regions:
+        return "fully_visible" if has_head else (
+            "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+        )
+    if "thorax" in appearance_regions:
+        if has_thorax:
+            return "fully_visible"
+        if partial_thorax:
+            return "partially_visible"
+        return "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+    if "extremity" in appearance_regions:
+        return "fully_visible" if has_extremity else (
+            "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+        )
     if hinted_region == "head_neck":
         return "fully_visible" if has_head else (
             "out_of_fov" if has_abdomen and not has_thorax and not has_pelvis else "unknown"
@@ -3038,6 +3123,10 @@ def _case_resume_state(
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except Exception as exc:
         return {"complete": False, "raw_ready": True, "reason": f"selection_metadata_unreadable:{exc}"}
+    if meta.get("quality_contract_version") != QUALITY_CONTRACT_VERSION:
+        return {"complete": False, "raw_ready": True, "reason": "quality_contract_version_mismatch"}
+    if meta.get("fov_policy_version") != FOV_POLICY_VERSION:
+        return {"complete": False, "raw_ready": True, "reason": "fov_policy_version_mismatch"}
     selection_rows = meta.get("selection_rows") or []
     selected_organs = meta.get("selected_organs") or []
     seen = {str(row.get("organ")) for row in selection_rows if isinstance(row, dict) and row.get("organ")}
@@ -4611,6 +4700,7 @@ def run_multimodel_annotation_loop(
     teacher_inference_mode: str = "hierarchical_roi",
     roi_margin_mm: float = 20.0,
     preseeded_parent_only: bool = False,
+    reuse_preseeded_only: bool = False,
     strict_labelcritic_selection: bool = True,
 ) -> dict[str, Any]:
     """
@@ -4722,7 +4812,7 @@ def run_multimodel_annotation_loop(
 
         fov_organs = _fov_pruned_organs(list(organs), taxonomy, presence_context)
         execution_organs = list(fov_organs)
-        if teacher_inference_mode == "hierarchical_roi":
+        if teacher_inference_mode == "hierarchical_roi" and not reuse_preseeded_only:
             for requested_organ in fov_organs:
                 for parent in ((taxonomy_entry(taxonomy, requested_organ) or {}).get("parent_ids", []) or []):
                     if parent not in execution_organs:
@@ -4862,7 +4952,7 @@ def run_multimodel_annotation_loop(
             if model_key not in resolved_preseeded_seg_dirs
         ]
 
-        if teacher_inference_mode == "hierarchical_roi":
+        if teacher_inference_mode == "hierarchical_roi" and not reuse_preseeded_only:
             _teacher_t0 = _time.time()
             hierarchy_result = _run_hierarchical_case_inference(
                 ct=ct, case_id=case_id, case_raw=case_raw, case_out=case_out,
@@ -4880,6 +4970,13 @@ def run_multimodel_annotation_loop(
             for item in hierarchy_blocked:
                 _append_jsonl(review_queue, {"case_id": case_id, "ct_path": str(ct), **item})
             stage_timing["teacher_inference_sec"] += _time.time() - _teacher_t0
+        elif teacher_inference_mode == "hierarchical_roi" and reuse_preseeded_only:
+            if not resolved_preseeded_seg_dirs:
+                raise RuntimeError(
+                    f"Preseeded-only replay requested for {case_id}, but no cached "
+                    "teacher/student segmentation directories were resolved."
+                )
+            stage_counts["hierarchical_inference_skipped_preseeded_only"] = True
 
         for model_idx, model_key in enumerate(case_models, start=1):
             _teacher_t0 = _time.time()
@@ -5957,6 +6054,7 @@ def run_multimodel_annotation_loop(
         write_json(updated_root / case_id / "case_timing_breakdown.json", case_timing)
         write_json(updated_root / case_id / "selection_metadata.json", {
             "quality_contract_version": QUALITY_CONTRACT_VERSION,
+            "fov_policy_version": FOV_POLICY_VERSION,
             "case_id": case_id,
             "ct_path": str(ct),
             "dataset_type": "pseudo_label_dataset",
@@ -6229,6 +6327,7 @@ def run_multimodel_annotation_loop(
         "training_manifest": manifest, "pseudo_label_gap_report": gap_report, "case_373_target_summary": case_373_dataset_summary, "shapekit_report": str((out / "shapekit_report.json").resolve()), "mstep_config": mcfg, "mstep_model_routing": mstep_routing,
         "resume_audit": resume_rows,
         "preseeded_parent_only": preseeded_parent_only,
+        "reuse_preseeded_only": reuse_preseeded_only,
         "round2_competition_audit": _summarize_preseeded_competition(
             preseeded_keys=[] if preseeded_parent_only else sorted((preseeded_model_dirs or {}).keys()),
             selection_rows=all_selection_rows,

@@ -43,13 +43,13 @@ student_containment:
       min_fraction: 0.001
       min_voxels: 16
     sub_organ:
-      keep_top_k: 5
-      min_fraction: 0.003
-      min_voxels: 32
-    hollow_gi:
-      keep_top_k: 5
-      min_fraction: 0.003
+      keep_top_k: 4
+      min_fraction: 0.006
       min_voxels: 64
+    hollow_gi:
+      keep_top_k: 3
+      min_fraction: 0.01
+      min_voxels: 128
     default:
       keep_top_k: 8
       min_fraction: 0.002
@@ -125,14 +125,17 @@ student_containment:
       parents: [colon]
       margin_mm: 20.0
     stomach:
-      parents: []
-      enabled: false
+      parents: [abdominal_cavity]
+      margin_mm: 10.0
     colon:
-      parents: []
-      enabled: false
+      parents: [abdominal_cavity]
+      margin_mm: 10.0
     duodenum:
-      parents: []
-      enabled: false
+      parents: [abdominal_cavity]
+      margin_mm: 10.0
+    small_bowel:
+      parents: [abdominal_cavity]
+      margin_mm: 10.0
   atlasnet_note: >
     AtlasNet is available as a teacher candidate for colon, duodenum, stomach,
     pancreatic_duct, and abdominal tubular structures. This post-processing
@@ -146,8 +149,8 @@ volume_gate:
       min_ratio: 0.5
       max_ratio: 1.8
     hollow_gi:
-      min_ratio: 0.2
-      max_ratio: 3.0
+      min_ratio: 0.35
+      max_ratio: 2.5
     vessel_or_duct:
       min_ratio: 0.05
       max_ratio: 5.0

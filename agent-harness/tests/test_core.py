@@ -854,6 +854,7 @@ class TestRunEMTrainingVoxTellMstep:
     def test_completed_cases_require_hierarchical_manifest_in_hierarchical_mode(self, monkeypatch, tmp_path):
         module = self._load_run_em_training(monkeypatch, tmp_path)
         monkeypatch.setattr(module, "TEACHER_INFERENCE_MODE", "hierarchical_roi")
+        monkeypatch.setattr(module, "load_student_target_organs", lambda: ["liver"])
         updated = tmp_path / "outputs" / "round1" / "estep" / "annotation_versions" / "case_001" / "updated"
         updated.mkdir(parents=True)
         _make_nii(np.ones((4, 4, 4), dtype=np.uint8), updated / "liver.nii.gz")
@@ -868,7 +869,59 @@ class TestRunEMTrainingVoxTellMstep:
             "hierarchical_plan_cache_key": {"requested_organs": ["liver"]},
             "hierarchical_plan_cache_key_sha256": "fake",
         }), encoding="utf-8")
+        assert module.completed_cases(1) == set()
+
+        (updated.parent / "selection_metadata.json").write_text(json.dumps({
+            "quality_contract_version": module.QUALITY_CONTRACT_VERSION,
+            "fov_policy_version": module.FOV_POLICY_VERSION,
+            "case_id": "case_001",
+            "selection_rows": [{"organ": "liver"}],
+            "selected_organs": [{"organ": "liver", "publication_status": "published"}],
+        }), encoding="utf-8")
         assert module.completed_cases(1) == {"case_001"}
+
+    def test_completed_cases_reject_stale_or_incomplete_selection_metadata(self, monkeypatch, tmp_path):
+        module = self._load_run_em_training(monkeypatch, tmp_path)
+        monkeypatch.setattr(module, "TEACHER_INFERENCE_MODE", "hierarchical_roi")
+        monkeypatch.setattr(module, "load_student_target_organs", lambda: ["liver", "pancreas"])
+        case_root = tmp_path / "outputs" / "round1" / "estep"
+        updated = case_root / "annotation_versions" / "case_001" / "updated"
+        updated.mkdir(parents=True)
+        _make_nii(np.ones((4, 4, 4), dtype=np.uint8), updated / "liver.nii.gz")
+        _make_nii(np.ones((4, 4, 4), dtype=np.uint8), updated / "pancreas.nii.gz")
+        manifest = case_root / "cases" / "case_001" / "hierarchical_inference_plan.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({
+            "teacher_inference_mode": "hierarchical_roi",
+            "hierarchical_plan_cache_key": {"requested_organs": ["liver", "pancreas"]},
+            "hierarchical_plan_cache_key_sha256": "fake",
+        }), encoding="utf-8")
+
+        def write_meta(**overrides):
+            payload = {
+                "quality_contract_version": module.QUALITY_CONTRACT_VERSION,
+                "fov_policy_version": module.FOV_POLICY_VERSION,
+                "case_id": "case_001",
+                "selection_rows": [{"organ": "liver"}, {"organ": "pancreas"}],
+                "selected_organs": [
+                    {"organ": "liver", "publication_status": "published"},
+                    {"organ": "pancreas", "publication_status": "published"},
+                ],
+            }
+            payload.update(overrides)
+            (updated.parent / "selection_metadata.json").write_text(json.dumps(payload), encoding="utf-8")
+
+        write_meta(selection_rows=[{"organ": "liver"}])
+        assert module.completed_cases(1) == set()
+        write_meta(selection_rows=[{"organ": "liver"}, {"organ": "liver"}])
+        assert module.completed_cases(1) == set()
+        write_meta(fov_policy_version="old_fov_policy")
+        assert module.completed_cases(1) == set()
+        write_meta(case_id="case_002")
+        assert module.completed_cases(1) == set()
+        (updated / "pancreas.nii.gz").unlink()
+        write_meta()
+        assert module.completed_cases(1) == set()
 
     def test_disabled_voxtell_training_keeps_manifest_but_no_checkpoint(self, monkeypatch, tmp_path):
         module = self._load_run_em_training(monkeypatch, tmp_path)
@@ -2084,6 +2137,93 @@ class TestLabelFusion:
 # ─── Test 8 : Teacher meeting pipeline contract ──────────────────────────────
 
 class TestTeacherMeetingPipeline:
+    def test_reuse_preseeded_only_skips_hierarchical_and_registered_inference(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
+        case_list = tmp_path / "cases.csv"
+        case_list.write_text(
+            "case_id,ct_path,annotation_folder,scan_coverage\ncase_001,%s,,abdomen\n" % ct,
+            encoding="utf-8",
+        )
+        seed_root = tmp_path / "seed"
+        seed_seg = seed_root / "case_001" / "segmentations"
+        seed_seg.mkdir(parents=True)
+        _make_nii(_sphere_mask(shape=(16, 16, 16), radius=4), seed_seg / "liver.nii.gz")
+
+        monkeypatch.setattr(
+            ml,
+            "_run_hierarchical_case_inference",
+            lambda *args, **kwargs: pytest.fail("hierarchical ROI inference must not run during preseeded-only replay"),
+        )
+        monkeypatch.setattr(
+            ml,
+            "run_registered_model",
+            lambda *args, **kwargs: pytest.fail("registered model inference must not run during preseeded-only replay"),
+        )
+
+        result = ml.run_multimodel_annotation_loop(
+            case_list=case_list,
+            output_folder=tmp_path / "out",
+            models=["teacher_cached"],
+            organs=["liver"],
+            preseeded_model_dirs={"teacher_cached": seed_root},
+            enable_critic=False,
+            enable_shapekit=False,
+            dry_run=False,
+            resume=False,
+            timeout_sec=30,
+            teacher_inference_mode="hierarchical_roi",
+            reuse_preseeded_only=True,
+            strict_labelcritic_selection=False,
+        )
+
+        assert result["status"] == "success"
+        assert result["reuse_preseeded_only"] is True
+        timing = json.loads(
+            (tmp_path / "out" / "annotation_versions" / "case_001" / "case_timing_breakdown.json")
+            .read_text(encoding="utf-8")
+        )
+        assert timing["stage_timing_sec"]["teacher_inference_sec"] == 0.0
+        assert timing["stage_counts"]["hierarchical_inference_skipped_preseeded_only"] is True
+
+    def test_reuse_preseeded_only_fails_without_resolved_cache(self, tmp_path, monkeypatch):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        ct = _make_nii(np.zeros((16, 16, 16), dtype=np.int16), tmp_path / "ct.nii.gz")
+        case_list = tmp_path / "cases.csv"
+        case_list.write_text(
+            "case_id,ct_path,annotation_folder,scan_coverage\ncase_001,%s,,abdomen\n" % ct,
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            ml,
+            "_run_hierarchical_case_inference",
+            lambda *args, **kwargs: pytest.fail("hierarchical ROI inference must not run when cache resolution fails"),
+        )
+        monkeypatch.setattr(
+            ml,
+            "run_registered_model",
+            lambda *args, **kwargs: pytest.fail("registered model inference must not run when cache resolution fails"),
+        )
+
+        with pytest.raises(RuntimeError, match="Preseeded-only replay requested"):
+            ml.run_multimodel_annotation_loop(
+                case_list=case_list,
+                output_folder=tmp_path / "out",
+                models=["teacher_cached"],
+                organs=["liver"],
+                preseeded_model_dirs={"teacher_cached": tmp_path / "missing_cache"},
+                enable_critic=False,
+                enable_shapekit=False,
+                dry_run=False,
+                resume=False,
+                timeout_sec=30,
+                teacher_inference_mode="hierarchical_roi",
+                reuse_preseeded_only=True,
+                strict_labelcritic_selection=False,
+            )
+
     def test_candidate_qc_marks_zero_volume_mask_without_calling_it_empty(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml
         monkeypatch.setenv("MEDAI_LABELCRITIC_ALLOW_UNCALIBRATED_SELECTION", "1")
@@ -2144,10 +2284,13 @@ class TestTeacherMeetingPipeline:
             dry_run=False,
         )
 
-        assert selected and selected["model"] == "teacher_good"
+        assert selected is None
+        assert selection["selection_method"] == "label_critic_audit_only"
+        assert selection["selection_status"] == "review_required"
+        assert selection["should_enter_student_training"] is False
         assert selection["comparison_candidate_count"] == 2
         assert selection["comparison_candidate_models"] == ["teacher_good", "teacher_zero_volume"]
-        assert critic_calls == ["called"]
+        assert critic_calls == ["called", "called"]
 
     def test_reuses_zero_mask_raw_inference_cache(self, tmp_path):
         import cli_anything.medai.core.multimodel_loop as ml
@@ -2260,7 +2403,7 @@ class TestTeacherMeetingPipeline:
         selection = json.loads((out / "annotation_versions" / "case_001" / "selection_metadata.json").read_text(encoding="utf-8"))
         liver = next(row for row in selection["selection_rows"] if row["organ"] == "liver")
         assert liver["selected_model"] is None
-        assert liver["selection_method"] == "label_critic_inconclusive"
+        assert liver["selection_method"] == "label_critic_audit_only"
         assert liver["selection_status"] == "review_required"
         assert liver["should_enter_student_training"] is False
         assert liver["comparison_input_stage"] == "post_shapekit_candidate"
@@ -2464,16 +2607,14 @@ class TestTeacherMeetingPipeline:
 
         assert result["status"] == "success"
         meta = json.loads((out / "annotation_versions" / "case_001" / "selection_metadata.json").read_text(encoding="utf-8"))
-        liver = meta["selected_organs"][0]
+        assert meta["selected_organs"] == []
+        liver = meta["selection_rows"][0]
         assert liver["labelcritic_compare_used"] is True
         assert liver["labelcritic_compare_reason"] == "multi_candidate_conflict"
-        assert liver["selected_candidate_id"] in liver["candidate_ids"]
-        assert liver["selected_source_mask_sha256"] == liver["final_mask_sha256"]
-        assert liver["mask_lineage_verified"] is True
-        assert liver["labelcritic_grade_used"] is False
-        assert liver["labelcritic_grade_skipped_reason"] == "policy_grade_disabled"
-        assert liver["distillation_eligible"] is True
-        assert liver["teacher_lineage"]
+        assert liver["selection_method"] == "label_critic_audit_only"
+        assert liver["selection_status"] == "review_required"
+        assert liver["should_enter_student_training"] is False
+        assert liver["selected_candidate_id"] is None
 
     def test_stable_single_candidate_runs_absolute_grade(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml
@@ -2605,6 +2746,8 @@ class TestTeacherMeetingPipeline:
         assert by_organ["brain"]["labelcritic_called"] is False
         assert by_organ["brain"]["metric_target"] == "all-zero target"
         assert by_organ["brain"]["metric_interpretation"] == "negative_absence_quality"
+        assert by_organ["brain"]["final_mask"] == str((tmp_path / "updated" / "brain.nii.gz").resolve())
+        assert (tmp_path / "updated" / "brain.nii.gz").is_file()
         assert by_organ["pancreas"]["target_type"] == "unresolved_visible"
         assert by_organ["pancreas"]["training_weight"] == 0.0
         assert by_organ["pancreas"]["should_enter_student_training"] is False
@@ -3158,11 +3301,12 @@ class TestLabelCriticTournament:
             dry_run=False, labelcritic_options={},
         )
 
-        assert selected["model"] == "teacher_b"
-        assert sel["selection_method"] == "label_critic"
-        assert sel["primary_selector"] == "official_labelcritic_pairwise_condorcet"
+        assert selected is None
+        assert sel["selection_method"] == "label_critic_audit_only"
+        assert sel["primary_selector"] == "official_labelcritic_pairwise_condorcet_audit_only"
         assert sel["comparison_decisive_count"] == 1
-        assert ml._labelcritic_locks_selection(sel) is True
+        assert sel["should_enter_student_training"] is False
+        assert ml._labelcritic_locks_selection(sel) is False
 
     def test_labelcritic_lock_helper_rejects_fallback_methods(self):
         from cli_anything.medai.core import multimodel_loop as ml
@@ -3297,8 +3441,9 @@ class TestLabelCriticTournament:
 
         assert called["n"] == 0
         assert selected["model"] in {"fusion_consensus", "teacher_a", "teacher_b"}
-        assert sel["selection_method"] == "near_identical_agreement"
-        assert sel["labelcritic_records"][0]["status"] == "skipped_near_identical"
+        assert sel["selection_method"] == "geometric_teacher_consensus"
+        assert sel["legacy_selection_method"] == "near_identical_agreement"
+        assert sel["labelcritic_records"][0]["status"] == "skipped_geometric_consensus"
 
     def test_near_identical_pair_skips_vlm(self, tmp_path, monkeypatch):
         from cli_anything.medai.core import multimodel_loop as ml

@@ -71,6 +71,13 @@ def test_four_state_fov_never_uses_missing_teacher() -> None:
     assert _fov_status_for_organ("liver", context) == "fully_visible"
     assert _fov_status_for_organ("lung_left", context) == "partially_visible"
     assert _fov_status_for_organ("brain", context) == "out_of_fov"
+    assert _fov_status_for_organ("caudate_nucleus", context) == "out_of_fov"
+    assert _fov_status_for_organ("internal_capsule", context) == "out_of_fov"
+    assert _fov_status_for_organ("breast_left", context) == "partially_visible"
+    assert _fov_status_for_organ("phalanges_hand", context) == "out_of_fov"
+    assert _fov_status_for_organ("autochthon_left", context) == "fully_visible"
+    assert _fov_status_for_organ("superior_vena_cava", context) == "partially_visible"
+    assert _fov_status_for_organ("muscle_of_head", context) == "out_of_fov"
     assert _fov_status_for_organ("bladder", context) == "unknown"
 
 
