@@ -66,6 +66,22 @@ def _render_description(entry: dict) -> str:
     return "\n".join(lines)
 
 
+def _project_extension_compare_prompt(organ: str, description: str) -> str:
+    display = organ.replace("_", " ")
+    return (
+        "The images I am sending are frontal projections of the same CT scan. "
+        "They are not CT slices; they have transparency and are oriented like AP X-rays. "
+        "Red overlays on the images demarcate candidate masks for the target organ, "
+        "but the accuracy of these overlays is uncertain. Compare the two overlays "
+        "and decide which one better represents the %(organ)s.\n"
+        f"Target-specific anatomical guidance for {display}:\n{description}\n"
+        "Evaluate location, CT appearance, shape/continuity, oversegmentation, "
+        "undersegmentation, truncation, and leakage into adjacent structures. "
+        "If both overlays have errors, choose the one with fewer or smaller errors. "
+        "Answer which overlay is better: overlay 1 or overlay 2, and briefly justify."
+    )
+
+
 def _structured_assessment(
     decision: dict,
     candidate_context: list[dict],
@@ -248,6 +264,7 @@ def main() -> None:
         import ErrorDetector as ed
 
         descriptions = dict(ed.DescriptionsED)
+        project_extension_description = None
         if args.organ not in descriptions:
             entry = description_entry
             if not isinstance(entry, dict) or not entry.get("formal_selection_eligible"):
@@ -262,7 +279,13 @@ def main() -> None:
                 )
                 print(json.dumps(result, indent=2))
                 raise SystemExit(2)
-            descriptions[args.organ] = _render_description(entry)
+            project_extension_description = _render_description(entry)
+            descriptions[args.organ] = project_extension_description
+        text_multi_image_prompt_2 = (
+            ed.Compare2Images
+            if args.organ in ed.DescriptionsED
+            else _project_extension_compare_prompt(args.organ, project_extension_description or descriptions[args.organ])
+        )
 
         base_url = f"{args.base_url.rstrip('/')}:{args.port}/v1"
         ed.SystematicComparisonLMDeploySepFigures(
@@ -276,6 +299,7 @@ def main() -> None:
             multi_image_prompt_2=(
                 "auto" if args.organ in ed.DescriptionsED else True
             ),
+            text_multi_image_prompt_2=text_multi_image_prompt_2,
             dual_confirmation=True,
             conservative_dual=False,
             dice_check=True,

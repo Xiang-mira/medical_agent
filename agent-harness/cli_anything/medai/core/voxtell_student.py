@@ -108,6 +108,160 @@ def _find_case_image(case_dir: Path) -> str | None:
     return None
 
 
+def _as_positive_target_type(value: Any) -> str:
+    raw = str(value or "hard").strip().lower()
+    if raw in {"positive_hard", "hard"}:
+        return "positive_hard"
+    if raw in {"positive_soft", "soft"}:
+        return "positive_soft"
+    return raw
+
+
+def _is_positive_supervision(row: dict[str, Any]) -> bool:
+    return str(row.get("supervision_type") or "positive").lower() == "positive"
+
+
+def _is_negative_absent(row: dict[str, Any]) -> bool:
+    return str(row.get("target_type") or "").strip().lower() in {"negative_absent", "absent_negative"}
+
+
+def _manifest_row_mask_path(row: dict[str, Any]) -> Path | None:
+    raw = row.get("mask_path") or row.get("mask") or row.get("final_mask")
+    if not raw:
+        return None
+    try:
+        return Path(str(raw)).expanduser().resolve()
+    except Exception:
+        return Path(str(raw))
+
+
+def _mask_has_foreground(path: Path | None) -> tuple[bool, str | None]:
+    if path is None:
+        return False, "mask_missing"
+    if not path.exists():
+        return False, "mask_missing"
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        arr = np.asanyarray(nib.load(str(path)).dataobj)
+        return bool((arr > 0).sum() > 0), None
+    except Exception as exc:
+        return False, f"mask_unreadable:{exc}"
+
+
+def _positive_replay_candidate_reason(row: dict[str, Any]) -> str | None:
+    """Return None for rows that may be considered for historical replay.
+
+    This is intentionally stricter than ordinary manifest inclusion. Historical
+    replay must never promote student predictions, GT rows, empty masks, failed
+    QC labels, or absent-negative all-zero masks into the positive memory.
+    """
+    if not isinstance(row, dict):
+        return "not_a_manifest_row"
+    if not _is_positive_supervision(row):
+        return "not_positive_supervision"
+    target_type = _as_positive_target_type(row.get("target_type"))
+    if target_type not in {"positive_hard", "positive_soft"}:
+        return f"not_positive_target_type:{target_type}"
+    if _is_negative_absent(row):
+        return "negative_absent_not_replay_positive"
+    grade = str(row.get("grade") or "D").upper()
+    if grade not in {"A", "B", "C"}:
+        return f"grade_not_trainable:{grade}"
+    if grade == "C" and target_type != "positive_soft":
+        return "grade_C_requires_soft_positive_target"
+    try:
+        if float(row.get("training_weight") or 0.0) <= 0.0:
+            return "nonpositive_training_weight"
+    except Exception:
+        return "invalid_training_weight"
+    if row.get("distillation_eligible") is False:
+        return "distillation_ineligible"
+    model_tokens = " ".join(
+        str(row.get(key) or "")
+        for key in ("selected_model", "source_model", "distillation_source", "selected_provider")
+    ).lower()
+    if "student" in model_tokens:
+        return "student_prediction_not_replay_memory"
+    dataset_role = str(row.get("dataset_role") or "").lower()
+    gt_status = str(row.get("ground_truth_status") or "").lower()
+    gt_tokens = {"gt", "ground_truth", "expert_ground_truth", "manual_ground_truth", "human_ground_truth"}
+    if dataset_role in gt_tokens or gt_status in gt_tokens or "ground_truth" in dataset_role:
+        return "ground_truth_not_replay_memory"
+    qc_status = str(row.get("selected_candidate_qc_status") or row.get("candidate_qc_status") or "").lower()
+    if qc_status and qc_status not in {"pass", "passed", "success", "ok"}:
+        return f"candidate_qc_not_pass:{qc_status}"
+    quality_status = str(row.get("quality_status") or "").lower()
+    if quality_status in {"failed", "fail", "rejected", "qc_failed"}:
+        return f"quality_status_not_pass:{quality_status}"
+    flags = {str(flag).lower() for flag in (row.get("quality_flags") or [])}
+    flags |= {str(flag).lower() for flag in (row.get("review_flags") or [])}
+    flags |= {str(flag).lower() for flag in (row.get("selected_candidate_qc_flags") or [])}
+    hard_fail_flags = {
+        "zero_volume_mask",
+        "empty_mask",
+        "geometry_mismatch",
+        "shape_mismatch_ct",
+        "affine_mismatch_ct",
+        "orientation_mismatch_ct",
+        "candidate_qc_fail",
+        "postprocess_failed",
+    }
+    if flags & hard_fail_flags:
+        return f"hard_quality_flag:{sorted(flags & hard_fail_flags)[0]}"
+    return None
+
+
+def _is_replay_safe_positive(row: dict[str, Any]) -> tuple[bool, str | None]:
+    reason = _positive_replay_candidate_reason(row)
+    if reason:
+        return False, reason
+    nonempty, mask_reason = _mask_has_foreground(_manifest_row_mask_path(row))
+    if not nonempty:
+        return False, mask_reason or "empty_mask_not_replay_memory"
+    return True, None
+
+
+def _is_trainable_positive_row(row: dict[str, Any], *, require_nonempty: bool = False) -> bool:
+    if _positive_replay_candidate_reason(row) is not None:
+        return False
+    if require_nonempty:
+        nonempty, _ = _mask_has_foreground(_manifest_row_mask_path(row))
+        return bool(nonempty)
+    return True
+
+
+def _normalize_replay_positive_item(
+    row: dict[str, Any],
+    *,
+    manifest_path: Path,
+    replay_index: int,
+) -> dict[str, Any]:
+    item = dict(row)
+    target_type = _as_positive_target_type(item.get("target_type"))
+    item["target_type"] = target_type
+    item["legacy_target_type"] = row.get("legacy_target_type") or row.get("target_type")
+    item["supervision_type"] = "positive"
+    item["distillation_role"] = "positive"
+    item["historical_replay"] = True
+    item["cumulative_manifest_role"] = "historical_replay_positive"
+    item["replay_source"] = "promoted_history"
+    item["replay_source_manifest"] = str(manifest_path)
+    item["replay_index"] = replay_index
+    item["training_gate_decision"] = (
+        "include_soft_c"
+        if str(item.get("grade") or "").upper() == "C" or target_type == "positive_soft"
+        else "include_hard_ab"
+    )
+    item["training_gate_policy"] = (
+        "Promoted historical trainable positive replay restored by the cumulative manifest."
+    )
+    item["negative_reason"] = None
+    item["negative_source"] = None
+    return item
+
+
 def _load_selection_index(cases_root: Path, case_id: str) -> dict[str, dict[str, Any]]:
     """Load source/quality metadata written by the E-step selection loop."""
     candidates = [
@@ -700,6 +854,7 @@ class VoxTellStudent:
         case_list: str | Path | None = None,
         require_images: bool = False,
         student_prediction_root: str | Path | None = None,
+        historical_replay_manifests: list[str | Path] | None = None,
     ) -> dict[str, Any]:
         """Build a prompt/mask manifest from merged teacher outputs.
 
@@ -736,6 +891,11 @@ class VoxTellStudent:
         negative_quota_policy = _negative_quota_policy()
         negative_source_shortfalls: dict[str, int] = {}
         ignored_student_prediction_root = Path(student_prediction_root).resolve() if student_prediction_root else None
+        replay_manifest_paths = [
+            Path(path).expanduser().resolve()
+            for path in (historical_replay_manifests or [])
+            if path
+        ]
 
         if _find_mask_dir(cases):
             case_dirs = [cases]
@@ -956,6 +1116,108 @@ class VoxTellStudent:
                     negative_source_counts[neg["negative_source"]] = negative_source_counts.get(neg["negative_source"], 0) + 1
                     rows.extend(_expand_prompt_manifest_item(item, prompt_variant_mode, doc))
 
+        current_trainable_positive_keys = {
+            (str(r.get("case_id") or ""), str(r.get("organ") or ""))
+            for r in rows
+            if _is_trainable_positive_row(r, require_nonempty=False)
+        }
+        current_trainable_positive_organs = {
+            str(r.get("organ") or "")
+            for r in rows
+            if _is_trainable_positive_row(r, require_nonempty=False)
+        }
+        replay_positive_rows: list[dict[str, Any]] = []
+        replay_excluded_rows: list[dict[str, Any]] = []
+        historical_trainable_positive_organs: set[str] = set()
+        historical_replay_source_manifests: list[str] = []
+        seen_replay_keys = set(current_trainable_positive_keys)
+        for manifest_idx, replay_manifest in enumerate(replay_manifest_paths):
+            if not replay_manifest.exists():
+                replay_excluded_rows.append({
+                    "manifest": str(replay_manifest),
+                    "reason": "historical_manifest_missing",
+                })
+                continue
+            try:
+                replay_doc = json.loads(replay_manifest.read_text(encoding="utf-8"))
+            except Exception as exc:
+                replay_excluded_rows.append({
+                    "manifest": str(replay_manifest),
+                    "reason": f"historical_manifest_unreadable:{exc}",
+                })
+                continue
+            historical_replay_source_manifests.append(str(replay_manifest))
+            replay_items = replay_doc.get("items") if isinstance(replay_doc, dict) else replay_doc
+            if not isinstance(replay_items, list):
+                replay_excluded_rows.append({
+                    "manifest": str(replay_manifest),
+                    "reason": "historical_manifest_items_missing",
+                })
+                continue
+            for item_idx, replay_item in enumerate(replay_items):
+                if not isinstance(replay_item, dict):
+                    continue
+                organ = str(replay_item.get("organ") or "")
+                if organ:
+                    candidate_reason = _positive_replay_candidate_reason(replay_item)
+                    if candidate_reason is None:
+                        historical_trainable_positive_organs.add(organ)
+                safe, reason = _is_replay_safe_positive(replay_item)
+                key = (str(replay_item.get("case_id") or ""), organ)
+                if not safe:
+                    replay_excluded_rows.append({
+                        "manifest": str(replay_manifest),
+                        "index": item_idx,
+                        "case_id": key[0],
+                        "organ": organ,
+                        "reason": reason,
+                    })
+                    continue
+                if not key[0] or not key[1]:
+                    replay_excluded_rows.append({
+                        "manifest": str(replay_manifest),
+                        "index": item_idx,
+                        "case_id": key[0],
+                        "organ": organ,
+                        "reason": "missing_case_or_organ",
+                    })
+                    continue
+                if key in seen_replay_keys:
+                    continue
+                replay_positive_rows.append(_normalize_replay_positive_item(
+                    replay_item,
+                    manifest_path=replay_manifest,
+                    replay_index=item_idx + manifest_idx * 1_000_000,
+                ))
+                seen_replay_keys.add(key)
+
+        rows.extend(replay_positive_rows)
+        final_trainable_positive_organs = {
+            str(r.get("organ") or "")
+            for r in rows
+            if _is_trainable_positive_row(r, require_nonempty=False)
+        }
+        recovered_historical_organs = sorted(
+            organ for organ in historical_trainable_positive_organs
+            if organ in final_trainable_positive_organs
+        )
+        missing_historical_organs = sorted(historical_trainable_positive_organs - final_trainable_positive_organs)
+        positive_rows = [r for r in rows if _is_positive_supervision(r) and not _is_negative_absent(r)]
+        negative_rows = [r for r in rows if str(r.get("supervision_type") or "").lower() == "negative"]
+        trainable_positive_rows = [r for r in positive_rows if _is_trainable_positive_row(r, require_nonempty=False)]
+        positive_grade_counts = {
+            grade: sum(1 for r in positive_rows if str(r.get("grade") or "").upper() == grade)
+            for grade in ["A", "B", "C", "D"]
+        }
+        included_positive_grade_counts = {
+            grade: sum(1 for r in trainable_positive_rows if str(r.get("grade") or "").upper() == grade)
+            for grade in ["A", "B", "C", "D"]
+        }
+        all_grade_counts = {
+            grade: sum(1 for r in rows if str(r.get("grade") or "").upper() == grade)
+            for grade in ["A", "B", "C", "D"]
+        }
+
         manifest = {
             "stage": "voxtell_3d_prompt_training_manifest",
             "status": "success",
@@ -973,18 +1235,22 @@ class VoxTellStudent:
             "cases_root": str(cases),
             "case_list": str(Path(case_list).resolve()) if case_list else None,
             "student_prediction_root": str(ignored_student_prediction_root) if ignored_student_prediction_root else None,
+            "historical_replay_manifests": historical_replay_source_manifests,
             "num_items": len(rows),
             "num_cases": len({r["case_id"] for r in rows}),
             "num_classes": len(target_organs),
             "expected_targets": len(case_dirs) * len(target_organs),
             "manifest_targets": len(rows),
-            "candidate_pseudo_targets": sum(1 for r in rows if r.get("supervision_type") == "positive"),
+            "candidate_pseudo_targets": len(positive_rows),
             "absent_negative_targets": sum(1 for r in rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"}),
             "all_zero_masks": len({str(r.get("mask_path") or r.get("mask") or "") for r in rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"} and (r.get("mask_path") or r.get("mask"))}),
             "num_items_missing_image": sum(1 for r in rows if not r.get("image")),
-            "grade_counts": {grade: sum(1 for r in rows if r.get("grade") == grade) for grade in ["A", "B", "C", "D"]},
-            "num_positive_items": sum(1 for r in rows if r.get("supervision_type") == "positive"),
-            "num_negative_items": sum(1 for r in rows if r.get("supervision_type") == "negative"),
+            "grade_counts": positive_grade_counts,
+            "positive_grade_counts": positive_grade_counts,
+            "all_grade_counts": all_grade_counts,
+            "num_positive_items": len(positive_rows),
+            "num_trainable_positive_items": len(trainable_positive_rows),
+            "num_negative_items": len(negative_rows),
             "negative_prompt_ratio": max_negative_ratio,
             "negative_prompt_ratio_note": "Candidate-manifest compatibility field only; final training positive/negative mix is controlled at runtime by scripts/train_voxtell_prompt_student.py --pos-neg-ratio.",
             "negative_quota_policy": negative_quota_policy,
@@ -1013,6 +1279,7 @@ class VoxTellStudent:
             "num_prompt_variant_items": sum(1 for r in rows if r.get("is_prompt_variant")),
             "num_strong_training_items": sum(1 for r in rows if r.get("supervision_type") == "positive" and float(r.get("training_weight") or 0.0) >= 0.5),
             "num_distillation_eligible_items": sum(1 for r in rows if r.get("distillation_eligible") is not False and float(r.get("training_weight") or 0.0) > 0.0),
+            "num_distillation_eligible_positive_items": sum(1 for r in trainable_positive_rows if r.get("distillation_eligible") is not False and float(r.get("training_weight") or 0.0) > 0.0),
             "num_zero_weight_items": sum(1 for r in rows if float(r.get("training_weight") or 0.0) == 0.0),
             "target_type_counts": {
                 target_type: sum(
@@ -1026,12 +1293,32 @@ class VoxTellStudent:
             },
             "training_gate_summary": {
                 "num_included": len(rows),
+                "num_included_positive": len(positive_rows),
+                "num_trainable_positive": len(trainable_positive_rows),
+                "included_grade_counts": included_positive_grade_counts,
+                "positive_grade_counts": positive_grade_counts,
+                "all_grade_counts": all_grade_counts,
+                "ab_nonzero": int(included_positive_grade_counts.get("A", 0) or 0) + int(included_positive_grade_counts.get("B", 0) or 0),
+                "negative_absent_excluded_from_positive_quota": True,
                 "num_excluded_positive": len(skipped_ineligible_positive),
                 "num_c_soft_included": sum(1 for r in rows if r.get("grade") == "C" and r.get("target_type") == "soft" and r.get("probability_mask_path")),
                 "num_c_missing_probability_excluded": sum(1 for r in skipped_ineligible_positive if r.get("reason") == "soft_target_probability_mask_missing"),
                 "num_c_hard_or_provisional_excluded": sum(1 for r in skipped_ineligible_positive if r.get("reason") == "grade_C_requires_soft_probability_target"),
                 "num_d_excluded": sum(1 for r in skipped_ineligible_positive if r.get("grade") == "D"),
                 "num_unsupported_schema_excluded": sum(1 for r in skipped_ineligible_positive if r.get("reason") == "unsupported_scoring_schema_requires_rescoring"),
+            },
+            "cumulative_manifest_summary": {
+                "enabled": bool(replay_manifest_paths),
+                "policy": "current_trainable_positive + promoted_historical_replay_positive + current_legal_negative",
+                "current_trainable_positive_organs": sorted(current_trainable_positive_organs),
+                "historical_trainable_positive_organs": sorted(historical_trainable_positive_organs),
+                "recovered_historical_trainable_positive_organs": recovered_historical_organs,
+                "missing_historical_trainable_positive_organs": missing_historical_organs,
+                "num_replay_positive_items": len(replay_positive_rows),
+                "num_replay_excluded_items": len(replay_excluded_rows),
+                "replay_excluded_rows": replay_excluded_rows[:200],
+                "negative_absent_is_positive": False,
+                "student_prediction_gt_empty_qc_fail_replay_blocked": True,
             },
             "zero_mask_targets": zero_mask_targets,
             "skipped_missing_image": skipped_missing_image,

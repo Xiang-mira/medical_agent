@@ -561,6 +561,383 @@ def _load_json(path: Path) -> dict:
         return {}
 
 
+def _sha256_file(path: Path) -> str | None:
+    import hashlib
+
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_commit_sha() -> str | None:
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    value = (proc.stdout or "").strip()
+    return value if proc.returncode == 0 and value else None
+
+
+def case_list_provenance(case_list: Path | None = None) -> dict:
+    import csv as csv_mod
+
+    path = (case_list or CASE_LIST).resolve()
+    rows: list[dict[str, str]] = []
+    if path.exists():
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            rows = [dict(row) for row in csv_mod.DictReader(handle)]
+    case_ids = [str(row.get("case_id") or "").strip() for row in rows if row.get("case_id")]
+    return {
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "case_ids": case_ids,
+        "num_cases": len(case_ids),
+        "duplicate_case_ids": sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1}),
+    }
+
+
+def inference_run_provenance(
+    round_idx: int,
+    *,
+    checkpoint: Path,
+    case_list: Path | None = None,
+) -> dict:
+    case_provenance = case_list_provenance(case_list)
+    checkpoint_hash = _sha256_file(checkpoint)
+    target_hash = _sha256_file(PROMPT_TARGET_CONFIG)
+    run_id = (
+        f"round{round_idx}-"
+        f"{(checkpoint_hash or 'no-checkpoint')[:12]}-"
+        f"{(case_provenance.get('sha256') or 'no-cases')[:12]}-"
+        f"{(target_hash or 'no-targets')[:12]}"
+    )
+    return {
+        "run_id": run_id,
+        "round": round_idx,
+        "checkpoint_path": str(checkpoint.resolve()),
+        "checkpoint_sha256": checkpoint_hash,
+        "case_list_path": case_provenance["path"],
+        "case_list_sha256": case_provenance["sha256"],
+        "expected_case_ids": case_provenance["case_ids"],
+        "expected_num_cases": case_provenance["num_cases"],
+        "case_list_duplicate_case_ids": case_provenance["duplicate_case_ids"],
+        "target_config_path": str(PROMPT_TARGET_CONFIG.resolve()),
+        "target_config_sha256": target_hash,
+        "code_commit_sha": _git_commit_sha(),
+    }
+
+
+def _result_matches_inference_provenance(
+    result: dict,
+    provenance: dict,
+    *,
+    expected_organs: list[str],
+    case_dir: Path,
+) -> bool:
+    if any(
+        result.get(key) != provenance.get(key)
+        for key in ("checkpoint_sha256", "case_list_sha256", "target_config_sha256", "run_id")
+    ):
+        return False
+    if result.get("case_id") not in provenance.get("expected_case_ids", []):
+        return False
+    if result.get("failed_organs"):
+        return False
+    return all((case_dir / f"{organ}.nii.gz").is_file() for organ in expected_organs)
+
+
+def audit_prompt_student_predictions(
+    round_idx: int,
+    *,
+    prediction_root: Path | None = None,
+    provenance: dict | None = None,
+    expected_organs: list[str] | None = None,
+) -> dict:
+    root = prediction_root or OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+    organs = expected_organs or load_student_target_organs()
+    mstep = _round_mstep_result(round_idx)
+    checkpoint = Path(str(mstep.get("inference_checkpoint") or mstep.get("finetuned_checkpoint") or ""))
+    expected = provenance or inference_run_provenance(round_idx, checkpoint=checkpoint)
+    expected_case_ids = list(expected.get("expected_case_ids") or [])
+    actual_case_ids = sorted(
+        path.name
+        for path in root.iterdir()
+        if root.exists() and path.is_dir()
+    ) if root.exists() else []
+    missing_cases = sorted(set(expected_case_ids) - set(actual_case_ids))
+    unexpected_cases = sorted(set(actual_case_ids) - set(expected_case_ids))
+    mixed_checkpoint_cases: list[str] = []
+    unknown_provenance_cases: list[str] = []
+    incomplete_cases: list[dict] = []
+    failed_organ_cases: list[dict] = []
+    per_case: list[dict] = []
+    for case_id in expected_case_ids:
+        case_dir = root / case_id
+        result_path = case_dir / "voxtell_student_result.json"
+        result = _load_json(result_path)
+        present = sum(1 for organ in organs if (case_dir / f"{organ}.nii.gz").is_file())
+        failed_organs = list(result.get("failed_organs") or [])
+        if not result:
+            unknown_provenance_cases.append(case_id)
+        elif not all(result.get(key) for key in ("checkpoint_sha256", "case_list_sha256", "target_config_sha256", "run_id")):
+            unknown_provenance_cases.append(case_id)
+        elif result.get("checkpoint_sha256") != expected.get("checkpoint_sha256"):
+            mixed_checkpoint_cases.append(case_id)
+        if present != len(organs):
+            incomplete_cases.append({"case_id": case_id, "present_masks": present, "expected_masks": len(organs)})
+        if failed_organs:
+            failed_organ_cases.append({"case_id": case_id, "failed_organs": failed_organs})
+        per_case.append({
+            "case_id": case_id,
+            "result_path": str(result_path),
+            "present_masks": present,
+            "expected_masks": len(organs),
+            "checkpoint_sha256": result.get("checkpoint_sha256"),
+            "case_list_sha256": result.get("case_list_sha256"),
+            "target_config_sha256": result.get("target_config_sha256"),
+            "run_id": result.get("run_id"),
+            "num_failed_organs": len(failed_organs),
+        })
+    failures = []
+    if expected.get("case_list_duplicate_case_ids"):
+        failures.append("duplicate_expected_case_ids")
+    if missing_cases:
+        failures.append("missing_cases")
+    if unexpected_cases:
+        failures.append("unexpected_cases")
+    if incomplete_cases:
+        failures.append("incomplete_373_mask_contract")
+    if failed_organ_cases:
+        failures.append("failed_organs_present")
+    if mixed_checkpoint_cases:
+        failures.append("mixed_checkpoint_cases")
+    if unknown_provenance_cases:
+        failures.append("unknown_provenance_cases")
+    audit = {
+        "stage": "prompt_student_inference_audit",
+        "round": round_idx,
+        "status": "passed" if not failures else "failed",
+        "failures": failures,
+        "prediction_root": str(root),
+        "expected_num_cases": len(expected_case_ids),
+        "actual_num_cases": len(actual_case_ids),
+        "expected_case_ids": expected_case_ids,
+        "actual_case_ids": actual_case_ids,
+        "missing_cases": missing_cases,
+        "unexpected_cases": unexpected_cases,
+        "mixed_checkpoint_cases": mixed_checkpoint_cases,
+        "unknown_provenance_cases": unknown_provenance_cases,
+        "incomplete_cases": incomplete_cases,
+        "failed_organ_cases": failed_organ_cases,
+        "expected_num_masks_per_case": len(organs),
+        "provenance": expected,
+        "per_case": per_case,
+    }
+    return audit
+
+
+def _promotion_registry_path() -> Path:
+    return OUTPUT_ROOT / "checkpoint_promotion_registry.json"
+
+
+def _load_promotion_registry() -> dict:
+    registry = _load_json(_promotion_registry_path())
+    if not isinstance(registry, dict):
+        registry = {}
+    registry.setdefault("stage", "checkpoint_promotion_registry")
+    registry.setdefault("status_values", ["candidate", "promoted", "competition_blocked"])
+    registry.setdefault("rounds", {})
+    registry.setdefault("history", [])
+    return registry
+
+
+def _write_promotion_registry(registry: dict) -> None:
+    path = _promotion_registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    registry["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    path.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def record_checkpoint_promotion(
+    round_idx: int,
+    *,
+    status: str,
+    reason: str | None = None,
+    mstep_result: dict | None = None,
+    manifest_path: Path | None = None,
+    summary_path: Path | None = None,
+    inference_audit: dict | None = None,
+) -> dict:
+    if status not in {"candidate", "promoted", "competition_blocked"}:
+        raise ValueError(f"Unsupported checkpoint promotion status: {status}")
+    mstep_result = mstep_result or _load_json(OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json")
+    manifest_path = manifest_path or OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_student_manifest.json"
+    summary_path = summary_path or OUTPUT_ROOT / f"round{round_idx}" / "round_summary.json"
+    checkpoint = Path(str(mstep_result.get("inference_checkpoint") or mstep_result.get("finetuned_checkpoint") or ""))
+    model_dir = Path(str(mstep_result.get("inference_model_dir") or "")) if mstep_result.get("inference_model_dir") else None
+    inference_audit = inference_audit or _load_json(
+        OUTPUT_ROOT / f"round{round_idx}" / "student_predictions" / "inference_audit.json"
+    )
+    if status == "promoted" and inference_audit.get("status") != "passed":
+        status = "competition_blocked"
+        reason = reason or "inference_provenance_audit_not_passed"
+    entry = {
+        "round": round_idx,
+        "status": status,
+        "reason": reason,
+        "manifest_path": str(manifest_path) if manifest_path else None,
+        "summary_path": str(summary_path) if summary_path else None,
+        "mstep_result_path": str(OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json"),
+        "inference_model_dir": str(model_dir) if model_dir else None,
+        "checkpoint_path": str(checkpoint) if str(checkpoint) else None,
+        "checkpoint_sha256": _sha256_file(checkpoint) if str(checkpoint) else None,
+        "eligible_for_next_round_prompt_student": bool(mstep_result.get("eligible_for_next_round_prompt_student", mstep_result.get("checkpoint_eligible_for_next_round", False))),
+        "retention_audit": mstep_result.get("retention_audit"),
+        "inference_audit_status": inference_audit.get("status"),
+        "inference_run_id": (inference_audit.get("provenance") or {}).get("run_id"),
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    registry = _load_promotion_registry()
+    registry["rounds"][str(round_idx)] = entry
+    history_entry = {**entry, "history_index": len(registry.get("history") or [])}
+    registry.setdefault("history", []).append(history_entry)
+    _write_promotion_registry(registry)
+    return entry
+
+
+def _round_mstep_result(round_idx: int) -> dict:
+    return _load_json(OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json")
+
+
+def _round_manifest_path(round_idx: int) -> Path:
+    return OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_student_manifest.json"
+
+
+def _round_is_legacy_promotable(round_idx: int) -> bool:
+    summary = _load_json(OUTPUT_ROOT / f"round{round_idx}" / "round_summary.json")
+    mstep = _round_mstep_result(round_idx)
+    return bool(
+        (summary.get("success") is True or summary.get("mstep_status") == "success")
+        and mstep.get("status") == "success"
+        and mstep.get("eligible_for_next_round_prompt_student", mstep.get("checkpoint_eligible_for_next_round", False))
+        and _round_manifest_path(round_idx).exists()
+        and mstep.get("inference_model_dir")
+    )
+
+
+def _promoted_round_entry(round_idx: int) -> dict | None:
+    registry = _load_promotion_registry()
+    entry = (registry.get("rounds") or {}).get(str(round_idx))
+    if entry and entry.get("status") == "competition_blocked":
+        return None
+    if entry and entry.get("status") == "promoted":
+        return entry
+    # Backward-compatible bootstrap for old Round1 artifacts that predate the
+    # promotion registry. Round2+ outputs must be explicitly promoted once the
+    # registry exists, so a blocked bad Round2 cannot leak into Round3.
+    if round_idx == 1 and _round_is_legacy_promotable(round_idx):
+        mstep = _round_mstep_result(round_idx)
+        return record_checkpoint_promotion(
+            round_idx,
+            status="promoted",
+            reason="legacy_round1_promoted_bootstrap",
+            mstep_result=mstep,
+            manifest_path=_round_manifest_path(round_idx),
+            summary_path=OUTPUT_ROOT / f"round{round_idx}" / "round_summary.json",
+        )
+    return None
+
+
+def promoted_replay_manifests_for_round(round_idx: int) -> list[Path]:
+    manifests: list[Path] = []
+    for prior_round in range(1, round_idx):
+        entry = _promoted_round_entry(prior_round)
+        if not entry:
+            continue
+        path = Path(str(entry.get("manifest_path") or ""))
+        if path.exists():
+            manifests.append(path)
+    return manifests
+
+
+def resolve_promoted_student_model(round_idx: int) -> Path | None:
+    entry = _promoted_round_entry(round_idx)
+    if not entry:
+        return None
+    model_dir = Path(str(entry.get("inference_model_dir") or ""))
+    if (model_dir / "plans.json").is_file() and (model_dir / "fold_0" / "checkpoint_final.pth").is_file():
+        return model_dir
+    return None
+
+
+def build_retention_audit(
+    *,
+    round_idx: int,
+    source_model_dir: Path,
+    train_result: dict,
+    required: bool,
+) -> dict:
+    configured_weight = float(train_result.get("official_retention_weight") or 0.0)
+    mean_loss = train_result.get("mean_retention_loss")
+    try:
+        mean_loss_float = float(mean_loss)
+    except Exception:
+        mean_loss_float = None
+    finite_nonzero = bool(
+        mean_loss_float is not None
+        and mean_loss_float == mean_loss_float
+        and mean_loss_float not in {float("inf"), float("-inf")}
+        and mean_loss_float > 0.0
+    )
+    checkpoint = source_model_dir / "fold_0" / "checkpoint_final.pth"
+    plans = source_model_dir / "plans.json"
+    provenance_path = Path(str(train_result.get("training_provenance") or ""))
+    provenance = _load_json(provenance_path) if provenance_path.exists() else {}
+    source_hash = _sha256_file(checkpoint)
+    provenance_hash = provenance.get("source_checkpoint_sha256") if isinstance(provenance, dict) else None
+    hash_ok = bool(source_hash and (not provenance_hash or provenance_hash == source_hash))
+    status = "passed"
+    failures: list[str] = []
+    if required:
+        if configured_weight <= 0:
+            failures.append("retention_weight_not_positive")
+        if configured_weight != 0.2 and os.getenv("MEDAI_OFFICIAL_RETENTION_WEIGHT") is None:
+            failures.append("round2_plus_default_retention_weight_not_0_2")
+        if not finite_nonzero:
+            failures.append("mean_retention_loss_not_nonzero_finite")
+        if not checkpoint.exists() or not plans.exists():
+            failures.append("retention_teacher_checkpoint_incomplete")
+        if not hash_ok:
+            failures.append("retention_teacher_hash_mismatch")
+    if failures:
+        status = "failed"
+    return {
+        "stage": "retention_audit",
+        "round": round_idx,
+        "required": required,
+        "status": status,
+        "failures": failures,
+        "student_initialized_from_promoted_checkpoint": str(source_model_dir),
+        "retention_teacher_model_dir": str(source_model_dir),
+        "teacher_frozen_eval": bool(configured_weight > 0),
+        "official_retention_weight": configured_weight,
+        "mean_retention_loss": mean_loss_float,
+        "retention_loss_nonzero_finite": finite_nonzero,
+        "source_checkpoint": str(checkpoint),
+        "source_checkpoint_sha256": source_hash,
+        "provenance_source_checkpoint_sha256": provenance_hash,
+        "source_checkpoint_hash_ok": hash_ok,
+    }
+
+
 def _round_evaluation_chain_dir(round_idx: int) -> Path:
     return OUTPUT_ROOT / f"round{round_idx}" / "metrics" / "evaluation_chain"
 
@@ -778,8 +1155,15 @@ def _cohort_coverage(
     key_organs: list[str],
     selection_rows: list[dict],
     selected_by_key: dict[tuple[str, str], dict],
+    trainable_positive_keys: set[tuple[str, str]] | None = None,
 ) -> tuple[dict[str, dict[str, float | int | str]], list[dict[str, object]], list[str]]:
-    """Measure usable key-organ labels only where CT evidence expects the organ."""
+    """Measure usable key-organ labels only where CT evidence expects the organ.
+
+    When a manifest is available, "usable" means the trainer actually has a
+    trainable positive row for that case/organ. This lets promoted historical
+    replay recover a currently missing organ, and prevents rejected/zero-weight
+    E-step selections from satisfying the M-step coverage gate.
+    """
     minimum_rate = float(os.getenv("MEDAI_FORMAL_KEY_ORGAN_MIN_COVERAGE", "0.80"))
     minimum_expected_cases = int(os.getenv("MEDAI_FORMAL_KEY_ORGAN_MIN_EXPECTED_CASES", "3"))
     coverage = {
@@ -794,11 +1178,14 @@ def _cohort_coverage(
         case_id = str(row.get("case_id") or "")
         coverage[organ]["expected_present"] += 1
         selected = selected_by_key.get((case_id, organ))
-        usable = bool(
-            selected
-            and str(selected.get("grade") or "D").upper() in {"A", "B", "C"}
-            and selected.get("final_mask")
-        )
+        if trainable_positive_keys is not None:
+            usable = (case_id, organ) in trainable_positive_keys
+        else:
+            usable = bool(
+                selected
+                and str(selected.get("grade") or "D").upper() in {"A", "B", "C"}
+                and selected.get("final_mask")
+            )
         if usable:
             coverage[organ]["usable"] += 1
         else:
@@ -835,6 +1222,85 @@ def _cohort_coverage(
                 "minimum_coverage_rate": minimum_rate,
             })
     return coverage, failures, not_applicable
+
+
+def _manifest_trainable_positive_summary(
+    manifest_path: Path | None,
+    key_organs: list[str],
+) -> dict:
+    summary = {
+        "manifest_path": str(manifest_path) if manifest_path else None,
+        "status": "missing_manifest",
+        "num_trainable_positive_items": 0,
+        "trainable_positive_keys": [],
+        "positive_grade_counts": {"A": 0, "B": 0, "C": 0, "D": 0},
+        "key_organ_coverage": {organ: 0 for organ in key_organs},
+        "missing_key_organs": list(key_organs),
+        "coverage_failures": [],
+        "cumulative_manifest_summary": {},
+        "historical_replay_deficits": [],
+    }
+    if manifest_path is None or not manifest_path.exists():
+        return summary
+    doc = _load_json(manifest_path)
+    if not isinstance(doc, dict):
+        summary["status"] = "invalid_manifest"
+        return summary
+    rows = doc.get("items") or []
+    if not isinstance(rows, list):
+        rows = []
+    positive_grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0}
+    key_coverage = {organ: 0 for organ in key_organs}
+    trainable_positive_keys: set[tuple[str, str]] = set()
+    trainable_items = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("supervision_type") or "").lower() != "positive":
+            continue
+        target_type = str(row.get("target_type") or "").lower()
+        if target_type in {"negative_absent", "absent_negative"}:
+            continue
+        if target_type not in {"positive_hard", "positive_soft", "hard", "soft"}:
+            continue
+        if row.get("distillation_eligible") is False:
+            continue
+        try:
+            if float(row.get("training_weight") or 0.0) <= 0.0:
+                continue
+        except Exception:
+            continue
+        mask = Path(str(row.get("mask_path") or row.get("mask") or ""))
+        if not mask.exists():
+            continue
+        grade = str(row.get("grade") or "D").upper()
+        if grade in positive_grade_counts:
+            positive_grade_counts[grade] += 1
+        trainable_items += 1
+        trainable_positive_keys.add((str(row.get("case_id") or ""), str(row.get("organ") or "")))
+        organ = str(row.get("organ") or "")
+        if organ in key_coverage:
+            key_coverage[organ] += 1
+    missing_key_organs = [organ for organ, count in key_coverage.items() if count <= 0]
+    cumulative = doc.get("cumulative_manifest_summary") or {}
+    historical_deficits = []
+    if isinstance(cumulative, dict):
+        historical_deficits = list(cumulative.get("missing_historical_trainable_positive_organs") or [])
+    summary.update({
+        "status": "success",
+        "num_trainable_positive_items": trainable_items,
+        "trainable_positive_keys": sorted([list(key) for key in trainable_positive_keys]),
+        "positive_grade_counts": positive_grade_counts,
+        "key_organ_coverage": key_coverage,
+        "missing_key_organs": missing_key_organs,
+        "coverage_failures": [
+            {"organ": organ, "reason": "no_trainable_positive_manifest_item"}
+            for organ in missing_key_organs
+        ],
+        "cumulative_manifest_summary": cumulative if isinstance(cumulative, dict) else {},
+        "historical_replay_deficits": historical_deficits,
+    })
+    return summary
 
 
 def _persist_formal_estep_gate(
@@ -1014,14 +1480,36 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
     gate_summary = (((manifest_doc.get("training_gate_summary") or {}) if isinstance(manifest_doc, dict) else {}) or {})
     manifest_grade_counts = manifest_doc.get("grade_counts", {}) if isinstance(manifest_doc, dict) else {}
     included_grade_counts = gate_summary.get("included_grade_counts", {})
+    manifest_positive_summary = _manifest_trainable_positive_summary(manifest_path, key_organs)
     ab_nonzero = (
-        int(included_grade_counts.get("A", manifest_grade_counts.get("A", 0)) or 0)
-        + int(included_grade_counts.get("B", manifest_grade_counts.get("B", 0)) or 0)
+        int((manifest_positive_summary.get("positive_grade_counts") or {}).get("A", 0) or 0)
+        + int((manifest_positive_summary.get("positive_grade_counts") or {}).get("B", 0) or 0)
     )
-    missing_key_organs = [organ for organ, count in key_coverage.items() if count <= 0]
+    selected_key_coverage = dict(key_coverage)
+    key_coverage = dict(manifest_positive_summary.get("key_organ_coverage") or key_coverage)
+    missing_key_organs = list(manifest_positive_summary.get("missing_key_organs") or [])
+    manifest_positive_coverage_failures = []
+    historical_replay_deficits = list(manifest_positive_summary.get("historical_replay_deficits") or [])
+    trainable_positive_keys = {
+        (str(item[0]), str(item[1]))
+        for item in (manifest_positive_summary.get("trainable_positive_keys") or [])
+        if isinstance(item, (list, tuple)) and len(item) == 2
+    }
     cohort_coverage, cohort_coverage_failures, fov_not_applicable_key_organs = _cohort_coverage(
-        key_organs, selection_rows, selected_by_key
+        key_organs, selection_rows, selected_by_key, trainable_positive_keys=trainable_positive_keys
     )
+    manifest_required_organs = {
+        organ
+        for organ, counts in cohort_coverage.items()
+        if isinstance(counts, dict)
+        and counts.get("status") == "pass"
+        and int(counts.get("usable") or 0) > 0
+    }
+    manifest_positive_coverage_failures = [
+        {"organ": organ, "reason": "cohort_passed_but_no_trainable_positive_manifest_item"}
+        for organ in sorted(manifest_required_organs)
+        if int(key_coverage.get(organ) or 0) <= 0
+    ]
     cohort_failed_key_organs = {
         str(row.get("organ") or "")
         for row in cohort_coverage_failures
@@ -1043,6 +1531,8 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         and fov_policy_mismatches == 0
         and missing_case_metadata == 0
         and not cohort_coverage_failures
+        and not manifest_positive_coverage_failures
+        and not historical_replay_deficits
         and not blocking_shapekit_coverage_failures
         and not blocking_labelcritic_coverage_failures
         and metadata_mismatch_count == 0
@@ -1058,8 +1548,12 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         "num_cases_with_selection_metadata": len(meta_paths),
         "num_selected_organs": len(selected_organs),
         "grade_counts": grade_counts,
+        "selected_key_organ_coverage": selected_key_coverage,
         "key_organ_coverage": key_coverage,
         "missing_key_organs": missing_key_organs,
+        "manifest_trainable_positive_summary": manifest_positive_summary,
+        "manifest_positive_coverage_failures": manifest_positive_coverage_failures,
+        "historical_replay_deficits": historical_replay_deficits,
         "fov_not_applicable_key_organs": fov_not_applicable_key_organs,
         "cohort_key_organ_coverage": cohort_coverage,
         "cohort_key_organ_coverage_failures": cohort_coverage_failures,
@@ -1089,6 +1583,8 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
             "fov_policy_mismatch" if fov_policy_mismatches else
             "missing_case_metadata" if missing_case_metadata else
             "cohort_key_organ_coverage_failed" if cohort_coverage_failures else
+            "trainer_positive_coverage_failed" if manifest_positive_coverage_failures else
+            "historical_replay_deficit" if historical_replay_deficits else
             "shapekit_coverage_failed" if blocking_shapekit_coverage_failures else
             "labelcritic_coverage_failed" if blocking_labelcritic_coverage_failures else
             "metadata_mismatch" if metadata_mismatch_count else
@@ -1548,12 +2044,19 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
         device="cuda",
     )
     prev_student_root = _round_student_prediction_root_for_qc(round_idx - 1) if round_idx > 1 else None
+    historical_replay_manifests = promoted_replay_manifests_for_round(round_idx) if round_idx > 1 else []
+    extra_replay = os.getenv("MEDAI_HISTORICAL_REPLAY_MANIFESTS", "").strip()
+    if extra_replay:
+        for raw in extra_replay.replace(";", os.pathsep).replace(",", os.pathsep).split(os.pathsep):
+            if raw.strip():
+                historical_replay_manifests.append(Path(raw.strip()).expanduser().resolve())
     manifest = student.build_training_manifest(
         cases_root=cases_root,
         output_manifest=manifest_path,
         case_list=CASE_LIST,
         require_images=True,
         student_prediction_root=prev_student_root if prev_student_root and prev_student_root.exists() else None,
+        historical_replay_manifests=historical_replay_manifests,
     )
     prompt_audit = run_prompt_semantic_audit(round_idx, manifest_path)
     if prompt_audit.get("status") == "review" and not env_bool("MEDAI_ALLOW_PROMPT_SEMANTIC_WARNINGS", default=False):
@@ -1565,6 +2068,8 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
         f"3D prompt manifest 完成: items={manifest.get('num_items', 0)}, "
         f"cases={manifest.get('num_cases', 0)}, "
         f"missing_image_items={manifest.get('num_items_missing_image', 0)}, "
+        f"trainable_positive={manifest.get('num_trainable_positive_items', manifest.get('num_positive_items', 0))}, "
+        f"replay_positive={(manifest.get('cumulative_manifest_summary') or {}).get('num_replay_positive_items', 0)}, "
         f"prompt_audit={prompt_audit.get('status')}"
     )
     return manifest_path
@@ -2389,10 +2894,15 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
 
     stop_vllm_for_mstep()
     previous_student_model = (
-        OUTPUT_ROOT / f"round{round_idx - 1}" / "mstep" / "voxtell_finetuned_model"
+        resolve_promoted_student_model(round_idx - 1)
         if round_idx > 1
         else VOXTELL_MODEL_DIR
     )
+    if previous_student_model is None:
+        raise RuntimeError(
+            f"Round {round_idx} prompt-student M-step requires a promoted Round {round_idx - 1} "
+            "checkpoint; none is registered."
+        )
     if round_idx > 1 and not (
         (previous_student_model / "plans.json").is_file()
         and (previous_student_model / "fold_0" / "checkpoint_final.pth").is_file()
@@ -2401,12 +2911,16 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             "Round 2+ prompt-student M-step must continue from the previous "
             f"student checkpoint; missing or incomplete: {previous_student_model}"
         )
+    retention_weight = os.getenv("MEDAI_OFFICIAL_RETENTION_WEIGHT")
+    if retention_weight is None:
+        retention_weight = "0.2" if round_idx > 1 else "0"
     env = os.environ.copy()
     env.update({
         "MEDAI_PROMPT_STUDENT_MANIFEST": str(manifest_path),
         "MEDAI_PROMPT_STUDENT_OUTPUT_DIR": str(out_dir),
         "MEDAI_PROMPT_TARGET_CONFIG": str(PROMPT_TARGET_CONFIG),
         "MEDAI_VOXTELL_MODEL_DIR": str(previous_student_model),
+        "MEDAI_OFFICIAL_RETENTION_WEIGHT": str(retention_weight),
         "MEDAI_STUDENT_CONTINUAL_SOURCE_ROUND": str(max(0, round_idx - 1)),
         "MEDAI_TEXT_ENCODING_MODEL": str(VOXTELL_TEXT_ENCODING_MODEL),
         "MEDAI_MSTEP_EPOCHS": str(CONSOLIDATION_EPOCHS if global_consolidation else FINETUNE_EPOCHS),
@@ -2488,6 +3002,19 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "stdout_tail": (proc.stdout or "")[-4000:],
         "stderr_tail": (proc.stderr or "")[-4000:],
     })
+    retention_audit = build_retention_audit(
+        round_idx=round_idx,
+        source_model_dir=previous_student_model,
+        train_result=train_result,
+        required=round_idx > 1,
+    )
+    result["retention_audit"] = retention_audit
+    result["retention_weight"] = retention_audit.get("official_retention_weight")
+    result["mean_retention_loss"] = retention_audit.get("mean_retention_loss")
+    if round_idx > 1 and retention_audit.get("status") != "passed":
+        result["status"] = "failed"
+        result["training_status"] = "completed_retention_audit_failed" if proc.returncode == 0 else result["training_status"]
+        result["reason"] = ",".join(retention_audit.get("failures") or ["retention_audit_failed"])
     if canonical_training_backend == PROJECT_PROMPT_STUDENT:
         result["trainer"] = PROJECT_PROMPT_STUDENT
         result["uses_official_voxtell_model"] = True
@@ -2909,10 +3436,9 @@ def save_official_voxtell_nnunet_encoder_predictions(round_idx: int):
 
 
 def save_prompt_student_predictions(round_idx: int):
-    """Save VoxTell-style 3D prompt student predictions for 373 exact organs."""
+    """Save one provenance-consistent, atomically published 373-organ cohort."""
     log(f"保存 Round {round_idx} 3D prompt student 推理结果（373 organs）...")
     pred_dir = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
-    pred_dir.mkdir(parents=True, exist_ok=True)
 
     finetuned_model_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_finetuned_model"
     mstep_result_path = OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json"
@@ -2962,12 +3488,31 @@ def save_prompt_student_predictions(round_idx: int):
             "mstep_result_path": str(mstep_result_path),
             "reason": skip_reason,
         }
+        pred_dir.mkdir(parents=True, exist_ok=True)
         (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         log(f"3D prompt student 推理跳过：{skip_reason}")
         return summary
 
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
     import csv as csv_mod
+
+    inference_checkpoint = model_dir / "fold_0" / "checkpoint_final.pth"
+    provenance = inference_run_provenance(
+        round_idx,
+        checkpoint=inference_checkpoint,
+        case_list=CASE_LIST,
+    )
+    if (
+        not provenance.get("checkpoint_sha256")
+        or not provenance.get("case_list_sha256")
+        or not provenance.get("target_config_sha256")
+        or provenance.get("case_list_duplicate_case_ids")
+    ):
+        raise RuntimeError(f"Invalid prompt-student inference provenance: {provenance}")
+    staging_dir = pred_dir.with_name(
+        f"student_predictions_staging_{provenance['checkpoint_sha256'][:12]}_{provenance['case_list_sha256'][:12]}"
+    )
+    staging_dir.mkdir(parents=True, exist_ok=True)
 
     student = VoxTellStudent(
         model_dir=model_dir,
@@ -2976,11 +3521,8 @@ def save_prompt_student_predictions(round_idx: int):
     )
     all_organs = load_student_target_organs()
 
-    def case_prediction_complete(case_dir: Path) -> bool:
-        return all((case_dir / f"{organ}.nii.gz").exists() for organ in all_organs)
-
     cases = []
-    with open(CASE_LIST) as f:
+    with open(CASE_LIST, encoding="utf-8-sig") as f:
         for row in csv_mod.DictReader(f):
             cases.append(row)
 
@@ -2990,21 +3532,28 @@ def save_prompt_student_predictions(round_idx: int):
         ct_path = Path(case["ct_path"])
         case_id = case["case_id"]
         if not ct_path.exists():
+            results.append({
+                **provenance,
+                "case_id": case_id,
+                "status": "failed",
+                "reason": f"CT not found: {ct_path}",
+                "failed_organs": list(all_organs),
+            })
             continue
-        case_pred_dir = pred_dir / case_id
-        if case_pred_dir.exists() and case_prediction_complete(case_pred_dir):
+        case_pred_dir = staging_dir / case_id
+        cached_result = case_pred_dir / "voxtell_student_result.json"
+        cached_doc = _load_json(cached_result)
+        if cached_doc and _result_matches_inference_provenance(
+            cached_doc,
+            provenance,
+            expected_organs=all_organs,
+            case_dir=case_pred_dir,
+        ):
             saved += 1
-            cached_result = case_pred_dir / "voxtell_student_result.json"
-            if cached_result.exists():
-                try:
-                    item = json.loads(cached_result.read_text(encoding="utf-8"))
-                except Exception:
-                    item = {"status": "skipped_existing", "output_dir": str(case_pred_dir)}
-            else:
-                item = {"status": "skipped_existing", "output_dir": str(case_pred_dir)}
-            item["case_id"] = case_id
-            results.append(item)
+            results.append(cached_doc)
             continue
+        if case_pred_dir.exists():
+            shutil.rmtree(case_pred_dir)
         case_pred_dir.mkdir(parents=True, exist_ok=True)
         result = student.segment(
             ct_image=ct_path,
@@ -3013,11 +3562,23 @@ def save_prompt_student_predictions(round_idx: int):
             dry_run=not model_dir.exists(),
             timeout_sec=1800,
         )
+        result.update(provenance)
         result["case_id"] = case_id
+        (case_pred_dir / "voxtell_student_result.json").write_text(
+            json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         results.append(result)
-        if result.get("status") == "success":
+        contract_complete = (
+            not result.get("failed_organs")
+            and all((case_pred_dir / f"{organ}.nii.gz").is_file() for organ in all_organs)
+        )
+        if contract_complete:
             saved += 1
-            log(f"  {case_id}: ✓ {result.get('num_masks', 0)}/{len(all_organs)} masks")
+            log(
+                f"  {case_id}: ✓ contract {len(all_organs)}/{len(all_organs)} masks "
+                f"(nonempty={result.get('num_success_nonempty')}, empty={result.get('num_empty_masks')})"
+            )
         else:
             log(f"  {case_id}: {result.get('status')} ({result.get('reason', 'see result json')})")
 
@@ -3032,11 +3593,41 @@ def save_prompt_student_predictions(round_idx: int):
         "num_cases": len(cases),
         "num_cases_success": saved,
         "target_organs": len(all_organs),
+        **provenance,
         "results": results,
         "accuracy_warning": "Student pseudo-consistency outputs are not expert ground-truth accuracy.",
     }
-    (pred_dir / "student_inference_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    (staging_dir / "student_inference_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    audit = audit_prompt_student_predictions(
+        round_idx,
+        prediction_root=staging_dir,
+        provenance=provenance,
+        expected_organs=all_organs,
+    )
+    (staging_dir / "inference_audit.json").write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    summary["inference_audit"] = audit
+    (staging_dir / "student_inference_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    if audit.get("status") != "passed":
+        log(f"3D prompt student 推理审计失败；保留 staging，不发布正式目录: {audit.get('failures')}")
+        return summary
+
+    replaced_dir = pred_dir.with_name(f"student_predictions_replaced_{int(time.time())}")
+    if pred_dir.exists():
+        pred_dir.rename(replaced_dir)
+    staging_dir.rename(pred_dir)
+    if replaced_dir.exists():
+        shutil.rmtree(replaced_dir)
     log(f"3D prompt student 推理阶段完成/计划完成: {saved}/{len(cases)} 个 case")
+    return summary
 
 
 def apply_round_organ_type_postprocess(round_idx: int) -> dict:
@@ -3441,7 +4032,17 @@ def main():
             and (summary.get("estep_formal_gate") or {}).get("status") == "success"
             and summary.get("mstep_status") == "success"
             and bool(mstep_result.get("eligible_for_next_round_prompt_student", mstep_result.get("checkpoint_eligible_for_next_round", False)))
+            and (round_idx == 1 or (mstep_result.get("retention_audit") or {}).get("status") == "passed")
         )
+        promotion_entry = record_checkpoint_promotion(
+            round_idx,
+            status="promoted" if summary["success"] else "competition_blocked",
+            reason=None if summary["success"] else "round_verification_failed",
+            mstep_result=mstep_result,
+            manifest_path=dataset_path,
+            summary_path=summary_path,
+        )
+        summary["checkpoint_promotion"] = promotion_entry
         summary_path.parent.mkdir(parents=True, exist_ok=True)
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
