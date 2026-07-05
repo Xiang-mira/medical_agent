@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Formal-lite EM Round1 -> gated Round2 launcher for pure-cached 10-case core."""
+"""Deprecated formal-lite Round1 -> Round2 launcher.
+
+The current formal-lite chain must not be restarted through this historical
+launcher: it rebuilds Round1 and launches Round2 from the old pure-cached path.
+Keep helper functions importable for audit/reproduction, but fail closed on
+direct execution.
+"""
 from __future__ import annotations
 
 import json
@@ -20,6 +26,15 @@ NEGATIVE_CORE = ROOT / "outputs/consensus_reselect_queue_safe_20260703/10case_ca
 MODEL_DIR = ROOT / "checkpoints/VoxTell/voxtell_v1.1"
 TEXT_MODEL = ROOT / "checkpoints/Qwen/Qwen3-Embedding-4B"
 EMBEDDING_BANK = ROOT / "checkpoints/VoxTell/embeddings/voxtell_v1.1/text_embeddings.npz"
+DISABLED_REASON = (
+    "scripts/run_pure_cached_10case_formal_lite_em.py is disabled for the "
+    "current repair. It launches the old Round1->Round2 chain; use the audited "
+    "replay/novelty path and the safe --start-round 2 baseline entry instead."
+)
+
+
+def fail_disabled_launcher() -> None:
+    raise SystemExit(DISABLED_REASON)
 
 
 def log(message: str) -> None:
@@ -256,6 +271,7 @@ def start_round2_screen() -> dict:
 
 
 def main() -> int:
+    fail_disabled_launcher()
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
     state_path = RUN_ROOT / "formal_lite_pipeline_state.json"
     write_json(state_path, {"stage": "started", "status": "running", "run_root": str(RUN_ROOT)})

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Launch Round3 only from a repaired/promoted Round2 checkpoint."""
+"""Deprecated Round3 launcher.
+
+Kept importable for historical preflight/audit helpers, but direct execution and
+programmatic launch are disabled for the current formal-lite chain.  The current
+Round2 repair is no_material_update and reuses Round1; there is no promoted new
+Round2 checkpoint to seed Round3.
+"""
 from __future__ import annotations
 
 import argparse
@@ -18,6 +24,16 @@ import scripts.run_em_training as em
 
 ROUND_IDX = 3
 MIN_FREE_GIB = 10.0
+DISABLED_REASON = (
+    "scripts/run_round3_after_promoted_round2.py is disabled for the current "
+    "formal-lite chain. The audited Round2 repair is no_material_update and "
+    "reuses the promoted Round1 checkpoint; do not launch Round3 from the old "
+    "promoted-Round2 helper."
+)
+
+
+def fail_disabled_launcher() -> None:
+    raise SystemExit(DISABLED_REASON)
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -142,6 +158,7 @@ def write_state(status: str, **extra) -> None:
 
 
 def run_round3(case_list: Path) -> int:
+    fail_disabled_launcher()
     em.CASE_LIST = case_list
     em.ensure_evaluation_protocol()
     em.write_round_run_spec(ROUND_IDX)
@@ -275,6 +292,7 @@ def run_round3(case_list: Path) -> int:
 
 
 def main() -> int:
+    fail_disabled_launcher()
     ap = argparse.ArgumentParser()
     ap.add_argument("--case-list", type=Path, required=True)
     ap.add_argument("--preflight-only", action="store_true")

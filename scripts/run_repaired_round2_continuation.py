@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Verify a repaired Round2, publish clean inference, and launch Round3."""
+"""Deprecated repaired-Round2 continuation launcher.
+
+This file is kept importable for historical audit helpers/tests, but direct
+execution is disabled.  The current audited Round2 repair is a no-material-update
+decision that reuses the promoted Round1 checkpoint; this script's inference and
+Round3 launch paths are therefore unsafe for the current chain.
+"""
 from __future__ import annotations
 
 import argparse
@@ -21,6 +27,16 @@ import scripts.run_em_training as em
 
 ROUND_IDX = 2
 MIN_FREE_GIB = 15.0
+DISABLED_REASON = (
+    "scripts/run_repaired_round2_continuation.py is disabled for the current "
+    "formal-lite Round2 repair. The audited replay/novelty decision is "
+    "no_material_update, so the correct action is to reuse the promoted Round1 "
+    "checkpoint and not launch continuation inference or Round3 from this helper."
+)
+
+
+def fail_disabled_launcher() -> None:
+    raise SystemExit(DISABLED_REASON)
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -173,6 +189,7 @@ def screen_exists(prefix: str) -> bool:
 
 
 def launch_round3_screen(case_list: Path) -> dict:
+    fail_disabled_launcher()
     prefix = "round3_repaired_10case_"
     state_path = em.OUTPUT_ROOT / "round3" / "round3_continuation_state.json"
     prior_state = read_json(state_path)
@@ -220,6 +237,7 @@ def launch_round3_screen(case_list: Path) -> dict:
 
 
 def main() -> int:
+    fail_disabled_launcher()
     parser = argparse.ArgumentParser()
     parser.add_argument("--case-list", type=Path, required=True)
     parser.add_argument("--resume-existing-mstep", action="store_true")

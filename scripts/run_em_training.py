@@ -186,6 +186,8 @@ ALL_TEACHERS = [
 ]
 
 NUM_ROUNDS             = int(os.getenv("MEDAI_NUM_ROUNDS", "3"))
+START_ROUND            = int(os.getenv("MEDAI_START_ROUND", "1"))
+BASELINE_RUN_ROOT      = os.getenv("MEDAI_BASELINE_RUN_ROOT", "").strip()
 CONSOLIDATION_INTERVAL = 2
 
 # Cross-round convergence auto-stop: end the EM loop early when the student's
@@ -299,15 +301,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--dry-run", action="store_true", help="Preflight only; do not run E-step, M-step, inference, or training.")
     ap.add_argument("--preflight-output", default=None, help="Optional JSON path for --dry-run preflight output.")
     ap.add_argument("--rounds", type=int, default=None, help="Override MEDAI_NUM_ROUNDS for this process.")
+    ap.add_argument(
+        "--start-round",
+        type=int,
+        default=None,
+        help=(
+            "Start from an already prepared prior round. Currently fail-closed "
+            "except for --start-round 2 with --baseline-run-root."
+        ),
+    )
+    ap.add_argument(
+        "--baseline-run-root",
+        default=None,
+        help="Existing formal run root that supplies the promoted Round1 checkpoint for --start-round 2.",
+    )
     ap.add_argument("--case-list", default=None, help="Override MEDAI_CASE_LIST for this process.")
     ap.add_argument("--output-root", default=None, help="Override MEDAI_OUTPUT_ROOT for this process.")
     ap.add_argument("--voxtell-mstep-mode", default=None, help="Override VoxTell M-step mode.")
     ap.add_argument("--allow-manifest-only", action="store_true", help="Allow manifest-only M-step mode.")
     ap.add_argument("--explicit-baseline-mode", action="store_true", help="Allow explicit official nnU-Net encoder baseline mode.")
-    args, unknown = ap.parse_known_args(argv)
-    if unknown:
-        args.unknown_args = unknown
-    return args
+    return ap.parse_args(argv)
 
 
 def dry_run_preflight(output_path: str | Path | None = None) -> dict:
@@ -331,6 +344,8 @@ def dry_run_preflight(output_path: str | Path | None = None) -> dict:
         "case_list_status": case_list_status,
         "num_cases": len(case_rows),
         "output_root": str(OUTPUT_ROOT),
+        "start_round": START_ROUND,
+        "baseline_run_root": BASELINE_RUN_ROOT or None,
         "student_backend": STUDENT_BACKEND,
         "target_space": target_audit,
         "expected_targets_if_all_cases_run": len(case_rows) * int(target_audit.get("exact_target_count") or 0),
@@ -354,7 +369,7 @@ def dry_run_preflight(output_path: str | Path | None = None) -> dict:
 
 def apply_cli_overrides(args: argparse.Namespace) -> None:
     """Apply CLI overrides to module globals before preflight or execution."""
-    global CASE_LIST, OUTPUT_ROOT, LOG_FILE, NUM_ROUNDS
+    global CASE_LIST, OUTPUT_ROOT, LOG_FILE, NUM_ROUNDS, START_ROUND, BASELINE_RUN_ROOT
     if args.case_list:
         CASE_LIST = Path(args.case_list).expanduser()
         if not CASE_LIST.is_absolute():
@@ -366,6 +381,161 @@ def apply_cli_overrides(args: argparse.Namespace) -> None:
         LOG_FILE = OUTPUT_ROOT / "training.log"
     if args.rounds is not None:
         NUM_ROUNDS = int(args.rounds)
+    if args.start_round is not None:
+        START_ROUND = int(args.start_round)
+    if args.baseline_run_root:
+        BASELINE_RUN_ROOT = str(Path(args.baseline_run_root).expanduser())
+
+
+def _link_or_copy_tree(source: Path, destination: Path) -> None:
+    """Expose an existing artifact tree in OUTPUT_ROOT without rewriting it."""
+    if destination.exists() or destination.is_symlink():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.symlink_to(source.resolve(), target_is_directory=True)
+    except OSError:
+        shutil.copytree(source, destination)
+
+
+def _link_or_copy_file(source: Path, destination: Path) -> None:
+    if destination.exists() or destination.is_symlink():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.symlink_to(source.resolve())
+    except OSError:
+        shutil.copy2(source, destination)
+
+
+def prepare_start_round_baseline() -> dict:
+    """Fail-closed setup for starting Round2 from a promoted Round1 baseline.
+
+    This is intentionally narrow: the only supported resumed formal entry is
+    ``--start-round 2 --baseline-run-root ...``.  The helper validates the prior
+    checkpoint and exposes only the minimum Round1/Round2 E-step artifacts needed
+    by the normal main loop.  It does not launch training.
+    """
+    if START_ROUND <= 1:
+        return {"status": "not_requested", "start_round": START_ROUND}
+    if START_ROUND != 2:
+        raise RuntimeError(
+            "Safe resumed formal EM currently supports only --start-round 2. "
+            f"Received --start-round {START_ROUND}."
+        )
+    if NUM_ROUNDS < START_ROUND:
+        raise RuntimeError(
+            f"--rounds ({NUM_ROUNDS}) must be >= --start-round ({START_ROUND})."
+        )
+    if NUM_ROUNDS != START_ROUND:
+        raise RuntimeError(
+            "Safe resumed formal EM currently supports one resumed round at a "
+            f"time. Use --rounds {START_ROUND} with --start-round {START_ROUND}."
+        )
+    if not BASELINE_RUN_ROOT:
+        raise RuntimeError(
+            "--start-round 2 requires --baseline-run-root so Round2 cannot "
+            "silently fall back to the default/output-root Round1 chain."
+        )
+
+    baseline = Path(BASELINE_RUN_ROOT).expanduser()
+    if not baseline.is_absolute():
+        baseline = PROJECT_ROOT / baseline
+    baseline = baseline.resolve()
+    if not baseline.is_dir():
+        raise RuntimeError(f"Baseline run root does not exist: {baseline}")
+
+    baseline_round1 = baseline / "round1"
+    baseline_mstep = baseline_round1 / "mstep"
+    manifest = baseline_mstep / "voxtell_prompt_student_manifest.json"
+    mstep_result = baseline_mstep / "voxtell_prompt_mstep_result.json"
+    model_dir = baseline_mstep / "voxtell_finetuned_model"
+    checkpoint = model_dir / "fold_0" / "checkpoint_final.pth"
+    round1_estep = baseline_round1 / "estep"
+    round2_estep = baseline / "round2" / "estep"
+    required = [
+        manifest,
+        mstep_result,
+        model_dir / "plans.json",
+        checkpoint,
+        round1_estep,
+        round2_estep / "annotation_versions",
+    ]
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise RuntimeError(
+            "Baseline Round1 is incomplete; refusing to start Round2. "
+            f"Missing: {missing}"
+        )
+    expected_sha = os.getenv("MEDAI_EXPECTED_BASELINE_CHECKPOINT_SHA256", "").strip()
+    checkpoint_sha = _sha256_file(checkpoint)
+    if expected_sha and checkpoint_sha != expected_sha:
+        raise RuntimeError(
+            "Baseline Round1 checkpoint SHA256 mismatch; refusing to start "
+            f"Round2. expected={expected_sha} actual={checkpoint_sha} path={checkpoint}"
+        )
+
+    if OUTPUT_ROOT.resolve() != baseline:
+        _link_or_copy_tree(round1_estep, OUTPUT_ROOT / "round1" / "estep")
+        _link_or_copy_file(manifest, OUTPUT_ROOT / "round1" / "mstep" / manifest.name)
+        _link_or_copy_file(mstep_result, OUTPUT_ROOT / "round1" / "mstep" / mstep_result.name)
+        if (baseline_round1 / "round_summary.json").exists():
+            _link_or_copy_file(
+                baseline_round1 / "round_summary.json",
+                OUTPUT_ROOT / "round1" / "round_summary.json",
+            )
+        _link_or_copy_tree(round2_estep, OUTPUT_ROOT / "round2" / "estep")
+
+    registry = _load_promotion_registry()
+    current_round1 = (registry.get("rounds") or {}).get("1") or {}
+    if current_round1.get("checkpoint_sha256") != checkpoint_sha:
+        entry = {
+            "round": 1,
+            "status": "promoted",
+            "reason": "baseline_run_root_start_round_2",
+            "manifest_path": str(manifest),
+            "summary_path": str(baseline_round1 / "round_summary.json"),
+            "mstep_result_path": str(mstep_result),
+            "inference_model_dir": str(model_dir),
+            "checkpoint_path": str(checkpoint),
+            "checkpoint_sha256": checkpoint_sha,
+            "eligible_for_next_round_prompt_student": True,
+            "retention_audit": None,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        registry.setdefault("rounds", {})["1"] = entry
+        registry.setdefault("history", []).append({**entry, "history_index": len(registry.get("history") or [])})
+        _write_promotion_registry(registry)
+
+    audit = {
+        "stage": "start_round_baseline_preflight",
+        "status": "passed",
+        "start_round": START_ROUND,
+        "baseline_run_root": str(baseline),
+        "output_root": str(OUTPUT_ROOT),
+        "round1_manifest": str(manifest),
+        "round1_model_dir": str(model_dir),
+        "round1_checkpoint": str(checkpoint),
+        "round1_checkpoint_sha256": checkpoint_sha,
+        "round2_estep_reused": str(round2_estep),
+    }
+    out = OUTPUT_ROOT / "start_round_baseline_preflight.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(audit, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return audit
+
+
+def enforce_round2_restart_guard() -> None:
+    """Prevent the known-unsafe ``--rounds 2`` restart pattern."""
+    if START_ROUND == 1 and NUM_ROUNDS == 2 and not env_bool("MEDAI_ALLOW_ROUND1_TO_ROUND2_RESTART", default=False):
+        raise RuntimeError(
+            "Refusing to run NUM_ROUNDS=2 from Round1. This pattern restarts "
+            "Round1 and is not a safe way to launch a new Round2 from an "
+            "existing promoted Round1. Use --start-round 2 --baseline-run-root "
+            "... for the repaired formal-lite chain, or set "
+            "MEDAI_ALLOW_ROUND1_TO_ROUND2_RESTART=1 only for intentional "
+            "historical reproduction."
+        )
 
 
 def stop_vllm_for_mstep():
@@ -4389,6 +4559,7 @@ def build_round_label_scoring_dashboard(round_idx: int) -> dict:
 
 
 def main():
+    enforce_round2_restart_guard()
     ensure_current_student_backend_allowed()
     ensure_formal_teacher_pool_registered()
     ensure_formal_quality_gates()
@@ -4413,10 +4584,17 @@ def main():
     log("=" * 60)
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    start_round_audit = prepare_start_round_baseline()
+    if start_round_audit.get("status") == "passed":
+        log(
+            "  Safe resumed start: "
+            f"round={START_ROUND}, baseline={start_round_audit.get('baseline_run_root')}, "
+            f"checkpoint_sha256={start_round_audit.get('round1_checkpoint_sha256')}"
+        )
     ensure_evaluation_protocol()
     total_start = time.time()
 
-    for round_idx in range(1, NUM_ROUNDS + 1):
+    for round_idx in range(START_ROUND, NUM_ROUNDS + 1):
         round_spec = write_round_run_spec(round_idx)
         round_state = RoundStateMachine(
             OUTPUT_ROOT / f"round{round_idx}" / "round_state.json",
@@ -4448,9 +4626,23 @@ def main():
                         f"\nRound {round_idx} 有旧 summary，但没有正式可用的 prompt-student checkpoint；"
                         "继续断点执行 M-step。"
                     )
-            if s.get("estep_status") == "success" and mstep_complete:
+            current_promotion = (_load_promotion_registry().get("rounds") or {}).get(str(round_idx)) or {}
+            if (
+                s.get("estep_status") == "success"
+                and mstep_complete
+                and current_promotion.get("status") != "competition_blocked"
+            ):
                 log(f"\nRound {round_idx} 已完成，跳过")
                 continue
+            if (
+                s.get("estep_status") == "success"
+                and mstep_complete
+                and current_promotion.get("status") == "competition_blocked"
+            ):
+                log(
+                    f"\nRound {round_idx} 存在旧 summary/checkpoint，但 promotion registry "
+                    "标记为 competition_blocked；不会把旧链当作可续跑结果。"
+                )
 
         log(f"\n{'='*60}\nRound {round_idx}/{NUM_ROUNDS}\n{'='*60}")
 
@@ -4598,6 +4790,54 @@ def main():
                 "retention_audit": mstep_result.get("retention_audit"),
             },
         )
+
+        if mstep_result.get("training_status") == "no_material_update":
+            log(
+                f"Round {round_idx} novelty=no_material_update；复用上一轮 promoted checkpoint，"
+                "不启动训练，也不在本入口继续生成新的 student inference。"
+            )
+            round_metrics = {
+                "status": "skipped",
+                "reason": "no_material_update_reused_previous_promoted_checkpoint",
+                "novelty_audit": mstep_result.get("novelty_audit"),
+            }
+            round_elapsed = time.time() - round_start
+            summary_path = OUTPUT_ROOT / f"round{round_idx}" / "round_summary.json"
+            summary = {
+                "round": round_idx,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "estep_status": estep_result.get("status"),
+                "estep_formal_gate": estep_gate,
+                "mstep_status": mstep_result.get("status"),
+                "mstep_training_status": "no_material_update",
+                "student_backend": STUDENT_BACKEND,
+                "mstep_type": "checkpoint_reuse",
+                "finetuned_checkpoint": mstep_result.get("finetuned_checkpoint"),
+                "inference_checkpoint": mstep_result.get("inference_checkpoint"),
+                "metrics": round_metrics,
+                "label_scoring_dashboard": label_scoring_dashboard,
+                "round_elapsed_hours": round(round_elapsed / 3600, 2),
+                "success": True,
+            }
+            promotion_entry = record_checkpoint_promotion(
+                round_idx,
+                status="promoted",
+                reason="no_material_update_reused_previous_promoted_checkpoint",
+                mstep_result=mstep_result,
+                manifest_path=dataset_path,
+                summary_path=summary_path,
+            )
+            round_state.advance(
+                "promotion",
+                str(promotion_entry.get("status") or "no_material_update"),
+                artifacts={"registry_entry": promotion_entry},
+            )
+            summary["checkpoint_promotion"] = promotion_entry
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(summary_path, "w") as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            log(f"Round {round_idx} no-material summary 已保存: {summary_path}")
+            continue
 
         if (
             STUDENT_BACKEND == "voxtell_style_3d_prompt"
