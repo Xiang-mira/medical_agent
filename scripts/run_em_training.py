@@ -942,6 +942,30 @@ def _round_evaluation_chain_dir(round_idx: int) -> Path:
     return OUTPUT_ROOT / f"round{round_idx}" / "metrics" / "evaluation_chain"
 
 
+def resolve_round_reference_root(reference_round: int) -> Path:
+    """Resolve selected pseudo-labels without silently treating a missing link as zero data."""
+    configured = os.getenv("MEDAI_ROUND_REFERENCE_ROOT", "").strip()
+    candidates = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.append(OUTPUT_ROOT / f"round{reference_round}" / "estep" / "annotation_versions")
+    if reference_round == 1:
+        candidates.append(
+            PROJECT_ROOT
+            / "outputs"
+            / "formal_round1_final_20260627"
+            / "round1"
+            / "estep"
+            / "annotation_versions"
+        )
+    for candidate in candidates:
+        if not candidate.is_absolute():
+            candidate = PROJECT_ROOT / candidate
+        if candidate.is_dir() and any(path.is_dir() for path in candidate.iterdir()):
+            return candidate.resolve()
+    return candidates[0].resolve()
+
+
 def _previous_round_blocklist(round_idx: int) -> Path:
     return _round_evaluation_chain_dir(round_idx - 1) / "next_round_blocklist.csv"
 
@@ -3084,7 +3108,7 @@ def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> 
     import runpy
 
     student_root = _round_student_prediction_root_for_qc(round_idx)
-    teacher_root = OUTPUT_ROOT / f"round{reference_round}" / "estep" / "annotation_versions"
+    teacher_root = resolve_round_reference_root(reference_round)
     gt_env = os.getenv("MEDAI_GT_ROOT", "").strip()
     gt_root = Path(gt_env).expanduser() if gt_env else None
     if gt_root is not None and not gt_root.is_absolute():
@@ -3175,7 +3199,7 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     student_pred_dir = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
-    pseudo_reference_root = OUTPUT_ROOT / f"round{reference_round}" / "estep" / "annotation_versions"
+    pseudo_reference_root = resolve_round_reference_root(reference_round)
     cases = []
     with open(CASE_LIST) as f:
         for row in csv_mod.DictReader(f):

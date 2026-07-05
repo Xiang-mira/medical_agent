@@ -171,3 +171,22 @@ def test_case_scope_rejects_50_case_list_for_10_case_manifest(tmp_path: Path, mo
     assert audit["status"] == "failed"
     assert "expected_exactly_10_cases:50" in audit["failures"]
     assert "manifest_case_scope_mismatch" in audit["failures"]
+
+
+def test_round1_reference_falls_back_to_formal_run(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(em, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(em, "OUTPUT_ROOT", tmp_path / "outputs" / "current")
+    formal = (
+        tmp_path
+        / "outputs"
+        / "formal_round1_final_20260627"
+        / "round1"
+        / "estep"
+        / "annotation_versions"
+        / "case01"
+    )
+    formal.mkdir(parents=True)
+
+    resolved = em.resolve_round_reference_root(1)
+
+    assert resolved == formal.parent.resolve()

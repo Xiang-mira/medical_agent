@@ -225,6 +225,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--case-list", type=Path, required=True)
     parser.add_argument("--resume-existing-mstep", action="store_true")
+    parser.add_argument("--verification-only", action="store_true")
     parser.add_argument("--launch-round3", action="store_true")
     parser.add_argument("--minimum-free-gib", type=float, default=MIN_FREE_GIB)
     args = parser.parse_args()
@@ -264,17 +265,36 @@ def main() -> int:
         update_state("blocked_by_mstep_preflight", mstep_audit=mstep_audit)
         return 2
 
-    em.record_checkpoint_promotion(
-        ROUND_IDX,
-        status="candidate",
-        reason="clean_10case_inference_pending",
-        mstep_result=mstep_result,
-        manifest_path=manifest_path,
-        summary_path=summary_path,
-    )
-    update_state("running_student_inference", mstep_audit=mstep_audit, case_scope=scope)
-    inference_summary = em.save_student_predictions(ROUND_IDX)
-    inference_audit = inference_summary.get("inference_audit") or {}
+    if args.verification_only:
+        inference_audit = em.audit_prompt_student_predictions(ROUND_IDX)
+        postprocess_summary = read_json(
+            em.OUTPUT_ROOT
+            / "round2"
+            / "student_predictions_postprocessed"
+            / "organ_type_postprocess_summary.json"
+        )
+        em.record_checkpoint_promotion(
+            ROUND_IDX,
+            status="candidate",
+            reason="verification_retry_reference_fixed",
+            mstep_result=mstep_result,
+            manifest_path=manifest_path,
+            summary_path=summary_path,
+            inference_audit=inference_audit,
+        )
+    else:
+        em.record_checkpoint_promotion(
+            ROUND_IDX,
+            status="candidate",
+            reason="clean_10case_inference_pending",
+            mstep_result=mstep_result,
+            manifest_path=manifest_path,
+            summary_path=summary_path,
+        )
+        update_state("running_student_inference", mstep_audit=mstep_audit, case_scope=scope)
+        inference_summary = em.save_student_predictions(ROUND_IDX)
+        inference_audit = inference_summary.get("inference_audit") or {}
+        postprocess_summary = {}
     if inference_audit.get("status") != "passed":
         em.record_checkpoint_promotion(
             ROUND_IDX,
@@ -289,7 +309,11 @@ def main() -> int:
         return 1
 
     update_state("running_verification", inference_audit=inference_audit)
-    postprocess_summary = em.apply_round_organ_type_postprocess(ROUND_IDX)
+    if not args.verification_only:
+        postprocess_summary = em.apply_round_organ_type_postprocess(ROUND_IDX)
+    if postprocess_summary.get("status") != "success":
+        update_state("verification_failed_missing_postprocess", postprocess_summary=postprocess_summary)
+        return 1
     round_metrics = em.compute_round_metrics(ROUND_IDX)
     evaluation_chain = em.compute_round_evaluation_chain(ROUND_IDX)
     round_metrics["evaluation_chain"] = evaluation_chain
