@@ -1026,6 +1026,110 @@ def _filtered_student_prediction_root_for_next_round(round_idx: int, source_root
     return filtered_root, summary
 
 
+def materialize_student_competition_root(
+    round_idx: int,
+    *,
+    allowlist_path: Path | None = None,
+) -> dict:
+    """Atomically publish only schema-v3 allowlisted case-organ masks."""
+    previous = round_idx - 1
+    gate_dir = OUTPUT_ROOT / f"round{previous}" / "metrics" / f"student_round{round_idx}_gate"
+    path = allowlist_path or gate_dir / "student_round2_organ_allowlist.json"
+    audit = {
+        "stage": "student_competition_root_materialization",
+        "round": round_idx,
+        "allowlist_path": str(path),
+        "allowlist_sha256": _sha256_file(path),
+        "status": "failed",
+        "failures": [],
+        "materialized_masks": 0,
+    }
+    doc = _load_json(path)
+    if int(doc.get("schema_version") or 0) < 3 or doc.get("status") != "success":
+        audit["failures"].append("schema_v3_success_allowlist_required")
+        return audit
+    destination = Path(str(doc.get("postprocessed_root") or "")).expanduser()
+    if not destination.is_absolute():
+        destination = PROJECT_ROOT / destination
+    destination = destination.resolve()
+    expected_destination = (
+        OUTPUT_ROOT / f"round{previous}" / f"student_predictions_round{round_idx}_competition"
+    ).resolve()
+    if destination != expected_destination:
+        audit["failures"].append("competition_root_destination_mismatch")
+        return audit
+    expected_case_ids = list(case_list_provenance().get("case_ids") or [])
+    if len(expected_case_ids) != 10 or len(set(expected_case_ids)) != 10:
+        audit["failures"].append("exact_10case_scope_required")
+        return audit
+    route_rows = [row for row in doc.get("allowed_case_organs") or [] if isinstance(row, dict)]
+    declared_count = int(doc.get("allowed_case_organ_count") or 0)
+    pairs = [
+        (str(row.get("case_id") or ""), str(row.get("organ") or ""))
+        for row in route_rows
+    ]
+    if declared_count != len(route_rows) or len(set(pairs)) != len(route_rows):
+        audit["failures"].append("allowlist_count_or_duplicate_mismatch")
+        return audit
+    if any(not case_id or not organ or case_id not in expected_case_ids for case_id, organ in pairs):
+        audit["failures"].append("allowlist_case_or_organ_invalid")
+        return audit
+
+    previous_root = (OUTPUT_ROOT / f"round{previous}").resolve()
+    resolved_rows: list[tuple[str, str, Path]] = []
+    for row, (case_id, organ) in zip(route_rows, pairs):
+        source = Path(str(row.get("source_path") or "")).expanduser()
+        if not source.is_absolute():
+            source = PROJECT_ROOT / source
+        source = source.resolve()
+        try:
+            source.relative_to(previous_root)
+        except ValueError:
+            audit["failures"].append(f"source_outside_previous_round:{case_id}/{organ}")
+            continue
+        if not source.is_file() or source.name != f"{organ}.nii.gz":
+            audit["failures"].append(f"allowlisted_source_missing:{case_id}/{organ}")
+            continue
+        resolved_rows.append((case_id, organ, source))
+    if audit["failures"]:
+        return audit
+
+    staging = destination.with_name(f"{destination.name}_staging_{int(time.time())}")
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True, exist_ok=True)
+    for case_id in expected_case_ids:
+        (staging / case_id).mkdir(parents=True, exist_ok=True)
+    entries = []
+    for case_id, organ, source in resolved_rows:
+        target = staging / case_id / f"{organ}.nii.gz"
+        target.symlink_to(source)
+        entries.append({
+            "case_id": case_id,
+            "organ": organ,
+            "source": str(source),
+            "target": str(target),
+        })
+    audit.update({
+        "status": "success",
+        "destination": str(destination),
+        "expected_case_ids": expected_case_ids,
+        "materialized_masks": len(entries),
+        "entries": entries,
+    })
+    (staging / "competition_root_manifest.json").write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    replaced = destination.with_name(f"{destination.name}_replaced_{int(time.time())}")
+    if destination.exists():
+        destination.rename(replaced)
+    staging.rename(destination)
+    if replaced.exists():
+        shutil.rmtree(replaced)
+    return audit
+
+
 def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[Path, dict]:
     """Fail-closed validation for the organ-level Round2 student candidate pool."""
     previous = round_idx - 1

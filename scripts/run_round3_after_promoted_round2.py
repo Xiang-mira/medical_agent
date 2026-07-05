@@ -147,7 +147,28 @@ def run_round3(case_list: Path) -> int:
         write_state("blocked_by_preflight", preflight=preflight)
         print(json.dumps(preflight, indent=2, ensure_ascii=False))
         return 2
-    write_state("running_estep", preflight=preflight)
+    competition_root = em.materialize_student_competition_root(ROUND_IDX)
+    if competition_root.get("status") != "success":
+        write_state("blocked_by_competition_root", preflight=preflight, competition_root=competition_root)
+        print(json.dumps(competition_root, indent=2, ensure_ascii=False))
+        return 2
+    validated_root, competition_validation = em._validated_student_prediction_root_for_next_round(ROUND_IDX)
+    if competition_validation.get("status") != "success":
+        write_state(
+            "blocked_by_competition_root_validation",
+            preflight=preflight,
+            competition_root=competition_root,
+            competition_validation=competition_validation,
+        )
+        print(json.dumps(competition_validation, indent=2, ensure_ascii=False))
+        return 2
+    write_state(
+        "running_estep",
+        preflight=preflight,
+        competition_root=competition_root,
+        competition_validation=competition_validation,
+        validated_competition_root=str(validated_root),
+    )
     estep_result = em.run_estep(ROUND_IDX)
     dashboard = em.build_round_label_scoring_dashboard(ROUND_IDX)
     manifest = em.build_student_dataset(ROUND_IDX)

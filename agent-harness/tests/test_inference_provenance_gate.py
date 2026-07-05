@@ -190,3 +190,48 @@ def test_round1_reference_falls_back_to_formal_run(tmp_path: Path, monkeypatch) 
     resolved = em.resolve_round_reference_root(1)
 
     assert resolved == formal.parent.resolve()
+
+
+def test_materialize_strict_78_mask_competition_root(tmp_path: Path, monkeypatch) -> None:
+    output_root = tmp_path / "outputs" / "run"
+    case_ids = [f"case{i:02d}" for i in range(10)]
+    case_list = _write_case_list(tmp_path / "cases.csv", case_ids)
+    monkeypatch.setattr(em, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(em, "OUTPUT_ROOT", output_root)
+    monkeypatch.setattr(em, "CASE_LIST", case_list)
+    raw_root = output_root / "round2" / "student_predictions"
+    destination = output_root / "round2" / "student_predictions_round3_competition"
+    rows = []
+    for index in range(78):
+        case_id = case_ids[index % len(case_ids)]
+        organ = f"organ{index:03d}"
+        source = raw_root / case_id / f"{organ}.nii.gz"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.touch()
+        rows.append({
+            "case_id": case_id,
+            "organ": organ,
+            "route": "student_competition",
+            "source_path": str(source),
+        })
+    allowlist = output_root / "round2" / "metrics" / "student_round3_gate" / "student_round2_organ_allowlist.json"
+    allowlist.parent.mkdir(parents=True)
+    allowlist.write_text(json.dumps({
+        "schema_version": 3,
+        "status": "success",
+        "postprocessed_root": str(destination),
+        "allowed_case_organ_count": 78,
+        "allowed_case_organs": rows,
+    }), encoding="utf-8")
+
+    first = em.materialize_student_competition_root(3, allowlist_path=allowlist)
+    (destination / case_ids[0] / "unexpected.nii.gz").touch()
+    second = em.materialize_student_competition_root(3, allowlist_path=allowlist)
+
+    assert first["status"] == "success"
+    assert second["status"] == "success"
+    assert second["materialized_masks"] == 78
+    assert len([path for path in destination.iterdir() if path.is_dir()]) == 10
+    assert len(list(destination.glob("*/*.nii.gz"))) == 78
+    assert not (destination / case_ids[0] / "unexpected.nii.gz").exists()
+    assert all(path.is_symlink() for path in destination.glob("*/*.nii.gz"))
