@@ -598,6 +598,10 @@ def test_round2_retention_audit_requires_nonzero_finite_loss(tmp_path: Path) -> 
     train_result = {
         "official_retention_weight": 0.2,
         "mean_retention_loss": 0.031,
+        "mean_retention_contribution_ratio": 0.2,
+        "mean_retention_gradient_contribution_ratio": 0.2,
+        "mean_retention_anchor_foreground_dice": 0.999,
+        "best_candidate_found": True,
     }
     audit = em.build_retention_audit(
         round_idx=2,

@@ -18,6 +18,13 @@ from typing import Any
 
 from .auto_fine_label import grade_to_training_weight
 from .auto_label_core import ACCEPTED_SCORING_SCHEMA_VERSIONS
+from .continual_learning import (
+    TRAINING_CONTRACT_VERSION,
+    TrainingContractError,
+    canonical_target_type,
+    canonicalize_training_record,
+    resolve_canonical_memory,
+)
 from .json_utils import read_json, write_json
 from .organ_prompt_bank import (
     filter_semantically_risky_prompts,
@@ -936,9 +943,18 @@ class VoxTellStudent:
                     case_id=case_id, image=image, organ=organ, prompt=canonical_prompt,
                     prompt_variants=prompt_variants, doc=doc, meta=meta,
                 )
+                try:
+                    normalized_meta_target = canonical_target_type(meta.get("target_type") or "hard")
+                except TrainingContractError:
+                    normalized_meta_target = str(meta.get("target_type") or "hard").lower()
+                resolved_training_mask = (
+                    meta.get("probability_mask_path")
+                    if normalized_meta_target == "positive_soft"
+                    else mask
+                )
                 item.update({
-                    "mask": str(meta.get("probability_mask_path") or mask) if meta.get("target_type") == "soft" else str(mask),
-                    "mask_path": str(meta.get("probability_mask_path") or mask) if meta.get("target_type") == "soft" else str(mask),
+                    "mask": str(resolved_training_mask),
+                    "mask_path": str(resolved_training_mask),
                     "supervision_type": "positive",
                     "distillation_role": "positive",
                     "negative_reason": None,
@@ -1106,6 +1122,7 @@ class VoxTellStudent:
                         "student_training_priority": "negative",
                         "supervision_type": "negative",
                         "distillation_role": "negative",
+                        "target_type": "negative_absent",
                         "negative_reason": neg["negative_reason"],
                         "negative_source": neg["negative_source"],
                         "negative_evidence": neg.get("negative_evidence"),
@@ -1130,7 +1147,6 @@ class VoxTellStudent:
         replay_excluded_rows: list[dict[str, Any]] = []
         historical_trainable_positive_organs: set[str] = set()
         historical_replay_source_manifests: list[str] = []
-        seen_replay_keys = set(current_trainable_positive_keys)
         for manifest_idx, replay_manifest in enumerate(replay_manifest_paths):
             if not replay_manifest.exists():
                 replay_excluded_rows.append({
@@ -1182,16 +1198,33 @@ class VoxTellStudent:
                         "reason": "missing_case_or_organ",
                     })
                     continue
-                if key in seen_replay_keys:
-                    continue
                 replay_positive_rows.append(_normalize_replay_positive_item(
                     replay_item,
                     manifest_path=replay_manifest,
                     replay_index=item_idx + manifest_idx * 1_000_000,
                 ))
-                seen_replay_keys.add(key)
 
-        rows.extend(replay_positive_rows)
+        # Canonicalize current and historical records through one shared
+        # contract, then resolve each case-organ by evidence quality.  Current
+        # rows no longer silently shadow a stronger promoted historical label.
+        candidate_rows = rows + replay_positive_rows
+        canonical_rows = [
+            canonicalize_training_record(
+                row,
+                project_root=Path(__file__).resolve().parents[4],
+                strict_soft=True,
+            )
+            for row in candidate_rows
+        ]
+        canonical_positive_rows, memory_rejected_rows = resolve_canonical_memory(canonical_rows)
+        negative_rows_current = [
+            row for row in canonical_rows
+            if row.get("supervision_type") == "negative"
+        ]
+        rows = canonical_positive_rows + negative_rows_current
+        replay_positive_rows = [
+            row for row in canonical_positive_rows if row.get("historical_replay")
+        ]
         final_trainable_positive_organs = {
             str(r.get("organ") or "")
             for r in rows
@@ -1230,7 +1263,7 @@ class VoxTellStudent:
             "formal_373_target_validation": validate_formal_373_target_space(
                 self.target_config,
                 requested_organs=list(target_organs),
-                require_full_target=True,
+                require_full_target=len(target_organs) == 373,
             ),
             "cases_root": str(cases),
             "case_list": str(Path(case_list).resolve()) if case_list else None,
@@ -1292,6 +1325,7 @@ class VoxTellStudent:
                 ]
             },
             "training_gate_summary": {
+                "training_contract_version": TRAINING_CONTRACT_VERSION,
                 "num_included": len(rows),
                 "num_included_positive": len(positive_rows),
                 "num_trainable_positive": len(trainable_positive_rows),
@@ -1317,6 +1351,8 @@ class VoxTellStudent:
                 "num_replay_positive_items": len(replay_positive_rows),
                 "num_replay_excluded_items": len(replay_excluded_rows),
                 "replay_excluded_rows": replay_excluded_rows[:200],
+                "memory_rejected_items": len(memory_rejected_rows),
+                "memory_rejected_rows": memory_rejected_rows[:200],
                 "negative_absent_is_positive": False,
                 "student_prediction_gt_empty_qc_fail_replay_blocked": True,
             },

@@ -65,10 +65,8 @@ def validate_case_scope(case_list: Path, manifest_path: Path) -> dict:
     estep_cases = sorted(path.name for path in estep_root.iterdir() if path.is_dir()) if estep_root.exists() else []
     expected_set = set(expected)
     failures = []
-    if len(expected) != 10:
-        failures.append(f"expected_exactly_10_cases:{len(expected)}")
-    if len(expected) != len(expected_set):
-        failures.append("duplicate_case_ids")
+    if not expected or len(expected) != len(expected_set):
+        failures.append("case_list_must_be_nonempty_and_unique")
     if set(manifest_cases) != expected_set:
         failures.append("manifest_case_scope_mismatch")
     if set(estep_cases) != expected_set:
@@ -234,6 +232,8 @@ def main() -> int:
     if not case_list.is_file():
         raise SystemExit(f"Missing required case list: {case_list}")
     em.CASE_LIST = case_list
+    em.ensure_evaluation_protocol()
+    em.write_round_run_spec(ROUND_IDX)
     manifest_path = em.OUTPUT_ROOT / "round2" / "mstep" / "voxtell_prompt_student_manifest.json"
     gate_path = em.OUTPUT_ROOT / "round2" / "estep" / "formal_gate.json"
     summary_path = em.OUTPUT_ROOT / "round2" / "round_summary.json"

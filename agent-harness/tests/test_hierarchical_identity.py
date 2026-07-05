@@ -809,17 +809,23 @@ def test_mstep_manifest_quarantines_identity_mismatch(tmp_path: Path):
         seg = case / "segmentations"
         seg.mkdir(parents=True)
         _save(np.ones((4, 4, 4), dtype=np.uint8), seg / "liver_segment_1.nii.gz")
+        ct_path = case / "ct.nii.gz"
+        _save(np.ones((4, 4, 4), dtype=np.float32), ct_path)
         (case / "selection_metadata.json").write_text(json.dumps({
             "selected_organs": [{
                 "case_id": case_id,
                 "organ": "liver_segment_1",
+                "selected_model": "teacher_a",
+                "ct_path": str(ct_path),
                 "requested_canonical_id": "liver_segment_1",
                 "resolved_canonical_id": resolved,
-                    "identity_status": status,
-                    "identity_mismatch_reasons": [] if status == "valid" else ["canonical_id_mismatch"],
-                    "grade": "B",
-                    "training_weight": 0.5,
-                    "scoring_schema_version": "autolabel_core_v2",
+                "identity_status": status,
+                "identity_mismatch_reasons": (
+                    [] if status == "valid" else ["canonical_id_mismatch"]
+                ),
+                "grade": "B",
+                "training_weight": 0.5,
+                "scoring_schema_version": "autolabel_core_v2",
             }]
         }))
     output = tmp_path / "training_manifest.json"

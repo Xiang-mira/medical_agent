@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import pydoc
 import random
@@ -25,6 +26,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 VOXTELL_ROOT = ROOT / "third_party" / "VoxTell"
 sys.path.insert(0, str(VOXTELL_ROOT))
+sys.path.insert(0, str(ROOT / "agent-harness"))
 
 import numpy as np
 import torch
@@ -40,6 +42,10 @@ from transformers import AutoModel, AutoTokenizer
 
 from voxtell.model.voxtell_model import VoxTellModel
 from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
+from cli_anything.medai.core.continual_learning import (
+    TRAINING_CONTRACT_VERSION,
+    sha256_file as contract_sha256_file,
+)
 
 
 SAFE_NEGATIVE_SOURCES = {
@@ -106,6 +112,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--seed", type=int, default=int(env.get("MEDAI_SEED", "42")))
     ap.add_argument("--save-every", type=int, default=int(env.get("MEDAI_SAVE_EVERY", "0")), help="0 disables intermediate checkpoints.")
     ap.add_argument("--dry-run", action="store_true", help="Validate inputs and write a training plan without loading Qwen/model weights.")
+    ap.add_argument(
+        "--run-spec",
+        default=env.get("MEDAI_RUN_SPEC"),
+        help="RunSpec JSON. Required when MEDAI_FORMAL_STATE_MACHINE=1.",
+    )
     ap.add_argument("--freeze-encoder", action="store_true", help="Only train prompt projection/decoder layers.")
     ap.add_argument(
         "--trainable-scope",
@@ -397,16 +408,41 @@ def parse_pos_neg_ratio(value: str | float | int) -> tuple[int, int]:
     return pos_i // div, neg_i // div
 
 
-def build_sample_pools(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def build_sample_pools(rows: list[dict[str, Any]]) -> dict[str, Any]:
     positive = [r for r in rows if r.get("supervision_type", "positive") == "positive"]
     manifest_negative = [r for r in rows if r.get("supervision_type") == "negative"]
+    derived_weight = float(os.getenv("MEDAI_DERIVED_NEGATIVE_LOSS_WEIGHT", "0.1"))
     derived_crop_negative = [
-        dict(r, supervision_type="negative", negative_reason="absent_in_crop", derived_negative_from_positive=True)
+        dict(
+            r,
+            supervision_type="negative",
+            negative_reason="absent_in_crop",
+            derived_negative_from_positive=True,
+            training_weight=derived_weight,
+            sampling_weight=1.0,
+            effective_loss_weight=derived_weight,
+        )
         for r in positive
         if can_derive_crop_negative(r)
     ]
+    positive_by_organ: dict[str, list[dict[str, Any]]] = {}
+    for row in positive:
+        positive_by_organ.setdefault(str(row.get("organ") or ""), []).append(row)
+    protected = {
+        item.strip()
+        for item in os.getenv("MEDAI_PROTECTED_ORGANS", "").split(",")
+        if item.strip()
+    }
+    novelty_organs = {
+        item.strip()
+        for item in os.getenv("MEDAI_NOVELTY_ORGANS", "").split(",")
+        if item.strip()
+    }
     return {
         "positive": positive,
+        "positive_by_organ": positive_by_organ,
+        "protected_organs": sorted(protected & set(positive_by_organ)),
+        "novelty_organs": sorted(novelty_organs & set(positive_by_organ)),
         "negative": manifest_negative + derived_crop_negative,
         "manifest_negative": manifest_negative,
         "semantic_negative": manifest_negative,
@@ -503,12 +539,40 @@ def can_derive_crop_negative(item: dict[str, Any]) -> bool:
 
 
 def _weighted_choice(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Choose uniformly; quality is applied exactly once in the task loss."""
     if not rows:
         raise ValueError("Cannot sample from an empty pool")
-    weights = [max(0.0, float(r.get("sampling_weight", r.get("training_weight", 1.0)) or 0.0)) for r in rows]
-    if sum(weights) <= 0:
-        return dict(random.choice(rows))
-    return dict(random.choices(rows, weights=weights, k=1)[0])
+    return dict(random.choice(rows))
+
+
+def _balanced_positive_choice(
+    step: int,
+    pools: dict[str, Any],
+    pos_neg_ratio: tuple[int, int],
+) -> dict[str, Any]:
+    by_organ = pools.get("positive_by_organ") or {}
+    if not by_organ:
+        return _weighted_choice(pools["positive"])
+    all_organs = sorted(organ for organ, rows in by_organ.items() if organ and rows)
+    protected = [organ for organ in pools.get("protected_organs", []) if organ in by_organ]
+    novelty = [organ for organ in pools.get("novelty_organs", []) if organ in by_organ]
+    positive_ordinal = sum(
+        choose_sample_kind(previous, pos_neg_ratio, pools) == "positive"
+        for previous in range(step + 1)
+    ) - 1
+    # Even positive samples protect configured anchor organs; odd samples
+    # balance the complete target space.
+    if protected and novelty:
+        # Preserve the 50% protected/all policy while assigning half of the
+        # all-organ half to organs carrying materially changed evidence.
+        selector = positive_ordinal % 4
+        organ_pool = protected if selector in {0, 2} else (
+            novelty if selector == 1 else all_organs
+        )
+    else:
+        organ_pool = protected if protected and positive_ordinal % 2 == 0 else all_organs
+    organ = organ_pool[(positive_ordinal // (4 if novelty else (2 if protected else 1))) % len(organ_pool)]
+    return dict(random.choice(by_organ[organ]))
 
 
 def choose_sample_kind(step: int, pos_neg_ratio: tuple[int, int], pools: dict[str, list[dict[str, Any]]]) -> str:
@@ -545,7 +609,7 @@ def sample_training_item(
         negative_source_class = preferred if pools.get(preferred) else fallback
         item = _weighted_choice(selected_pool)
     else:
-        item = _weighted_choice(pools[kind])
+        item = _balanced_positive_choice(step, pools, pos_neg_ratio)
     item["runtime_sample_kind"] = kind
     if kind == "negative":
         item["negative_reason"] = canonical_negative_reason(item, "absent_in_crop")
@@ -749,10 +813,20 @@ def load_paper_training_unit(
     case: dict[str, Any],
     patch_size: tuple[int, int, int],
     foreground_prob: float,
+    preferred_organ: str | None = None,
     max_attempts: int = 64,
 ) -> tuple[torch.Tensor, torch.Tensor, list[str], dict[str, Any]]:
     """One image patch queried by two present and one volume-absent prompt."""
-    positives = random.sample(case["positive"], 2)
+    preferred = [
+        row for row in case["positive"]
+        if str(row.get("organ") or "") == str(preferred_organ or "")
+    ]
+    if preferred:
+        first = random.choice(preferred)
+        alternatives = [row for row in case["positive"] if row is not first]
+        positives = [first, random.choice(alternatives)]
+    else:
+        positives = random.sample(case["positive"], 2)
     negative = random.choice(case["negative"])
     image, bbox, original_shape = _cached_preprocessed_image(str(Path(case["image"]).resolve()))
     masks = [
@@ -913,7 +987,7 @@ def voxtell_supervision_loss(
 
 
 def official_retention_loss(student_outputs: Any, official_outputs: Any) -> torch.Tensor:
-    """Keep student prompt-conditioned probabilities close to official VoxTell."""
+    """Foreground-aware functional retention against the previous checkpoint."""
     students = list(student_outputs) if isinstance(student_outputs, (list, tuple)) else [student_outputs]
     officials = list(official_outputs) if isinstance(official_outputs, (list, tuple)) else [official_outputs]
     if len(students) != len(officials):
@@ -932,15 +1006,41 @@ def official_retention_loss(student_outputs: Any, official_outputs: Any) -> torc
             )
         stage_w = 0.5 ** idx
         teacher_probability = torch.sigmoid(official.detach().float())
-        stage_loss = F.binary_cross_entropy_with_logits(
-            student.float(),
-            teacher_probability,
+        student_probability = torch.sigmoid(student.float())
+        foreground_weight = 1.0 + 4.0 * teacher_probability
+        probability_match = (
+            foreground_weight
+            * (student_probability - teacher_probability).square()
+        ).mean()
+        # Bernoulli KL has zero value and zero gradient at identical logits.
+        # Plain BCE has zero gradient there but nonzero entropy, which made the
+        # previous "retention contribution" audit look strong while exerting
+        # essentially no constraint.
+        cross_entropy = F.binary_cross_entropy_with_logits(
+            student.float(), teacher_probability
         )
+        teacher_entropy = F.binary_cross_entropy_with_logits(
+            official.detach().float(), teacher_probability
+        )
+        calibration_kl = (cross_entropy - teacher_entropy).clamp_min(0.0)
+        stage_loss = 0.5 * probability_match + 0.5 * calibration_kl
         total = stage_w * stage_loss if total is None else total + stage_w * stage_loss
         total_w += stage_w
     if total is None or total_w <= 0:
         raise ValueError("Official retention received no output tensors")
     return total / total_w
+
+
+def foreground_probability_dice(outputs: Any, target: torch.Tensor) -> float:
+    """Foreground-aware soft Dice for checkpoint/retention auditing."""
+    prediction = list(outputs)[0] if isinstance(outputs, (list, tuple)) else outputs
+    if not isinstance(prediction, torch.Tensor):
+        raise ValueError("Dice audit requires tensor output")
+    resized_target = _resize_target_like(target, prediction).float()
+    probability = torch.sigmoid(prediction.detach().float())
+    numerator = 2.0 * (probability * resized_target).sum()
+    denominator = probability.sum() + resized_target.sum()
+    return float(((numerator + 1e-5) / (denominator + 1e-5)).cpu())
 
 
 def paper_aligned_supervision_loss(outputs: Any, target: torch.Tensor) -> torch.Tensor:
@@ -1023,18 +1123,56 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     result_path = output_dir / "voxtell_prompt_train_result.json"
 
+    manifest_document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    formal_state_machine = os.getenv("MEDAI_FORMAL_STATE_MACHINE", "0").lower() in {
+        "1", "true", "yes",
+    }
+    run_spec_path = Path(args.run_spec).resolve() if args.run_spec else None
+    run_spec_sha256 = (
+        contract_sha256_file(run_spec_path)
+        if run_spec_path and run_spec_path.is_file()
+        else None
+    )
+    if formal_state_machine:
+        if not run_spec_sha256:
+            raise SystemExit("Formal M-step requires a readable --run-spec")
+        if manifest_document.get("training_contract_version") != TRAINING_CONTRACT_VERSION:
+            raise SystemExit(
+                "Formal M-step manifest does not carry the current training contract"
+            )
+        invalid_contract_rows = [
+            index
+            for index, row in enumerate(manifest_document.get("items") or [])
+            if row.get("contract_version") != TRAINING_CONTRACT_VERSION
+            or row.get("training_eligible") is not True
+        ]
+        if invalid_contract_rows:
+            raise SystemExit(
+                "Formal M-step contains noncanonical/ineligible manifest rows: "
+                + ",".join(map(str, invalid_contract_rows[:20]))
+            )
+
     rows = load_manifest(manifest_path, max_items=args.max_items, training_profile=args.training_profile)
     case_split = deterministic_case_split([str(row.get("case_id") or "") for row in rows if row.get("case_id")])
     training_cases = set(case_split["training"])
     training_rows = [row for row in rows if str(row.get("case_id") or "") in training_cases]
     validation_rows = [row for row in rows if str(row.get("case_id") or "") in set(case_split["validation"])]
-    sample_pools = build_sample_pools(training_rows) if args.training_profile == QUALITY_WEIGHTED_PROFILE else {
-        "positive": [r for r in training_rows if r.get("supervision_type", "positive") == "positive"],
-        "negative": [r for r in training_rows if r.get("supervision_type") == "negative"],
-        "manifest_negative": [r for r in training_rows if r.get("supervision_type") == "negative"],
-        "semantic_negative": [r for r in training_rows if r.get("supervision_type") == "negative"],
-        "derived_crop_negative": [],
-    }
+    validation_positive_rows = [
+        row
+        for row in validation_rows
+        if row.get("supervision_type", "positive") == "positive"
+    ]
+    retention_sample_pools = (
+        build_sample_pools(validation_positive_rows)
+        if validation_positive_rows
+        else None
+    )
+    sample_pools = build_sample_pools(training_rows)
+    if args.training_profile == PAPER_ALIGNED_PROFILE:
+        # Paper-aligned training never uses derived crop negatives, but keeps
+        # the same organ-stratification metadata as every other backend.
+        sample_pools["negative"] = list(sample_pools["manifest_negative"])
+        sample_pools["derived_crop_negative"] = []
     paper_case_pools = build_paper_case_pools(training_rows) if args.training_profile == PAPER_ALIGNED_PROFILE else {}
     try:
         pos_neg_ratio = parse_pos_neg_ratio(args.pos_neg_ratio)
@@ -1073,6 +1211,10 @@ def main() -> int:
         )
     if args.official_retention_weight < 0:
         validation_errors.append("--official-retention-weight must be >= 0")
+    if args.official_retention_weight > 0 and not validation_positive_rows:
+        validation_errors.append(
+            "Retention requires positive anchors from the frozen validation split"
+        )
     if not model_files_ok:
         validation_errors.append("Missing plans.json or fold_0/checkpoint_final.pth in model_dir")
     if outbound_write_audit()["status"] != "passed":
@@ -1107,6 +1249,10 @@ def main() -> int:
         "official_prompt_training_pipeline_available": False,
         "negative_prompt_sampling": "per_image_2_positive_1_volume_absent_negative" if args.training_profile == PAPER_ALIGNED_PROFILE else "runtime_pool_sampler",
         "training_provenance_warning": "Project prompt-conditioned distillation trainer using official VoxTell components; not official voxtell-finetune.",
+        "formal_state_machine": formal_state_machine,
+        "run_spec_path": str(run_spec_path) if run_spec_path else None,
+        "run_spec_sha256": run_spec_sha256,
+        "training_contract_version": manifest_document.get("training_contract_version"),
         "manifest": str(manifest_path),
         "model_dir": str(model_dir),
         "output_dir": str(output_dir),
@@ -1184,7 +1330,10 @@ def main() -> int:
     write_json(output_dir / "case_split.json", case_split)
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     patch_size = load_patch_size(model_dir)
-    prompts = sorted({str(r["prompt"]) for r in training_rows})
+    prompts = sorted(
+        {str(r["prompt"]) for r in training_rows}
+        | {str(r["prompt"]) for r in validation_positive_rows}
+    )
     cache_path = Path(args.embedding_cache).resolve() if args.embedding_cache else output_dir / "prompt_embeddings.pt"
     started = time.time()
     embeddings = build_prompt_embeddings(prompts, args.text_encoding_model, device, cache_path, official_bank)
@@ -1202,13 +1351,21 @@ def main() -> int:
         official_network.to(device)
         official_network.eval()
 
-    optim = build_optimizer((p for p in network.parameters() if p.requires_grad), args)
+    trainable_parameters = [p for p in network.parameters() if p.requires_grad]
+    optim = build_optimizer(trainable_parameters, args)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
 
     losses: list[float] = []
     task_losses: list[float] = []
     retention_losses: list[float] = []
+    retention_contribution_ratios: list[float] = []
+    retention_gradient_contribution_ratios: list[float] = []
+    task_foreground_dices: list[float] = []
+    retention_anchor_foreground_dices: list[float] = []
+    effective_retention_weights: list[float] = []
     loss_history: list[dict[str, float | int]] = []
+    organ_gradient_mass: dict[str, float] = {}
+    organ_sample_counts: dict[str, int] = {}
     total_steps = 0
     max_steps = args.max_steps if args.max_steps > 0 else args.epochs * max(1, len(training_rows))
     sampling_history: list[dict[str, Any]] = []
@@ -1216,15 +1373,68 @@ def main() -> int:
     skipped_attempts = 0
     max_attempts = max_steps * 20
     attempts = 0
+    retention_task_ema: float | None = None
+    retention_loss_ema: float | None = None
+    best_checkpoint = output_dir / "checkpoint_best.pth"
+    best_task_score = float("-inf")
+    best_anchor_score: float | None = None
+    retention_anchor_baseline = 1.0
+    checkpoint_patience = int(os.getenv("MEDAI_CHECKPOINT_PATIENCE", "3"))
+    checkpoint_eval_interval = int(os.getenv("MEDAI_CHECKPOINT_EVAL_INTERVAL", "100"))
+    checkpoint_bad_windows = 0
+    stopped_early = False
+    gradient_calibrated_retention_weight: float | None = None
     paper_cases = list(paper_case_pools.values())
+    paper_cases_by_organ: dict[str, list[dict[str, Any]]] = {}
+    for case in paper_cases:
+        for organ in {
+            str(row.get("organ") or "")
+            for row in case.get("positive", [])
+            if str(row.get("organ") or "")
+        }:
+            paper_cases_by_organ.setdefault(organ, []).append(case)
+    paper_organs = sorted(paper_cases_by_organ)
+    protected_paper_organs = [
+        organ for organ in sample_pools.get("protected_organs", [])
+        if organ in paper_cases_by_organ
+    ]
+    novelty_paper_organs = [
+        organ for organ in sample_pools.get("novelty_organs", [])
+        if organ in paper_cases_by_organ
+    ]
     while total_steps < max_steps and attempts < max_attempts:
         attempts += 1
         if args.training_profile == PAPER_ALIGNED_PROFILE:
             try:
-                units = [
-                    load_paper_training_unit(random.choice(paper_cases), patch_size, args.foreground_prob)
-                    for _ in range(args.batch_size)
-                ]
+                units = []
+                for batch_index in range(args.batch_size):
+                    ordinal = total_steps * args.batch_size + batch_index
+                    if protected_paper_organs and novelty_paper_organs:
+                        selector = ordinal % 4
+                        organ_pool = (
+                            protected_paper_organs
+                            if selector in {0, 2}
+                            else (
+                                novelty_paper_organs
+                                if selector == 1 else paper_organs
+                            )
+                        )
+                    else:
+                        organ_pool = (
+                            protected_paper_organs
+                            if protected_paper_organs and ordinal % 2 == 0
+                            else paper_organs
+                        )
+                    preferred_organ = organ_pool[ordinal % len(organ_pool)]
+                    case = random.choice(paper_cases_by_organ[preferred_organ])
+                    units.append(
+                        load_paper_training_unit(
+                            case,
+                            patch_size,
+                            args.foreground_prob,
+                            preferred_organ=preferred_organ,
+                        )
+                    )
             except Exception as exc:
                 skipped_attempts += 1
                 print(f"[warn] skip paper-aligned unit: {exc}", flush=True)
@@ -1274,12 +1484,130 @@ def main() -> int:
                     args.bce_pos_weight_cap,
                 )
             if official_network is not None:
+                # Retention uses an independent, organ-balanced positive anchor
+                # rather than merely reusing the current task patch.
+                try:
+                    if retention_sample_pools is None:
+                        raise RuntimeError("retention validation anchor pool is empty")
+                    anchor_item = _balanced_positive_choice(
+                        total_steps + 1, retention_sample_pools, pos_neg_ratio
+                    )
+                    anchor_item["runtime_sample_kind"] = "positive"
+                    anchor_image, _anchor_target, anchor_meta = load_training_patch_with_metadata(
+                        anchor_item, patch_size, args.foreground_prob
+                    )
+                    anchor_image = anchor_image.to(device, non_blocking=True)
+                    anchor_embedding = embeddings[str(anchor_item["prompt"])].to(
+                        device, non_blocking=True
+                    )
+                    student_anchor_logits = network(anchor_image, anchor_embedding)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Retention validation anchor failed: {exc}"
+                    ) from exc
                 with torch.no_grad():
-                    official_logits = official_network(image, text_embedding)
-                retention_loss = official_retention_loss(logits, official_logits)
+                    official_logits = official_network(anchor_image, anchor_embedding)
+                retention_loss = official_retention_loss(
+                    student_anchor_logits, official_logits
+                )
+                retention_anchor_foreground_dices.append(
+                    foreground_probability_dice(
+                        student_anchor_logits,
+                        torch.sigmoid(
+                            (
+                                list(official_logits)[0]
+                                if isinstance(official_logits, (list, tuple))
+                                else official_logits
+                            ).detach().float()
+                        ),
+                    )
+                )
+                task_scalar = float(task_loss.detach().float().cpu())
+                retention_scalar = float(retention_loss.detach().float().cpu())
+                retention_task_ema = (
+                    task_scalar
+                    if retention_task_ema is None
+                    else 0.95 * retention_task_ema + 0.05 * task_scalar
+                )
+                retention_loss_ema = (
+                    retention_scalar
+                    if retention_loss_ema is None
+                    else 0.95 * retention_loss_ema + 0.05 * retention_scalar
+                )
+                effective_retention_weight = min(
+                    10.0,
+                    max(
+                        0.01,
+                        float(args.official_retention_weight)
+                        * retention_task_ema
+                        / max(retention_loss_ema, 1e-8),
+                    ),
+                )
+                if (
+                    retention_scalar > 0
+                    and (
+                        gradient_calibrated_retention_weight is None
+                        or (total_steps + 1) % checkpoint_eval_interval == 0
+                    )
+                ):
+                    task_gradients = torch.autograd.grad(
+                        task_loss,
+                        trainable_parameters,
+                        retain_graph=True,
+                        allow_unused=True,
+                    )
+                    retention_gradients = torch.autograd.grad(
+                        retention_loss,
+                        trainable_parameters,
+                        retain_graph=True,
+                        allow_unused=True,
+                    )
+                    task_gradient_norm = math.sqrt(
+                        sum(
+                            float(gradient.detach().float().square().sum().cpu())
+                            for gradient in task_gradients
+                            if gradient is not None
+                        )
+                    )
+                    raw_retention_gradient_norm = math.sqrt(
+                        sum(
+                            float(gradient.detach().float().square().sum().cpu())
+                            for gradient in retention_gradients
+                            if gradient is not None
+                        )
+                    )
+                    if task_gradient_norm > 0 and raw_retention_gradient_norm > 0:
+                        target_fraction = min(
+                            0.30, max(0.15, float(args.official_retention_weight))
+                        )
+                        gradient_calibrated_retention_weight = min(
+                            10.0,
+                            max(
+                                0.01,
+                                target_fraction
+                                / (1.0 - target_fraction)
+                                * task_gradient_norm
+                                / raw_retention_gradient_norm,
+                            ),
+                        )
+                        weighted_retention_norm = (
+                            gradient_calibrated_retention_weight
+                            * raw_retention_gradient_norm
+                        )
+                        retention_gradient_contribution_ratios.append(
+                            weighted_retention_norm
+                            / (task_gradient_norm + weighted_retention_norm)
+                        )
+                if gradient_calibrated_retention_weight is not None:
+                    effective_retention_weight = gradient_calibrated_retention_weight
             else:
                 retention_loss = task_loss.new_zeros(())
-            loss = task_loss + float(args.official_retention_weight) * retention_loss
+                effective_retention_weight = 0.0
+                anchor_meta = {}
+            loss = task_loss + effective_retention_weight * retention_loss
+            task_foreground_dices.append(
+                foreground_probability_dice(logits, target)
+            )
         scaler.scale(loss).backward()
         scaler.unscale_(optim)
         if args.grad_clip_norm > 0:
@@ -1289,6 +1617,24 @@ def main() -> int:
             ))
         else:
             grad_norm = 0.0
+        sampled_organs: list[str] = []
+        if sample_meta.get("batch_units"):
+            for unit in sample_meta["batch_units"]:
+                sampled_organs.extend(
+                    str(organ)
+                    for organ in unit.get("positive_organs", [])
+                    if str(organ)
+                )
+                if unit.get("negative_organ"):
+                    sampled_organs.append(str(unit["negative_organ"]))
+        elif sample_meta.get("organ"):
+            sampled_organs = [str(sample_meta["organ"])]
+        for organ in set(sampled_organs):
+            fraction = 1.0 / max(1, len(set(sampled_organs)))
+            organ_gradient_mass[organ] = (
+                organ_gradient_mass.get(organ, 0.0) + grad_norm * fraction
+            )
+            organ_sample_counts[organ] = organ_sample_counts.get(organ, 0) + 1
         scaler.step(optim)
         scaler.update()
 
@@ -1296,9 +1642,15 @@ def main() -> int:
         loss_value = float(loss.detach().cpu())
         task_loss_value = float(task_loss.detach().cpu())
         retention_loss_value = float(retention_loss.detach().cpu())
+        retention_contribution = (
+            effective_retention_weight * retention_loss_value
+            / max(task_loss_value, 1e-8)
+        )
         losses.append(loss_value)
         task_losses.append(task_loss_value)
         retention_losses.append(retention_loss_value)
+        effective_retention_weights.append(effective_retention_weight)
+        retention_contribution_ratios.append(retention_contribution)
         sampling_window.append(sample_meta)
         loss_history.append({
             "step": total_steps,
@@ -1358,15 +1710,68 @@ def main() -> int:
             sampling_history.append(stat)
             print(json.dumps(stat, ensure_ascii=False), flush=True)
             sampling_window = []
+        if (
+            checkpoint_eval_interval > 0
+            and total_steps % checkpoint_eval_interval == 0
+        ):
+            window_task = float(
+                np.mean(task_foreground_dices[-checkpoint_eval_interval:])
+            )
+            window_retention = (
+                float(
+                    np.mean(
+                        retention_anchor_foreground_dices[
+                            -checkpoint_eval_interval:
+                        ]
+                    )
+                )
+                if retention_anchor_foreground_dices
+                else 1.0
+            )
+            retention_ok = (
+                official_network is None
+                or window_retention >= retention_anchor_baseline - 0.002
+            )
+            if retention_ok and window_task > best_task_score:
+                best_task_score = window_task
+                best_anchor_score = window_retention
+                checkpoint_bad_windows = 0
+                torch.save(
+                    {
+                        "eligible_for_next_round_prompt_student": False,
+                        "eligible_as_teacher_candidate": False,
+                        "network_weights": network.state_dict(),
+                        "step": total_steps,
+                        "selection": {
+                            "new_supervision_foreground_dice": window_task,
+                            "anchor_foreground_dice": window_retention,
+                            "retention_anchor_baseline": retention_anchor_baseline,
+                        },
+                    },
+                    best_checkpoint,
+                )
+            else:
+                checkpoint_bad_windows += 1
+            if checkpoint_bad_windows >= checkpoint_patience:
+                stopped_early = True
+                break
         if args.save_every > 0 and total_steps % args.save_every == 0:
             # Rotate one recovery checkpoint; 3D checkpoints are ~1.7 GB
             # and retaining every interval can exhaust the experiment disk.
             torch.save({"eligible_for_next_round_prompt_student": False,
         "eligible_as_teacher_candidate": False,
         "network_weights": network.state_dict(), "step": total_steps}, output_dir / "checkpoint_latest.pth")
-    if total_steps < max_steps:
+    if total_steps < max_steps and not stopped_early:
         raise RuntimeError(f"Runtime sampler produced only {total_steps}/{max_steps} steps after {attempts} attempts")
 
+    best_candidate_found = best_checkpoint.exists()
+    if best_candidate_found:
+        best_payload = torch.load(best_checkpoint, map_location=device, weights_only=False)
+        network.load_state_dict(best_payload["network_weights"], strict=True)
+    elif official_network is not None:
+        # Fail safe: never publish the last step when no rolling candidate
+        # satisfied the anchor constraint.
+        network.load_state_dict(official_network.state_dict(), strict=True)
     final_ckpt = output_dir / "model_finetune.pth"
     torch.save({
         "training_mode": "project_voxtell_prompt_distillation_student",
@@ -1385,6 +1790,7 @@ def main() -> int:
         "patch_size": patch_size,
     }, final_ckpt)
     inference_model_dir = write_voxtell_model_dir(model_dir, output_dir, network, total_steps, manifest_path)
+    best_checkpoint.unlink(missing_ok=True)
     finite_losses = [x for x in losses if np.isfinite(x)]
     write_json(output_dir / "loss_history.json", {"steps": total_steps, "history": loss_history, "sampling_history": sampling_history, "skipped_sampling_attempts": skipped_attempts})
     provenance = {
@@ -1399,8 +1805,21 @@ def main() -> int:
         "external_uploads_performed": False,
         "official_retention": {
             "enabled": official_network is not None,
-            "weight": args.official_retention_weight,
-            "loss": "multi-scale soft-target BCE against frozen official VoxTell",
+            "target_fraction": args.official_retention_weight,
+            "mean_effective_weight": (
+                float(np.mean(effective_retention_weights))
+                if effective_retention_weights else 0.0
+            ),
+            "mean_contribution_ratio": (
+                float(np.mean(retention_contribution_ratios))
+                if retention_contribution_ratios else 0.0
+            ),
+            "mean_gradient_contribution_ratio": (
+                float(np.mean(retention_gradient_contribution_ratios))
+                if retention_gradient_contribution_ratios else 0.0
+            ),
+            "loss": "multi-scale foreground-weighted probability matching plus Bernoulli KL against frozen previous checkpoint",
+            "anchor_policy": "frozen validation split, organ-balanced positive anchors",
         },
         "paper_alignment": {
             "prompts_per_image": {"positive": 2, "negative": 1},
@@ -1417,6 +1836,53 @@ def main() -> int:
             "project-specific quality-gated EM outer loop",
         ],
     }
+    positive_steps = sum(
+        1 for row in loss_history
+        if row.get("sample_kind") != "negative"
+    )
+    all_positive_organs = sorted(
+        {
+            str(row.get("organ") or "")
+            for row in training_rows
+            if row.get("supervision_type", "positive") == "positive"
+            and str(row.get("organ") or "")
+        }
+    )
+    priority_organs = sorted(
+        set(sample_pools.get("protected_organs") or [])
+        | set(sample_pools.get("novelty_organs") or [])
+    )
+    expected_gradient_organs = (
+        all_positive_organs
+        if positive_steps >= len(all_positive_organs)
+        else priority_organs
+    )
+    total_gradient_mass = sum(organ_gradient_mass.values())
+    organ_gradient_shares = {
+        organ: (
+            organ_gradient_mass.get(organ, 0.0) / total_gradient_mass
+            if total_gradient_mass > 0 else 0.0
+        )
+        for organ in all_positive_organs
+    }
+    minimum_share = (
+        0.1 / len(expected_gradient_organs)
+        if expected_gradient_organs else 0.0
+    )
+    underrepresented_organs = [
+        organ
+        for organ in expected_gradient_organs
+        if organ_gradient_shares.get(organ, 0.0) < minimum_share
+    ]
+    organ_gradient_audit = {
+        "status": "passed" if not underrepresented_organs else "failed",
+        "positive_steps": positive_steps,
+        "expected_organs": expected_gradient_organs,
+        "minimum_gradient_share": minimum_share,
+        "underrepresented_organs": underrepresented_organs,
+        "sample_counts": organ_sample_counts,
+        "gradient_shares": organ_gradient_shares,
+    }
     write_json(output_dir / "training_provenance.json", provenance)
     write_json(output_dir / "sampling_audit.json", {
         "training_profile": args.training_profile,
@@ -1424,6 +1890,7 @@ def main() -> int:
         "sampling_history": sampling_history,
         "skipped_sampling_attempts": skipped_attempts,
         "derived_crop_negatives_allowed": args.training_profile == QUALITY_WEIGHTED_PROFILE,
+        "organ_gradient_audit": organ_gradient_audit,
     })
     result = {
         **plan,
@@ -1438,11 +1905,45 @@ def main() -> int:
         "deep_supervision": args.deep_supervision,
         "poly_power": args.poly_power,
         "steps": total_steps,
+        "stopped_early": stopped_early,
+        "best_candidate_found": best_candidate_found,
+        "checkpoint_selection": {
+            "evaluation_interval": checkpoint_eval_interval,
+            "patience": checkpoint_patience,
+            "best_task_objective": best_task_objective if math.isfinite(best_task_objective) else None,
+            "retention_anchor_baseline": retention_anchor_baseline,
+            "best_new_supervision_foreground_dice": (
+                best_task_score if math.isfinite(best_task_score) else None
+            ),
+            "best_anchor_foreground_dice": best_anchor_score,
+        },
         "sampling_history": sampling_history,
         "skipped_sampling_attempts": skipped_attempts,
         "mean_loss": float(np.mean(finite_losses)) if finite_losses else None,
         "mean_task_loss": float(np.mean(task_losses)) if task_losses else None,
         "mean_retention_loss": float(np.mean(retention_losses)) if retention_losses else None,
+        "mean_effective_retention_weight": (
+            float(np.mean(effective_retention_weights))
+            if effective_retention_weights else 0.0
+        ),
+        "mean_retention_contribution_ratio": (
+            float(np.mean(retention_contribution_ratios))
+            if retention_contribution_ratios else 0.0
+        ),
+        "mean_retention_gradient_contribution_ratio": (
+            float(np.mean(retention_gradient_contribution_ratios))
+            if retention_gradient_contribution_ratios else 0.0
+        ),
+        "mean_task_foreground_dice": (
+            float(np.mean(task_foreground_dices))
+            if task_foreground_dices else None
+        ),
+        "mean_retention_anchor_foreground_dice": (
+            float(np.mean(retention_anchor_foreground_dices))
+            if retention_anchor_foreground_dices else None
+        ),
+        "best_retention_anchor_foreground_dice": best_anchor_score,
+        "organ_gradient_audit": organ_gradient_audit,
         "last_loss": finite_losses[-1] if finite_losses else None,
         "finetuned_checkpoint": str(final_ckpt),
         "inference_model_dir": str(inference_model_dir),

@@ -11,6 +11,12 @@ from typing import Any
 
 from .auto_fine_label import grade_to_training_weight
 from .auto_label_core import ACCEPTED_SCORING_SCHEMA_VERSIONS
+from .continual_learning import (
+    TRAINING_CONTRACT_VERSION,
+    TrainingContractError,
+    canonical_target_type,
+    canonicalize_training_record,
+)
 from .json_utils import write_json
 from .organ_taxonomy import normalize_canonical_id
 from .subprocess_utils import subprocess_text
@@ -115,22 +121,25 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                 if not schema_supported:
                     training_weight_value = 0.0
                     distillation_eligible_value = False
-                target_type_value = str(meta.get("target_type", "hard")).lower()
+                try:
+                    target_type_value = canonical_target_type(meta.get("target_type", "hard"))
+                except TrainingContractError:
+                    target_type_value = str(meta.get("target_type", "hard")).lower()
                 probability_path_value = meta.get("probability_mask_path")
                 probability_path_exists = bool(probability_path_value and Path(str(probability_path_value)).exists())
                 if not schema_supported:
                     training_gate_decision = "exclude_unsupported_schema"
                     training_gate_policy = "Unsupported scoring schemas require rescoring before student training."
-                elif grade_value in {"A", "B"} and target_type_value == "hard" and training_weight_value > 0.0:
+                elif grade_value in {"A", "B"} and target_type_value == "positive_hard" and training_weight_value > 0.0:
                     training_gate_decision = "include_hard_ab"
                     training_gate_policy = "A/B hard pseudo-labels are eligible for direct student training."
                 elif grade_value in {"A", "B"}:
                     training_gate_decision = "exclude_ab_non_hard_or_zero_weight"
                     training_gate_policy = "A/B labels must be hard targets with positive training weight for direct student training."
-                elif grade_value == "C" and target_type_value == "soft" and training_weight_value > 0.0 and probability_path_exists:
+                elif grade_value == "C" and target_type_value == "positive_soft" and training_weight_value > 0.0 and probability_path_exists:
                     training_gate_decision = "include_soft_c"
                     training_gate_policy = "C is eligible only as a soft target with an explicit probability mask."
-                elif grade_value == "C" and target_type_value == "soft":
+                elif grade_value == "C" and target_type_value == "positive_soft":
                     training_gate_decision = "exclude_c_soft_missing_probability"
                     training_gate_policy = "C soft labels require an explicit probability mask before student training."
                 elif grade_value == "C":
@@ -145,8 +154,16 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                     "dataset_type": "auto_fine_label_dataset",
                     "organ": organ,
                     "prompt": meta.get("prompt", organ.replace("_", " ")),
-                    "mask_path": str(mask.resolve()),
-                    "mask": str(mask.resolve()),
+                    "mask_path": str(
+                        Path(probability_path_value).resolve()
+                        if target_type_value == "positive_soft" and probability_path_value
+                        else mask.resolve()
+                    ),
+                    "mask": str(
+                        Path(probability_path_value).resolve()
+                        if target_type_value == "positive_soft" and probability_path_value
+                        else mask.resolve()
+                    ),
                     "ct_path": meta.get("ct_path", ""),
                     "image": meta.get("ct_path", ""),
                     "selected_model": meta.get("selected_model"),
@@ -212,10 +229,21 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                     "mapping_source": meta.get("mapping_source"),
                     "identity_status": identity_status,
                 }
+                row = canonicalize_training_record(
+                    row,
+                    project_root=Path(__file__).resolve().parents[4],
+                    strict_soft=True,
+                )
                 grade = str(row.get("grade") or "D").upper()
                 training_weight = float(row.get("training_weight") or 0.0)
                 include_gate = row.get("training_gate_decision") in {"include_hard_ab", "include_soft_c"}
-                if (not include_gate) or grade == "D" or training_weight <= 0.0 or row.get("distillation_eligible") is False:
+                if (
+                    (not include_gate)
+                    or grade == "D"
+                    or training_weight <= 0.0
+                    or row.get("distillation_eligible") is False
+                    or not row.get("training_eligible")
+                ):
                     exclusion_reason = row.get("distillation_exclusion_reason")
                     if not exclusion_reason:
                         if row.get("scoring_schema_version") not in ACCEPTED_SCORING_SCHEMA_VERSIONS:
@@ -232,6 +260,8 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                             exclusion_reason = "training_weight_zero"
                         elif not include_gate:
                             exclusion_reason = str(row.get("training_gate_decision") or "training_gate_excluded")
+                        elif row.get("contract_failures"):
+                            exclusion_reason = "training_contract:" + ",".join(row["contract_failures"])
                         else:
                             exclusion_reason = "distillation_eligible_false"
                     excluded_training_rows.append({
@@ -276,11 +306,18 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
         key = str(r.get("distillation_exclusion_reason") or "unknown")
         exclusion_counts[key] = exclusion_counts.get(key, 0) + 1
     training_gate_summary = {
+        "training_contract_version": TRAINING_CONTRACT_VERSION,
         "included_grade_counts": grade_counts,
         "included_target_type_counts": target_type_counts,
         "num_included": len(rows),
         "num_excluded_training": len(excluded_training_rows),
-        "num_c_soft_included": sum(1 for r in rows if r.get("grade") == "C" and r.get("target_type") == "soft" and r.get("probability_mask_path")),
+        "num_c_soft_included": sum(
+            1
+            for r in rows
+            if r.get("grade") == "C"
+            and r.get("target_type") == "positive_soft"
+            and r.get("probability_mask_path")
+        ),
         "num_c_missing_probability_excluded": sum(1 for r in excluded_training_rows if r.get("distillation_exclusion_reason") == "soft_target_probability_mask_missing"),
         "num_c_hard_or_provisional_excluded": sum(1 for r in excluded_training_rows if r.get("distillation_exclusion_reason") == "grade_C_requires_soft_probability_target"),
         "num_d_excluded": sum(1 for r in excluded_training_rows if r.get("grade") == "D"),
@@ -346,7 +383,7 @@ def _prepare_nnunet_dataset(
     for r in rows:
         # nnUNet consumes discrete labels only. Soft/provisional targets are
         # reserved for the VoxTell probability-target training path.
-        if str(r.get("target_type") or "hard") != "hard":
+        if str(r.get("target_type") or "positive_hard") not in {"hard", "positive_hard"}:
             continue
         cid = r.get("case_id", "")
         if cid:

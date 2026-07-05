@@ -217,13 +217,17 @@ def test_mstep_training_gate_excludes_c_hard_and_unsupported_schema(tmp_path) ->
         make_mask(organ)
     prob = tmp_path / "kidney_left_probability.nii.gz"
     nib.save(nib.Nifti1Image(np.full((3, 3, 3), 0.6, dtype=np.float32), np.eye(4)), str(prob))
+    ct = tmp_path / "ct.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((3, 3, 3), dtype=np.float32), np.eye(4)), str(ct))
 
     selected = [
-        {"organ": "liver", "grade": "A", "training_weight": 1.0, "target_type": "hard", "identity_status": "valid", "requested_canonical_id": "liver", "resolved_canonical_id": "liver", "scoring_schema_version": "autolabel_core_v2"},
-        {"organ": "pancreas", "grade": "C", "training_weight": 0.1, "target_type": "hard", "identity_status": "valid", "requested_canonical_id": "pancreas", "resolved_canonical_id": "pancreas", "scoring_schema_version": "autolabel_core_v2"},
-        {"organ": "kidney_left", "grade": "C", "training_weight": 0.1, "target_type": "soft", "probability_mask_path": str(prob), "identity_status": "valid", "requested_canonical_id": "kidney_left", "resolved_canonical_id": "kidney_left", "scoring_schema_version": "autolabel_core_v2"},
-        {"organ": "spleen", "grade": "B", "training_weight": 0.5, "target_type": "hard", "identity_status": "valid", "requested_canonical_id": "spleen", "resolved_canonical_id": "spleen", "scoring_schema_version": "legacy"},
-    ]
+            {"organ": "liver", "selected_model": "teacher_a", "grade": "A", "training_weight": 1.0, "target_type": "hard", "identity_status": "valid", "requested_canonical_id": "liver", "resolved_canonical_id": "liver", "scoring_schema_version": "autolabel_core_v2"},
+            {"organ": "pancreas", "selected_model": "teacher_a", "grade": "C", "training_weight": 0.1, "target_type": "hard", "identity_status": "valid", "requested_canonical_id": "pancreas", "resolved_canonical_id": "pancreas", "scoring_schema_version": "autolabel_core_v2"},
+            {"organ": "kidney_left", "selected_model": "teacher_a", "grade": "C", "training_weight": 0.1, "target_type": "soft", "probability_mask_path": str(prob), "identity_status": "valid", "requested_canonical_id": "kidney_left", "resolved_canonical_id": "kidney_left", "scoring_schema_version": "autolabel_core_v2"},
+            {"organ": "spleen", "selected_model": "teacher_a", "grade": "B", "training_weight": 0.5, "target_type": "hard", "identity_status": "valid", "requested_canonical_id": "spleen", "resolved_canonical_id": "spleen", "scoring_schema_version": "legacy"},
+        ]
+    for row in selected:
+        row["ct_path"] = str(ct)
     (case / "selection_metadata.json").write_text(json.dumps({"selected_organs": selected}), encoding="utf-8")
     result = build_training_manifest(root, tmp_path / "manifest.json")
     rows = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))

@@ -84,8 +84,9 @@ def round3_preflight(case_list: Path) -> dict:
         reasons.append("round2_round3_case_list_hash_mismatch")
     if round2_scope.get("status") != "passed" or set(round2_scope.get("expected_case_ids") or []) != set(_case_ids(case_list)):
         reasons.append("round2_case_scope_not_reusable")
-    if len(_case_ids(case_list)) != 10:
-        reasons.append("round3_requires_exact_10case_cohort")
+    case_ids = _case_ids(case_list)
+    if not case_ids or len(set(case_ids)) != len(case_ids):
+        reasons.append("round_requires_nonempty_unique_cohort")
     if free_bytes < minimum_free_bytes:
         reasons.append("insufficient_disk_space")
 
@@ -142,6 +143,8 @@ def write_state(status: str, **extra) -> None:
 
 def run_round3(case_list: Path) -> int:
     em.CASE_LIST = case_list
+    em.ensure_evaluation_protocol()
+    em.write_round_run_spec(ROUND_IDX)
     preflight = round3_preflight(case_list)
     if preflight.get("status") != "ready":
         write_state("blocked_by_preflight", preflight=preflight)

@@ -50,7 +50,8 @@ def test_policy_infers_taxonomy_parent_rule(policy, taxonomy):
     assert rule.margin_mm == pytest.approx(20.0)
 
     colon = containment_rule_for_organ("colon", taxonomy, policy)
-    assert colon.enabled is False
+    assert colon.enabled is True
+    assert colon.parents == ("abdominal_cavity",)
 
 
 

@@ -639,9 +639,9 @@ class TestVoxTellStudentContracts:
             "case_id": "case_001",
             "ct_path": str(ct),
             "selected_organs": [
-                {"organ": "liver", "mask_path": str(liver), "grade": "A", "training_weight": 1.0},
-                {"organ": "spleen", "mask_path": str(spleen), "grade": "C", "training_weight": 0.1, "scoring_schema_version": "autolabel_core_v2", "target_type": "hard"},
-                {"organ": "pancreas", "mask_path": str(pancreas), "grade": "C", "training_weight": 0.1, "scoring_schema_version": "autolabel_core_v2", "target_type": "soft", "probability_mask_path": str(probability)},
+                {"organ": "liver", "mask_path": str(liver), "selected_model": "teacher_a", "grade": "A", "training_weight": 1.0},
+                {"organ": "spleen", "mask_path": str(spleen), "selected_model": "teacher_a", "grade": "C", "training_weight": 0.1, "scoring_schema_version": "autolabel_core_v2", "target_type": "hard"},
+                {"organ": "pancreas", "mask_path": str(pancreas), "selected_model": "teacher_a", "grade": "C", "training_weight": 0.1, "scoring_schema_version": "autolabel_core_v2", "target_type": "soft", "probability_mask_path": str(probability)},
             ],
         }), encoding="utf-8")
         case_list = tmp_path / "cases.csv"
@@ -684,7 +684,7 @@ class TestVoxTellStudentContracts:
         (case / "selection_metadata.json").write_text(json.dumps({
             "scan_coverage": "abdomen,pelvis",
             "selected_organs": [
-                {"organ": "prostate", "mask_path": str(mask), "ct_path": str(ct), "grade": "A", "training_weight": 1.0, "scoring_schema_version": "autolabel_core_v2"},
+                {"organ": "prostate", "mask_path": str(mask), "ct_path": str(ct), "selected_model": "teacher_a", "grade": "A", "training_weight": 1.0, "scoring_schema_version": "autolabel_core_v2"},
                 {"organ": "liver", "ct_path": str(ct), "grade": "D", "training_weight": 0.0, "quality_flags": ["missing_final_mask"]},
             ]
         }), encoding="utf-8")
@@ -1754,6 +1754,7 @@ class TestBDMAPPanTSLayout:
         (case / "selection_metadata.json").write_text(json.dumps({"selected_organs": [{
             "organ": "pancreas", "identity_status": "valid",
             "requested_canonical_id": "pancreas", "resolved_canonical_id": "pancreas",
+            "selected_model": "teacher_a",
             "grade": "B", "training_weight": 0.5,
             "scoring_schema_version": "autolabel_core_v2",
         }]}), encoding="utf-8")
@@ -1857,12 +1858,17 @@ class TestRound1RepairAuditAndMstepContracts:
         updated.mkdir(parents=True)
         for organ in ["liver", "pancreas", "kidney_left", "kidney_right"]:
             _make_nii(np.ones((4, 4, 4), dtype=np.uint8), updated / f"{organ}.nii.gz")
+        ct_path = _make_nii(
+            np.ones((4, 4, 4), dtype=np.float32),
+            tmp_path / "ct.nii.gz",
+        )
         pancreas_prob = _make_nii(np.full((4, 4, 4), 0.7, dtype=np.float32), tmp_path / "pancreas_probability.nii.gz")
 
         selected_organs = [
             {
                 "organ": "liver",
-                "ct_path": str(tmp_path / "ct.nii.gz"),
+                "selected_model": "teacher_a",
+                "ct_path": str(ct_path),
                 "grade": "B",
                 "training_weight": 0.5,
                 "identity_status": "valid",
@@ -1873,6 +1879,7 @@ class TestRound1RepairAuditAndMstepContracts:
             },
             {
                 "organ": "pancreas",
+                "selected_model": "teacher_a",
                 "grade": "C",
                 "training_weight": 0.1,
                 "identity_status": "valid",
@@ -1885,6 +1892,7 @@ class TestRound1RepairAuditAndMstepContracts:
             },
             {
                 "organ": "kidney_left",
+                "selected_model": "teacher_a",
                 "grade": "D",
                 "training_weight": 0.0,
                 "identity_status": "valid",
@@ -1895,6 +1903,7 @@ class TestRound1RepairAuditAndMstepContracts:
             },
             {
                 "organ": "kidney_right",
+                "selected_model": "teacher_a",
                 "grade": "B",
                 "training_weight": 0.5,
                 "distillation_eligible": False,
@@ -1906,6 +1915,8 @@ class TestRound1RepairAuditAndMstepContracts:
                 "scoring_schema_version": "autolabel_core_v2",
             },
         ]
+        for row in selected_organs:
+            row.setdefault("ct_path", str(ct_path))
         (case / "selection_metadata.json").write_text(json.dumps({"selected_organs": selected_organs}), encoding="utf-8")
 
         result = build_training_manifest(root, tmp_path / "mstep_manifest.json")
@@ -1916,7 +1927,7 @@ class TestRound1RepairAuditAndMstepContracts:
         assert organs == {"liver", "pancreas"}
         pancreas_row = next(row for row in rows if row["organ"] == "pancreas")
         assert pancreas_row["training_weight"] == 0.1
-        assert pancreas_row["target_type"] == "soft"
+        assert pancreas_row["target_type"] == "positive_soft"
         assert pancreas_row["training_gate_decision"] == "include_soft_c"
         exclusions = json.loads(Path(result["training_exclusions"]).read_text(encoding="utf-8"))
         assert {row["organ"] for row in exclusions} == {"kidney_left", "kidney_right"}

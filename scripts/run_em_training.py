@@ -13,7 +13,9 @@ legacy/reference backend，不能再作为默认目标类别空间。
 - ShapeKit 开启提升 mask 质量
 - save_round_predictions 直接调用，无 timeout
 """
+import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -58,6 +60,17 @@ from cli_anything.medai.core.backend_capabilities import (
     profile_runtime_policy,
 )
 from cli_anything.medai.core.target_space import canonical_target_name
+from cli_anything.medai.core.continual_learning import (
+    PROMOTION_STATUSES,
+    TRAINING_CONTRACT_VERSION,
+    RoundStateMachine,
+    RunSpec,
+    derive_round_seed,
+    novelty_audit,
+    promotion_decision,
+    sha256_file as contract_sha256_file,
+    write_json as write_contract_json,
+)
 
 VOXTELL_MSTEP_MODES = {"manifest_only", PROJECT_PROMPT_STUDENT, LEGACY_PROJECT_DISTILLATION, OFFICIAL_NNUNET_BASELINE, LEGACY_OFFICIAL_NNUNET_FINETUNE}
 LEGACY_VOXTELL_MSTEP_MODE = LEGACY_AMBIGUOUS_OFFICIAL_FINETUNE
@@ -503,7 +516,8 @@ def student_target_space_audit() -> dict:
         "exact_target_policy": "preserve_configured_prompt_ids",
         "canonicalization_policy": "audit_only_do_not_deduplicate_exact_prompt_targets",
         "canonical_collisions": canonical_collisions,
-        "status": "success" if len(exact) == 373 else "failed",
+        "strict_373_contract": len(exact) == 373,
+        "status": "success" if exact and len(exact) == len(set(exact)) else "failed",
     }
 
 
@@ -513,7 +527,7 @@ def ensure_current_student_backend_allowed() -> None:
         raise RuntimeError(
             "MEDAI_STUDENT_BACKEND=vista3d_legacy is disabled by default. "
             "The current teacher-approved mainline is VoxTell-style 3D prompt "
-            "student over the 373 exact targets. Set MEDAI_ALLOW_VISTA3D_LEGACY=1 "
+            "student over the configured exact target space. Set MEDAI_ALLOW_VISTA3D_LEGACY=1 "
             "only for historical reproduction/reference runs."
         )
     if STUDENT_BACKEND not in {"voxtell_style_3d_prompt", "vista3d_legacy"}:
@@ -602,6 +616,116 @@ def case_list_provenance(case_list: Path | None = None) -> dict:
         "num_cases": len(case_ids),
         "duplicate_case_ids": sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1}),
     }
+
+
+def reference_tree_sha256(root: Path) -> str | None:
+    if not root.is_dir():
+        return None
+    digest = hashlib.sha256()
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    for path in files:
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        file_hash = _sha256_file(path)
+        if file_hash:
+            digest.update(file_hash.encode("ascii"))
+    return digest.hexdigest()
+
+
+def ensure_evaluation_protocol() -> dict:
+    """Freeze cohort-independent evaluation identity at run creation."""
+    path = OUTPUT_ROOT / "evaluation_protocol.json"
+    cases = case_list_provenance()
+    protected = [
+        item.strip()
+        for item in os.getenv(
+            "MEDAI_PROTECTED_ORGANS", ",".join(_formal_round1_key_organs())
+        ).split(",")
+        if item.strip()
+    ]
+    configured_reference = os.getenv("MEDAI_ROUND_REFERENCE_ROOT", "").strip()
+    reference_root = (
+        Path(configured_reference).expanduser().resolve()
+        if configured_reference else None
+    )
+    if not path.exists() and (reference_root is None or not reference_root.is_dir()):
+        raise RuntimeError(
+            "A new formal run requires MEDAI_ROUND_REFERENCE_ROOT so the "
+            "evaluation reference can be frozen before Round1."
+        )
+    reference_sha256 = (
+        reference_tree_sha256(reference_root)
+        if reference_root is not None else None
+    )
+    expected = {
+        "schema_version": "medai.evaluation-protocol.v2",
+        "case_list_path": cases["path"],
+        "case_list_sha256": cases["sha256"],
+        "case_count": cases["num_cases"],
+        "target_space_path": str(PROMPT_TARGET_CONFIG.resolve()),
+        "target_space_sha256": _sha256_file(PROMPT_TARGET_CONFIG),
+        "protected_organs": protected,
+        "raw_and_postprocessed_metrics_required": True,
+        "baseline_round": 1,
+        "gt_usage": "final_promotion_only_when_configured",
+        "reference_root": str(reference_root) if reference_root else None,
+        "reference_kind": os.getenv(
+            "MEDAI_REFERENCE_KIND", "frozen_teacher_anchor"
+        ),
+        "reference_tree_sha256": reference_sha256,
+    }
+    existing = _load_json(path)
+    if existing:
+        locked = (
+            "case_list_sha256",
+            "target_space_sha256",
+            "protected_organs",
+            "reference_root",
+            "reference_tree_sha256",
+        )
+        mismatches = [key for key in locked if existing.get(key) != expected.get(key)]
+        if mismatches:
+            raise RuntimeError(
+                "Evaluation protocol is immutable within a run; mismatched fields: "
+                + ",".join(mismatches)
+            )
+        return existing
+    write_contract_json(path, expected)
+    return expected
+
+
+def write_round_run_spec(round_idx: int) -> dict:
+    protocol = ensure_evaluation_protocol()
+    registry = _load_promotion_registry()
+    baseline = (registry.get("rounds") or {}).get("1") or {}
+    previous = (registry.get("rounds") or {}).get(str(round_idx - 1)) or {}
+    cases = case_list_provenance()
+    spec = RunSpec(
+        run_id=os.getenv("MEDAI_RUN_ID", OUTPUT_ROOT.name),
+        round_index=round_idx,
+        backend=STUDENT_BACKEND,
+        case_list_path=cases["path"],
+        case_list_sha256=str(cases["sha256"] or ""),
+        case_count=int(cases["num_cases"]),
+        target_space_path=str(PROMPT_TARGET_CONFIG.resolve()),
+        target_space_sha256=str(_sha256_file(PROMPT_TARGET_CONFIG) or ""),
+        baseline_checkpoint_sha256=baseline.get("checkpoint_sha256"),
+        previous_checkpoint_sha256=previous.get("checkpoint_sha256"),
+        evaluation_protocol_sha256=str(
+            contract_sha256_file(OUTPUT_ROOT / "evaluation_protocol.json") or ""
+        ),
+        training_split_sha256=str(cases["sha256"] or ""),
+        evaluation_split_sha256=str(cases["sha256"] or ""),
+        reference_protocol_sha256=str(
+            contract_sha256_file(OUTPUT_ROOT / "evaluation_protocol.json") or ""
+        ),
+        code_commit_sha=_git_commit_sha(),
+        protected_organs=tuple(protocol.get("protected_organs") or []),
+    ).to_dict()
+    write_contract_json(
+        OUTPUT_ROOT / f"round{round_idx}" / "run_spec.json",
+        spec,
+    )
+    return spec
 
 
 def inference_run_provenance(
@@ -753,7 +877,10 @@ def _load_promotion_registry() -> dict:
     if not isinstance(registry, dict):
         registry = {}
     registry.setdefault("stage", "checkpoint_promotion_registry")
-    registry.setdefault("status_values", ["candidate", "promoted", "competition_blocked"])
+    registry.setdefault(
+        "status_values",
+        ["candidate", "promoted", "competition_blocked", "no_material_update"],
+    )
     registry.setdefault("rounds", {})
     registry.setdefault("history", [])
     return registry
@@ -776,7 +903,7 @@ def record_checkpoint_promotion(
     summary_path: Path | None = None,
     inference_audit: dict | None = None,
 ) -> dict:
-    if status not in {"candidate", "promoted", "competition_blocked"}:
+    if status not in PROMOTION_STATUSES:
         raise ValueError(f"Unsupported checkpoint promotion status: {status}")
     mstep_result = mstep_result or _load_json(OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_mstep_result.json")
     manifest_path = manifest_path or OUTPUT_ROOT / f"round{round_idx}" / "mstep" / "voxtell_prompt_student_manifest.json"
@@ -786,9 +913,66 @@ def record_checkpoint_promotion(
     inference_audit = inference_audit or _load_json(
         OUTPUT_ROOT / f"round{round_idx}" / "student_predictions" / "inference_audit.json"
     )
-    if status == "promoted" and inference_audit.get("status") != "passed":
-        status = "competition_blocked"
-        reason = reason or "inference_provenance_audit_not_passed"
+    manifest_doc = _load_json(manifest_path) if manifest_path and manifest_path.exists() else {}
+    novelty = manifest_doc.get("novelty_audit") or {}
+    regression_path = (
+        OUTPUT_ROOT / f"round{round_idx}" / "metrics" / "quality_regression_audit.json"
+    )
+    regression = _load_json(regression_path)
+    if status == "promoted" and not regression:
+        regression = build_quality_regression_audit(round_idx)
+    positive_records = [
+        row for row in (manifest_doc.get("items") or [])
+        if row.get("supervision_type") == "positive"
+    ]
+    contract_ok = bool(positive_records) and all(
+        row.get("training_eligible") is True
+        and row.get("contract_version")
+        for row in positive_records
+    )
+    retention = mstep_result.get("retention_audit") or {}
+    decision = promotion_decision(
+        requested_status=status,
+        hard_checks={
+            "inference_provenance_audit": (
+                status != "promoted" or inference_audit.get("status") == "passed"
+            ),
+            "training_contract": status != "promoted" or contract_ok,
+            "checkpoint_eligible": (
+                status != "promoted"
+                or bool(
+                    mstep_result.get(
+                        "eligible_for_next_round_prompt_student",
+                        mstep_result.get("checkpoint_eligible_for_next_round", False),
+                    )
+                )
+            ),
+            "retention": (
+                status != "promoted"
+                or round_idx == 1
+                or retention.get("status") == "passed"
+            ),
+            "central_round_state_machine": (
+                status != "promoted"
+                or round_idx == 1
+                or (
+                    mstep_result.get("formal_state_machine") is True
+                    and bool(mstep_result.get("run_spec_sha256"))
+                )
+            ),
+        },
+        regression=regression if status == "promoted" else None,
+        novelty=novelty,
+    )
+    status = str(decision["status"])
+    if decision.get("failures"):
+        if (
+            "inference_provenance_audit" in decision["failures"]
+            and not reason
+        ):
+            reason = "inference_provenance_audit_not_passed"
+        else:
+            reason = reason or "central_promotion_gate:" + ",".join(decision["failures"])
     entry = {
         "round": round_idx,
         "status": status,
@@ -803,6 +987,9 @@ def record_checkpoint_promotion(
         "retention_audit": mstep_result.get("retention_audit"),
         "inference_audit_status": inference_audit.get("status"),
         "inference_run_id": (inference_audit.get("provenance") or {}).get("run_id"),
+        "promotion_decision": decision,
+        "quality_regression_audit": regression if regression else None,
+        "novelty_audit": novelty if novelty else None,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     registry = _load_promotion_registry()
@@ -904,6 +1091,34 @@ def build_retention_audit(
     source_hash = _sha256_file(checkpoint)
     provenance_hash = provenance.get("source_checkpoint_sha256") if isinstance(provenance, dict) else None
     hash_ok = bool(source_hash and (not provenance_hash or provenance_hash == source_hash))
+    objective_contribution_ratio = train_result.get(
+        "mean_retention_contribution_ratio"
+    )
+    contribution_ratio = train_result.get(
+        "mean_retention_gradient_contribution_ratio"
+    )
+    try:
+        contribution_ratio_float = float(contribution_ratio)
+    except Exception:
+        contribution_ratio_float = None
+    contribution_effective = bool(
+        contribution_ratio_float is not None
+        and math.isfinite(contribution_ratio_float)
+        and 0.15 <= contribution_ratio_float <= 0.30
+    )
+    anchor_foreground_dice = train_result.get(
+        "best_retention_anchor_foreground_dice",
+        train_result.get("mean_retention_anchor_foreground_dice"),
+    )
+    try:
+        anchor_foreground_dice_float = float(anchor_foreground_dice)
+    except Exception:
+        anchor_foreground_dice_float = None
+    anchor_drift_ok = bool(
+        anchor_foreground_dice_float is not None
+        and math.isfinite(anchor_foreground_dice_float)
+        and anchor_foreground_dice_float >= 0.998
+    )
     status = "passed"
     failures: list[str] = []
     if required:
@@ -913,6 +1128,12 @@ def build_retention_audit(
             failures.append("round2_plus_default_retention_weight_not_0_2")
         if not finite_nonzero:
             failures.append("mean_retention_loss_not_nonzero_finite")
+        if not contribution_effective:
+            failures.append("retention_contribution_not_in_0_15_to_0_30")
+        if not anchor_drift_ok:
+            failures.append("retention_anchor_foreground_dice_drop_exceeds_0_002")
+        if train_result.get("best_candidate_found") is not True:
+            failures.append("no_rolling_candidate_satisfied_retention_gate")
         if not checkpoint.exists() or not plans.exists():
             failures.append("retention_teacher_checkpoint_incomplete")
         if not hash_ok:
@@ -931,6 +1152,11 @@ def build_retention_audit(
         "official_retention_weight": configured_weight,
         "mean_retention_loss": mean_loss_float,
         "retention_loss_nonzero_finite": finite_nonzero,
+        "mean_retention_contribution_ratio": contribution_ratio_float,
+        "mean_retention_objective_contribution_ratio": objective_contribution_ratio,
+        "retention_contribution_effective": contribution_effective,
+        "mean_retention_anchor_foreground_dice": anchor_foreground_dice_float,
+        "retention_anchor_drift_ok": anchor_drift_ok,
         "source_checkpoint": str(checkpoint),
         "source_checkpoint_sha256": source_hash,
         "provenance_source_checkpoint_sha256": provenance_hash,
@@ -949,21 +1175,15 @@ def resolve_round_reference_root(reference_round: int) -> Path:
     if configured:
         candidates.append(Path(configured).expanduser())
     candidates.append(OUTPUT_ROOT / f"round{reference_round}" / "estep" / "annotation_versions")
-    if reference_round == 1:
-        candidates.append(
-            PROJECT_ROOT
-            / "outputs"
-            / "formal_round1_final_20260627"
-            / "round1"
-            / "estep"
-            / "annotation_versions"
-        )
     for candidate in candidates:
         if not candidate.is_absolute():
             candidate = PROJECT_ROOT / candidate
         if candidate.is_dir() and any(path.is_dir() for path in candidate.iterdir()):
             return candidate.resolve()
-    return candidates[0].resolve()
+    raise FileNotFoundError(
+        "Frozen round reference root is missing or empty; set "
+        "MEDAI_ROUND_REFERENCE_ROOT explicitly."
+    )
 
 
 def _previous_round_blocklist(round_idx: int) -> Path:
@@ -1059,8 +1279,8 @@ def materialize_student_competition_root(
         audit["failures"].append("competition_root_destination_mismatch")
         return audit
     expected_case_ids = list(case_list_provenance().get("case_ids") or [])
-    if len(expected_case_ids) != 10 or len(set(expected_case_ids)) != 10:
-        audit["failures"].append("exact_10case_scope_required")
+    if not expected_case_ids or len(set(expected_case_ids)) != len(expected_case_ids):
+        audit["failures"].append("nonempty_unique_case_scope_required")
         return audit
     route_rows = [row for row in doc.get("allowed_case_organs") or [] if isinstance(row, dict)]
     declared_count = int(doc.get("allowed_case_organ_count") or 0)
@@ -1170,24 +1390,38 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
     schema_version = int(doc.get("schema_version") or 0)
     if schema_version not in {2, 3} or doc.get("status") != "success":
         audit["reasons"].append("organ_allowlist_schema_or_status_invalid")
-    if int(doc.get("case_count") or 0) != 10 or int(doc.get("expected_case_count") or 0) != 10:
-        audit["reasons"].append("organ_allowlist_not_10_case_complete")
+    expected_case_count = len(load_case_rows())
+    expected_target_count = len(load_student_target_organs())
+    if (
+        int(doc.get("case_count") or 0) != expected_case_count
+        or int(doc.get("expected_case_count") or 0) != expected_case_count
+    ):
+        audit["reasons"].append("organ_allowlist_cohort_incomplete")
     if "pseudo-label consistency" not in str(doc.get("metric_interpretation") or ""):
         audit["reasons"].append("metric_interpretation_missing")
     routing = doc.get("routing_contract") or {}
     if (
-        int(routing.get("target_organs") or 0) != 373
-        or int(routing.get("resolved_organs") or 0) != 373
+        int(routing.get("target_organs") or 0) != expected_target_count
+        or int(routing.get("resolved_organs") or 0) != expected_target_count
         or int(routing.get("student_competition") or 0)
-        + int(routing.get("teacher_or_fov_negative") or 0) != 373
+        + int(routing.get("teacher_or_fov_negative") or 0)
+        != expected_target_count
     ):
-        audit["reasons"].append("round2_373_routing_contract_incomplete")
+        audit["reasons"].append("target_space_routing_contract_incomplete")
     routes = {
-        str(row.get("round2_route") or "")
+        str(
+            row.get("route")
+            or row.get("round_route")
+            or row.get("round2_route")
+            or ""
+        )
         for row in doc.get("organs", [])
         if isinstance(row, dict)
     }
-    if not routes.issubset({"student_competition", "teacher_or_fov_negative"}) or len(doc.get("organs", [])) != 373:
+    if (
+        not routes.issubset({"student_competition", "teacher_or_fov_negative"})
+        or len(doc.get("organs", [])) != expected_target_count
+    ):
         audit["reasons"].append("invalid_or_missing_per_organ_routes")
     allowed = {
         str(row.get("organ") or "")
@@ -2160,7 +2394,7 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
     """Build VoxTell-style prompt/mask manifest from current E-step pseudo-labels."""
     from cli_anything.medai.core.voxtell_student import VoxTellStudent
 
-    log("构建 3D prompt student 训练 manifest（373 exact organs）...")
+    log("构建 3D prompt student 训练 manifest（configured exact targets）...")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2186,6 +2420,37 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
         student_prediction_root=prev_student_root if prev_student_root and prev_student_root.exists() else None,
         historical_replay_manifests=historical_replay_manifests,
     )
+    if round_idx > 1:
+        previous_manifest_path = _round_manifest_path(round_idx - 1)
+        previous_manifest = _load_json(previous_manifest_path)
+        novelty = novelty_audit(
+            manifest.get("items") or [],
+            previous_manifest.get("items") or [],
+        )
+    else:
+        novelty = {
+            "stage": "continual_learning_novelty",
+            "status": "success",
+            "decision": "full_update",
+            "max_steps": 2000,
+            "weighted_change_ratio": 1.0,
+            "added_keys": [],
+            "changed_keys": [],
+            "removed_keys": [],
+        }
+    manifest["novelty_audit"] = novelty
+    manifest["round_seed"] = derive_round_seed(
+        os.getenv("MEDAI_RUN_ID", OUTPUT_ROOT.name), round_idx
+    )
+    manifest["training_contract_version"] = TRAINING_CONTRACT_VERSION
+    manifest["run_spec_path"] = str(
+        (OUTPUT_ROOT / f"round{round_idx}" / "run_spec.json").resolve()
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    write_contract_json(out_dir / "novelty_audit.json", novelty)
     prompt_audit = run_prompt_semantic_audit(round_idx, manifest_path)
     if prompt_audit.get("status") == "review" and not env_bool("MEDAI_ALLOW_PROMPT_SEMANTIC_WARNINGS", default=False):
         raise RuntimeError(
@@ -2817,6 +3082,41 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             json.dump(payload, f, indent=2, ensure_ascii=False)
         return payload
 
+    novelty = manifest.get("novelty_audit") or {}
+    if round_idx > 1 and novelty.get("decision") == "no_material_update":
+        previous_student_model = resolve_promoted_student_model(round_idx - 1)
+        if previous_student_model is None:
+            result.update({
+                "status": "failed",
+                "training_status": "failed_no_material_update_without_promoted_source",
+                "reason": "Novelty gate requested checkpoint reuse but no promoted previous checkpoint exists.",
+            })
+            return finish(result)
+        checkpoint = previous_student_model / "fold_0" / "checkpoint_final.pth"
+        result.update({
+            "status": "success",
+            "training_status": "no_material_update",
+            "novelty_audit": novelty,
+            "gpu_training_launched": False,
+            "inference_model_dir": str(previous_student_model),
+            "inference_checkpoint": str(checkpoint),
+            "finetuned_checkpoint": str(checkpoint),
+            "checkpoint_reused_from_round": round_idx - 1,
+            "checkpoint_eligible_for_next_round": True,
+            "eligible_for_next_round_prompt_student": True,
+            "retention_audit": {
+                "stage": "retention_audit",
+                "round": round_idx,
+                "required": False,
+                "status": "passed",
+                "reason": "no_material_update_reused_promoted_checkpoint",
+            },
+        })
+        log(
+            f"Round {round_idx} 新监督不足5%，跳过重复M-step并复用Round {round_idx - 1} checkpoint。"
+        )
+        return finish(result)
+
     if not mode_audit.get("valid"):
         reason = (
             "Deprecated mode official_voxtell_finetune is ambiguous. Use "
@@ -3056,7 +3356,31 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             1e-4 if PROMPT_TRAINING_PROFILE == "paper_aligned"
             else (CONSOLIDATION_LR if global_consolidation else LEARNING_RATE)
         ),
-        "MEDAI_MAX_STEPS": str(PROMPT_MAX_STEPS),
+        "MEDAI_MAX_STEPS": str(
+            min(
+                PROMPT_MAX_STEPS or int(novelty.get("max_steps") or 2000),
+                int(novelty.get("max_steps") or PROMPT_MAX_STEPS or 2000),
+            )
+        ),
+        "MEDAI_SEED": str(
+            manifest.get("round_seed")
+            or derive_round_seed(os.getenv("MEDAI_RUN_ID", OUTPUT_ROOT.name), round_idx)
+        ),
+        "MEDAI_PROTECTED_ORGANS": os.getenv(
+            "MEDAI_PROTECTED_ORGANS", ",".join(_formal_round1_key_organs())
+        ),
+        "MEDAI_NOVELTY_ORGANS": ",".join(
+            sorted(
+                {
+                    str(key[1])
+                    for key in (
+                        (novelty.get("changed_keys") or [])
+                        + (novelty.get("added_keys") or [])
+                    )
+                    if isinstance(key, list) and len(key) == 2
+                }
+            )
+        ),
         "MEDAI_TRAINABLE_SCOPE": "all_decoder" if PROMPT_TRAINING_PROFILE == "paper_aligned" else PROMPT_TRAINABLE_SCOPE,
         "MEDAI_BCE_POS_WEIGHT_CAP": "1" if PROMPT_TRAINING_PROFILE == "paper_aligned" else str(PROMPT_BCE_POS_CAP),
         "MEDAI_FOREGROUND_PROB": "0.85" if PROMPT_TRAINING_PROFILE == "paper_aligned" else os.getenv("MEDAI_FOREGROUND_PROB", "0.7"),
@@ -3067,6 +3391,10 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "MEDAI_SAVE_EVERY": str(PROMPT_SAVE_EVERY),
         "MEDAI_VOXTELL_MSTEP_MODE": str(mode),
         "MEDAI_CANONICAL_TRAINING_BACKEND": PROJECT_PROMPT_STUDENT,
+        "MEDAI_RUN_SPEC": str(
+            (OUTPUT_ROOT / f"round{round_idx}" / "run_spec.json").resolve()
+        ),
+        "MEDAI_FORMAL_STATE_MACHINE": "1",
     })
     start = time.time()
     proc = subprocess.run(
@@ -3099,10 +3427,17 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
     total_items = int(manifest.get("num_items") or 0)
     max_steps = int(train_result.get("max_steps") or 0)
     training_profile = str(train_result.get("training_profile") or "quality_weighted_ablation")
-    formal_min_steps = int(os.getenv("MEDAI_FORMAL_MIN_STEPS", "50000"))
+    # Novelty policy defines the formal step budget (0/500/2000). A legacy
+    # 50k minimum would incorrectly classify every valid continual update as a
+    # pilot and make it impossible to promote.
+    formal_min_steps = int(os.getenv("MEDAI_FORMAL_MIN_STEPS", "0"))
     pilot_short_training = bool(
         (trained_items and total_items and trained_items < total_items)
-        or (max_steps > 0 and max_steps < formal_min_steps)
+        or (
+            formal_min_steps > 0
+            and max_steps > 0
+            and max_steps < formal_min_steps
+        )
     )
     provenance_path = Path(str(train_result.get("training_provenance") or out_dir / "training_provenance.json"))
     provenance = _load_json(provenance_path) if provenance_path.exists() else {}
@@ -3125,6 +3460,9 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         "training_profile": training_profile,
         "training_provenance": str(provenance_path),
         "training_provenance_ok": provenance_ok,
+        "formal_state_machine": bool(train_result.get("formal_state_machine")),
+        "run_spec_path": train_result.get("run_spec_path"),
+        "run_spec_sha256": train_result.get("run_spec_sha256"),
         "mean_effective_loss_weight": train_result.get("mean_effective_loss_weight"),
         "effective_loss_weight_range": train_result.get("effective_loss_weight_range"),
         "stdout_tail": (proc.stdout or "")[-4000:],
@@ -3143,6 +3481,15 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         result["status"] = "failed"
         result["training_status"] = "completed_retention_audit_failed" if proc.returncode == 0 else result["training_status"]
         result["reason"] = ",".join(retention_audit.get("failures") or ["retention_audit_failed"])
+    organ_gradient_audit = train_result.get("organ_gradient_audit") or {}
+    result["organ_gradient_audit"] = organ_gradient_audit
+    if (
+        train_result.get("formal_state_machine") is True
+        and organ_gradient_audit.get("status") != "passed"
+    ):
+        result["status"] = "failed"
+        result["training_status"] = "completed_organ_gradient_audit_failed"
+        result["reason"] = "organ_gradient_share_below_policy_minimum"
     if canonical_training_backend == PROJECT_PROMPT_STUDENT:
         result["trainer"] = PROJECT_PROMPT_STUDENT
         result["uses_official_voxtell_model"] = True
@@ -3401,12 +3748,130 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
         "overall_std_dsc": round(float(arr_all.std()), 4),
         "top5_organs": sorted(organ_summary, key=lambda x: -x["mean_dsc"])[:5],
         "bottom5_organs": sorted(organ_summary, key=lambda x: x["mean_dsc"])[:5],
+        "organ_summary": organ_summary,
     }
     with open(metrics_dir / "round_metrics.json", "w") as f:
         json.dump(round_metrics, f, indent=2)
 
     log(f"Student 指标完成: {len(dice_rows)} 条, pseudo-consistency DSC={round_metrics['overall_mean_dsc']:.4f}")
     return round_metrics
+
+
+def build_quality_regression_audit(round_idx: int) -> dict:
+    """Compare a candidate to both the previous promoted round and baseline.
+
+    The metric family is frozen student-vs-reference pseudo consistency unless
+    the run supplies a trusted GT audit.  Cohort size and target count are read
+    from artifacts; no experiment-specific counts are assumed.
+    """
+    import csv as csv_mod
+    import statistics
+
+    output = OUTPUT_ROOT / f"round{round_idx}" / "metrics" / "quality_regression_audit.json"
+    if round_idx == 1:
+        audit = {
+            "stage": "quality_regression_audit",
+            "status": "passed",
+            "evidence_level": "baseline",
+            "mean_delta": 0.0,
+            "paired_median_delta": 0.0,
+            "worst_protected_delta": 0.0,
+            "pseudo_delta": 0.0,
+        }
+        write_contract_json(output, audit)
+        return audit
+
+    def load_rows(
+        index: int,
+        *,
+        trusted_gt: bool = False,
+    ) -> dict[tuple[str, str], float]:
+        path = (
+            OUTPUT_ROOT
+            / f"round{index}"
+            / "metrics"
+            / (
+                "evaluation_chain/evaluation_chain_per_case_organ.csv"
+                if trusted_gt else "student_dice_per_organ.csv"
+            )
+        )
+        value_column = "student_gt_dice" if trusted_gt else "dsc"
+        rows: dict[tuple[str, str], float] = {}
+        if not path.exists():
+            return rows
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv_mod.DictReader(handle):
+                try:
+                    value = row.get(value_column)
+                    if value not in {None, ""}:
+                        rows[(str(row["case_id"]), str(row["organ"]))] = float(value)
+                except Exception:
+                    continue
+        return rows
+
+    gt_configured = bool(os.getenv("MEDAI_GT_ROOT", "").strip())
+    current = load_rows(round_idx, trusted_gt=gt_configured)
+    previous = load_rows(round_idx - 1, trusted_gt=gt_configured)
+    baseline = load_rows(1, trusted_gt=gt_configured)
+    pseudo_current = load_rows(round_idx)
+    pseudo_previous = load_rows(round_idx - 1)
+    common_previous = sorted(set(current) & set(previous))
+    common_baseline = sorted(set(current) & set(baseline))
+    protected = set(
+        item.strip()
+        for item in os.getenv(
+            "MEDAI_PROTECTED_ORGANS", ",".join(_formal_round1_key_organs())
+        ).split(",")
+        if item.strip()
+    )
+    previous_deltas = [current[key] - previous[key] for key in common_previous]
+    baseline_deltas = [current[key] - baseline[key] for key in common_baseline]
+    organ_deltas: dict[str, list[float]] = defaultdict(list)
+    for key in common_previous:
+        organ_deltas[key[1]].append(current[key] - previous[key])
+    protected_means = [
+        sum(values) / len(values)
+        for organ, values in organ_deltas.items()
+        if organ in protected and values
+    ]
+    pseudo_common = sorted(set(pseudo_current) & set(pseudo_previous))
+    pseudo_deltas = [
+        pseudo_current[key] - pseudo_previous[key] for key in pseudo_common
+    ]
+    audit = {
+        "stage": "quality_regression_audit",
+        "status": "passed" if previous_deltas and baseline_deltas else "failed",
+        "evidence_level": (
+            "trusted_gt_final_promotion"
+            if gt_configured else "frozen_reference_anchor"
+        ),
+        "round": round_idx,
+        "paired_previous_count": len(previous_deltas),
+        "paired_baseline_count": len(baseline_deltas),
+        "mean_delta": (
+            min(
+                sum(previous_deltas) / len(previous_deltas),
+                sum(baseline_deltas) / len(baseline_deltas),
+            )
+            if previous_deltas and baseline_deltas else None
+        ),
+        "paired_median_delta": (
+            min(statistics.median(previous_deltas), statistics.median(baseline_deltas))
+            if previous_deltas and baseline_deltas else None
+        ),
+        "worst_protected_delta": min(protected_means) if protected_means else None,
+        "pseudo_delta": (
+            sum(pseudo_deltas) / len(pseudo_deltas) if pseudo_deltas else None
+        ),
+        "protected_organs": sorted(protected),
+        "reference_protocol": {
+            "case_list_sha256": _sha256_file(CASE_LIST),
+            "target_config_sha256": _sha256_file(PROMPT_TARGET_CONFIG),
+            "reference_round": 1,
+        },
+    }
+    write_contract_json(output, audit)
+    return audit
 
 
 def save_round_predictions(round_idx: int):
@@ -3948,9 +4413,16 @@ def main():
     log("=" * 60)
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    ensure_evaluation_protocol()
     total_start = time.time()
 
     for round_idx in range(1, NUM_ROUNDS + 1):
+        round_spec = write_round_run_spec(round_idx)
+        round_state = RoundStateMachine(
+            OUTPUT_ROOT / f"round{round_idx}" / "round_state.json",
+            round_spec,
+        )
+        round_state.advance("preflight", "passed")
         round_start = time.time()
 
         # 检查本轮是否已完全完成（断点续跑跳过整轮）
@@ -3985,12 +4457,23 @@ def main():
         # E-step
         estep_result = run_estep(round_idx)
         if estep_result.get("status") == "failed":
+            round_state.advance("estep", "failed", artifacts=estep_result)
             log(f"E-step 失败，跳过 Round {round_idx}")
             continue
+        round_state.advance("estep", "passed")
         label_scoring_dashboard = build_round_label_scoring_dashboard(round_idx)
 
         # 构建训练数据
         dataset_path = build_student_dataset(round_idx)
+        round_state.advance(
+            "manifest", "passed", artifacts={"path": str(dataset_path)}
+        )
+        manifest_for_state = _load_json(dataset_path)
+        round_state.advance(
+            "novelty_decision",
+            str((manifest_for_state.get("novelty_audit") or {}).get("decision") or "full_update"),
+            artifacts=manifest_for_state.get("novelty_audit") or {},
+        )
         is_consolidation = (round_idx % CONSOLIDATION_INTERVAL == 0)
         estep_gate = formal_estep_gate(round_idx, estep_result, dataset_path)
         gate_path = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "formal_gate.json"
@@ -4089,6 +4572,7 @@ def main():
             break
 
         if mstep_result.get("status") != "success":
+            round_state.advance("mstep", "failed", artifacts=mstep_result)
             log(f"❌ M-step 重试后仍失败，跳过 Round {round_idx} 的 student 推理和评估")
             log(f"   stderr: {mstep_result.get('stderr_tail','')[-500:]}")
             summary = {
@@ -4106,6 +4590,14 @@ def main():
             with open(summary_path, "w") as f:
                 json.dump(summary, f, indent=2, ensure_ascii=False)
             continue
+        round_state.advance(
+            "mstep",
+            str(mstep_result.get("training_status") or "passed"),
+            artifacts={
+                "checkpoint": mstep_result.get("inference_checkpoint"),
+                "retention_audit": mstep_result.get("retention_audit"),
+            },
+        )
 
         if (
             STUDENT_BACKEND == "voxtell_style_3d_prompt"
@@ -4119,6 +4611,7 @@ def main():
         else:
             # 先保存 student 推理结果，再做器官类型感知后处理，然后评估。
             save_student_predictions(round_idx)
+            round_state.advance("inference", "passed")
             postprocess_summary = apply_round_organ_type_postprocess(round_idx)
 
             # 评估 student 与 Round1 selected pseudo label 的一致性；不能当真实 accuracy。
@@ -4127,6 +4620,11 @@ def main():
             # volume/empty/false-positive/organ-group gates，并生成下一轮 blocklist。
             evaluation_chain = compute_round_evaluation_chain(round_idx)
             round_metrics["evaluation_chain"] = evaluation_chain
+            round_state.advance(
+                "evaluation",
+                str(evaluation_chain.get("status") or "completed"),
+                artifacts={"evaluation_chain": evaluation_chain},
+            )
 
         round_elapsed = time.time() - round_start
         log(f"Round {round_idx} 完成，耗时 {round_elapsed/3600:.1f} 小时")
@@ -4169,6 +4667,11 @@ def main():
             mstep_result=mstep_result,
             manifest_path=dataset_path,
             summary_path=summary_path,
+        )
+        round_state.advance(
+            "promotion",
+            str(promotion_entry.get("status") or "competition_blocked"),
+            artifacts={"registry_entry": promotion_entry},
         )
         summary["checkpoint_promotion"] = promotion_entry
         summary_path.parent.mkdir(parents=True, exist_ok=True)

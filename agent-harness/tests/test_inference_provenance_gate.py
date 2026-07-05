@@ -169,11 +169,12 @@ def test_case_scope_rejects_50_case_list_for_10_case_manifest(tmp_path: Path, mo
     audit = validate_case_scope(case_list, manifest)
 
     assert audit["status"] == "failed"
-    assert "expected_exactly_10_cases:50" in audit["failures"]
+    assert "manifest_case_scope_mismatch" in audit["failures"]
+    assert "estep_case_scope_mismatch" in audit["failures"]
     assert "manifest_case_scope_mismatch" in audit["failures"]
 
 
-def test_round1_reference_falls_back_to_formal_run(tmp_path: Path, monkeypatch) -> None:
+def test_round1_reference_requires_explicit_frozen_root(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(em, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(em, "OUTPUT_ROOT", tmp_path / "outputs" / "current")
     formal = (
@@ -186,6 +187,7 @@ def test_round1_reference_falls_back_to_formal_run(tmp_path: Path, monkeypatch) 
         / "case01"
     )
     formal.mkdir(parents=True)
+    monkeypatch.setenv("MEDAI_ROUND_REFERENCE_ROOT", str(formal.parent))
 
     resolved = em.resolve_round_reference_root(1)
 

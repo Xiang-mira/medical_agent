@@ -136,7 +136,7 @@ def test_allowlist_is_organ_level_and_fail_closed(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     report = json.loads((gate / "student_round2_organ_allowlist.json").read_text())
     decisions = {row["organ"]: row for row in report["organs"]}
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
     assert decisions["liver"]["decision"] == "allow"
     assert decisions["liver"]["round2_route"] == "student_competition"
     assert decisions["abdominal_cavity"]["decision"] == "block"
