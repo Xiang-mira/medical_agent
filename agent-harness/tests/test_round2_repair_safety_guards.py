@@ -1,4 +1,5 @@
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -53,3 +54,21 @@ def test_deprecated_round2_launchers_fail_closed(module_name):
 
     with pytest.raises(SystemExit, match="disabled"):
         module.fail_disabled_launcher()
+
+
+def test_pure_cached_round2_estep_launcher_is_audit_only():
+    text = Path("scripts/run_pure_cached_10case_round2_estep.py").read_text(encoding="utf-8")
+
+    assert "audit_only_launcher_disables_round2_mstep" in text
+    assert "audit_only_launcher_disables_student_inference" in text
+    assert "run_student_mstep(2" not in text
+    assert "save_student_predictions(2" not in text
+
+
+def test_round2_estep_readiness_audit_does_not_train_or_infer():
+    text = Path("scripts/audit_round2_estep_mstep_readiness.py").read_text(encoding="utf-8")
+
+    assert "run_student_mstep" not in text
+    assert "run_prompt_student_mstep" not in text
+    assert "save_student_predictions" not in text
+    assert '"mstep_allowed": False' in text

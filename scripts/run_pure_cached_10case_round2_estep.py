@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Start Round2 E-step for the pure-cached 10-case formal-lite EM run."""
+"""Run Round2 E-step/manifest audit for the pure-cached 10-case formal-lite run.
+
+This helper is intentionally audit-only.  It may rebuild the Round2 E-step,
+manifest, formal gate, and novelty audit, but it must not launch Round2 M-step
+or student inference.  Training is allowed only through the formal repaired
+Round2 M-step entry after a material-update novelty decision.
+"""
 from __future__ import annotations
 
 import json
@@ -123,34 +129,34 @@ def main() -> int:
     dashboard = em.build_round_label_scoring_dashboard(2)
     manifest = em.build_student_dataset(2)
     gate = em.formal_estep_gate(2, result, manifest)
-    mstep = {"status": "blocked", "reason": "round2_formal_gate_failed"}
-    prediction_stage = {"status": "not_run"}
-    if gate.get("status") == "success":
-        mstep = em.run_student_mstep(2, manifest, global_consolidation=False)
-        if mstep.get("status") == "success":
-            em.save_student_predictions(2)
-            prediction_stage = {
-                "status": "success",
-                "root": str(em.OUTPUT_ROOT / "round2" / "student_predictions"),
-            }
-        else:
-            prediction_stage = {
-                "status": "blocked",
-                "reason": "round2_mstep_failed_or_not_quality_eligible",
-            }
+    manifest_doc = json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else {}
+    novelty = manifest_doc.get("novelty_audit") or {}
+    mstep = {
+        "status": "not_run",
+        "reason": "audit_only_launcher_disables_round2_mstep",
+        "required_next_step": (
+            "Use the formal repaired Round2 M-step launcher only if novelty "
+            "decision is material_update and max_steps > 0."
+        ),
+        "novelty_audit": novelty,
+    }
+    prediction_stage = {
+        "status": "not_run",
+        "reason": "audit_only_launcher_disables_student_inference",
+    }
     final = {
         **preflight,
-        "stage": "round2_estep_mstep_and_student_refresh_completed",
+        "stage": "round2_estep_manifest_gate_novelty_audit_completed",
         "status": "success" if (
             result.get("status") == "success"
             and gate.get("status") == "success"
-            and mstep.get("status") == "success"
-            and prediction_stage.get("status") == "success"
+            and manifest.exists()
         ) else "failed",
         "estep_result": result,
         "label_scoring_dashboard": dashboard,
         "round2_manifest": str(manifest),
         "round2_formal_gate": gate,
+        "round2_novelty_audit": novelty,
         "round2_mstep": mstep,
         "round2_student_predictions": prediction_stage,
     }
