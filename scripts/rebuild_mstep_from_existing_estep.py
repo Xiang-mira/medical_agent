@@ -18,6 +18,12 @@ from cli_anything.medai.core.multimodel_loop import (
     _materialize_case_373_targets,
 )
 from cli_anything.medai.core.voxtell_student import VoxTellStudent
+from cli_anything.medai.core.continual_learning import (
+    canonicalize_training_record,
+    novelty_audit,
+    resolve_canonical_memory,
+    write_json,
+)
 
 
 def link_masks(source: Path, destination: Path) -> int:
@@ -79,6 +85,13 @@ def main() -> int:
     )
     ap.add_argument("--target-config", type=Path, default=ROOT / "configs/student_3d_prompt_target_organs.json")
     ap.add_argument("--model-dir", type=Path, default=ROOT / "checkpoints/VoxTell/voxtell_v1.1")
+    ap.add_argument(
+        "--historical-replay-manifest",
+        type=Path,
+        action="append",
+        default=[],
+        help="Promoted historical manifest to resolve through the shared memory contract.",
+    )
     ap.add_argument(
         "--absent-negative-training-weight",
         type=float,
@@ -240,7 +253,21 @@ def main() -> int:
         output_manifest=manifest_path,
         case_list=args.case_list.resolve() if args.case_list else None,
         require_images=True,
+        historical_replay_manifests=[
+            path.resolve() for path in args.historical_replay_manifest
+        ],
     )
+    previous_records: list[dict] = []
+    for historical_path in args.historical_replay_manifest:
+        historical = json.loads(historical_path.read_text(encoding="utf-8"))
+        previous_records.extend(
+            canonicalize_training_record(row, project_root=ROOT)
+            for row in (historical.get("items") or [])
+        )
+    previous_memory, _ = resolve_canonical_memory(previous_records)
+    novelty = novelty_audit(manifest.get("items") or [], previous_memory)
+    manifest["novelty_audit"] = novelty
+    write_json(manifest_path, manifest)
     report = {
         "stage": "rebuild_mstep_from_existing_estep",
         "status": "success",
@@ -252,11 +279,15 @@ def main() -> int:
         "source_cases_cache": str(source_cases),
         "replay_cases_cache": str(replay_cases),
         "manifest": str(manifest_path),
+        "historical_replay_manifests": [
+            str(path.resolve()) for path in args.historical_replay_manifest
+        ],
         "num_cases": len(cases),
         "absent_negative_targets": manifest.get("absent_negative_targets", 0),
         "absent_negative_training_weight": args.absent_negative_training_weight,
         "positive_items": manifest.get("num_positive_items", 0),
         "negative_items": manifest.get("num_negative_items", 0),
+        "novelty_audit": novelty,
         "cases": cases,
     }
     mstep.mkdir(parents=True, exist_ok=True)
