@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 PROJECT_PROMPT_STUDENT = "project_voxtell_prompt_distillation_student"
+PROJECT_PROMPT_STUDENT_ALIAS = "project_prompt_student"
 LEGACY_PROJECT_DISTILLATION = "project_distillation_experimental"
 OFFICIAL_VOXTELL_PRETRAINED = "official_voxtell_pretrained"
 OFFICIAL_NNUNET_BASELINE = "official_voxtell_nnunet_encoder_baseline"
@@ -80,6 +81,8 @@ def canonical_backend_name(name: str | None) -> str | None:
     if not name:
         return None
     value = str(name).strip()
+    if value == PROJECT_PROMPT_STUDENT_ALIAS:
+        return PROJECT_PROMPT_STUDENT
     if value == LEGACY_PROJECT_DISTILLATION:
         return PROJECT_PROMPT_STUDENT
     if value == LEGACY_OFFICIAL_NNUNET_FINETUNE:

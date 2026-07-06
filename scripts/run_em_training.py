@@ -55,6 +55,7 @@ from cli_anything.medai.core.backend_capabilities import (
     LEGACY_PROJECT_DISTILLATION,
     OFFICIAL_NNUNET_BASELINE,
     PROJECT_PROMPT_STUDENT,
+    PROJECT_PROMPT_STUDENT_ALIAS,
     backend_capability,
     canonical_backend_name,
     profile_runtime_policy,
@@ -65,6 +66,7 @@ from cli_anything.medai.core.continual_learning import (
     TRAINING_CONTRACT_VERSION,
     RoundStateMachine,
     RunSpec,
+    canonicalize_training_record,
     derive_round_seed,
     novelty_audit,
     promotion_decision,
@@ -72,7 +74,7 @@ from cli_anything.medai.core.continual_learning import (
     write_json as write_contract_json,
 )
 
-VOXTELL_MSTEP_MODES = {"manifest_only", PROJECT_PROMPT_STUDENT, LEGACY_PROJECT_DISTILLATION, OFFICIAL_NNUNET_BASELINE, LEGACY_OFFICIAL_NNUNET_FINETUNE}
+VOXTELL_MSTEP_MODES = {"manifest_only", PROJECT_PROMPT_STUDENT, PROJECT_PROMPT_STUDENT_ALIAS, LEGACY_PROJECT_DISTILLATION, OFFICIAL_NNUNET_BASELINE, LEGACY_OFFICIAL_NNUNET_FINETUNE}
 LEGACY_VOXTELL_MSTEP_MODE = LEGACY_AMBIGUOUS_OFFICIAL_FINETUNE
 OFFICIAL_VOXTELL_ENCODER_MODE = OFFICIAL_NNUNET_BASELINE
 QUALITY_CONTRACT_VERSION = "estep_quality_contract_v3"
@@ -2218,11 +2220,11 @@ def _round_teacher_cache_dirs(round_idx: int) -> dict[str, Path]:
 
 def run_estep(round_idx: int) -> dict:
     """
-    E-step：所有 teacher 模型推理，生成全身器官 pseudo-label。
+    E-step：teacher pseudo-label 生产/筛选，生成全身器官 pseudo-label。
     - 直接调用 Python 函数，无 subprocess timeout
     - 断点续跑：跳过已完成的 case
     - Round 2+ 由 OrganModelPerformance 追踪器自动选 top-2 teacher
-    - Round 2+ 把上一轮 student 预测注入 teacher 候选池，参与 DICE 竞争
+    - Round 2+ 复用 teacher cache；上一轮 student 预测只用于诊断，不能进入训练标签候选池
     """
     log(f"=== Round {round_idx} E-step 开始 ===")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep"
@@ -2265,8 +2267,8 @@ def run_estep(round_idx: int) -> dict:
             organ_list = json.load(f)
 
     # Round 2+：复用 Round 1 teacher cache，并把上一轮 best pseudo labels
-    # 和上一轮 student 预测都注入候选池。这样后续 EM 轮次不重跑 22 个 teacher。
-    # 这对应老师要求的“student 输出 vs 第一轮最好输出”竞争；student 不能自动覆盖 Round1。
+    # 作为 replay/reference 注入。上一轮 student 预测只能用于诊断/错误定位，
+    # 不能作为 E-step 候选或 M-step 标签来源。
     preseeded: dict = {}
     models_to_run = list(ALL_TEACHERS)
     if round_idx > 1:
@@ -2286,35 +2288,15 @@ def run_estep(round_idx: int) -> dict:
         prev_selected_dir = _round_selected_pseudo_label_root(round_idx - 1)
         if prev_selected_dir.exists() and any(prev_selected_dir.iterdir()):
             preseeded["round_prev_selected"] = prev_selected_dir
-            log(f"  注入上一轮 selected pseudo labels 参与竞争: {prev_selected_dir}")
+            log(f"  注入上一轮 selected pseudo labels 作为 replay/reference: {prev_selected_dir}")
         else:
             log(f"  上一轮 selected pseudo labels 不存在，跳过注入: {prev_selected_dir}")
 
         prev_pred_dir = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions_postprocessed"
-        prev_mstep_result = OUTPUT_ROOT / f"round{round_idx - 1}" / "mstep" / "voxtell_prompt_mstep_result.json"
-        prev_student_eligible = False
-        if prev_mstep_result.exists():
-            try:
-                prev_doc = json.loads(prev_mstep_result.read_text(encoding="utf-8"))
-                prev_student_eligible = bool(prev_doc.get("eligible_for_next_round_prompt_student", prev_doc.get("checkpoint_eligible_for_next_round")))
-            except Exception:
-                prev_student_eligible = False
-        if prev_student_eligible:
-            validated_prev_pred_dir, organ_gate_audit = _validated_student_prediction_root_for_next_round(round_idx)
-            if organ_gate_audit.get("status") != "success":
-                raise RuntimeError(
-                    "Round 2 student injection is fail-closed: organ-level 10-case allowlist "
-                    f"validation failed: {organ_gate_audit}"
-                )
-            preseeded["student_prev"] = validated_prev_pred_dir
-            log(
-                "  注入上一轮器官级白名单 student 预测参与竞争: "
-                f"{validated_prev_pred_dir}; organs={len(organ_gate_audit.get('allowed_organs', []))}, "
-                f"masks={organ_gate_audit.get('validated_masks')}, "
-                f"allowlist={organ_gate_audit.get('allowlist_path')}"
-            )
-        else:
-            log(f"  上一轮 student 预测未通过质量门槛或不存在，跳过注入: {prev_pred_dir}")
+        log(
+            "  上一轮 student 预测不注入 E-step 候选池；仅保留为诊断/错误定位输入: "
+            f"{prev_pred_dir}"
+        )
 
     log(f"  待推理模型: {len(models_to_run)}个, 候选teacher总数: {len(ALL_TEACHERS)}个, 器官: {len(organ_list)}个, "
         f"Student backend: {STUDENT_BACKEND}, "
@@ -2364,6 +2346,124 @@ def run_estep(round_idx: int) -> dict:
 
 
 # ── 数据集构建 ────────────────────────────────────────────────────────────────
+
+def build_material_update_audit(
+    round_idx: int,
+    manifest: dict,
+    previous_manifest: dict | None = None,
+    novelty: dict | None = None,
+) -> dict:
+    """Summarize whether Round N added reliable teacher supervision.
+
+    This audit is intentionally stricter than the generic novelty audit:
+    legal negatives and historical replay/carry-forward positives are useful
+    training context, but they must not by themselves trigger a Round2 M-step.
+    """
+    previous_keys: set[tuple[str, str]] = set()
+    previous_rows = (previous_manifest or {}).get("items", []) if isinstance(previous_manifest, dict) else []
+    for row in previous_rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            record = canonicalize_training_record(row, round_index=max(round_idx - 1, 1), project_root=PROJECT_ROOT)
+        except Exception:
+            continue
+        if record.get("supervision_type") == "positive" and record.get("training_eligible"):
+            previous_keys.add((str(record.get("case_id") or ""), str(record.get("organ") or "")))
+
+    items = manifest.get("items") or []
+    new_reliable_positive_keys: set[tuple[str, str]] = set()
+    old_replay_positive_keys: set[tuple[str, str]] = set()
+    legal_negative_count = 0
+    unusable_count = 0
+    student_source_positive_count = 0
+    provider_counts: dict[str, int] = defaultdict(int)
+    exclusion_reasons: dict[str, int] = defaultdict(int)
+
+    for row in items:
+        if not isinstance(row, dict):
+            unusable_count += 1
+            exclusion_reasons["not_a_manifest_row"] += 1
+            continue
+        try:
+            record = canonicalize_training_record(row, round_index=round_idx, project_root=PROJECT_ROOT)
+        except Exception as exc:
+            unusable_count += 1
+            exclusion_reasons[f"contract_error:{type(exc).__name__}"] += 1
+            continue
+        provider = str(record.get("origin_provider") or row.get("selected_model") or row.get("source_model") or "")
+        if provider:
+            provider_counts[provider] += 1
+        if record.get("supervision_type") == "negative":
+            if record.get("training_eligible"):
+                legal_negative_count += 1
+            else:
+                unusable_count += 1
+                for reason in record.get("contract_failures") or ["negative_contract_ineligible"]:
+                    exclusion_reasons[str(reason)] += 1
+            continue
+        if record.get("supervision_type") != "positive":
+            unusable_count += 1
+            exclusion_reasons["not_positive_or_negative"] += 1
+            continue
+        key = (str(record.get("case_id") or ""), str(record.get("organ") or ""))
+        provider_lower = provider.lower()
+        is_replay = bool(row.get("historical_replay")) or provider_lower in {
+            "round_prev_selected",
+            "previous_round_selected",
+            "previous_selected",
+            "selected_previous_round",
+        }
+        if "student" in provider_lower or str(record.get("source_role") or "") == "student":
+            student_source_positive_count += 1
+        if is_replay and "student" not in provider_lower:
+            # Carry-forward/replay positives are prior supervision memory.  They
+            # are useful context, but must not count as new material Round2
+            # evidence even when their provider alias intentionally obscures the
+            # original teacher provenance.
+            old_replay_positive_keys.add(key)
+            continue
+        if not record.get("training_eligible"):
+            unusable_count += 1
+            for reason in record.get("contract_failures") or ["positive_contract_ineligible"]:
+                exclusion_reasons[str(reason)] += 1
+            continue
+        if key in previous_keys:
+            old_replay_positive_keys.add(key)
+            continue
+        if record.get("source_role") == "teacher":
+            new_reliable_positive_keys.add(key)
+        else:
+            unusable_count += 1
+            exclusion_reasons[f"positive_source_role_forbidden:{record.get('source_role')}"] += 1
+
+    decision = (
+        "material_update"
+        if new_reliable_positive_keys and (novelty or {}).get("decision") != "no_material_update"
+        else "no_material_update"
+    )
+    max_steps = 0 if decision == "no_material_update" else (novelty or {}).get("max_steps")
+    audit = {
+        "stage": "round_material_update_audit",
+        "status": "success",
+        "round": round_idx,
+        "policy": "Only new reliable teacher positives can trigger Round2 M-step; replay positives and legal negatives do not trigger material update.",
+        "new_reliable_positive_count": len(new_reliable_positive_keys),
+        "new_reliable_positive_keys": [list(key) for key in sorted(new_reliable_positive_keys)],
+        "old_replay_positive_count": len(old_replay_positive_keys),
+        "old_replay_positive_keys": [list(key) for key in sorted(old_replay_positive_keys)],
+        "legal_negative_count": legal_negative_count,
+        "unusable_count": unusable_count,
+        "student_source_positive_count": student_source_positive_count,
+        "provider_counts": dict(sorted(provider_counts.items())),
+        "top_exclusion_reasons": sorted(exclusion_reasons.items(), key=lambda item: (-item[1], item[0]))[:50],
+        "novelty_decision": (novelty or {}).get("decision"),
+        "material_update_decision": decision,
+        "max_steps": max_steps,
+    }
+    out = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "material_update_audit.json"
+    write_contract_json(out, audit)
+    return audit
 
 def build_vista3d_dataset(round_idx: int) -> Path:
     """
@@ -2438,8 +2538,8 @@ def build_vista3d_dataset(round_idx: int) -> Path:
                     if real.exists():
                         mask_path = real
 
-                # 2. 当前 E-step selected pseudo label（可能来自 teacher、round_prev_selected 或 student_prev）。
-                # Student 预测必须先进入 E-step candidate selection，不能在 M-step 自动覆盖 teacher/Round1。
+                # 2. 当前 E-step selected pseudo label（来自 teacher 或 round_prev_selected replay）。
+                # Student 预测只允许做诊断，不能作为 E-step/M-step 标签来源。
                 if mask_path is None:
                     selected_cand = (
                         OUTPUT_ROOT / f"round{round_idx}" / "estep" /
@@ -2597,6 +2697,22 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
             manifest.get("items") or [],
             previous_manifest.get("items") or [],
         )
+        material_update = build_material_update_audit(
+            round_idx,
+            manifest,
+            previous_manifest=previous_manifest,
+            novelty=novelty,
+        )
+        if material_update.get("material_update_decision") == "no_material_update":
+            novelty = {
+                **novelty,
+                "decision": "no_material_update",
+                "max_steps": 0,
+                "material_update_policy": material_update.get("policy"),
+                "material_update_audit": str(
+                    OUTPUT_ROOT / f"round{round_idx}" / "estep" / "material_update_audit.json"
+                ),
+            }
     else:
         novelty = {
             "stage": "continual_learning_novelty",
@@ -2608,7 +2724,14 @@ def build_3d_prompt_student_dataset(round_idx: int) -> Path:
             "changed_keys": [],
             "removed_keys": [],
         }
+        material_update = build_material_update_audit(
+            round_idx,
+            manifest,
+            previous_manifest=None,
+            novelty=novelty,
+        )
     manifest["novelty_audit"] = novelty
+    manifest["material_update_audit"] = material_update
     manifest["round_seed"] = derive_round_seed(
         os.getenv("MEDAI_RUN_ID", OUTPUT_ROOT.name), round_idx
     )

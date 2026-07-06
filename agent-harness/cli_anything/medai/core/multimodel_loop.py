@@ -5057,6 +5057,13 @@ def run_multimodel_annotation_loop(
             route_info = (case_execution_plan.get("per_organ", {}) or {}).get(organ, {})
             eligible_teachers = set(route_info.get("eligible_teachers", []))
             preseeded_keys = set() if preseeded_parent_only else set((preseeded_model_dirs or {}).keys())
+            # Round2+ student predictions are diagnostic-only.  Even if a
+            # legacy caller passes ``student_prev`` in preseeded_model_dirs,
+            # do not allow it to become an E-step candidate.
+            preseeded_keys = {
+                key for key in preseeded_keys
+                if key != "student_prev" and "student" not in key.lower()
+            }
             if tracker and not tracker.should_run_all(organ):
                 top_models = tracker.get_top_k_models(organ, k=2)
                 organ_model_seg_dirs = {
@@ -5079,12 +5086,11 @@ def run_multimodel_annotation_loop(
                     if k in eligible_teachers or k in preseeded_keys
                 }
 
-            # Round 2+ is a challenger match, not a replay of the unchanged
-            # teacher tournament.  When the previous selected mask exists,
-            # compare it only with an available project-student challenger.
-            # If this organ has no qualified student mask, carry the previous
-            # winner forward.  Fall back to the teacher pool only when the
-            # previous round did not produce this organ.
+            # Round 2+ remains teacher-cache selection.  The previous selected
+            # mask is a replay/reference candidate, but it must not collapse the
+            # pool into a student-vs-previous challenger match.  If there are
+            # teacher candidates, keep them; if not, carry the previous selected
+            # mask forward as historical replay.
             if (
                 candidate_mode == "route_pruned_with_competition"
                 and "round_prev_selected" in organ_model_seg_dirs
@@ -5092,11 +5098,15 @@ def run_multimodel_annotation_loop(
                 previous_dir = organ_model_seg_dirs["round_prev_selected"]
                 previous_mask = _mask_path(previous_dir, organ)
                 if previous_mask.exists():
-                    challenger_dirs = {"round_prev_selected": previous_dir}
-                    student_dir = organ_model_seg_dirs.get("student_prev")
-                    if student_dir is not None and _mask_path(student_dir, organ).exists():
-                        challenger_dirs["student_prev"] = student_dir
-                    organ_model_seg_dirs = challenger_dirs
+                    teacher_dirs = {
+                        key: value
+                        for key, value in organ_model_seg_dirs.items()
+                        if key != "round_prev_selected" and "student" not in key.lower()
+                    }
+                    organ_model_seg_dirs = {
+                        **teacher_dirs,
+                        "round_prev_selected": previous_dir,
+                    } if teacher_dirs else {"round_prev_selected": previous_dir}
 
             _qc_t0 = _time.time()
             organ_worker_count = max(1, int(os.getenv("MEDAI_ORGAN_WORKER_COUNT", "4")))
