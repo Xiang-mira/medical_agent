@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Screen-friendly launcher for the Round2 +10 experiment chain.
+# Screen-friendly launcher for the Round2 +10 non-formal/bootstrap-only
+# experiment chain. The repaired formal Round2 EM path is
+# run_em_training.py with em_student_vs_previous.
 #
 # Usage inside screen:
 #   cd /home/teacher1/JHU-project1/medical_agent

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run the formal Round2 +10 experiment.
+"""Run the non-formal/bootstrap-only Round2 +10 experiment.
+
+This script explores the separate "add new cases plus teacher cache" axis. It
+is not the repaired formal EM Round2 path, which is implemented in
+``run_em_training.py`` as ``em_student_vs_previous``.
 
 This is the safe path for:
   1) reuse the promoted 10-case Round1 teacher cache/checkpoint,

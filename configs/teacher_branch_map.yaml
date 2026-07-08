@@ -41,9 +41,10 @@ airway_tree:
 aorta:
   fallback_teachers:
   - vista3d
+  - cads551
   - totalsegmentator
   freeze_backbone: true
-  teacher_model: vsmtrans
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
@@ -161,9 +162,10 @@ clavicula_right:
 colon:
   fallback_teachers:
   - vsmtrans
+  - epai_20250421
   - cads
   freeze_backbone: true
-  teacher_model: epai_20250421
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
@@ -199,8 +201,10 @@ costal_cartilages:
 duodenum:
   fallback_teachers:
   - vsmtrans
+  - epai_20250421
+  - cads553
   freeze_backbone: true
-  teacher_model: epai_20250421
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
@@ -240,9 +244,11 @@ femur_right:
   vista3d_label_id: 94
 gall_bladder:
   fallback_teachers:
+  - vsmtrans
+  - cads551
   - totalsegmentator
   freeze_backbone: true
-  teacher_model: vsmtrans
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
@@ -386,18 +392,22 @@ iliopsoas_right:
   update_mode: class_continual
   vista3d_label_id: 107
 inferior_vena_cava:
-  fallback_teachers: *id001
+  fallback_teachers:
+  - totalsegmentator
+  - cads551
+  - moose888
   freeze_backbone: true
-  teacher_model: totalsegmentator
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
   update_mode: class_continual
   vista3d_label_id: 7
 intestine:
-  fallback_teachers: *id001
+  fallback_teachers:
+  - vsmtrans
   freeze_backbone: true
-  teacher_model: totalsegmentator
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
@@ -552,9 +562,12 @@ pancreatic_pnet:
   update_mode: class_continual
   vista3d_label_id: 24
 portal_vein_and_splenic_vein:
-  fallback_teachers: *id001
+  fallback_teachers:
+  - vsmtrans
+  - cads551
+  - moose888
   freeze_backbone: true
-  teacher_model: totalsegmentator
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head
@@ -885,9 +898,10 @@ sternum:
   vista3d_label_id: 122
 stomach:
   fallback_teachers:
+  - vsmtrans
   - totalsegmentator
   freeze_backbone: true
-  teacher_model: vsmtrans
+  teacher_model: atlasnet
   trainable_scope:
   - class_embedding
   - point_head

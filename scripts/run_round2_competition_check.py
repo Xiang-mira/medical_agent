@@ -24,9 +24,9 @@ def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Validate Round2 student-vs-Round1 competition wiring.")
     ap.add_argument("--case-list", default=str(base / "case_list_subset.csv"))
     ap.add_argument("--round-prev-selected", default=str(base / "estep/annotation_versions"))
-    ap.add_argument("--student-prev", default=str(base / "student_real_infer_ministep/round1/student_predictions"))
+    ap.add_argument("--student-prev", default=str(base / "student_real_infer_ministep/round1/student_predictions_postprocessed"))
     ap.add_argument("--output-dir", default=str(ROOT / "outputs/audit_21_models/round2_competition_check"))
-    ap.add_argument("--models", default="mock_seg", help="Additional comma-separated comparator models.")
+    ap.add_argument("--models", default="", help="Debug-only additional comparator models; formal EM check leaves this empty.")
     ap.add_argument("--organs", default="liver")
     ap.add_argument("--critic-backend", default="stub", choices=["stub", "labelcritic"])
     ap.add_argument("--critic-base-url", default="http://localhost")
@@ -69,6 +69,8 @@ def main() -> int:
         device="cuda",
         resume=False,
         teacher_inference_mode="hierarchical_roi",
+        candidate_mode="em_student_vs_previous",
+        reuse_preseeded_only=True,
         preseeded_model_dirs={
             "round_prev_selected": Path(args.round_prev_selected).resolve(),
             "student_prev": Path(args.student_prev).resolve(),
@@ -108,7 +110,7 @@ def main() -> int:
     summary = {
         "stage": "round2_competition_check",
         "status": status,
-        "formal_experiment_eligible": args.critic_backend == "labelcritic" and "mock_seg" not in set(models),
+        "formal_experiment_eligible": args.critic_backend == "labelcritic" and not models,
         "formal_manifest_allowed": False,
         "scientific_training_evidence": False,
         "formal_exclusion_reason": "round2 competition check is wiring/audit only; mock_seg or stub outputs must not enter formal manifest",

@@ -22,6 +22,7 @@ import subprocess
 import sys
 import time
 import argparse
+import csv
 from collections import defaultdict
 from pathlib import Path
 
@@ -240,6 +241,7 @@ DEBUG_ALLOW_NO_LABELCRITIC = (
     or env_bool("MEDAI_FAST_SMOKE", default=False)
 )
 CANDIDATE_MODE = os.getenv("MEDAI_CANDIDATE_MODE", "route_pruned_with_competition").strip() or "route_pruned_with_competition"
+EM_STUDENT_VS_PREVIOUS_MODE = "em_student_vs_previous"
 TEACHER_INFERENCE_MODE = os.getenv("MEDAI_TEACHER_INFERENCE_MODE", "hierarchical_roi").strip() or "hierarchical_roi"
 ROI_MARGIN_MM = float(os.getenv("MEDAI_ROI_MARGIN_MM", "20"))
 
@@ -355,6 +357,13 @@ def dry_run_preflight(output_path: str | Path | None = None) -> dict:
         "labelcritic_enabled": ENABLE_CRITIC,
         "labelcritic_vllm_url": VLLM_BASE_URL,
         "labelcritic_vllm_online": vllm_ok,
+        "candidate_mode": CANDIDATE_MODE,
+        "round2_plus_candidate_mode": EM_STUDENT_VS_PREVIOUS_MODE,
+        "round2_plus_policy": (
+            "previous selected pseudo labels plus cleaned/postprocessed student "
+            "predictions; no formal teacher replay and no PanTS/annotation_folder "
+            "reference in the pseudo-label update gate"
+        ),
         "formal_estep_ready": bool((not ENABLE_CRITIC) or vllm_ok or DEBUG_ALLOW_NO_LABELCRITIC),
         "formal_estep_blocker": None if ((not ENABLE_CRITIC) or vllm_ok or DEBUG_ALLOW_NO_LABELCRITIC) else (
             f"LabelCritic/vLLM is offline at {VLLM_BASE_URL}; start vLLM or use MEDAI_DEBUG_ALLOW_NO_LABELCRITIC=1 for smoke/debug only."
@@ -963,10 +972,14 @@ def audit_prompt_student_predictions(
     checkpoint = Path(str(mstep.get("inference_checkpoint") or mstep.get("finetuned_checkpoint") or ""))
     expected = provenance or inference_run_provenance(round_idx, checkpoint=checkpoint)
     expected_case_ids = list(expected.get("expected_case_ids") or [])
+    metadata_dirs = {"parent_rois", "logs", "qc", "metrics"}
     actual_case_ids = sorted(
         path.name
         for path in root.iterdir()
-        if root.exists() and path.is_dir()
+        if root.exists()
+        and path.is_dir()
+        and path.name not in metadata_dirs
+        and not path.name.startswith(".")
     ) if root.exists() else []
     missing_cases = sorted(set(expected_case_ids) - set(actual_case_ids))
     unexpected_cases = sorted(set(actual_case_ids) - set(expected_case_ids))
@@ -1523,7 +1536,13 @@ def materialize_student_competition_root(
 
 
 def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[Path, dict]:
-    """Fail-closed validation for the organ-level Round2 student candidate pool."""
+    """Fail-closed validation for the Round2+ cleaned student candidate pool.
+
+    Formal EM does not use the legacy Dice/allowlist gate as a prerequisite:
+    Dice is routing metadata, while LabelCritic/verifier decides replacement.
+    The hard requirement here is provenance-safe postprocessed masks, never the
+    raw ``student_predictions`` root.
+    """
     previous = round_idx - 1
     source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_postprocessed"
     next_round_gate_dir = OUTPUT_ROOT / f"round{previous}" / "metrics" / f"student_round{round_idx}_gate"
@@ -1532,109 +1551,200 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
     if not default_allowlist.is_file():
         default_allowlist = legacy_gate_dir / "student_round2_organ_allowlist.json"
     allowlist_path = Path(os.getenv("MEDAI_STUDENT_ORGAN_ALLOWLIST", str(default_allowlist)))
-    if next_round_gate_dir.exists():
-        source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_round{round_idx}_competition"
-        if not source_root.exists():
-            source_root = OUTPUT_ROOT / f"round{previous}" / "student_predictions_postprocessed"
+    use_legacy_allowlist = env_bool("MEDAI_USE_LEGACY_STUDENT_COMPETITION_ALLOWLIST", default=False)
+    if use_legacy_allowlist and next_round_gate_dir.exists():
+        legacy_competition_root = OUTPUT_ROOT / f"round{previous}" / f"student_predictions_round{round_idx}_competition"
+        if legacy_competition_root.exists():
+            source_root = legacy_competition_root
     audit = {
         "status": "failed",
         "source_root": str(source_root),
         "allowlist_path": str(allowlist_path),
+        "legacy_allowlist_present": allowlist_path.is_file(),
+        "legacy_allowlist_used": use_legacy_allowlist,
+        "validation_policy": "postprocessed_student_candidate_root_not_dice_allowlist",
         "allowed_organs": [],
         "validated_masks": 0,
         "reasons": [],
     }
-    if not allowlist_path.is_file():
-        audit["reasons"].append("organ_allowlist_missing")
-        return source_root, audit
-    try:
-        doc = json.loads(allowlist_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        audit["reasons"].append(f"organ_allowlist_invalid_json:{exc}")
-        return source_root, audit
-    doc_postprocessed_root = Path(str(doc.get("postprocessed_root") or "")).expanduser()
-    if doc_postprocessed_root and str(doc_postprocessed_root) != ".":
-        if not doc_postprocessed_root.is_absolute():
-            doc_postprocessed_root = PROJECT_ROOT / doc_postprocessed_root
-        if doc_postprocessed_root.is_dir():
-            source_root = doc_postprocessed_root.resolve()
-            audit["source_root"] = str(source_root)
-    schema_version = int(doc.get("schema_version") or 0)
-    if schema_version not in {2, 3} or doc.get("status") != "success":
-        audit["reasons"].append("organ_allowlist_schema_or_status_invalid")
-    expected_case_count = len(load_case_rows())
-    expected_target_count = len(load_student_target_organs())
-    if (
-        int(doc.get("case_count") or 0) != expected_case_count
-        or int(doc.get("expected_case_count") or 0) != expected_case_count
-    ):
-        audit["reasons"].append("organ_allowlist_cohort_incomplete")
-    if "pseudo-label consistency" not in str(doc.get("metric_interpretation") or ""):
-        audit["reasons"].append("metric_interpretation_missing")
-    routing = doc.get("routing_contract") or {}
-    if (
-        int(routing.get("target_organs") or 0) != expected_target_count
-        or int(routing.get("resolved_organs") or 0) != expected_target_count
-        or int(routing.get("student_competition") or 0)
-        + int(routing.get("teacher_or_fov_negative") or 0)
-        != expected_target_count
-    ):
-        audit["reasons"].append("target_space_routing_contract_incomplete")
-    routes = {
-        str(
-            row.get("route")
-            or row.get("round_route")
-            or row.get("round2_route")
-            or ""
-        )
-        for row in doc.get("organs", [])
-        if isinstance(row, dict)
-    }
-    if (
-        not routes.issubset({"student_competition", "teacher_or_fov_negative"})
-        or len(doc.get("organs", [])) != expected_target_count
-    ):
-        audit["reasons"].append("invalid_or_missing_per_organ_routes")
-    allowed = {
-        str(row.get("organ") or "")
-        for row in doc.get("organs", [])
-        if isinstance(row, dict) and row.get("decision") == "allow"
-    }
-    if not allowed:
-        audit["reasons"].append("no_organs_allowed")
-    audit["allowed_organs"] = sorted(allowed)
+    doc = {}
+    allowed: set[str] = set()
     allowed_case_organs: set[tuple[str, str]] | None = None
-    if schema_version >= 3:
-        route_rows = [
-            row for row in doc.get("allowed_case_organs", [])
-            if isinstance(row, dict)
-        ]
-        allowed_case_organs = {
-            (str(row.get("case_id") or ""), str(row.get("organ") or ""))
-            for row in route_rows
-            if str(row.get("case_id") or "") and str(row.get("organ") or "")
+    if use_legacy_allowlist:
+        if not allowlist_path.is_file():
+            audit["reasons"].append("legacy_organ_allowlist_missing")
+            return source_root, audit
+        try:
+            doc = json.loads(allowlist_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            audit["reasons"].append(f"legacy_organ_allowlist_invalid_json:{exc}")
+            return source_root, audit
+        doc_postprocessed_root = Path(str(doc.get("postprocessed_root") or "")).expanduser()
+        if doc_postprocessed_root and str(doc_postprocessed_root) != ".":
+            if not doc_postprocessed_root.is_absolute():
+                doc_postprocessed_root = PROJECT_ROOT / doc_postprocessed_root
+            if doc_postprocessed_root.is_dir():
+                source_root = doc_postprocessed_root.resolve()
+                audit["source_root"] = str(source_root)
+        schema_version = int(doc.get("schema_version") or 0)
+        if schema_version not in {2, 3} or doc.get("status") != "success":
+            audit["reasons"].append("legacy_organ_allowlist_schema_or_status_invalid")
+        allowed = {
+            str(row.get("organ") or "")
+            for row in doc.get("organs", [])
+            if isinstance(row, dict) and row.get("decision") == "allow"
         }
-        audit["allowed_case_organs"] = sorted(f"{case_id}/{organ}" for case_id, organ in allowed_case_organs)
-        audit["allowed_case_organ_count"] = len(allowed_case_organs)
-        if int(doc.get("allowed_case_organ_count") or 0) != len(allowed_case_organs):
-            audit["reasons"].append("allowed_case_organ_count_mismatch")
-        if any(organ not in allowed for _, organ in allowed_case_organs):
-            audit["reasons"].append("case_organ_route_contains_non_allowlisted_organ")
+        audit["allowed_organs"] = sorted(allowed)
+        if schema_version >= 3:
+            route_rows = [
+                row for row in doc.get("allowed_case_organs", [])
+                if isinstance(row, dict)
+            ]
+            allowed_case_organs = {
+                (str(row.get("case_id") or ""), str(row.get("organ") or ""))
+                for row in route_rows
+                if str(row.get("case_id") or "") and str(row.get("organ") or "")
+            }
+            audit["allowed_case_organs"] = sorted(f"{case_id}/{organ}" for case_id, organ in allowed_case_organs)
+            audit["allowed_case_organ_count"] = len(allowed_case_organs)
+            if int(doc.get("allowed_case_organ_count") or 0) != len(allowed_case_organs):
+                audit["reasons"].append("allowed_case_organ_count_mismatch")
+            if any(organ not in allowed for _, organ in allowed_case_organs):
+                audit["reasons"].append("case_organ_route_contains_non_allowlisted_organ")
     if not source_root.is_dir():
         audit["reasons"].append("postprocessed_student_root_missing")
         return source_root, audit
+    if source_root.name == "student_predictions":
+        audit["reasons"].append("raw_student_root_forbidden")
+    summary_path = source_root / "organ_type_postprocess_summary.json"
+    summary = _load_json(summary_path)
+    if not summary:
+        fallback_summary = source_root / "student_containment_postprocess_summary.json"
+        summary = _load_json(fallback_summary)
+        summary_path = fallback_summary
+    audit["postprocess_summary_path"] = str(summary_path) if summary_path.exists() else ""
+    audit["postprocess_summary_status"] = summary.get("status") if isinstance(summary, dict) else None
+    summary_input_root: Path | None = None
+    if not summary or str(summary.get("status") or "") not in {"success"}:
+        audit["reasons"].append("postprocess_summary_missing_or_not_success")
+    else:
+        summary_output_root = Path(str(summary.get("output_root") or "")).expanduser()
+        if summary_output_root and str(summary_output_root) != ".":
+            if not summary_output_root.is_absolute():
+                summary_output_root = PROJECT_ROOT / summary_output_root
+            if summary_output_root.resolve() != source_root.resolve():
+                audit["reasons"].append("postprocess_summary_output_root_mismatch")
+        summary_input_root = Path(str(summary.get("input_root") or "")).expanduser()
+        if summary_input_root and str(summary_input_root) != ".":
+            if not summary_input_root.is_absolute():
+                summary_input_root = PROJECT_ROOT / summary_input_root
+            summary_input_root = summary_input_root.resolve()
+            if summary_input_root.resolve() == source_root.resolve():
+                audit["reasons"].append("postprocessed_root_aliases_raw_root")
+            if not summary_input_root.is_dir():
+                audit["reasons"].append("postprocess_summary_input_root_missing")
+            if summary_input_root.name != "student_predictions":
+                audit["reasons"].append("postprocess_input_not_raw_student_predictions_root")
+        else:
+            audit["reasons"].append("postprocess_summary_input_root_missing")
+    if summary_input_root is not None and summary_input_root.is_dir():
+        inference_summary = _load_json(summary_input_root / "student_inference_summary.json")
+        inference_audit = _load_json(summary_input_root / "inference_audit.json")
+        expected_case_provenance = case_list_provenance()
+        expected_target_hash = _sha256_file(PROMPT_TARGET_CONFIG)
+        audit["raw_inference_summary_path"] = str(summary_input_root / "student_inference_summary.json")
+        audit["raw_inference_audit_path"] = str(summary_input_root / "inference_audit.json")
+        audit["raw_inference_summary_status"] = inference_summary.get("status")
+        audit["raw_inference_audit_status"] = inference_audit.get("status")
+        if inference_summary.get("status") != "success":
+            audit["reasons"].append("raw_student_inference_summary_not_success")
+        if not bool(inference_summary.get("eligible_for_competition")):
+            audit["reasons"].append("raw_student_checkpoint_not_competition_eligible")
+        if inference_audit.get("status") != "passed":
+            audit["reasons"].append("raw_student_inference_audit_not_passed")
+        if inference_summary.get("case_list_sha256") != expected_case_provenance.get("sha256"):
+            audit["reasons"].append("raw_student_case_list_sha256_mismatch")
+        if inference_summary.get("target_config_sha256") != expected_target_hash:
+            audit["reasons"].append("raw_student_target_config_sha256_mismatch")
+        postprocessed_provenance = {
+            "run_id": inference_summary.get("run_id"),
+            "checkpoint_sha256": inference_summary.get("checkpoint_sha256"),
+            "case_list_sha256": inference_summary.get("case_list_sha256"),
+            "target_config_sha256": inference_summary.get("target_config_sha256"),
+            "expected_case_ids": expected_case_provenance.get("case_ids") or [],
+            "case_list_duplicate_case_ids": expected_case_provenance.get("duplicate_case_ids") or [],
+        }
+        postprocessed_prediction_audit = audit_prompt_student_predictions(
+            previous,
+            prediction_root=source_root,
+            provenance=postprocessed_provenance,
+            expected_organs=load_student_target_organs(),
+        )
+        audit["postprocessed_prediction_audit_status"] = postprocessed_prediction_audit.get("status")
+        audit["postprocessed_prediction_audit_failures"] = postprocessed_prediction_audit.get("failures", [])
+        if postprocessed_prediction_audit.get("status") != "passed":
+            audit["reasons"].append("postprocessed_student_prediction_contract_failed")
     expected_cases = load_case_rows()
     expected_case_ids = {str(row.get("case_id") or "") for row in expected_cases}
-    actual_case_ids = {p.name for p in source_root.iterdir() if p.is_dir()}
+    metadata_dirs = {"parent_rois", "logs", "qc", "metrics"}
+    actual_case_ids = {
+        p.name for p in source_root.iterdir()
+        if p.is_dir() and p.name not in metadata_dirs and not p.name.startswith(".")
+    }
     if actual_case_ids != expected_case_ids:
         audit["reasons"].append("postprocessed_case_set_mismatch")
     unexpected: list[str] = []
     missing: list[str] = []
     actual_allowed_pairs: set[tuple[str, str]] = set()
+    target_organs = set(load_student_target_organs())
+    if not use_legacy_allowlist:
+        per_mask_csv = source_root / "student_containment_postprocess_per_mask.csv"
+        audit["student_postprocess_per_mask_csv"] = str(per_mask_csv)
+        if not per_mask_csv.is_file():
+            audit["reasons"].append("student_postprocess_per_mask_csv_missing")
+        else:
+            high_risk_failed: list[str] = []
+            expected_pairs = {
+                (case_id, organ)
+                for case_id in expected_case_ids
+                for organ in target_organs
+            }
+            seen_pairs: set[tuple[str, str]] = set()
+            with per_mask_csv.open(encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    case_id = str(row.get("case_id") or "")
+                    output_path = str(row.get("output_path") or "")
+                    organ = (
+                        Path(output_path).name[:-7]
+                        if output_path.endswith(".nii.gz")
+                        else str(row.get("organ") or "")
+                    )
+                    pair = (case_id, organ)
+                    if pair in expected_pairs:
+                        seen_pairs.add(pair)
+                    status = str(row.get("status") or "")
+                    high_risk = any(
+                        token in organ.lower()
+                        for token in ("duct", "artery", "vein", "vessel", "cava", "lesion", "tumor")
+                    )
+                    if high_risk and (
+                        status in {"postprocess_failed", "fallback_original", "failed"}
+                        or status.startswith("warning_")
+                    ):
+                        high_risk_failed.append(f"{case_id}/{organ}:{status}")
+            missing_rows = sorted(f"{case_id}/{organ}" for case_id, organ in expected_pairs - seen_pairs)
+            if missing_rows:
+                audit["reasons"].append(f"student_postprocess_per_mask_rows_missing:{missing_rows[:20]}")
+            if high_risk_failed:
+                audit["high_risk_student_postprocess_blocked_from_labelcritic"] = high_risk_failed[:200]
     for case_id in sorted(expected_case_ids):
         case_dir = source_root / case_id
         names = {p.name[:-7] for p in case_dir.glob("*.nii.gz")}
-        if allowed_case_organs is None:
+        if not use_legacy_allowlist:
+            unexpected.extend(f"{case_id}/{name}" for name in sorted(names - target_organs))
+            missing.extend(f"{case_id}/{name}" for name in sorted(target_organs - names))
+            audit["validated_masks"] += len(names & target_organs)
+        elif allowed_case_organs is None:
             unexpected.extend(f"{case_id}/{name}" for name in sorted(names - allowed))
             missing.extend(f"{case_id}/{name}" for name in sorted(allowed - names))
             audit["validated_masks"] += len(names & allowed)
@@ -1651,17 +1761,16 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
                 for _, name in sorted(expected_pairs - actual_pairs)
             )
             audit["validated_masks"] += len(actual_pairs & allowed_case_organs)
-    if allowed_case_organs is not None and actual_allowed_pairs != allowed_case_organs:
+    if use_legacy_allowlist and allowed_case_organs is not None and actual_allowed_pairs != allowed_case_organs:
         audit["reasons"].append("allowed_case_organ_materialization_mismatch")
     if unexpected:
         audit["reasons"].append(f"non_allowlisted_masks_present:{unexpected[:20]}")
     if missing:
         audit["reasons"].append(f"allowlisted_masks_missing:{missing[:20]}")
-    raw_root_text = str(doc.get("raw_root") or "")
-    if Path(raw_root_text).resolve() == source_root.resolve() if raw_root_text else False:
-        audit["reasons"].append("postprocessed_root_aliases_raw_root")
     if "round2_aborted_" in str(source_root):
         audit["reasons"].append("aborted_round2_path_forbidden")
+    if int(audit["validated_masks"] or 0) <= 0:
+        audit["reasons"].append("no_postprocessed_student_masks_found")
     if not audit["reasons"]:
         audit["status"] = "success"
     return source_root, audit
@@ -1942,6 +2051,8 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         independent_family_count = int(row.get("independent_family_count") or 0)
         expected_presence = str(row.get("expected_presence") or "unknown")
         case_id = str(row.get("case_id") or "")
+        row_candidate_mode = str(row.get("candidate_mode") or "")
+        is_em_student_vs_previous = row_candidate_mode == EM_STUDENT_VS_PREVIOUS_MODE
         if (
             organ in key_organs
             and expected_presence == "expected_present"
@@ -1965,7 +2076,8 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
             model_names = [str(model) for model in candidate_models] if isinstance(candidate_models, list) else []
             has_voxtell = "official_voxtell_pretrained" in model_names
             has_teacher = any(model not in {"official_voxtell_pretrained", "fusion_consensus"} for model in model_names)
-            if not (has_voxtell and has_teacher):
+            has_em_pair = {"round_prev_selected", "student_prev"}.issubset(set(model_names))
+            if not (has_voxtell and has_teacher) and not (is_em_student_vs_previous and has_em_pair):
                 voxtell_competition_failures.append({
                     "case_id": case_id,
                     "organ": organ,
@@ -1981,7 +2093,18 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
                 shapekit_coverage_failures.append({"case_id": case_id, "organ": organ})
             critic_used = bool(row.get("labelcritic_compare_used"))
             critic_bypass = str(row.get("labelcritic_compare_skipped_reason") or "") == "high_agreement"
-            if candidate_count >= 2 and not (critic_used or critic_bypass):
+            em_student_qc_blocked = bool(
+                is_em_student_vs_previous
+                and str(row.get("selection_method") or "") == "em_student_vs_previous_carry_forward"
+                and any(
+                    str((candidate or {}).get("model") or "") == "student_prev"
+                    and str((candidate or {}).get("candidate_qc_status") or "").lower()
+                    not in {"", "pass", "passed", "success", "ok"}
+                    for candidate in candidate_predictions
+                    if isinstance(candidate, dict)
+                )
+            )
+            if candidate_count >= 2 and not (critic_used or critic_bypass or em_student_qc_blocked):
                 labelcritic_coverage_failures.append({
                     "case_id": case_id,
                     "organ": organ,
@@ -2152,9 +2275,11 @@ def _round_selected_pseudo_label_root(round_idx: int) -> Path:
 def _round_teacher_cache_dirs(round_idx: int) -> dict[str, Path]:
     """Return teacher prediction roots from an earlier E-step.
 
-    Round 2+ must reuse Round 1 teacher candidates instead of rerunning the
-    teacher pool. Under the hierarchical ROI pipeline, the reusable teacher
-    candidates live in:
+    This is a bootstrap/debug helper for legacy teacher-cache replay scripts.
+    The repaired formal Round2+ EM path does not use teacher cache as the
+    candidate pool; it compares ``round_prev_selected`` with cleaned
+    ``student_prev`` instead. Under the hierarchical ROI pipeline, reusable
+    teacher candidates live in:
 
         cases/<case_id>/hierarchical_predictions/<teacher>/segmentations
 
@@ -2220,11 +2345,12 @@ def _round_teacher_cache_dirs(round_idx: int) -> dict[str, Path]:
 
 def run_estep(round_idx: int) -> dict:
     """
-    E-step：teacher pseudo-label 生产/筛选，生成全身器官 pseudo-label。
+    E-step：生成/更新全身器官 pseudo-label。
     - 直接调用 Python 函数，无 subprocess timeout
     - 断点续跑：跳过已完成的 case
-    - Round 2+ 由 OrganModelPerformance 追踪器自动选 top-2 teacher
-    - Round 2+ 复用 teacher cache；上一轮 student 预测只用于诊断，不能进入训练标签候选池
+    - Round 1 bootstrap 使用 teacher candidates
+    - Round 2+ 使用上一轮 selected pseudo label 和上一轮 cleaned student prediction
+      做 verifier/LabelCritic 竞争；teacher cache 只保留为 bootstrap/debug artifact
     """
     log(f"=== Round {round_idx} E-step 开始 ===")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep"
@@ -2266,43 +2392,54 @@ def run_estep(round_idx: int) -> dict:
         with open(ALL_ORGANS) as f:
             organ_list = json.load(f)
 
-    # Round 2+：复用 Round 1 teacher cache，并把上一轮 best pseudo labels
-    # 作为 replay/reference 注入。上一轮 student 预测只能用于诊断/错误定位，
-    # 不能作为 E-step 候选或 M-step 标签来源。
     preseeded: dict = {}
     models_to_run = list(ALL_TEACHERS)
+    candidate_mode_for_call = CANDIDATE_MODE
     if round_idx > 1:
-        teacher_cache = _round_teacher_cache_dirs(1)
-        missing_teacher_cache = sorted(set(ALL_TEACHERS) - set(teacher_cache))
-        if TEACHER_INFERENCE_MODE == "hierarchical_roi" and not teacher_cache:
-            missing_teacher_cache = ["no_hierarchical_teacher_cache_found"]
-        if missing_teacher_cache:
-            raise RuntimeError(
-                "Round 2+ requires Round 1 teacher cache so teachers are not rerun. "
-                f"Missing cached teacher outputs for: {missing_teacher_cache}"
-            )
-        preseeded.update(teacher_cache)
+        # EM-style Round2+: the student prediction from the previous M-step is
+        # a formal candidate only after the dedicated postprocess/QC handoff.
+        # Fresh teacher replay is intentionally excluded from this path.
         models_to_run = []
-        log(f"  复用 Round 1 teacher cache: {len(teacher_cache)}/{len(ALL_TEACHERS)} 个 teacher")
+        candidate_mode_for_call = EM_STUDENT_VS_PREVIOUS_MODE
 
         prev_selected_dir = _round_selected_pseudo_label_root(round_idx - 1)
         if prev_selected_dir.exists() and any(prev_selected_dir.iterdir()):
             preseeded["round_prev_selected"] = prev_selected_dir
-            log(f"  注入上一轮 selected pseudo labels 作为 replay/reference: {prev_selected_dir}")
+            log(f"  注入上一轮 selected pseudo labels 作为 immutable pseudo reference: {prev_selected_dir}")
         else:
-            log(f"  上一轮 selected pseudo labels 不存在，跳过注入: {prev_selected_dir}")
+            raise RuntimeError(
+                "Round 2+ EM update requires previous selected pseudo labels. "
+                f"Missing or empty: {prev_selected_dir}"
+            )
 
-        prev_pred_dir = OUTPUT_ROOT / f"round{round_idx - 1}" / "student_predictions_postprocessed"
-        log(
-            "  上一轮 student 预测不注入 E-step 候选池；仅保留为诊断/错误定位输入: "
-            f"{prev_pred_dir}"
+        student_root, student_audit = _validated_student_prediction_root_for_next_round(round_idx)
+        audit_path = out_dir / "student_prev_candidate_validation.json"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        audit_path.write_text(
+            json.dumps(student_audit, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
         )
+        if student_audit.get("status") != "success":
+            raise RuntimeError(
+                "Round 2+ EM update requires cleaned/postprocessed student "
+                "predictions from the previous round before LabelCritic. "
+                f"Validation failed: {student_audit.get('reasons')} "
+                f"(audit={audit_path})"
+            )
+        preseeded["student_prev"] = student_root
+        log(f"  注入上一轮 postprocessed student predictions 作为 verifier candidate: {student_root}")
+        if CANDIDATE_MODE != EM_STUDENT_VS_PREVIOUS_MODE:
+            log(
+                f"  Round {round_idx} 强制使用 {EM_STUDENT_VS_PREVIOUS_MODE}，"
+                f"忽略 MEDAI_CANDIDATE_MODE={CANDIDATE_MODE!r} 的 teacher-replay 路径"
+            )
 
     log(f"  待推理模型: {len(models_to_run)}个, 候选teacher总数: {len(ALL_TEACHERS)}个, 器官: {len(organ_list)}个, "
         f"Student backend: {STUDENT_BACKEND}, "
         f"待处理 case: {max(expected_cases - len(done), 0)}/{expected_cases}, "
         f"ShapeKit: {'开' if ENABLE_SHAPEKIT else '关'}, "
-        f"LabelCritic: {'开' if enable_critic else '关'}"
+        f"LabelCritic: {'开' if enable_critic else '关'}, "
+        f"candidate_mode={candidate_mode_for_call}"
         + (f", preseeded: {','.join(preseeded.keys())}" if preseeded else ""))
     if any(LABELCRITIC_OPTIONS.values()):
         log(f"  LabelCritic diagnostic options: {LABELCRITIC_OPTIONS}")
@@ -2332,10 +2469,11 @@ def run_estep(round_idx: int) -> dict:
         resume=True,
         preseeded_model_dirs=preseeded if preseeded else None,
         labelcritic_options=LABELCRITIC_OPTIONS,
-        candidate_mode=CANDIDATE_MODE,
+        candidate_mode=candidate_mode_for_call,
         teacher_inference_mode=TEACHER_INFERENCE_MODE,
         roi_margin_mm=ROI_MARGIN_MM,
         reuse_preseeded_only=round_idx > 1,
+        use_annotation_folder_reference=False,
     )
 
     status = result.get("status", "unknown")
@@ -2353,13 +2491,16 @@ def build_material_update_audit(
     previous_manifest: dict | None = None,
     novelty: dict | None = None,
 ) -> dict:
-    """Summarize whether Round N added reliable teacher supervision.
+    """Summarize whether Round N added material supervision.
 
     This audit is intentionally stricter than the generic novelty audit:
     legal negatives and historical replay/carry-forward positives are useful
     training context, but they must not by themselves trigger a Round2 M-step.
+    Round2+ student positives count only when they are verifier/LabelCritic
+    accepted replacements of the previous selected pseudo label.
     """
     previous_keys: set[tuple[str, str]] = set()
+    previous_hash_by_key: dict[tuple[str, str], str | None] = {}
     previous_rows = (previous_manifest or {}).get("items", []) if isinstance(previous_manifest, dict) else []
     for row in previous_rows:
         if not isinstance(row, dict):
@@ -2369,10 +2510,13 @@ def build_material_update_audit(
         except Exception:
             continue
         if record.get("supervision_type") == "positive" and record.get("training_eligible"):
-            previous_keys.add((str(record.get("case_id") or ""), str(record.get("organ") or "")))
+            key = (str(record.get("case_id") or ""), str(record.get("organ") or ""))
+            previous_keys.add(key)
+            previous_hash_by_key[key] = record.get("mask_sha256")
 
     items = manifest.get("items") or []
     new_reliable_positive_keys: set[tuple[str, str]] = set()
+    verified_student_replacement_keys: set[tuple[str, str]] = set()
     old_replay_positive_keys: set[tuple[str, str]] = set()
     legal_negative_count = 0
     unusable_count = 0
@@ -2428,6 +2572,19 @@ def build_material_update_audit(
             for reason in record.get("contract_failures") or ["positive_contract_ineligible"]:
                 exclusion_reasons[str(reason)] += 1
             continue
+        is_verified_student = bool(record.get("verified_student_replacement")) or (
+            provider_lower == "student_prev"
+            and str(row.get("selection_method") or "") == "label_critic"
+            and str(row.get("selection_status") or "") == "selected"
+            and row.get("labelcritic_decisive") is True
+        )
+        if is_verified_student:
+            previous_hash = previous_hash_by_key.get(key)
+            if previous_hash and previous_hash == record.get("mask_sha256"):
+                old_replay_positive_keys.add(key)
+            else:
+                verified_student_replacement_keys.add(key)
+            continue
         if key in previous_keys:
             old_replay_positive_keys.add(key)
             continue
@@ -2437,19 +2594,26 @@ def build_material_update_audit(
             unusable_count += 1
             exclusion_reasons[f"positive_source_role_forbidden:{record.get('source_role')}"] += 1
 
+    material_positive_keys = new_reliable_positive_keys | verified_student_replacement_keys
     decision = (
         "material_update"
-        if new_reliable_positive_keys and (novelty or {}).get("decision") != "no_material_update"
+        if material_positive_keys
         else "no_material_update"
     )
-    max_steps = 0 if decision == "no_material_update" else (novelty or {}).get("max_steps")
+    max_steps = 0 if decision == "no_material_update" else ((novelty or {}).get("max_steps") or 500)
     audit = {
         "stage": "round_material_update_audit",
         "status": "success",
         "round": round_idx,
-        "policy": "Only new reliable teacher positives can trigger Round2 M-step; replay positives and legal negatives do not trigger material update.",
+        "policy": (
+            "Only new reliable Round1 teacher positives or LabelCritic-accepted "
+            "student_prev replacements can trigger M-step; round_prev_selected "
+            "carry-forward and legal negatives do not trigger material update."
+        ),
         "new_reliable_positive_count": len(new_reliable_positive_keys),
         "new_reliable_positive_keys": [list(key) for key in sorted(new_reliable_positive_keys)],
+        "verified_student_replacement_count": len(verified_student_replacement_keys),
+        "verified_student_replacement_keys": [list(key) for key in sorted(verified_student_replacement_keys)],
         "old_replay_positive_count": len(old_replay_positive_keys),
         "old_replay_positive_keys": [list(key) for key in sorted(old_replay_positive_keys)],
         "legal_negative_count": legal_negative_count,
@@ -2538,8 +2702,10 @@ def build_vista3d_dataset(round_idx: int) -> Path:
                     if real.exists():
                         mask_path = real
 
-                # 2. 当前 E-step selected pseudo label（来自 teacher 或 round_prev_selected replay）。
-                # Student 预测只允许做诊断，不能作为 E-step/M-step 标签来源。
+                # 2. Legacy VISTA3D consumes the current E-step selected pseudo
+                # label. In the formal prompt-student path, verified student
+                # replacements have already been written into this selected-label
+                # root; raw student_predictions are never read directly.
                 if mask_path is None:
                     selected_cand = (
                         OUTPUT_ROOT / f"round{round_idx}" / "estep" /
@@ -4535,6 +4701,7 @@ def apply_round_organ_type_postprocess(round_idx: int) -> dict:
         "--output-root", str(output_root),
         "--case-list", str(CASE_LIST),
         "--policy", str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"),
+        "--target-config", str(PROMPT_TARGET_CONFIG),
         "--parent-root", str(_round_selected_pseudo_label_root(round_idx)),
         "--parent-root", str(_round_selected_pseudo_label_root(max(round_idx - 1, 1))),
         "--overwrite",
@@ -4940,6 +5107,7 @@ def main():
                 "metrics": round_metrics,
                 "label_scoring_dashboard": label_scoring_dashboard,
                 "round_elapsed_hours": round(round_elapsed / 3600, 2),
+                "stopped_early_reason": "no_material_update_converged_no_new_student_candidate",
                 "success": True,
             }
             promotion_entry = record_checkpoint_promotion(
@@ -4959,8 +5127,11 @@ def main():
             summary_path.parent.mkdir(parents=True, exist_ok=True)
             with open(summary_path, "w") as f:
                 json.dump(summary, f, indent=2, ensure_ascii=False)
-            log(f"Round {round_idx} no-material summary 已保存: {summary_path}")
-            continue
+            log(
+                f"Round {round_idx} no-material summary 已保存: {summary_path}；"
+                "EM 已无新的 verified student replacement，本次运行提前收敛停止。"
+            )
+            break
 
         if (
             STUDENT_BACKEND == "voxtell_style_3d_prompt"

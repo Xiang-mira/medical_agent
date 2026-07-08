@@ -27,6 +27,52 @@
     "pancreatic_cyst": 24,
     "pancreatic_pnet": 25
   },
-  "source": "ATLAS-Net model card / Another version of ShapeKit.docx",
-  "note": "25-class abdominal CT label map."
+  "source": "ATLAS-Net Hugging Face model card and label map: https://huggingface.co/Koushik45048545309/Atlas-Net",
+  "note": "25-class abdominal CT label map. Formal routing uses foreground organs/ducts/vessels/stent that exist in the 373 target space; pancreatic tumor/cyst labels are retained for raw export/debug, not formal 373 routing.",
+  "recommended_teacher_priority_organs": [
+    "colon",
+    "stomach",
+    "duodenum",
+    "intestine",
+    "common_bile_duct",
+    "pancreatic_duct",
+    "cbd_stent",
+    "celiac_aa (celiac_artery)",
+    "superior_mesenteric_artery",
+    "portal_vein_and_splenic_vein",
+    "renal_vein_left",
+    "renal_vein_right",
+    "inferior_vena_cava",
+    "aorta",
+    "gall_bladder"
+  ],
+  "formal_373_routing_organs": [
+    "adrenal_gland_left",
+    "adrenal_gland_right",
+    "aorta",
+    "cbd_stent",
+    "celiac_aa (celiac_artery)",
+    "colon",
+    "common_bile_duct",
+    "duodenum",
+    "gall_bladder",
+    "inferior_vena_cava",
+    "intestine",
+    "kidney_left",
+    "kidney_right",
+    "liver",
+    "pancreas",
+    "pancreatic_duct",
+    "portal_vein_and_splenic_vein",
+    "renal_vein_left",
+    "renal_vein_right",
+    "spleen",
+    "stomach",
+    "superior_mesenteric_artery"
+  ],
+  "formal_373_excluded_labels": [
+    "pancreatic_pdac",
+    "pancreatic_cyst",
+    "pancreatic_pnet"
+  ]
 }

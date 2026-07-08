@@ -85,31 +85,76 @@ def test_round2_estep_readiness_audit_does_not_train_or_infer():
     assert '"mstep_allowed": False' in text
 
 
-def test_round2_estep_never_preseeds_student_prev():
+def test_round2_estep_preseeds_cleaned_student_prev_for_em_update():
     text = Path("scripts/run_em_training.py").read_text(encoding="utf-8")
 
-    assert 'preseeded["student_prev"]' not in text
-    assert "student 预测不注入 E-step 候选池" in text
+    assert 'preseeded["student_prev"]' in text
+    assert "EM_STUDENT_VS_PREVIOUS_MODE" in text
+    assert "student 预测不注入 E-step 候选池" not in text
+    assert "Round 2+ requires Round 1 teacher cache" not in text
     assert "material_update_audit.json" in text
+    assert "no_material_update_converged_no_new_student_candidate" in text
 
 
-def test_multimodel_loop_filters_legacy_student_prev_challenger():
+def test_multimodel_loop_has_formal_student_vs_previous_mode():
     text = Path("agent-harness/cli_anything/medai/core/multimodel_loop.py").read_text(encoding="utf-8")
 
-    assert 'key != "student_prev"' in text
-    assert 'challenger_dirs["student_prev"]' not in text
-    assert "student-vs-previous challenger match" in text
+    assert 'EM_STUDENT_VS_PREVIOUS_MODE = "em_student_vs_previous"' in text
+    assert '{"round_prev_selected", "student_prev"}' in text
+    assert "student_prev cannot auto-overwrite" in text
+    assert 'key != "student_prev"' in text  # legacy modes still filter diagnostic student masks.
 
 
-def _save_mask(path: Path, *, empty: bool = False) -> Path:
+def test_em_student_gate_requires_decisive_labelcritic() -> None:
+    from cli_anything.medai.core.multimodel_loop import _apply_em_student_vs_previous_gate
+
+    previous = {
+        "model": "round_prev_selected",
+        "candidate_exists": True,
+        "prediction": "/tmp/previous.nii.gz",
+        "candidate_qc_status": "pass",
+    }
+    student = {
+        "model": "student_prev",
+        "candidate_exists": True,
+        "prediction": "/tmp/student.nii.gz",
+        "candidate_qc_status": "pass",
+        "eligible_for_labelcritic": True,
+    }
+    selection = {
+        "selection_method": "label_critic",
+        "selection_status": "selected",
+        "selected_model": "student_prev",
+        "selected_prediction": "/tmp/student.nii.gz",
+    }
+
+    selected, gated = _apply_em_student_vs_previous_gate(
+        selected=student,
+        selection=selection,
+        candidates=[previous, student],
+    )
+    assert selected == previous
+    assert gated["selection_method"] == "em_student_vs_previous_carry_forward"
+
+    selected, gated = _apply_em_student_vs_previous_gate(
+        selected=student,
+        selection={**selection, "labelcritic_decisive": True},
+        candidates=[previous, student],
+    )
+    assert selected == student
+    assert gated["verified_student_replacement"] is True
+
+
+def _save_mask(path: Path, *, empty: bool = False, shift: int = 0) -> Path:
     array = np.zeros((4, 4, 4), dtype=np.float32)
     if not empty:
-        array[1:3, 1:3, 1:3] = 1.0
+        start = 1 if shift == 0 else 0
+        array[start:start + 2, 1:3, 1:3] = 1.0
     nib.save(nib.Nifti1Image(array, np.eye(4)), path)
     return path
 
 
-def test_material_update_audit_requires_new_teacher_positive(tmp_path: Path, monkeypatch):
+def test_material_update_audit_carry_forward_previous_is_not_material(tmp_path: Path, monkeypatch):
     import scripts.run_em_training as em
 
     monkeypatch.setattr(em, "OUTPUT_ROOT", tmp_path)
@@ -173,11 +218,129 @@ def test_material_update_audit_requires_new_teacher_positive(tmp_path: Path, mon
     )
 
     assert audit["new_reliable_positive_count"] == 0
+    assert audit["verified_student_replacement_count"] == 0
     assert audit["old_replay_positive_count"] == 1
     assert audit["legal_negative_count"] == 1
     assert audit["material_update_decision"] == "no_material_update"
     assert audit["max_steps"] == 0
     assert (tmp_path / "round2" / "estep" / "material_update_audit.json").is_file()
+
+
+def test_material_update_audit_counts_verified_student_replacement(tmp_path: Path, monkeypatch):
+    import scripts.run_em_training as em
+
+    monkeypatch.setattr(em, "OUTPUT_ROOT", tmp_path)
+    image = _save_mask(tmp_path / "ct.nii.gz")
+    old_mask = _save_mask(tmp_path / "old_liver.nii.gz")
+    student_mask = _save_mask(tmp_path / "student_liver.nii.gz", shift=1)
+    previous = {
+        "items": [
+            {
+                "case_id": "case001",
+                "organ": "liver",
+                "image": str(image),
+                "mask": str(old_mask),
+                "target_type": "positive_hard",
+                "grade": "A",
+                "training_weight": 1.0,
+                "distillation_eligible": True,
+                "selected_model": "teacher_a",
+                "selected_candidate_qc_status": "pass",
+                "identity_status": "valid",
+            }
+        ]
+    }
+    current = {
+        "items": [
+            {
+                "case_id": "case001",
+                "organ": "liver",
+                "image": str(image),
+                "mask": str(student_mask),
+                "target_type": "positive_hard",
+                "grade": "A",
+                "training_weight": 1.0,
+                "distillation_eligible": True,
+                "selected_model": "student_prev",
+                "source_model": "student_prev",
+                "selection_method": "label_critic",
+                "selection_status": "selected",
+                "labelcritic_decisive": True,
+                "labelcritic_records": [{"status": "success", "decision": {"winner": "b"}}],
+                "selected_candidate_qc_status": "pass",
+                "identity_status": "valid",
+            }
+        ]
+    }
+    audit = em.build_material_update_audit(
+        2,
+        current,
+        previous_manifest=previous,
+        novelty={"decision": "limited_update", "max_steps": 500},
+    )
+
+    assert audit["verified_student_replacement_count"] == 1
+    assert audit["verified_student_replacement_keys"] == [["case001", "liver"]]
+    assert audit["material_update_decision"] == "material_update"
+    assert audit["max_steps"] == 500
+
+
+def test_material_update_audit_rejects_nondecisive_student_replacement(tmp_path: Path, monkeypatch):
+    import scripts.run_em_training as em
+
+    monkeypatch.setattr(em, "OUTPUT_ROOT", tmp_path)
+    image = _save_mask(tmp_path / "ct.nii.gz")
+    old_mask = _save_mask(tmp_path / "old_liver.nii.gz")
+    student_mask = _save_mask(tmp_path / "student_liver.nii.gz", shift=1)
+    previous = {
+        "items": [
+            {
+                "case_id": "case001",
+                "organ": "liver",
+                "image": str(image),
+                "mask": str(old_mask),
+                "target_type": "positive_hard",
+                "grade": "A",
+                "training_weight": 1.0,
+                "distillation_eligible": True,
+                "selected_model": "teacher_a",
+                "selected_candidate_qc_status": "pass",
+                "identity_status": "valid",
+            }
+        ]
+    }
+    current = {
+        "items": [
+            {
+                "case_id": "case001",
+                "organ": "liver",
+                "image": str(image),
+                "mask": str(student_mask),
+                "target_type": "positive_hard",
+                "grade": "A",
+                "training_weight": 1.0,
+                "distillation_eligible": True,
+                "selected_model": "student_prev",
+                "source_model": "student_prev",
+                "selection_method": "label_critic",
+                "selection_status": "selected",
+                "labelcritic_records": [{"status": "success", "decision": {"winner": "b"}}],
+                "selected_candidate_qc_status": "pass",
+                "identity_status": "valid",
+            }
+        ]
+    }
+
+    audit = em.build_material_update_audit(
+        2,
+        current,
+        previous_manifest=previous,
+        novelty={"decision": "limited_update", "max_steps": 500},
+    )
+
+    assert audit["verified_student_replacement_count"] == 0
+    assert audit["material_update_decision"] == "no_material_update"
+    assert audit["max_steps"] == 0
 
 
 def test_round2_plus10_case_plan_is_read_only_contract():

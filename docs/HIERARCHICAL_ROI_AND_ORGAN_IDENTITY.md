@@ -51,8 +51,11 @@ child from being accepted in the liver region while preserving the speed benefit
 when the merged prediction remains anatomically scoped. Hard QC and exact
 canonical identity checks still apply after restoration.
 
-Round 2 and later reuse the new Round 1 teacher cache. Student inference still
-runs after each M-step because the student checkpoint changes.
+Round 1 teacher caches remain bootstrap/debug artifacts. In the repaired formal
+Round2+ EM path, the previous selected pseudo label is carried as the immutable
+pseudo reference, and the previous round cleaned student prediction enters only
+as a verifier-gated candidate. Student inference still runs after each M-step
+because the student checkpoint changes.
 
 ## GPU resource gate
 

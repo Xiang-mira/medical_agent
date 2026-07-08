@@ -39,9 +39,9 @@
       "Totalsegmentator (headneck_muscles)"
     ],
     "aorta": [
+      "Dataset001_ATLASNet",
       "VISTA3D",
-      "CADS551",
-      "Dataset001_ATLASNet"
+      "CADS551"
     ],
     "arm_left": [
       "SAROS nnUNet"
@@ -170,12 +170,12 @@
       "Totalsegmentator (brain_structures)"
     ],
     "cbd_stent": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "celiac_aa (celiac_artery)": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "celiac_trunk": [
       "VSmTrans"
@@ -215,17 +215,17 @@
       "CADS558"
     ],
     "colon": [
+      "Dataset001_ATLASNet",
       "VSmTrans",
       "ePAI",
-      "CADS553",
-      "Dataset001_ATLASNet"
+      "CADS553"
     ],
     "colostomy_bag": [
       "CADS556"
     ],
     "common_bile_duct": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "common_carotid_artery_left": [
       "VISTA3D"
@@ -267,11 +267,11 @@
       "Totalsegmentator (head_muscles)"
     ],
     "duodenum": [
+      "Dataset001_ATLASNet",
       "VSmTrans",
       "ePAI",
       "CADS553",
-      "MOOSE3.0 (clin_ct_digestive)",
-      "Dataset001_ATLASNet"
+      "MOOSE3.0 (clin_ct_digestive)"
     ],
     "esophagus": [
       "VSmTrans",
@@ -328,10 +328,10 @@
       "Totalsegmentator (brain_structures)"
     ],
     "gall_bladder": [
+      "Dataset001_ATLASNet",
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_organs)",
-      "Dataset001_ATLASNet"
+      "MOOSE3.0 (clin_ct_organs)"
     ],
     "gland_structure": [
       "CADS559"
@@ -489,10 +489,10 @@
       "Totalsegmentator (oculomotor_muscles)"
     ],
     "inferior_vena_cava": [
+      "Dataset001_ATLASNet",
       "Totalsegmentator(total)",
       "CADS551",
-      "MOOSE3.0 (clin_ct_cardiac)",
-      "Dataset001_ATLASNet"
+      "MOOSE3.0 (clin_ct_cardiac)"
     ],
     "insular_cortex": [
       "Totalsegmentator (brain_structures)"
@@ -516,8 +516,8 @@
       "Totalsegmentator(headneck_bones_vessels)"
     ],
     "intestine": [
-      "VSmTrans",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "VSmTrans"
     ],
     "kidney": [
       "VISTA3D"
@@ -800,8 +800,8 @@
       "Dataset224_AbdomenAtlas1.1"
     ],
     "pancreatic_duct": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "parietal_lobe": [
       "Totalsegmentator (brain_structures)"
@@ -846,10 +846,10 @@
       "Totalsegmentator (headneck_muscles)"
     ],
     "portal_vein_and_splenic_vein": [
+      "Dataset001_ATLASNet",
       "VSmTrans",
       "CADS551",
-      "MOOSE3.0 (clin_ct_cardiac)",
-      "Dataset001_ATLASNet"
+      "MOOSE3.0 (clin_ct_cardiac)"
     ],
     "postcava": [
       "VSmTrans"
@@ -913,12 +913,12 @@
       "CADS556"
     ],
     "renal_vein_left": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "renal_vein_right": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "rib_cartilage": [
       "Totalsegmentator(total)"
@@ -1130,9 +1130,9 @@
       "DAPS"
     ],
     "stomach": [
+      "Dataset001_ATLASNet",
       "VSmTrans",
-      "CADS551",
-      "Dataset001_ATLASNet"
+      "CADS551"
     ],
     "styloid_process_left": [
       "Totalsegmentator (headneck_bones_vessels)"
@@ -1167,8 +1167,8 @@
       "SAROS nnUNet"
     ],
     "superior_mesenteric_artery": [
-      "ePAI",
-      "Dataset001_ATLASNet"
+      "Dataset001_ATLASNet",
+      "ePAI"
     ],
     "superior_oblique_muscle_left": [
       "Totalsegmentator (oculomotor_muscles)"
@@ -1436,6 +1436,7 @@
     "CADS555": 24,
     "MOOSE (clin_ct_vertebrae)": 24,
     "CADS553": 22,
+    "Dataset001_ATLASNet": 22,
     "Totalsegmentator (headneck_muscles)": 22,
     "VSmTrans": 22,
     "CADS554": 21,
@@ -1447,8 +1448,8 @@
     "CADS556": 15,
     "Totalsegmentator (oculomotor_muscles)": 14,
     "ePAI": 13,
-    "MOOSE3.0 (clin_ct_cardiac)": 12,
     "CADS559": 12,
+    "MOOSE3.0 (clin_ct_cardiac)": 12,
     "Dataset224_AbdomenAtlas1.1": 11,
     "Totalsegmentator (appendicular_bones)": 11,
     "Totalsegmentator (head_muscles)": 11,
@@ -1459,7 +1460,6 @@
     "MOOSE3.0 (clin_ct_lungs)": 5,
     "Duke": 4,
     "AirRC": 3,
-    "Dataset001_ATLASNet": 3,
     "MOOSE3.0 (clin_ct_body)": 3,
     "MOOSE3.0 (clin_ct_body_composition)": 3,
     "MOOSE3.0 (clin_ct_digestive)": 3,

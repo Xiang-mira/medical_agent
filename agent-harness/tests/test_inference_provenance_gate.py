@@ -5,6 +5,9 @@ import json
 import sys
 from pathlib import Path
 
+import nibabel as nib
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -44,6 +47,14 @@ def _write_valid_prediction_set(
         (case_dir / "voxtell_student_result.json").write_text(json.dumps(result), encoding="utf-8")
 
 
+def _write_nii(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    array = np.zeros((4, 4, 4), dtype=np.uint8)
+    array[1:3, 1:3, 1:3] = 1
+    nib.save(nib.Nifti1Image(array, np.eye(4)), str(path))
+    return path
+
+
 def test_clean_10_by_373_prediction_contract_passes(tmp_path: Path) -> None:
     cases = [f"case{i:02d}" for i in range(10)]
     organs = [f"organ{i:03d}" for i in range(373)]
@@ -68,6 +79,191 @@ def test_clean_10_by_373_prediction_contract_passes(tmp_path: Path) -> None:
     assert audit["status"] == "passed"
     assert audit["actual_num_cases"] == 10
     assert audit["expected_num_masks_per_case"] == 373
+
+
+def test_postprocessed_prediction_audit_ignores_metadata_dirs(tmp_path: Path) -> None:
+    cases = ["case01"]
+    organs = ["liver"]
+    provenance = {
+        "run_id": "run",
+        "checkpoint_sha256": "a" * 64,
+        "case_list_sha256": "b" * 64,
+        "target_config_sha256": "c" * 64,
+        "expected_case_ids": cases,
+        "case_list_duplicate_case_ids": [],
+    }
+    prediction_root = tmp_path / "student_predictions_postprocessed"
+    _write_valid_prediction_set(prediction_root, case_ids=cases, organs=organs, provenance=provenance)
+    (prediction_root / "parent_rois" / "case01").mkdir(parents=True)
+
+    audit = em.audit_prompt_student_predictions(
+        1,
+        prediction_root=prediction_root,
+        provenance=provenance,
+        expected_organs=organs,
+    )
+
+    assert audit["status"] == "passed"
+    assert audit["actual_case_ids"] == ["case01"]
+
+
+def test_student_postprocess_preserves_exact_target_collision_names(tmp_path: Path) -> None:
+    from cli_anything.medai.core.student_postprocess import process_student_root
+
+    input_root = tmp_path / "student_predictions"
+    _write_nii(input_root / "case01" / "inferior_vena_cava.nii.gz")
+    _write_nii(input_root / "case01" / "postcava.nii.gz")
+
+    output_root = tmp_path / "student_predictions_postprocessed"
+    summary = process_student_root(
+        input_root=input_root,
+        output_root=output_root,
+        parent_roots=[input_root],
+        taxonomy_path=ROOT / "configs" / "organ_taxonomy.json",
+        policy_path=ROOT / "configs" / "organ_postprocess_policy.yaml",
+        case_list=None,
+        organs=["inferior_vena_cava", "postcava"],
+        overwrite=True,
+    )
+
+    assert summary["status"] == "success"
+    assert (output_root / "case01" / "inferior_vena_cava.nii.gz").is_file()
+    assert (output_root / "case01" / "postcava.nii.gz").is_file()
+
+
+def test_next_round_student_candidate_validation_requires_complete_provenance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_root = tmp_path / "outputs"
+    case_list = _write_case_list(tmp_path / "cases.csv", ["case01"])
+    target_config = tmp_path / "targets.json"
+    organs = ["inferior_vena_cava", "postcava"]
+    target_config.write_text(json.dumps({"target_organs": organs}), encoding="utf-8")
+    monkeypatch.setattr(em, "OUTPUT_ROOT", output_root)
+    monkeypatch.setattr(em, "CASE_LIST", case_list)
+    monkeypatch.setattr(em, "PROMPT_TARGET_CONFIG", target_config)
+    monkeypatch.setenv("MEDAI_USE_LEGACY_STUDENT_COMPETITION_ALLOWLIST", "0")
+
+    raw_root = output_root / "round1" / "student_predictions"
+    post_root = output_root / "round1" / "student_predictions_postprocessed"
+    case_provenance = em.case_list_provenance()
+    provenance = {
+        "run_id": "round1-ckpt-cases-targets",
+        "checkpoint_sha256": "a" * 64,
+        "case_list_sha256": case_provenance["sha256"],
+        "target_config_sha256": em._sha256_file(target_config),
+        "expected_case_ids": case_provenance["case_ids"],
+        "case_list_duplicate_case_ids": [],
+    }
+    _write_valid_prediction_set(raw_root, case_ids=["case01"], organs=organs, provenance=provenance)
+    _write_valid_prediction_set(post_root, case_ids=["case01"], organs=organs, provenance=provenance)
+    (raw_root / "inference_audit.json").write_text(
+        json.dumps({"status": "passed", "failures": [], "provenance": provenance}),
+        encoding="utf-8",
+    )
+    (raw_root / "student_inference_summary.json").write_text(
+        json.dumps({
+            "status": "success",
+            "eligible_for_competition": True,
+            "checkpoint_eligible_for_next_round": True,
+            **provenance,
+        }),
+        encoding="utf-8",
+    )
+    (post_root / "organ_type_postprocess_summary.json").write_text(
+        json.dumps({
+            "status": "success",
+            "input_root": str(raw_root),
+            "output_root": str(post_root),
+            "processed_masks": 2,
+        }),
+        encoding="utf-8",
+    )
+    with (post_root / "student_containment_postprocess_per_mask.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["case_id", "organ", "output_path", "status"])
+        writer.writeheader()
+        for organ in organs:
+            writer.writerow({
+                "case_id": "case01",
+                "organ": organ,
+                "output_path": str(post_root / "case01" / f"{organ}.nii.gz"),
+                "status": "postprocessed_no_voxels_removed",
+            })
+    (post_root / "parent_rois").mkdir()
+
+    root, audit = em._validated_student_prediction_root_for_next_round(2)
+    assert root == post_root
+    assert audit["status"] == "success"
+
+    with (post_root / "student_containment_postprocess_per_mask.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["case_id", "organ", "output_path", "status"])
+        writer.writeheader()
+        for organ in organs:
+            writer.writerow({
+                "case_id": "case01",
+                "organ": organ,
+                "output_path": str(post_root / "case01" / f"{organ}.nii.gz"),
+                "status": "warning_missing_parent_roi_copied_raw" if organ == "postcava" else "postprocessed",
+            })
+    _, high_risk_failed = em._validated_student_prediction_root_for_next_round(2)
+    assert high_risk_failed["status"] == "success"
+    assert high_risk_failed["high_risk_student_postprocess_blocked_from_labelcritic"] == [
+        "case01/postcava:warning_missing_parent_roi_copied_raw"
+    ]
+
+    with (post_root / "student_containment_postprocess_per_mask.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["case_id", "organ", "output_path", "status"])
+        writer.writeheader()
+        for organ in organs:
+            writer.writerow({
+                "case_id": "case01",
+                "organ": organ,
+                "output_path": str(post_root / "case01" / f"{organ}.nii.gz"),
+                "status": "postprocessed",
+            })
+    (post_root / "case01" / "postcava.nii.gz").unlink()
+    _, failed = em._validated_student_prediction_root_for_next_round(2)
+    assert failed["status"] == "failed"
+    assert any("allowlisted_masks_missing" in reason for reason in failed["reasons"])
+
+
+def test_high_risk_student_postprocess_warning_blocks_labelcritic(tmp_path: Path) -> None:
+    from cli_anything.medai.core.multimodel_loop import (
+        _CaseMaskCache,
+        _evaluate_candidate_for_organ,
+    )
+    from cli_anything.medai.core.organ_taxonomy import load_taxonomy
+
+    ct = _write_nii(tmp_path / "ct.nii.gz")
+    seg_dir = tmp_path / "student_prev"
+    _write_nii(seg_dir / "postcava.nii.gz")
+
+    row = _evaluate_candidate_for_organ(
+        ct=ct,
+        organ="postcava",
+        model_key="student_prev",
+        seg_dir=seg_dir,
+        raw_seg_dir=seg_dir,
+        alias_config={},
+        shapekit_report={
+            "status": "success",
+            "per_mask_status_by_organ": {
+                "postcava": {"status": "warning_missing_parent_roi_copied_raw"}
+            },
+        },
+        current_ref=None,
+        current_ref_exists=False,
+        vlm_threshold=0.5,
+        case_id="case01",
+        mask_cache=_CaseMaskCache(),
+        taxonomy=load_taxonomy(ROOT / "configs" / "organ_taxonomy.json"),
+        presence_context={},
+    )
+
+    assert row["candidate_qc_status"] == "fail"
+    assert row["eligible_for_labelcritic"] is False
+    assert "high_risk_postprocess_required" in row["candidate_qc_flags"]
 
 
 def test_unknown_or_mixed_checkpoint_predictions_fail(tmp_path: Path) -> None:

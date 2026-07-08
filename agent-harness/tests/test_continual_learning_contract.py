@@ -86,6 +86,47 @@ def test_student_gt_unknown_and_empty_positive_are_blocked(tmp_path: Path) -> No
     assert canonicalize_training_record(empty)["training_eligible"] is False
 
 
+def test_verified_student_replacement_is_trainable_positive(tmp_path: Path) -> None:
+    row = _teacher_row(tmp_path, case="student_verified")
+    row.update(
+        {
+            "selected_model": "student_prev",
+            "source_model": "student_prev",
+            "selection_method": "label_critic",
+            "selection_status": "selected",
+            "labelcritic_decisive": True,
+            "labelcritic_records": [{"status": "success", "decision": {"winner": "b"}}],
+        }
+    )
+    record = canonicalize_training_record(row)
+    assert record["training_eligible"] is True
+    assert record["source_role"] == "student"
+    assert record["verified_student_replacement"] is True
+
+
+def test_student_replacement_requires_decisive_successful_labelcritic(tmp_path: Path) -> None:
+    row = _teacher_row(tmp_path, case="student_not_decisive")
+    row.update(
+        {
+            "selected_model": "student_prev",
+            "source_model": "student_prev",
+            "selection_method": "label_critic",
+            "selection_status": "selected",
+            "labelcritic_records": [{"status": "success", "decision": {"winner": "b"}}],
+        }
+    )
+
+    missing_decisive = canonicalize_training_record(row)
+    assert missing_decisive["training_eligible"] is False
+    assert missing_decisive["verified_student_replacement"] is False
+
+    row["labelcritic_decisive"] = True
+    row["labelcritic_records"] = [{"status": "failed", "decision": {}}]
+    failed_record = canonicalize_training_record(row)
+    assert failed_record["training_eligible"] is False
+    assert failed_record["verified_student_replacement"] is False
+
+
 def test_memory_prefers_stronger_stable_teacher(tmp_path: Path) -> None:
     historical = canonicalize_training_record(_teacher_row(tmp_path))
     historical["historical_replay"] = True

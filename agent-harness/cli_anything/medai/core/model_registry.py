@@ -356,11 +356,11 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
             "status": "ready_if_checkpoint_folder_present",
             "checkpoint_path": f"{checkpoint_root}/ATLAS-Net",
             "label_map_path": "configs/atlasnet_label_map.json",
-            "command_template": "python scripts/atlasnet_predict_and_split.py --image {image} --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path} --device \"{device}\"",
+            "command_template": "python scripts/atlasnet_predict_and_split.py --image {image} --output {case_output} --atlas-root {checkpoint_path} --label-map {label_map_path} --device \"{device}\" --postprocess-mode auto",
             "private_checkpoint": False,
             "source_code_path": "https://huggingface.co/Koushik45048545309/Atlas-Net",
             "license": "CC-BY-4.0",
-            "notes": "Public ATLAS-Net nnUNet v2 checkpoint from Hugging Face. It covers 25 abdominal organ/duct/tumor labels and expects Linux, an NVIDIA GPU, CUDA 11.7+, and nnUNet v2.",
+            "notes": "Public ATLAS-Net nnUNet v2 checkpoint from Hugging Face. It covers 25 abdominal organ/duct/tumor labels. In this project it is prioritized for colon, stomach, duodenum, intestine, biliary/pancreatic ducts, abdominal stent, and abdominal vessel/tubular structures; solid abdominal organs remain comparison/back-up candidates. The wrapper uses the cloned repo postprocess utility in auto mode when present.",
         })
     elif key == "cads":
         base.update({

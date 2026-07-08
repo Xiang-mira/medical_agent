@@ -9,7 +9,29 @@
         "small_intestine": "intestine",
         "portal_splenic_veins": "portal_vein_and_splenic_vein"
       },
-      "_note": "ATLAS-Net emits canonical left/right organ names directly; only source label-name differences are listed here."
+      "_note": "ATLAS-Net emits canonical left/right organ names directly; source label-name differences are listed here. Pancreatic tumor/cyst labels are exported for raw/debug use but are not formal 373 routing targets.",
+      "_pathology_debug_only": [
+        "pancreatic_pdac",
+        "pancreatic_cyst",
+        "pancreatic_pnet"
+      ],
+      "_recommended_teacher_priority_organs": [
+        "colon",
+        "stomach",
+        "duodenum",
+        "intestine",
+        "common_bile_duct",
+        "pancreatic_duct",
+        "cbd_stent",
+        "celiac_aa (celiac_artery)",
+        "superior_mesenteric_artery",
+        "portal_vein_and_splenic_vein",
+        "renal_vein_left",
+        "renal_vein_right",
+        "inferior_vena_cava",
+        "aorta",
+        "gall_bladder"
+      ]
     },
     "cads551": {
       "local_to_global": {
@@ -40,7 +62,11 @@
       "local_to_global": {
         "celiac_aa": "celiac_aa (celiac_artery)"
       },
-      "_pathology_ignore": ["pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"],
+      "_pathology_ignore": [
+        "pancreatic_pdac",
+        "pancreatic_cyst",
+        "pancreatic_pnet"
+      ],
       "_note": "veins is direct match to global 'veins' (routed exclusively to ePAI); postcava is direct match"
     },
     "vista3d": {
@@ -256,17 +282,53 @@
     }
   },
   "forbidden_coarsening": [
-    ["liver_segment_1", "liver"],
-    ["liver_segment_2", "liver"],
-    ["liver_segment_3", "liver"],
-    ["liver_segment_4", "liver"],
-    ["liver_segment_5", "liver"],
-    ["liver_segment_6", "liver"],
-    ["liver_segment_7", "liver"],
-    ["liver_segment_8", "liver"],
-    ["pancreas_head", "pancreas"],
-    ["pancreas_body", "pancreas"],
-    ["pancreas_tail", "pancreas"],
-    ["portal_vein_and_splenic_vein", "veins"]
+    [
+      "liver_segment_1",
+      "liver"
+    ],
+    [
+      "liver_segment_2",
+      "liver"
+    ],
+    [
+      "liver_segment_3",
+      "liver"
+    ],
+    [
+      "liver_segment_4",
+      "liver"
+    ],
+    [
+      "liver_segment_5",
+      "liver"
+    ],
+    [
+      "liver_segment_6",
+      "liver"
+    ],
+    [
+      "liver_segment_7",
+      "liver"
+    ],
+    [
+      "liver_segment_8",
+      "liver"
+    ],
+    [
+      "pancreas_head",
+      "pancreas"
+    ],
+    [
+      "pancreas_body",
+      "pancreas"
+    ],
+    [
+      "pancreas_tail",
+      "pancreas"
+    ],
+    [
+      "portal_vein_and_splenic_vein",
+      "veins"
+    ]
   ]
 }

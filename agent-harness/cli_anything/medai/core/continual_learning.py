@@ -168,6 +168,49 @@ def _source_role(row: dict[str, Any]) -> tuple[str, str | None]:
     return "teacher", provider
 
 
+def _verified_student_replacement(row: dict[str, Any], provider: str | None) -> bool:
+    provider_lower = str(provider or "").lower()
+    if "student" not in provider_lower:
+        return False
+    if str(row.get("selection_status") or "").lower() != "selected":
+        return False
+    if str(row.get("selection_method") or "").lower() != "label_critic":
+        return False
+    qc_status = str(
+        row.get("selected_candidate_qc_status")
+        or row.get("candidate_qc_status")
+        or ""
+    ).lower()
+    if qc_status and qc_status not in {"pass", "passed", "success", "ok"}:
+        return False
+    if row.get("labelcritic_decisive") is not True:
+        return False
+    records = row.get("labelcritic_records") or row.get("critic_records") or []
+    if not any(isinstance(record, dict) and record.get("status") == "success" for record in records):
+        return False
+    return True
+
+
+def _previous_pseudo_carry_forward(row: dict[str, Any], provider: str | None) -> bool:
+    provider_lower = str(provider or "").lower()
+    if provider_lower not in {
+        "round_prev_selected",
+        "previous_round_selected",
+        "previous_selected",
+        "selected_previous_round",
+    }:
+        return False
+    if str(row.get("selection_status") or "").lower() != "selected":
+        return False
+    method = str(row.get("selection_method") or "").lower()
+    return method in {
+        "em_student_vs_previous_carry_forward",
+        "label_critic",
+        "near_identical_agreement",
+        "single_teacher_provisional",
+    }
+
+
 def canonicalize_training_record(
     row: dict[str, Any],
     *,
@@ -205,7 +248,14 @@ def canonicalize_training_record(
         foreground_audit = mask_foreground_audit(mask)
         if foreground_audit.get("status") != "passed":
             reasons.append(str(foreground_audit.get("reason") or "positive_mask_invalid"))
-    if supervision_type == "positive" and source_role != "teacher":
+    verified_student = supervision_type == "positive" and _verified_student_replacement(item, provider)
+    previous_carry_forward = supervision_type == "positive" and _previous_pseudo_carry_forward(item, provider)
+    if (
+        supervision_type == "positive"
+        and source_role != "teacher"
+        and not verified_student
+        and not previous_carry_forward
+    ):
         reasons.append(f"positive_source_role_forbidden:{source_role}")
     if supervision_type == "positive" and grade not in {"A", "B", "C"}:
         reasons.append(f"positive_grade_not_trainable:{grade}")
@@ -272,7 +322,13 @@ def canonicalize_training_record(
             ),
             "probability_audit": probability_audit,
             "origin_provider": provider,
-            "source_role": source_role,
+            "source_role": (
+                "student" if verified_student else
+                "previous_pseudo_label" if previous_carry_forward else
+                source_role
+            ),
+            "verified_student_replacement": verified_student,
+            "previous_pseudo_carry_forward": previous_carry_forward,
             "source_round": round_index if round_index is not None else item.get("source_round"),
             "memory_role": (
                 "historical"

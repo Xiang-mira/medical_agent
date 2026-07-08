@@ -44,6 +44,7 @@ from .case_quality_report import build_case_quality_report
 
 QUALITY_CONTRACT_VERSION = "estep_quality_contract_v3"
 FOV_POLICY_VERSION = "fov_appearance_regions_v4"
+EM_STUDENT_VS_PREVIOUS_MODE = "em_student_vs_previous"
 
 def _file_sha256(path: str | Path | None) -> str | None:
     if not path or not Path(path).exists():
@@ -716,6 +717,12 @@ def _build_case_execution_plan(
             # are not in the formal registry. Formal route-aware runs must leave
             # unmapped organs unresolved instead of expanding back to all teachers.
             eligible = list(requested_models)
+        if candidate_mode == EM_STUDENT_VS_PREVIOUS_MODE:
+            eligible = []
+            route["primary_teacher"] = None
+            route["backup_teachers"] = []
+            route["competition_teachers"] = []
+            route["route_confidence"] = "em_student_vs_previous"
         if candidate_mode == "formal_full_legacy":
             eligible = list(requested_models)
         route["eligible_teachers"] = eligible
@@ -1927,6 +1934,31 @@ def _safe_shapekit_targets_for_seg_dir(seg_dir: Path) -> list[str]:
     return targets
 
 
+def _load_student_postprocess_status_by_organ(root: Path, case_id: str) -> dict[str, dict[str, Any]]:
+    path = root / "student_containment_postprocess_per_mask.csv"
+    if not path.is_file():
+        return {}
+    rows: dict[str, dict[str, Any]] = {}
+    try:
+        with path.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if str(row.get("case_id") or "") != str(case_id):
+                    continue
+                keys = {
+                    str(row.get("organ") or ""),
+                    str(row.get("canonical_organ") or ""),
+                }
+                output_path = str(row.get("output_path") or "")
+                if output_path:
+                    keys.add(Path(output_path).name[:-7] if output_path.endswith(".nii.gz") else Path(output_path).stem)
+                for key in keys:
+                    if key:
+                        rows[key] = dict(row)
+    except Exception:
+        return {}
+    return rows
+
+
 def _postprocess_candidate_models_with_shapekit(
     *,
     model_seg_dirs: dict[str, Path],
@@ -1936,11 +1968,47 @@ def _postprocess_candidate_models_with_shapekit(
     enable_shapekit: bool,
     dry_run: bool,
     timeout_sec: int,
+    immutable_model_keys: set[str] | None = None,
+    precleaned_model_keys: set[str] | None = None,
 ) -> tuple[dict[str, Path], dict[str, dict[str, Any]]]:
     processed_dirs: dict[str, Path] = {}
     reports: dict[str, dict[str, Any]] = {}
+    immutable_model_keys = set(immutable_model_keys or set())
+    precleaned_model_keys = set(precleaned_model_keys or set())
+    for model_key, seg_dir in model_seg_dirs.items():
+        if model_key in immutable_model_keys or model_key in precleaned_model_keys:
+            processed_dirs[model_key] = seg_dir
+            role = (
+                "immutable_previous_selected_pseudo_label"
+                if model_key in immutable_model_keys
+                else "precleaned_student_candidate"
+            )
+            reports[model_key] = {
+                "stage": "candidate_preselection_shapekit",
+                "status": "success",
+                "model": model_key,
+                "raw_seg_dir": str(seg_dir),
+                "processed_seg_dir": str(seg_dir),
+                "fallback_used": False,
+                "em_candidate_role": role,
+                "reason": (
+                    "round_prev_selected is an immutable pseudo reference and is not re-ShapeKit-modified"
+                    if model_key in immutable_model_keys
+                    else "student_prev already points to the previous round cleaned/postprocessed prediction root"
+                ),
+            }
+            if model_key in precleaned_model_keys:
+                reports[model_key]["per_mask_status_by_organ"] = _load_student_postprocess_status_by_organ(
+                    seg_dir.parent,
+                    case_id,
+                )
+    remaining_model_seg_dirs = {
+        model_key: seg_dir
+        for model_key, seg_dir in model_seg_dirs.items()
+        if model_key not in processed_dirs
+    }
     if not enable_shapekit:
-        for model_key, seg_dir in model_seg_dirs.items():
+        for model_key, seg_dir in remaining_model_seg_dirs.items():
             processed_dirs[model_key] = seg_dir
             reports[model_key] = {
                 "stage": "candidate_preselection_shapekit",
@@ -1952,7 +2020,7 @@ def _postprocess_candidate_models_with_shapekit(
             }
         return processed_dirs, reports
     if dry_run:
-        for model_key, seg_dir in model_seg_dirs.items():
+        for model_key, seg_dir in remaining_model_seg_dirs.items():
             processed_dirs[model_key] = seg_dir
             reports[model_key] = {
                 "stage": "candidate_preselection_shapekit",
@@ -1964,7 +2032,7 @@ def _postprocess_candidate_models_with_shapekit(
             }
         return processed_dirs, reports
 
-    for model_key, seg_dir in model_seg_dirs.items():
+    for model_key, seg_dir in remaining_model_seg_dirs.items():
         input_root = case_refined / "candidate_shapekit_input" / model_key
         output_root = case_refined / "candidate_shapekit" / model_key
         safe_targets = _safe_shapekit_targets_for_seg_dir(seg_dir)
@@ -2461,6 +2529,14 @@ def _evaluate_candidate_for_organ(
     pred, alias_match = _candidate_mask_path(seg_dir, organ, model_key, alias_config)
     candidate_shapekit_status = shapekit_report.get("status", "skipped_debug_only")
     candidate_shapekit_reason = shapekit_report.get("reason")
+    per_mask_postprocess = (shapekit_report.get("per_mask_status_by_organ") or {}).get(organ)
+    if isinstance(per_mask_postprocess, dict):
+        candidate_shapekit_status = str(per_mask_postprocess.get("status") or candidate_shapekit_status)
+        candidate_shapekit_reason = (
+            per_mask_postprocess.get("reason")
+            or per_mask_postprocess.get("containment_source")
+            or candidate_shapekit_reason
+        )
     if not pred.exists() and seg_dir != raw_seg_dir and raw_pred.exists():
         pred = raw_pred
         alias_match = f"post_shapekit_missing_fallback:{raw_alias_match}"
@@ -2486,7 +2562,11 @@ def _evaluate_candidate_for_organ(
         token in _norm_organ_key(organ)
         for token in ("duct", "artery", "vein", "vessel", "cava", "lesion", "tumor")
     )
-    if candidate_shapekit_status in {"postprocess_failed", "fallback_original", "failed"}:
+    postprocess_failed_for_candidate = (
+        candidate_shapekit_status in {"postprocess_failed", "fallback_original", "failed"}
+        or str(candidate_shapekit_status).startswith("warning_")
+    )
+    if postprocess_failed_for_candidate:
         candidate_qc = dict(candidate_qc)
         qc_flags = list(candidate_qc.get("flags", []))
         qc_flags.append("postprocess_failed")
@@ -2510,14 +2590,31 @@ def _evaluate_candidate_for_organ(
         cache=mask_cache,
     )
     dice = v.get("dice")
+    em_candidate_role = None
+    if model_key == "round_prev_selected":
+        em_candidate_role = "previous_selected_pseudo_label"
+    elif model_key == "student_prev":
+        em_candidate_role = "postprocessed_student_prediction"
     result = {
         "case_id": case_id,
         "organ": organ,
         "model": model_key,
         "prediction": str(pred),
         "pre_shapekit_prediction": str(raw_pred),
+        "candidate_cleaned_prediction": str(pred),
+        "candidate_raw_prediction": str(raw_pred),
+        "candidate_source_role": (
+            "previous_pseudo_label" if model_key == "round_prev_selected"
+            else "student_candidate" if model_key == "student_prev"
+            else "teacher_or_model_candidate"
+        ),
+        "em_candidate_role": em_candidate_role,
         "reference": str(current_ref) if current_ref else "",
-        "reference_role": "historical_pseudo_label" if current_ref_exists else "none",
+        "reference_role": (
+            "previous_selected_pseudo_label"
+            if current_ref_exists and model_key in {"student_prev", "round_prev_selected"}
+            else "historical_pseudo_label" if current_ref_exists else "none"
+        ),
         "reference_provenance": _historical_reference_provenance(current_ref) if current_ref_exists else None,
         "metric_family": "pseudo_consistency",
         "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
@@ -2538,7 +2635,11 @@ def _evaluate_candidate_for_organ(
         "alias_match": alias_match,
         "candidate_shapekit_status": candidate_shapekit_status,
         "candidate_shapekit_reason": candidate_shapekit_reason,
-        "candidate_shapekit_report": shapekit_report,
+        "candidate_postprocess_row": per_mask_postprocess if isinstance(per_mask_postprocess, dict) else None,
+        "candidate_shapekit_report": {
+            k: v for k, v in shapekit_report.items()
+            if k != "per_mask_status_by_organ"
+        },
         "candidate_qc": candidate_qc,
         "candidate_qc_status": candidate_qc.get("status"),
         "candidate_qc_score": candidate_qc.get("score"),
@@ -4059,6 +4160,7 @@ def _select_candidate(
     compare_batch_enabled: bool = True,
     compare_batch_max_candidates: int = 2,
     strict_labelcritic_selection: bool = True,
+    use_official_pairwise: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Select the pseudo-label candidate for one organ.
 
@@ -4140,7 +4242,7 @@ def _select_candidate(
             "review_flags": ["single_teacher_no_pairwise_comparison", *qc_review_flags],
         }
 
-    if enable_critic and not dry_run:
+    if use_official_pairwise and enable_critic and not dry_run:
         selected, selection = _official_pairwise_condorcet_selection(
             ct=ct,
             organ=organ,
@@ -4380,6 +4482,128 @@ def _select_candidate(
         ) + qc_quality_flags,
         "review_flags": ([] if selection_status == "selected" else ["selection_fallback", "labelcritic_uncertain"]) + qc_review_flags,
     }
+
+
+def _student_qc_passed(candidate: dict[str, Any] | None) -> bool:
+    if not candidate:
+        return False
+    qc_status = str(candidate.get("candidate_qc_status") or "").lower()
+    return qc_status in {"", "pass", "passed", "success", "ok"} and bool(
+        candidate.get("eligible_for_labelcritic", True)
+    )
+
+
+def _apply_em_student_vs_previous_gate(
+    *,
+    selected: dict[str, Any] | None,
+    selection: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Fail-closed gate for RoundN student-vs-previous pseudo-label updates."""
+    previous = next(
+        (
+            c for c in candidates
+            if str(c.get("model") or "") in {"round_prev_selected", "previous_round_selected"}
+            and c.get("candidate_exists")
+        ),
+        None,
+    )
+    student = next(
+        (
+            c for c in candidates
+            if str(c.get("model") or "") == "student_prev"
+            and c.get("candidate_exists")
+        ),
+        None,
+    )
+    if previous is None:
+        gated = {
+            **selection,
+            "selection_method": "em_student_vs_previous_missing_previous",
+            "selection_status": "review_required",
+            "selected_model": None,
+            "selected_prediction": None,
+            "fallback_reason": "round_prev_selected mask missing; student_prev cannot auto-overwrite without a previous pseudo reference",
+            "primary_selector": "labelcritic_gate_fail_closed",
+            "should_enter_student_training": False,
+            "em_student_vs_previous_gate": {
+                "status": "failed",
+                "reason": "missing_round_prev_selected",
+                "student_candidate_present": student is not None,
+            },
+            "quality_flags": list(dict.fromkeys([*(selection.get("quality_flags") or []), "missing_round_prev_selected"])),
+            "review_flags": list(dict.fromkeys([*(selection.get("review_flags") or []), "automatic_abstention"])),
+        }
+        return None, gated
+
+    selected_model = str((selected or {}).get("model") or selection.get("selected_model") or "")
+    student_was_selected = selected_model == "student_prev"
+    student_verified = bool(
+        student_was_selected
+        and selected is not None
+        and selection.get("selection_status") == "selected"
+        and selection.get("selection_method") == "label_critic"
+        and selection.get("labelcritic_decisive") is True
+        and _student_qc_passed(selected)
+    )
+    if student_verified:
+        return selected, {
+            **selection,
+            "source_model": "student_prev",
+            "em_student_vs_previous_gate": {
+                "status": "student_replacement_accepted",
+                "verifier": "LabelCritic",
+                "student_qc_status": selected.get("candidate_qc_status"),
+            },
+            "verified_student_replacement": True,
+            "primary_selector": selection.get("primary_selector") or "labelcritic",
+            "should_enter_student_training": True,
+        }
+
+    previous_selected_by_verifier = bool(
+        selected_model in {"round_prev_selected", "previous_round_selected"}
+        and selected is not None
+        and selection.get("selection_status") == "selected"
+    )
+    if previous_selected_by_verifier:
+        return selected, {
+            **selection,
+            "source_model": selected_model,
+            "em_student_vs_previous_gate": {
+                "status": "previous_selected_by_verifier",
+                "student_candidate_present": student is not None,
+                "student_qc_status": (student or {}).get("candidate_qc_status"),
+            },
+            "verified_student_replacement": False,
+            "should_enter_student_training": True,
+        }
+
+    gated = {
+        **selection,
+        "selection_method": "em_student_vs_previous_carry_forward",
+        "selection_status": "selected",
+        "selected_model": "round_prev_selected",
+        "source_model": "round_prev_selected",
+        "selected_prediction": previous.get("prediction"),
+        "selected_candidate_qc_status": previous.get("candidate_qc_status"),
+        "selected_candidate_qc_score": previous.get("candidate_qc_score"),
+        "selected_candidate_qc_flags": previous.get("candidate_qc_flags", []),
+        "fallback_reason": selection.get("fallback_reason") or "LabelCritic did not accept student_prev; carried forward previous selected pseudo label",
+        "primary_selector": "labelcritic_gate_carry_forward",
+        "fallback_selector": None,
+        "should_enter_student_training": True,
+        "em_student_vs_previous_gate": {
+            "status": "previous_carried_forward",
+            "student_candidate_present": student is not None,
+            "student_qc_status": (student or {}).get("candidate_qc_status"),
+            "student_was_selected_before_gate": student_was_selected,
+            "student_verified": False,
+        },
+        "verified_student_replacement": False,
+        "quality_flags": list(dict.fromkeys([*(selection.get("quality_flags") or []), "round_prev_selected_carry_forward"])),
+        "review_flags": list(selection.get("review_flags") or []),
+    }
+    return previous, gated
 
 
 
@@ -4702,6 +4926,7 @@ def run_multimodel_annotation_loop(
     preseeded_parent_only: bool = False,
     reuse_preseeded_only: bool = False,
     strict_labelcritic_selection: bool = True,
+    use_annotation_folder_reference: bool = True,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -4723,8 +4948,23 @@ def run_multimodel_annotation_loop(
     case_csv = Path(case_list).resolve()
     out = Path(output_folder).resolve()
     labelcritic_options = labelcritic_options or {}
+    em_student_vs_previous = candidate_mode == EM_STUDENT_VS_PREVIOUS_MODE
     if teacher_inference_mode not in {"full_volume", "hierarchical_roi"}:
         raise ValueError("teacher_inference_mode must be 'full_volume' or 'hierarchical_roi'")
+    if em_student_vs_previous:
+        preseeded_keys = set((preseeded_model_dirs or {}).keys())
+        required = {"round_prev_selected", "student_prev"}
+        missing = sorted(required - preseeded_keys)
+        if missing:
+            raise ValueError(
+                f"{EM_STUDENT_VS_PREVIOUS_MODE} requires preseeded candidates {sorted(required)}; missing {missing}"
+            )
+        student_base = Path(preseeded_model_dirs["student_prev"])
+        if student_base.name == "student_predictions":
+            raise ValueError(
+                f"{EM_STUDENT_VS_PREVIOUS_MODE} requires cleaned/postprocessed student_prev masks; "
+                f"raw student prediction root is not allowed: {student_base}"
+            )
     out.mkdir(parents=True, exist_ok=True)
     cases = _read_case_list(case_csv)
     registry = load_registry(registry_path)
@@ -4778,7 +5018,11 @@ def run_multimodel_annotation_loop(
     for idx, case in enumerate(cases, start=1):
         case_id = case.get("case_id") or Path(case.get("ct_path", f"case_{idx}")).parent.name
         ct = Path(case.get("ct_path", "")).resolve()
-        ref_dir = Path(case.get("annotation_folder", "")).resolve() if case.get("annotation_folder") else None
+        ref_dir = (
+            Path(case.get("annotation_folder", "")).resolve()
+            if use_annotation_folder_reference and case.get("annotation_folder")
+            else None
+        )
         case_out = out / "cases" / case_id
         case_raw = case_out / "raw_predictions"
         case_refined = case_out / "refined_predictions"
@@ -4909,6 +5153,7 @@ def run_multimodel_annotation_loop(
             "ct_path": str(ct),
             "teacher_inference_mode": teacher_inference_mode,
             "roi_margin_mm": roi_margin_mm,
+            "annotation_folder_reference_enabled": use_annotation_folder_reference,
             **case_execution_plan,
         })
         organ_task_state_path = updated_root / case_id / "organ_task_state.json"
@@ -5031,6 +5276,8 @@ def run_multimodel_annotation_loop(
             enable_shapekit=enable_shapekit,
             dry_run=dry_run,
             timeout_sec=timeout_sec,
+            immutable_model_keys={"round_prev_selected"} if em_student_vs_previous else None,
+            precleaned_model_keys={"student_prev"} if em_student_vs_previous else None,
         )
         stage_timing["candidate_shapekit_sec"] += _time.time() - _shapekit_t0
 
@@ -5049,7 +5296,10 @@ def run_multimodel_annotation_loop(
         ordered_organs = topological_order_organs(taxonomy, list(fov_organs), strict=False)
 
         for organ in ordered_organs:
-            current_ref = _mask_path(ref_dir, organ) if ref_dir else None
+            if em_student_vs_previous and "round_prev_selected" in resolved_preseeded_seg_dirs:
+                current_ref = _mask_path(resolved_preseeded_seg_dirs["round_prev_selected"], organ)
+            else:
+                current_ref = _mask_path(ref_dir, organ) if ref_dir else None
             current_ref_exists = bool(current_ref and (not dry_run) and current_ref.exists())
             organ_rows: list[dict[str, Any]] = []
             candidates: list[dict[str, Any]] = []
@@ -5057,41 +5307,52 @@ def run_multimodel_annotation_loop(
             route_info = (case_execution_plan.get("per_organ", {}) or {}).get(organ, {})
             eligible_teachers = set(route_info.get("eligible_teachers", []))
             preseeded_keys = set() if preseeded_parent_only else set((preseeded_model_dirs or {}).keys())
-            # Round2+ student predictions are diagnostic-only.  Even if a
-            # legacy caller passes ``student_prev`` in preseeded_model_dirs,
-            # do not allow it to become an E-step candidate.
-            preseeded_keys = {
-                key for key in preseeded_keys
-                if key != "student_prev" and "student" not in key.lower()
-            }
-            if tracker and not tracker.should_run_all(organ):
-                top_models = tracker.get_top_k_models(organ, k=2)
+            if em_student_vs_previous:
                 organ_model_seg_dirs = {
                     k: v for k, v in candidate_model_seg_dirs.items()
-                    if (k in eligible_teachers or k in preseeded_keys)
-                    and (
-                        k in top_models
-                        or k.replace("_shapekit", "") in top_models
-                        or k in preseeded_keys
-                    )
+                    if k in {"round_prev_selected", "student_prev"}
                 }
-                if not organ_model_seg_dirs:
+                previous_dir = organ_model_seg_dirs.get("round_prev_selected")
+                previous_mask = _mask_path(previous_dir, organ) if previous_dir else None
+                if not (previous_mask and previous_mask.exists()):
+                    # Without the immutable previous pseudo label there is no
+                    # verifier comparison target; never let student_prev become
+                    # a single-candidate overwrite.
+                    organ_model_seg_dirs = {}
+            else:
+                # Legacy modes keep previous behavior: student predictions passed
+                # as preseeded diagnostics must not silently become candidates.
+                preseeded_keys = {
+                    key for key in preseeded_keys
+                    if key != "student_prev" and "student" not in key.lower()
+                }
+                if tracker and not tracker.should_run_all(organ):
+                    top_models = tracker.get_top_k_models(organ, k=2)
+                    organ_model_seg_dirs = {
+                        k: v for k, v in candidate_model_seg_dirs.items()
+                        if (k in eligible_teachers or k in preseeded_keys)
+                        and (
+                            k in top_models
+                            or k.replace("_shapekit", "") in top_models
+                            or k in preseeded_keys
+                        )
+                    }
+                    if not organ_model_seg_dirs:
+                        organ_model_seg_dirs = {
+                            k: v for k, v in candidate_model_seg_dirs.items()
+                            if k in eligible_teachers or k in preseeded_keys
+                        }
+                else:
                     organ_model_seg_dirs = {
                         k: v for k, v in candidate_model_seg_dirs.items()
                         if k in eligible_teachers or k in preseeded_keys
                     }
-            else:
-                organ_model_seg_dirs = {
-                    k: v for k, v in candidate_model_seg_dirs.items()
-                    if k in eligible_teachers or k in preseeded_keys
-                }
 
-            # Round 2+ remains teacher-cache selection.  The previous selected
-            # mask is a replay/reference candidate, but it must not collapse the
-            # pool into a student-vs-previous challenger match.  If there are
-            # teacher candidates, keep them; if not, carry the previous selected
-            # mask forward as historical replay.
+            # Legacy teacher-cache modes still keep student_prev diagnostic-only.
+            # The formal EM repair uses em_student_vs_previous above instead.
             if (
+                not em_student_vs_previous
+                and
                 candidate_mode == "route_pruned_with_competition"
                 and "round_prev_selected" in organ_model_seg_dirs
             ):
@@ -5328,7 +5589,14 @@ def run_multimodel_annotation_loop(
                 compare_batch_enabled=compare_batch_enabled,
                 compare_batch_max_candidates=int(os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH_MAX_CANDIDATES", "2")),
                 strict_labelcritic_selection=strict_labelcritic_selection,
+                use_official_pairwise=not em_student_vs_previous,
             )
+            if em_student_vs_previous:
+                selected, selection = _apply_em_student_vs_previous_gate(
+                    selected=selected,
+                    selection=selection,
+                    candidates=candidates,
+                )
             stage_timing["labelcritic_compare_sec"] += _time.time() - _select_t0
             stage_counts["labelcritic_compare_records"] += len(selection.get("critic_records", []) or [])
             critic_count += len(selection.get("critic_records", []) or [])
@@ -5396,6 +5664,11 @@ def run_multimodel_annotation_loop(
                         "mask_sha256": c.get("mask_sha256"),
                         "prediction": c["prediction"],
                         "pre_shapekit_prediction": c.get("pre_shapekit_prediction"),
+                        "candidate_raw_prediction": c.get("candidate_raw_prediction"),
+                        "candidate_cleaned_prediction": c.get("candidate_cleaned_prediction"),
+                        "candidate_source_role": c.get("candidate_source_role"),
+                        "em_candidate_role": c.get("em_candidate_role"),
+                        "candidate_postprocess_row": c.get("candidate_postprocess_row"),
                         "dice": c.get("dice"),
                         "status": c.get("status"),
                         "reason": c.get("reason"),
@@ -5455,7 +5728,12 @@ def run_multimodel_annotation_loop(
                 "metric_comparison": "selected_candidate_vs_prior_or_selected_pseudo_reference",
                 "metric_interpretation": "pseudo_label_consistency",
                 "accuracy_warning": "Selected Dice is pseudo-label consistency, not true expert-label accuracy.",
-                "comparison_input_stage": "post_shapekit_candidate" if enable_shapekit and not dry_run else "raw_candidate",
+                "comparison_input_stage": (
+                    "postprocessed_student_vs_previous"
+                    if em_student_vs_previous
+                    else "post_shapekit_candidate" if enable_shapekit and not dry_run
+                    else "raw_candidate"
+                ),
                 "dataset_type": "pseudo_label_dataset",
                 "ground_truth_status": "pseudo_label_candidate",
                 **selection,
@@ -5463,8 +5741,11 @@ def run_multimodel_annotation_loop(
             selection_record["labelcritic_records"] = selection_record.get("critic_records", [])
             selection_record["labelcritic_decision_path"] = _labelcritic_decision_path(selection_record["labelcritic_records"])
             selection_record["labelcritic_decisive"] = _labelcritic_locks_selection(selection_record)
-            selection_record["primary_selector"] = "labelcritic"
-            selection_record["evidence_used_for"] = "audit_only" if selection_record["labelcritic_decisive"] else "fallback_selection"
+            selection_record["primary_selector"] = selection_record.get("primary_selector") or "labelcritic"
+            selection_record["evidence_used_for"] = (
+                selection_record.get("evidence_used_for")
+                or ("audit_only" if selection_record["labelcritic_decisive"] else "fallback_selection")
+            )
             selection_record["selected_candidate"] = selection_record.get("selected_model")
             selection_record["selected_candidate_id"] = selected.get("candidate_id") if selected else None
             selection_record["candidate_ids"] = [c.get("candidate_id") for c in candidates if c.get("candidate_id")]
@@ -5518,6 +5799,8 @@ def run_multimodel_annotation_loop(
                 "best_dice": best_dice,
                 "selected_reference_quality_bucket": selected_reference_quality_bucket,
                 "empty_reference_nonempty_prediction": empty_reference_nonempty_prediction,
+                "current_ref": current_ref,
+                "current_ref_exists": current_ref_exists,
             })
 
         grade_cache: dict[str, dict[str, Any]] = {}
@@ -5564,6 +5847,8 @@ def run_multimodel_annotation_loop(
             best_dice = decision["best_dice"]
             selected_reference_quality_bucket = decision["selected_reference_quality_bucket"]
             empty_reference_nonempty_prediction = decision["empty_reference_nonempty_prediction"]
+            current_ref = decision.get("current_ref")
+            current_ref_exists = bool(decision.get("current_ref_exists"))
             auto_grade_record = None
 
             if decision.get("should_run_grade") and selected:
@@ -6338,6 +6623,7 @@ def run_multimodel_annotation_loop(
         "resume_audit": resume_rows,
         "preseeded_parent_only": preseeded_parent_only,
         "reuse_preseeded_only": reuse_preseeded_only,
+        "annotation_folder_reference_enabled": use_annotation_folder_reference,
         "round2_competition_audit": _summarize_preseeded_competition(
             preseeded_keys=[] if preseeded_parent_only else sorted((preseeded_model_dirs or {}).keys()),
             selection_rows=all_selection_rows,

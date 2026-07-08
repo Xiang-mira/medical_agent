@@ -163,14 +163,14 @@
       "parent_ids": [],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
+        "atlasnet",
         "vista3d",
-        "cads551",
-        "atlasnet"
+        "cads551"
       ],
-      "primary_teacher": "vista3d",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "cads551",
-        "atlasnet"
+        "vista3d",
+        "cads551"
       ]
     },
     "arm_left": {
@@ -697,12 +697,12 @@
       "parent_ids": [],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
-        "epai_20250421",
-        "atlasnet"
+        "atlasnet",
+        "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "epai_20250421"
       ]
     },
     "celiac_aa_celiac_artery": {
@@ -712,10 +712,13 @@
       "parent_ids": [],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
+        "atlasnet",
         "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
-      "backup_teachers": []
+      "primary_teacher": "atlasnet",
+      "backup_teachers": [
+        "epai_20250421"
+      ]
     },
     "celiac_trunk": {
       "canonical_id": "celiac_trunk",
@@ -882,16 +885,16 @@
       "parent_ids": [],
       "comparison_family": "whole_organ",
       "candidate_models": [
-        "epai_20250421",
+        "atlasnet",
         "vsmtrans",
-        "cads553",
-        "atlasnet"
+        "epai_20250421",
+        "cads553"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
         "vsmtrans",
-        "cads553",
-        "atlasnet"
+        "epai_20250421",
+        "cads553"
       ]
     },
     "colostomy_bag": {
@@ -915,12 +918,12 @@
       "parent_ids": [],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
-        "epai_20250421",
-        "atlasnet"
+        "atlasnet",
+        "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "epai_20250421"
       ]
     },
     "common_carotid_artery_left": {
@@ -1102,16 +1105,18 @@
       "parent_ids": [],
       "comparison_family": "whole_organ",
       "candidate_models": [
-        "epai_20250421",
+        "atlasnet",
         "vsmtrans",
+        "epai_20250421",
         "cads553",
-        "atlasnet"
+        "moose888"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
         "vsmtrans",
+        "epai_20250421",
         "cads553",
-        "atlasnet"
+        "moose888"
       ]
     },
     "esophagus": {
@@ -1348,14 +1353,16 @@
       "parent_ids": [],
       "comparison_family": "whole_organ",
       "candidate_models": [
+        "atlasnet",
         "vsmtrans",
         "cads551",
-        "atlasnet"
+        "moose888"
       ],
-      "primary_teacher": "vsmtrans",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
+        "vsmtrans",
         "cads551",
-        "atlasnet"
+        "moose888"
       ]
     },
     "gland_structure": {
@@ -1955,16 +1962,16 @@
       ],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
+        "atlasnet",
         "totalsegmentator",
         "cads551",
-        "moose888",
-        "atlasnet"
+        "moose888"
       ],
-      "primary_teacher": "totalsegmentator",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
+        "totalsegmentator",
         "cads551",
-        "moose888",
-        "atlasnet"
+        "moose888"
       ]
     },
     "insular_cortex": {
@@ -2068,12 +2075,12 @@
       "parent_ids": [],
       "comparison_family": "whole_organ",
       "candidate_models": [
-        "vsmtrans",
-        "atlasnet"
+        "atlasnet",
+        "vsmtrans"
       ],
-      "primary_teacher": "vsmtrans",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "vsmtrans"
       ]
     },
     "kidney": {
@@ -3240,12 +3247,12 @@
       ],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
-        "epai_20250421",
-        "atlasnet"
+        "atlasnet",
+        "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "epai_20250421"
       ]
     },
     "parietal_lobe": {
@@ -3442,16 +3449,16 @@
       ],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
+        "atlasnet",
         "vsmtrans",
         "cads551",
-        "moose888",
-        "atlasnet"
+        "moose888"
       ],
-      "primary_teacher": "vsmtrans",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
+        "vsmtrans",
         "cads551",
-        "moose888",
-        "atlasnet"
+        "moose888"
       ]
     },
     "postcava": {
@@ -3736,12 +3743,12 @@
       ],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
-        "epai_20250421",
-        "atlasnet"
+        "atlasnet",
+        "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "epai_20250421"
       ]
     },
     "renal_vein_right": {
@@ -3753,12 +3760,12 @@
       ],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
-        "epai_20250421",
-        "atlasnet"
+        "atlasnet",
+        "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "epai_20250421"
       ]
     },
     "rib_cartilage": {
@@ -4526,14 +4533,14 @@
       "parent_ids": [],
       "comparison_family": "whole_organ",
       "candidate_models": [
+        "atlasnet",
         "vsmtrans",
-        "cads551",
-        "atlasnet"
+        "cads551"
       ],
-      "primary_teacher": "vsmtrans",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "cads551",
-        "atlasnet"
+        "vsmtrans",
+        "cads551"
       ]
     },
     "styloid_process_left": {
@@ -4672,12 +4679,12 @@
       "parent_ids": [],
       "comparison_family": "vessel_or_small_structure",
       "candidate_models": [
-        "epai_20250421",
-        "atlasnet"
+        "atlasnet",
+        "epai_20250421"
       ],
-      "primary_teacher": "epai_20250421",
+      "primary_teacher": "atlasnet",
       "backup_teachers": [
-        "atlasnet"
+        "epai_20250421"
       ]
     },
     "superior_oblique_muscle_left": {

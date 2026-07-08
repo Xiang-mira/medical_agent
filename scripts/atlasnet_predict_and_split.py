@@ -16,6 +16,32 @@ MODEL_RELATIVE_PATH = Path(
     "nnUNet_results/Dataset001_ATLASNet/"
     "nnUNetTrainer__nnUNetPlans__3d_fullres"
 )
+DEFAULT_POSTPROCESS_RELATIVE_PATH = Path("utils/atlas_postprocess.py")
+PROJECT_FALLBACK_POSTPROCESS = Path("third_party/atlasnet/utils/atlas_postprocess.py")
+ATLAS_POSTPROCESS_LABEL_MAP = {
+    "aorta": 1,
+    "adrenal_l": 2,
+    "adrenal_r": 3,
+    "common_bile_duct": 4,
+    "celiac_artery": 5,
+    "colon": 6,
+    "duodenum": 7,
+    "gallbladder": 8,
+    "ivc": 9,
+    "kidney_l": 10,
+    "kidney_r": 11,
+    "liver": 12,
+    "pancreas": 13,
+    "pancreatic_duct": 14,
+    "superior_mesenteric_artery": 15,
+    "intestine": 16,
+    "spleen": 17,
+    "stomach": 18,
+    "portal_splenic_vein": 19,
+    "renal_vein_l": 20,
+    "renal_vein_r": 21,
+    "cbd_stent": 22,
+}
 
 
 def _load_labels(path: Path) -> dict[str, int]:
@@ -39,6 +65,26 @@ def _case_id(image: Path) -> str:
     return name.removesuffix("_0000")
 
 
+def _write_text(path: Path, value: str | None) -> None:
+    path.write_text(value or "", encoding="utf-8")
+
+
+def _postprocess_snippet(atlas_root: Path, pred_path: Path | str, ct_path: Path | str, output_path: Path | str) -> str:
+    return "\n".join([
+        "import sys",
+        "from pathlib import Path",
+        f"sys.path.insert(0, {str(atlas_root)!r})",
+        "from utils.atlas_postprocess import run_from_files",
+        (
+            "run_from_files("
+            f"pred_path={str(pred_path)!r}, "
+            f"ct_path={str(ct_path)!r}, "
+            f"output_path={str(output_path)!r}, "
+            f"label_map={ATLAS_POSTPROCESS_LABEL_MAP!r})"
+        ),
+    ])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="ATLAS-Net wrapper for the medai CLI")
     parser.add_argument("--image", required=True, help="Input 3D CT volume (.nii.gz)")
@@ -51,6 +97,18 @@ def main() -> int:
     parser.add_argument("--device", default=None, help="cpu, cuda, cuda:0, or a CUDA device index")
     parser.add_argument("--num-processes-preprocessing", type=int, default=2)
     parser.add_argument("--num-processes-segmentation-export", type=int, default=2)
+    parser.add_argument(
+        "--postprocess-mode",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="Run the official ATLAS-Net CT-aware postprocess when available.",
+    )
+    parser.add_argument(
+        "--postprocess-script",
+        default=None,
+        help="Optional path to utils/atlas_postprocess.py from the cloned ATLAS-Net repo.",
+    )
+    parser.add_argument("--skip-postprocess", action="store_true", help="Alias for --postprocess-mode never.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -61,6 +119,15 @@ def main() -> int:
     per_model_dir = Path(args.per_model_dir).resolve() if args.per_model_dir else output
     seg_dir = output / "segmentations"
     model_folder = atlas_root / MODEL_RELATIVE_PATH
+    postprocess_mode = "never" if args.skip_postprocess else args.postprocess_mode
+    if args.postprocess_script:
+        postprocess_script = Path(args.postprocess_script).resolve()
+        postprocess_import_root = postprocess_script.parent.parent
+    else:
+        checkpoint_postprocess = atlas_root / DEFAULT_POSTPROCESS_RELATIVE_PATH
+        fallback_postprocess = (Path(__file__).resolve().parents[1] / PROJECT_FALLBACK_POSTPROCESS).resolve()
+        postprocess_script = checkpoint_postprocess if checkpoint_postprocess.is_file() else fallback_postprocess
+        postprocess_import_root = atlas_root if checkpoint_postprocess.is_file() else fallback_postprocess.parent.parent
 
     output.mkdir(parents=True, exist_ok=True)
     seg_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +142,9 @@ def main() -> int:
         "atlas_root": str(atlas_root),
         "model_folder": str(model_folder),
         "label_map": str(label_map),
+        "postprocess_mode": postprocess_mode,
+        "postprocess_script": str(postprocess_script),
+        "postprocess_import_root": str(postprocess_import_root),
     }
 
     command_preview = [
@@ -91,8 +161,19 @@ def main() -> int:
     if args.device and args.device.lower() in {"cpu", "cuda", "mps"}:
         command_preview.extend(["-device", args.device.lower()])
 
+    postprocess_preview = [
+        sys.executable,
+        "-c",
+        _postprocess_snippet(postprocess_import_root, "<raw_prediction>", image, "<postprocessed_prediction>"),
+    ]
+
     if args.dry_run:
-        print(json.dumps({**summary, "status": "dry_run", "command": command_preview}, indent=2))
+        print(json.dumps({
+            **summary,
+            "status": "dry_run",
+            "command": command_preview,
+            "postprocess_command": postprocess_preview if postprocess_mode != "never" else None,
+        }, indent=2))
         return 0
 
     if not image.is_file():
@@ -108,13 +189,17 @@ def main() -> int:
     checkpoint = model_folder / f"fold_{args.folds}" / args.checkpoint_name
     if not checkpoint.is_file():
         raise FileNotFoundError(f"ATLAS-Net checkpoint not found: {checkpoint}")
+    if postprocess_mode == "always" and not postprocess_script.is_file():
+        raise FileNotFoundError(f"ATLAS-Net postprocess script not found: {postprocess_script}")
 
     with tempfile.TemporaryDirectory(prefix="medai_atlasnet_") as temp_root:
         temp = Path(temp_root)
         input_dir = temp / "imagesTs"
         prediction_dir = temp / "predictions"
+        postprocess_dir = temp / "postprocessed"
         input_dir.mkdir()
         prediction_dir.mkdir()
+        postprocess_dir.mkdir()
         shutil.copy2(image, input_dir / f"{_case_id(image)}_0000.nii.gz")
 
         command = list(command_preview)
@@ -139,8 +224,8 @@ def main() -> int:
             check=False,
             env=env,
         )
-        (output / "atlasnet_stdout.log").write_text(completed.stdout or "", encoding="utf-8")
-        (output / "atlasnet_stderr.log").write_text(completed.stderr or "", encoding="utf-8")
+        _write_text(output / "atlasnet_stdout.log", completed.stdout)
+        _write_text(output / "atlasnet_stderr.log", completed.stderr)
         if completed.returncode != 0:
             print(json.dumps({
                 **summary,
@@ -155,8 +240,73 @@ def main() -> int:
             print(json.dumps({**summary, "status": "failed", "reason": "ATLAS-Net produced no prediction"}, indent=2))
             return 2
 
+        raw_prediction = predictions[0]
+        final_prediction = raw_prediction
+        postprocess_info = {
+            "postprocess_status": "skipped",
+            "postprocess_used": False,
+            "postprocess_reason": "postprocess disabled",
+            "raw_prediction": str(raw_prediction),
+        }
+        if postprocess_mode != "never":
+            if postprocess_script.is_file():
+                postprocessed_prediction = postprocess_dir / raw_prediction.name
+                postprocess_command = [
+                    sys.executable,
+                    "-c",
+                    _postprocess_snippet(postprocess_import_root, raw_prediction, image, postprocessed_prediction),
+                ]
+                postprocess = subprocess.run(
+                    postprocess_command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                )
+                _write_text(output / "atlasnet_postprocess_stdout.log", postprocess.stdout)
+                _write_text(output / "atlasnet_postprocess_stderr.log", postprocess.stderr)
+                if postprocess.returncode == 0 and postprocessed_prediction.is_file():
+                    final_prediction = postprocessed_prediction
+                    postprocess_info = {
+                        "postprocess_status": "success",
+                        "postprocess_used": True,
+                        "postprocess_reason": None,
+                        "postprocess_return_code": postprocess.returncode,
+                        "postprocess_command": postprocess_command,
+                        "raw_prediction": str(raw_prediction),
+                        "postprocessed_prediction": str(postprocessed_prediction),
+                    }
+                else:
+                    postprocess_info = {
+                        "postprocess_status": "failed",
+                        "postprocess_used": False,
+                        "postprocess_reason": "official postprocess failed; using raw prediction in auto mode",
+                        "postprocess_return_code": postprocess.returncode,
+                        "postprocess_command": postprocess_command,
+                        "raw_prediction": str(raw_prediction),
+                        "postprocessed_prediction": str(postprocessed_prediction),
+                        "postprocess_stderr_tail": (postprocess.stderr or "")[-4000:],
+                    }
+                    if postprocess_mode == "always":
+                        print(json.dumps({
+                            **summary,
+                            **postprocess_info,
+                            "status": "failed",
+                        }, indent=2))
+                        return postprocess.returncode or 4
+            else:
+                postprocess_info = {
+                    "postprocess_status": "unavailable",
+                    "postprocess_used": False,
+                    "postprocess_reason": f"postprocess script not found: {postprocess_script}",
+                    "raw_prediction": str(raw_prediction),
+                }
+                if postprocess_mode == "always":
+                    print(json.dumps({**summary, **postprocess_info, "status": "failed"}, indent=2))
+                    return 4
+
         combined = per_model_dir / "combined_labels.nii.gz"
-        shutil.copy2(predictions[0], combined)
+        shutil.copy2(final_prediction, combined)
         local_labels = _load_labels(label_map)
         (per_model_dir / "local_labels.json").write_text(
             json.dumps(local_labels, indent=2, ensure_ascii=False, sort_keys=True),
@@ -177,13 +327,14 @@ def main() -> int:
             text=True,
             check=False,
         )
-        (output / "split_stdout.log").write_text(split.stdout or "", encoding="utf-8")
-        (output / "split_stderr.log").write_text(split.stderr or "", encoding="utf-8")
+        _write_text(output / "split_stdout.log", split.stdout)
+        _write_text(output / "split_stderr.log", split.stderr)
 
     masks = sorted(seg_dir.glob("*.nii.gz"))
     status = "success" if split.returncode == 0 and masks else "failed"
     print(json.dumps({
         **summary,
+        **postprocess_info,
         "status": status,
         "combined_label": str(combined),
         "num_masks": len(masks),

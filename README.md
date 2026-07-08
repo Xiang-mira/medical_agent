@@ -207,7 +207,7 @@ checkpoints/
   nnUNet_private/
   VSmTrans/
   VISTA3D-Inference-Pipeline-master/
-  ATLAS-Net/
+  ATLAS-Net/                 # clone of https://huggingface.co/Koushik45048545309/Atlas-Net, including utils/atlas_postprocess.py
   VoxTell/voxtell_v1.1/
   Qwen/Qwen3-Embedding-4B/
 ```
@@ -267,17 +267,20 @@ reloading the same checkpoint, but each child keeps an independent anatomical
 support box. At least 95% of a merged-crop prediction must remain inside that
 support; otherwise only that child is rerun on its independent ROI.
 
-Primary teachers run first and backups are used when required. Round 2 and later
-reuse valid Round 1 hierarchical teacher caches. Student inference runs after
-each M-step.
+Primary teachers run first and backups are used when required for Round 1
+bootstrap. Round 2 and later use the EM repair path: the previous selected
+pseudo label is the immutable pseudo reference, and the previous round cleaned
+student prediction competes against it through LabelCritic/verifier. Fresh
+teacher replay is debug/bootstrap-only, not the formal Round2+ update path.
 
 ### E-step selection flow
 
 1. Normalize teacher outputs to exact canonical NIfTI masks.
 2. Run ShapeKit when enabled.
 3. Apply structural and geometry QC.
-4. Exclude fusion, student, historical pseudo, and QC-failed masks from formal
-   positive recovery.
+4. In Round 1, exclude fusion, student, historical pseudo, and QC-failed masks
+   from formal positive recovery. In Round2+, allow only `round_prev_selected`
+   and postprocessed `student_prev` in the formal EM candidate pool.
 5. Compute a full 3D Dice matrix over original teacher masks.
 6. Accept only a unique complete-link geometric consensus cluster
    (`Dice >= 0.95`) and choose the original teacher medoid.

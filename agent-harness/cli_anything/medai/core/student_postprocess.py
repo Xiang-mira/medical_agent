@@ -409,7 +409,7 @@ def process_student_root(
 ) -> dict[str, Any]:
     taxonomy = load_taxonomy(taxonomy_path)
     policy = load_yaml(policy_path)
-    wanted = {normalize_canonical_id(x) for x in organs or []}
+    wanted_exact = {str(x).strip() for x in organs or [] if str(x).strip()}
     cases = _case_ids(case_list, input_root)
     if max_cases > 0:
         cases = cases[:max_cases]
@@ -429,12 +429,14 @@ def process_student_root(
         for src in sorted(in_case.glob("*.nii.gz")):
             source_name = src.name[:-7]
             organ = normalize_canonical_id(source_name)
-            # When an explicit target list is supplied, require the on-disk
-            # canonical filename. Historical ``ct_*`` aliases must not be
-            # normalized into duplicate formal candidates.
-            if wanted and source_name not in wanted:
+            # When an explicit target list is supplied, preserve the configured
+            # prompt id as the output filename. This prevents canonical
+            # collisions such as inferior_vena_cava/postcava from collapsing the
+            # formal 373-target handoff.
+            if wanted_exact and source_name not in wanted_exact:
                 continue
-            dst = out_case / f"{organ}.nii.gz"
+            output_name = source_name if wanted_exact else organ
+            dst = out_case / f"{output_name}.nii.gz"
             if dst.exists() and not overwrite and not dry_run:
                 skipped_existing += 1
                 continue
@@ -443,7 +445,8 @@ def process_student_root(
             if dry_run:
                 rows.append({
                     "case_id": case_id,
-                    "organ": organ,
+                    "organ": output_name,
+                    "canonical_organ": organ,
                     "input_path": str(src),
                     "output_path": str(dst),
                     "containment_enabled": rule.enabled,
@@ -460,7 +463,8 @@ def process_student_root(
                 shutil.copy2(src, dst)
                 rows.append({
                     "case_id": case_id,
-                    "organ": organ,
+                    "organ": output_name,
+                    "canonical_organ": organ,
                     "input_path": str(src),
                     "output_path": str(dst),
                     "containment_enabled": False,

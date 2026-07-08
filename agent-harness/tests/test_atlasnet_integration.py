@@ -17,6 +17,14 @@ ATLASNET_373_ORGANS = {
     "spleen", "stomach", "superior_mesenteric_artery",
 }
 
+ATLASNET_PRIORITY_ORGANS = {
+    "aorta", "cbd_stent", "celiac_aa (celiac_artery)", "colon",
+    "common_bile_duct", "duodenum", "gall_bladder", "inferior_vena_cava",
+    "intestine", "pancreatic_duct", "portal_vein_and_splenic_vein",
+    "renal_vein_left", "renal_vein_right", "stomach",
+    "superior_mesenteric_artery",
+}
+
 
 def test_atlasnet_registry_entry_is_enabled_and_complete():
     sys.path.insert(0, str(ROOT / "agent-harness"))
@@ -28,6 +36,20 @@ def test_atlasnet_registry_entry_is_enabled_and_complete():
     assert entry["private_checkpoint"] is False
     assert len(entry["covered_organs"]) == 25
     assert "atlasnet_predict_and_split.py" in entry["command_template"]
+    assert "--postprocess-mode auto" in entry["command_template"]
+    assert "colon, stomach" in entry["notes"]
+
+
+def test_atlasnet_label_map_declares_formal_and_priority_scope():
+    label_map = json.loads((ROOT / "configs/atlasnet_label_map.json").read_text())
+    assert len(label_map["labels"]) == 26
+    assert set(label_map["formal_373_routing_organs"]) == ATLASNET_373_ORGANS
+    assert set(label_map["recommended_teacher_priority_organs"]) == ATLASNET_PRIORITY_ORGANS
+    assert set(label_map["formal_373_excluded_labels"]) == {
+        "pancreatic_pdac",
+        "pancreatic_cyst",
+        "pancreatic_pnet",
+    }
 
 
 def test_atlasnet_cli_dry_run_uses_uniform_per_model_contract(tmp_path):
@@ -55,6 +77,7 @@ def test_atlasnet_cli_dry_run_uses_uniform_per_model_contract(tmp_path):
     assert result["per_model_dir"].endswith("case_001/per_model/atlasnet")
     assert "--device \"cuda:0\"" in result["command"]
     assert "--per-model-dir" in result["command"]
+    assert "--postprocess-mode auto" in result["command"]
 
 
 def test_atlasnet_wrapper_dry_run_matches_official_modelfolder_command(tmp_path):
@@ -79,6 +102,11 @@ def test_atlasnet_wrapper_dry_run_matches_official_modelfolder_command(tmp_path)
     assert command[0] == "nnUNetv2_predict_from_modelfolder"
     assert "checkpoint_final.pth" in command
     assert "nnUNetTrainer__nnUNetPlans__3d_fullres" in " ".join(command)
+    assert result["postprocess_mode"] == "auto"
+    assert result["postprocess_command"] is not None
+    assert "atlas_postprocess.py" in result["postprocess_script"]
+    assert "run_from_files" in result["postprocess_command"][2]
+    assert "utils.atlas_postprocess" in result["postprocess_command"][2]
 
 
 def test_atlasnet_is_formally_routed_for_exactly_its_373_organs():
@@ -94,3 +122,7 @@ def test_atlasnet_is_formally_routed_for_exactly_its_373_organs():
     }
     assert actual == ATLASNET_373_ORGANS
     assert not ({"pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"} & set(target["target_organs"]))
+
+    for organ in ATLASNET_PRIORITY_ORGANS:
+        candidates = routed["ranked_candidates"][organ]
+        assert candidates[0]["model_key"] == "atlasnet"
