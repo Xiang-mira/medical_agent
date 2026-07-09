@@ -3035,10 +3035,8 @@
         "fat"
       ],
       "comparison_family": "other_noncomparable",
-      "candidate_models": [
-        "duke"
-      ],
-      "primary_teacher": "duke",
+      "candidate_models": [],
+      "primary_teacher": null,
       "backup_teachers": []
     },
     "muscle_of_head": {

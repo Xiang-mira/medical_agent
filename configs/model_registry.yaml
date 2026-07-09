@@ -1443,133 +1443,6 @@ models:
     training_data_lineage: class_checkpoint_map.xlsx
     is_student: false
     lineage_contract_status: derived
-  duke:
-    name: duke
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - muscle_fat
-    - skeletal_muscle
-    - subcutaneous_adipose_tissue
-    - visceral_adipose_tissue
-    status: ignored
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
-    runner: command_template
-    checkpoint_path: checkpoints/duke
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
-    private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
-    enabled: false
-    recipe: null
-    checkpoint_name: null
-    routing_aliases: []
-    evidence_family: duke
-    architecture_lineage: duke
-    training_data_lineage: class_checkpoint_map.xlsx
-    is_student: false
-    lineage_contract_status: derived
-  pedro:
-    name: pedro
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - liver_segment_1
-    - liver_segment_2
-    - liver_segment_3
-    - liver_segment_4
-    - liver_segment_5
-    - liver_segment_6
-    - liver_segment_7
-    - liver_segment_8
-    - pancreas_body
-    - pancreas_head
-    - pancreas_tail
-    status: ignored
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Command template may need editing after the real checkpoint folder and
-      original inference script are available.
-    runner: command_template
-    checkpoint_path: checkpoints/pedro
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
-    private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
-    enabled: false
-    recipe: null
-    checkpoint_name: null
-    routing_aliases: []
-    evidence_family: pedro
-    architecture_lineage: pedro
-    training_data_lineage: class_checkpoint_map.xlsx
-    is_student: false
-    lineage_contract_status: derived
-  goacc:
-    name: goacc
-    type: segmentation
-    source: class_checkpoint_map.xlsx
-    covered_organs:
-    - vertebrae_c1
-    - vertebrae_c2
-    - vertebrae_c3
-    - vertebrae_c4
-    - vertebrae_c5
-    - vertebrae_c6
-    - vertebrae_c7
-    - vertebrae_l1
-    - vertebrae_l2
-    - vertebrae_l3
-    - vertebrae_l4
-    - vertebrae_l5
-    - vertebrae_s1
-    - vertebrae_t1
-    - vertebrae_t10
-    - vertebrae_t11
-    - vertebrae_t12
-    - vertebrae_t2
-    - vertebrae_t3
-    - vertebrae_t4
-    - vertebrae_t5
-    - vertebrae_t6
-    - vertebrae_t7
-    - vertebrae_t8
-    - vertebrae_t9
-    status: ignored
-    output_layout: case_id/segmentations/*.nii.gz
-    notes: Template retained; the lightweight export did not include a runnable script
-      for this family.
-    runner: command_template
-    checkpoint_path: checkpoints/goacc
-    command_template: python wrappers/{model_key}_infer.py --image {image} --output
-      {output} --checkpoint {checkpoint_path}
-    private_checkpoint: true
-    trainable: unknown_template_only
-    mstep_role: template_only_until_real_script_arrives
-    mstep_backend: none
-    mstep_reason: This model family appears in class_checkpoint_map.xlsx, but no complete
-      runnable inference/training script or checkpoint folder was available in the
-      lightweight export.
-    enabled: false
-    recipe: null
-    checkpoint_name: null
-    routing_aliases: []
-    evidence_family: goacc
-    architecture_lineage: goacc
-    training_data_lineage: class_checkpoint_map.xlsx
-    is_student: false
-    lineage_contract_status: derived
   mock_seg:
     name: Local mock segmentation wrapper
     type: segmentation
@@ -2081,28 +1954,20 @@ organ_to_models:
   liver_portal_vein:
   - vsnet
   liver_segment_1:
-  - pedro
   - totalsegmentator
   liver_segment_2:
-  - pedro
   - totalsegmentator
   liver_segment_3:
-  - pedro
   - totalsegmentator
   liver_segment_4:
-  - pedro
   - totalsegmentator
   liver_segment_5:
-  - pedro
   - totalsegmentator
   liver_segment_6:
-  - pedro
   - totalsegmentator
   liver_segment_7:
-  - pedro
   - totalsegmentator
   liver_segment_8:
-  - pedro
   - totalsegmentator
   lung:
   - vista3d
@@ -2182,8 +2047,7 @@ organ_to_models:
   muscle:
   - saros_nnunet
   - cads
-  muscle_fat:
-  - duke
+  muscle_fat: []
   muscle_of_head:
   - cads
   nasal_cavity_left:
@@ -2213,12 +2077,9 @@ organ_to_models:
   - moose3_0
   - nnunet_private
   - mock_seg
-  pancreas_body:
-  - pedro
-  pancreas_head:
-  - pedro
-  pancreas_tail:
-  - pedro
+  pancreas_body: []
+  pancreas_head: []
+  pancreas_tail: []
   pancreatic_duct:
   - epai_20250421
   pancreatic_cyst:
@@ -2434,7 +2295,6 @@ organ_to_models:
   - cads
   skeletal_muscle:
   - saros_nnunet
-  - duke
   - moose3_0
   skin:
   - totalsegmentator
@@ -2498,7 +2358,6 @@ organ_to_models:
   - vista3d
   subcutaneous_adipose_tissue:
   - saros_nnunet
-  - duke
   - cads
   - moose3_0
   submandibular_gland_left:
@@ -2593,131 +2452,105 @@ organ_to_models:
   venous_sinuses:
   - totalsegmentator
   vertebrae_c1:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_c2:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_c3:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_c4:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_c5:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_c6:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_c7:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_l1:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_l2:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_l3:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_l4:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_l5:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_s1:
-  - goacc
   - vista3d
   vertebrae_t1:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t10:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t11:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t12:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t2:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t3:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t4:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t5:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t6:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t7:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t8:
-  - goacc
   - vista3d
   - cads
   - moose
   vertebrae_t9:
-  - goacc
   - vista3d
   - cads
   - moose
   visceral_adipose_tissue:
   - saros_nnunet
-  - duke
   - moose3_0
   white_matter:
   - cads

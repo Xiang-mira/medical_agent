@@ -7,7 +7,9 @@ checkpoints/
 *.pkl
 
 # ── CT / medical imaging data ─────────────────────────────────────────────────
+data/PanTS/
 third_party/PanTS-main/data/
+third_party/PanTS-main/tars/
 PanTSMini_Label/
 *.nii.gz
 *.nii

@@ -1,0 +1,57 @@
+# Local repository metadata; use git push when history is needed.
+.git/
+
+# Large local artifacts: keep out of uploaded archives/storage snapshots.
+checkpoints/
+outputs/
+data/PanTS/
+third_party/PanTS-main/tars/
+third_party/VoxTell/
+
+# Runtime-generated model/data products.
+results/
+comparison_results/
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
+# Medical imaging and model binaries.
+*.nii.gz
+*.nii
+*.mha
+*.mhd
+*.dcm
+*.tar.gz
+*.zip
+*.tar
+*.pth
+*.pt
+*.ckpt
+*.onnx
+*.pkl
+*.npz
+
+# Local Python/editor/cache noise.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.ipynb
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local logs/secrets.
+*.log
+logs/
+.env
+.env.*
+secrets.json
+credentials.json

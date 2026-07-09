@@ -93,12 +93,6 @@
       "enabled": true,
       "reason": null
     },
-    "Duke": {
-      "model": null,
-      "subtask": null,
-      "enabled": false,
-      "reason": "决策:忽略不封装"
-    },
     "Totalsegmentator (oculomotor_muscles)": {
       "model": "totalsegmentator",
       "subtask": "oculomotor_muscles",

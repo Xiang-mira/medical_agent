@@ -748,9 +748,7 @@
       "SAROS nnUNet",
       "CADS559"
     ],
-    "muscle_fat": [
-      "Duke"
-    ],
+    "muscle_fat": [],
     "muscle_of_head": [
       "CADS557"
     ],
@@ -1072,7 +1070,6 @@
     ],
     "skeletal_muscle": [
       "SAROS nnUNet",
-      "Duke",
       "MOOSE3.0 (clin_ct_body_composition)"
     ],
     "skin": [
@@ -1151,7 +1148,6 @@
     ],
     "subcutaneous_adipose_tissue": [
       "SAROS nnUNet",
-      "Duke",
       "CADS559",
       "MOOSE3.0 (clin_ct_body_composition)"
     ],
@@ -1412,7 +1408,6 @@
     ],
     "visceral_adipose_tissue": [
       "SAROS nnUNet",
-      "Duke",
       "MOOSE3.0 (clin_ct_body_composition)"
     ],
     "white_matter": [
@@ -1458,7 +1453,6 @@
     "Totalsegmentator (headneck_bones_vessels)": 9,
     "Totalsegmentator (liver_segments)": 8,
     "MOOSE3.0 (clin_ct_lungs)": 5,
-    "Duke": 4,
     "AirRC": 3,
     "MOOSE3.0 (clin_ct_body)": 3,
     "MOOSE3.0 (clin_ct_body_composition)": 3,
@@ -1485,9 +1479,12 @@
     "bladder",
     "brain",
     "brainstem",
+    "cbd_stent",
+    "celiac_aa (celiac_artery)",
     "clavicula_left",
     "clavicula_right",
     "colon",
+    "common_bile_duct",
     "duodenum",
     "esophagus",
     "femur_left",
@@ -1517,6 +1514,7 @@
     "iliopsoas_left",
     "iliopsoas_right",
     "inferior_vena_cava",
+    "intestine",
     "kidney_left",
     "kidney_right",
     "liver",
@@ -1538,6 +1536,7 @@
     "optic_nerve_left",
     "optic_nerve_right",
     "pancreas",
+    "pancreatic_duct",
     "parotid_gland_left",
     "parotid_gland_right",
     "pericardium",
@@ -1546,7 +1545,12 @@
     "pulmonary_artery",
     "pulmonary_vein",
     "rectum",
+    "renal_vein_left",
+    "renal_vein_right",
     "rib_left_1",
+    "rib_left_10",
+    "rib_left_11",
+    "rib_left_12",
     "rib_left_2",
     "rib_left_3",
     "rib_left_4",
@@ -1555,10 +1559,10 @@
     "rib_left_7",
     "rib_left_8",
     "rib_left_9",
-    "rib_left_10",
-    "rib_left_11",
-    "rib_left_12",
     "rib_right_1",
+    "rib_right_10",
+    "rib_right_11",
+    "rib_right_12",
     "rib_right_2",
     "rib_right_3",
     "rib_right_4",
@@ -1567,9 +1571,6 @@
     "rib_right_7",
     "rib_right_8",
     "rib_right_9",
-    "rib_right_10",
-    "rib_right_11",
-    "rib_right_12",
     "sacrum",
     "scapula_left",
     "scapula_right",
@@ -1583,6 +1584,7 @@
     "subcutaneous_adipose_tissue",
     "submandibular_gland_left",
     "submandibular_gland_right",
+    "superior_mesenteric_artery",
     "thoracic_cavity",
     "thyrohyoid_left",
     "thyrohyoid_right",
@@ -1601,6 +1603,9 @@
     "vertebrae_L4",
     "vertebrae_L5",
     "vertebrae_T1",
+    "vertebrae_T10",
+    "vertebrae_T11",
+    "vertebrae_T12",
     "vertebrae_T2",
     "vertebrae_T3",
     "vertebrae_T4",
@@ -1609,9 +1614,6 @@
     "vertebrae_T7",
     "vertebrae_T8",
     "vertebrae_T9",
-    "vertebrae_T10",
-    "vertebrae_T11",
-    "vertebrae_T12",
     "visceral_adipose_tissue"
   ]
 }

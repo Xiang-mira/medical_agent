@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover
 
 
 XLSX_NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+IGNORED_TEACHER_KEYS = {"duke", "goacc", "pedro"}
 
 
 def _norm_key(text: str) -> str:
@@ -472,7 +473,11 @@ def build_registry_dict(checkpoint_map: str | Path, checkpoint_root: str = "chec
     parsed = parse_checkpoint_map(checkpoint_map)
     if parsed.get("status") != "success":
         return parsed
-    models = {k: _default_model_entry(k, v, checkpoint_root) for k, v in parsed["coverage"].items()}
+    models = {
+        k: _default_model_entry(k, v, checkpoint_root)
+        for k, v in parsed["coverage"].items()
+        if k not in IGNORED_TEACHER_KEYS
+    }
     # Add practical local/demo model so the full workflow can be smoke-tested without GPU checkpoints.
     models["mock_seg"] = apply_mstep_metadata({
         "name": "Local mock segmentation wrapper",
@@ -495,16 +500,20 @@ def build_registry_dict(checkpoint_map: str | Path, checkpoint_root: str = "chec
     models.setdefault("atlasnet", _default_model_entry("atlasnet", [
         "aorta", "adrenal_gland_left", "adrenal_gland_right", "common_bile_duct", "celiac_aa (celiac_artery)", "colon", "duodenum", "gall_bladder", "inferior_vena_cava", "kidney_left", "kidney_right", "liver", "pancreas", "pancreatic_duct", "superior_mesenteric_artery", "intestine", "spleen", "stomach", "portal_vein_and_splenic_vein", "renal_vein_left", "renal_vein_right", "cbd_stent", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"
     ], checkpoint_root))
+    filtered_records: list[dict[str, Any]] = []
     organ_to_models: dict[str, list[str]] = {}
     for rec in parsed["organs"]:
-        models_for_organ = list(rec["candidate_models"])
+        models_for_organ = [m for m in rec["candidate_models"] if m not in IGNORED_TEACHER_KEYS]
         if rec["organ"] in {"liver", "pancreas", "spleen", "kidney_left", "kidney_right", "aorta", "postcava"}:
             if "mock_seg" not in models_for_organ:
                 models_for_organ.append("mock_seg")
         organ_to_models[rec["organ"]] = models_for_organ
+        filtered = dict(rec)
+        filtered["candidate_models"] = models_for_organ
+        filtered_records.append(filtered)
     from .organ_taxonomy import build_taxonomy
 
-    taxonomy = build_taxonomy(parsed["organs"], checkpoint_map)
+    taxonomy = build_taxonomy(filtered_records, checkpoint_map)
     registry = {
         "schema_version": "1.1",
         "generated_from": str(Path(checkpoint_map).resolve()),
