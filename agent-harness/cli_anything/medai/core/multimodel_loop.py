@@ -45,6 +45,10 @@ from .case_quality_report import build_case_quality_report
 QUALITY_CONTRACT_VERSION = "estep_quality_contract_v3"
 FOV_POLICY_VERSION = "fov_appearance_regions_v4"
 EM_STUDENT_VS_PREVIOUS_MODE = "em_student_vs_previous"
+METRIC_TARGET_SELECTED_PSEUDO = "selected_pseudo_label"
+METRIC_TARGET_ABSENT_ZERO = "absent_negative_zero_mask"
+METRIC_TARGET_TEACHER_CANDIDATE = "teacher_candidate"
+METRIC_TARGET_STUDENT_CANDIDATE = "student_candidate"
 
 def _file_sha256(path: str | Path | None) -> str | None:
     if not path or not Path(path).exists():
@@ -126,6 +130,83 @@ def _mask_path(seg_dir: Path, organ: str) -> Path:
     return seg_dir / f"{organ}.nii.gz"
 
 
+def _pseudo_transition_action(row: dict[str, Any]) -> str:
+    target_type = str(row.get("target_type") or "").lower()
+    if target_type in {"negative_absent", "absent_negative"}:
+        return "negative_absent_selected"
+    if target_type in {"withheld_uncertain", "unresolved_review", "unresolved_visible", "partial_fov"}:
+        return "withheld_uncertain"
+    gate = row.get("em_student_vs_previous_gate") or {}
+    status = str(gate.get("status") or "")
+    if status == "student_replacement_accepted":
+        return "student_output_selected"
+    if status in {"previous_selected_by_verifier", "previous_carried_forward"}:
+        return "previous_selected_kept"
+    if status == "missing_round_prev_selected":
+        return "withheld_uncertain"
+    selected_model = str(row.get("selected_model") or row.get("source_model") or "")
+    if selected_model == "student_prev":
+        qc_status = str(row.get("selected_candidate_qc_status") or gate.get("student_qc_status") or "")
+        if qc_status and qc_status != "pass":
+            return "student_rejected_by_qc"
+        return "student_output_selected"
+    if selected_model in {"round_prev_selected", "previous_round_selected"}:
+        return "previous_selected_kept"
+    if row.get("selection_status") != "selected":
+        return "withheld_uncertain"
+    return "teacher_output_selected"
+
+
+def _pseudo_transition_detail(row: dict[str, Any], action: str) -> str:
+    if action != "student_output_selected":
+        return action
+    shapekit_status = str(
+        row.get("selected_candidate_shapekit_status")
+        or row.get("student_shapekit_status")
+        or ""
+    )
+    if shapekit_status == "success":
+        return "student_accepted_after_shapekit"
+    if shapekit_status:
+        return f"student_rejected_or_unverified_after_shapekit_{shapekit_status}"
+    return "student_output_selected_shapekit_status_missing"
+
+
+def _decorate_pseudo_label_record(row: dict[str, Any]) -> dict[str, Any]:
+    """Normalize mainline artifacts toward pseudo-label wording."""
+    target_type = str(row.get("target_type") or "").lower()
+    action = _pseudo_transition_action(row)
+    row["pseudo_label_transition_action"] = action
+    row["pseudo_label_transition_detail"] = _pseudo_transition_detail(row, action)
+    if target_type in {"negative_absent", "absent_negative"}:
+        label_role = "absent_negative_zero_mask"
+        metric_target = METRIC_TARGET_ABSENT_ZERO
+        supervision_role = "absent_negative_zero_mask"
+    elif action == "student_output_selected":
+        label_role = "student_pseudo_candidate"
+        metric_target = METRIC_TARGET_STUDENT_CANDIDATE
+        supervision_role = "selected_pseudo_label"
+    elif action == "withheld_uncertain":
+        label_role = "withheld_uncertain"
+        metric_target = "selected_pseudo_label"
+        supervision_role = "withheld_uncertain"
+    elif action == "teacher_output_selected":
+        label_role = "teacher_pseudo_candidate"
+        metric_target = METRIC_TARGET_TEACHER_CANDIDATE
+        supervision_role = "selected_pseudo_label"
+    else:
+        label_role = "selected_pseudo_label"
+        metric_target = METRIC_TARGET_SELECTED_PSEUDO
+        supervision_role = "selected_pseudo_label"
+    row["label_role"] = label_role
+    row["supervision_role"] = supervision_role
+    row["metric_target"] = metric_target
+    row.setdefault("metric_interpretation", "pseudo_label_consistency")
+    if "ground_truth_status" in row:
+        row["legacy_ground_truth_status"] = row.pop("ground_truth_status")
+    return row
+
+
 def _load_model_label_aliases(root: Path) -> dict[str, Any]:
     path = root / "configs" / "model_label_aliases.json"
     if not path.exists():
@@ -169,7 +250,8 @@ def _load_target_space_policy(root: Path, requested_organs: list[str]) -> dict[s
         "target_organs_not_requested": sorted(target_set - requested_set),
         "policy_skipped_organs": doc.get("policy_skipped_organs", []),
         "no_enabled_route_organs": doc.get("no_enabled_route_organs", []),
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "teacher_pseudo_candidate",
+        "supervision_role": "selected_pseudo_label",
         "accuracy_warning": "Teacher outputs are pseudo-label candidates; this target policy does not prove true accuracy.",
     }
 
@@ -1577,6 +1659,10 @@ def _materialize_case_373_targets(
             row["training_block_reason"] = (
                 "selection_not_formally_eligible_under_current_gate"
             )
+    for row in selection_rows:
+        _decorate_pseudo_label_record(row)
+    for row in selected_metadata:
+        _decorate_pseudo_label_record(row)
     selection_by_organ = {str(row.get("organ")): row for row in selection_rows if row.get("organ")}
     absent_added = 0
     review_gap_missing = 0
@@ -1626,6 +1712,7 @@ def _materialize_case_373_targets(
                 "metric_comparison": "none",
                 "metric_interpretation": "not_evaluable",
             }
+            _decorate_pseudo_label_record(row)
             selection_rows.append(dict(row))
             selected_metadata.append(dict(row))
             selection_by_organ[organ] = row
@@ -1674,10 +1761,9 @@ def _materialize_case_373_targets(
             "negative_reason": "out_of_scan_by_scan_coverage",
             "negative_source": "case_373_expected_absent",
             "dataset_role": "semantic_absent_negative",
-            "ground_truth_status": "valid_absent_negative",
             "metric_family": "absence_supervision",
             "metric_scope": "all_zero_negative_target_for_absent_organ",
-            "metric_target": "all-zero target",
+            "metric_target": METRIC_TARGET_ABSENT_ZERO,
             "metric_subject": "E-step output",
             "metric_comparison": "e_step_all_zero_absent_negative_target",
             "metric_interpretation": "negative_absence_quality",
@@ -1687,6 +1773,7 @@ def _materialize_case_373_targets(
             "publication_status": "accepted_absent_negative",
             "should_enter_student_training": float(negative_absent_training_weight) > 0.0,
         }
+        _decorate_pseudo_label_record(row)
         selection_rows.append(dict(row))
         selected_metadata.append(dict(row))
         selection_by_organ[organ] = row
@@ -1829,14 +1916,16 @@ def _export_standard_case_dataset(
             "student target ID",
         ],
         "target_mapping_policy": "Student target IDs come from configs/student_3d_prompt_target_organs.json and are not copied from teacher label IDs.",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "selected_pseudo_label",
+        "supervision_role": "selected_pseudo_label",
         "mappings": mappings,
     })
     write_json(case_root / "selection_metadata.json", {
         "case_id": case_id,
         "ct_path": str(image_dst.resolve()),
         "dataset_type": "pseudo_label_dataset",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "selected_pseudo_label",
+        "supervision_role": "selected_pseudo_label",
         "layout": "bdmap_pants_style_binary_masks",
         "label_mapping": str(mapping_path.resolve()),
         "selected_organs": exported_metadata,
@@ -1936,26 +2025,50 @@ def _safe_shapekit_targets_for_seg_dir(seg_dir: Path) -> list[str]:
 
 def _load_student_postprocess_status_by_organ(root: Path, case_id: str) -> dict[str, dict[str, Any]]:
     path = root / "student_containment_postprocess_per_mask.csv"
-    if not path.is_file():
-        return {}
     rows: dict[str, dict[str, Any]] = {}
-    try:
-        with path.open(encoding="utf-8", newline="") as handle:
-            for row in csv.DictReader(handle):
-                if str(row.get("case_id") or "") != str(case_id):
-                    continue
-                keys = {
-                    str(row.get("organ") or ""),
-                    str(row.get("canonical_organ") or ""),
-                }
-                output_path = str(row.get("output_path") or "")
-                if output_path:
-                    keys.add(Path(output_path).name[:-7] if output_path.endswith(".nii.gz") else Path(output_path).stem)
-                for key in keys:
-                    if key:
-                        rows[key] = dict(row)
-    except Exception:
-        return {}
+    if path.is_file():
+        try:
+            with path.open(encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    if str(row.get("case_id") or "") != str(case_id):
+                        continue
+                    keys = {
+                        str(row.get("organ") or ""),
+                        str(row.get("canonical_organ") or ""),
+                    }
+                    output_path = str(row.get("output_path") or "")
+                    if output_path:
+                        keys.add(Path(output_path).name[:-7] if output_path.endswith(".nii.gz") else Path(output_path).stem)
+                    for key in keys:
+                        if key:
+                            rows[key] = dict(row)
+        except Exception:
+            rows = {}
+    shapekit_path = root / "student_shapekit_manifest.csv"
+    if shapekit_path.is_file():
+        try:
+            with shapekit_path.open(encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    if str(row.get("case_id") or "") != str(case_id):
+                        continue
+                    keys = {str(row.get("organ") or "")}
+                    output_path = str(row.get("output_path") or "")
+                    if output_path:
+                        keys.add(Path(output_path).name[:-7] if output_path.endswith(".nii.gz") else Path(output_path).stem)
+                    for key in keys:
+                        if not key:
+                            continue
+                        merged = dict(rows.get(key) or {})
+                        merged.update({
+                            "student_shapekit_status": row.get("student_shapekit_status"),
+                            "student_shapekit_reason": row.get("student_shapekit_reason"),
+                            "student_shapekit_mask": row.get("shapekit_mask"),
+                            "student_shapekit_selected_source": row.get("selected_for_student_candidate"),
+                            "student_shapekit_raw_mask": row.get("raw_student_mask"),
+                        })
+                        rows[key] = merged
+        except Exception:
+            pass
     return rows
 
 
@@ -1998,10 +2111,16 @@ def _postprocess_candidate_models_with_shapekit(
                 ),
             }
             if model_key in precleaned_model_keys:
-                reports[model_key]["per_mask_status_by_organ"] = _load_student_postprocess_status_by_organ(
+                per_mask = _load_student_postprocess_status_by_organ(
                     seg_dir.parent,
                     case_id,
                 )
+                reports[model_key]["per_mask_status_by_organ"] = per_mask
+                if not any(str(row.get("student_shapekit_status") or "") == "success" for row in per_mask.values()):
+                    reports[model_key]["status"] = "failed"
+                    reports[model_key]["reason"] = (
+                        "student_prev is precleaned but lacks per-organ student ShapeKit success evidence"
+                    )
     remaining_model_seg_dirs = {
         model_key: seg_dir
         for model_key, seg_dir in model_seg_dirs.items()
@@ -2449,11 +2568,12 @@ def _verify_annotation_cached(
         "organ": organ,
         "metric_family": "pseudo_consistency",
         "metric_scope": "prediction_vs_prior_or_selected_pseudo_reference",
-        "metric_target": "pseudo-label",
+        "metric_target": METRIC_TARGET_SELECTED_PSEUDO,
         "metric_subject": "E-step output",
         "metric_comparison": "candidate_vs_prior_or_selected_pseudo_reference",
         "metric_interpretation": "pseudo_label_consistency",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "teacher_pseudo_candidate",
+        "supervision_role": "selected_pseudo_label",
         "accuracy_warning": "DSC is pseudo-label consistency unless the caller explicitly supplies expert fine labels.",
         "dsc_replace_threshold": dsc_replace_threshold,
         "dsc_vlm_threshold": dsc_vlm_threshold,
@@ -2531,9 +2651,11 @@ def _evaluate_candidate_for_organ(
     candidate_shapekit_reason = shapekit_report.get("reason")
     per_mask_postprocess = (shapekit_report.get("per_mask_status_by_organ") or {}).get(organ)
     if isinstance(per_mask_postprocess, dict):
-        candidate_shapekit_status = str(per_mask_postprocess.get("status") or candidate_shapekit_status)
+        student_shape_status = per_mask_postprocess.get("student_shapekit_status")
+        candidate_shapekit_status = str(student_shape_status or per_mask_postprocess.get("status") or candidate_shapekit_status)
         candidate_shapekit_reason = (
-            per_mask_postprocess.get("reason")
+            per_mask_postprocess.get("student_shapekit_reason")
+            or per_mask_postprocess.get("reason")
             or per_mask_postprocess.get("containment_source")
             or candidate_shapekit_reason
         )
@@ -2581,6 +2703,17 @@ def _evaluate_candidate_for_organ(
             candidate_qc["score"] = min(float(candidate_qc.get("score", 1.0)), 0.5)
         candidate_qc["flags"] = sorted(set(qc_flags))
         candidate_qc["reason"] = ";".join(candidate_qc["flags"])
+    if model_key == "student_prev" and candidate_shapekit_status != "success":
+        candidate_qc = dict(candidate_qc)
+        qc_flags = list(candidate_qc.get("flags", []))
+        qc_flags.extend(["student_shapekit_required", f"student_shapekit_{candidate_shapekit_status or 'missing'}"])
+        candidate_qc.update({
+            "status": "fail",
+            "score": 0.0,
+            "eligible_for_labelcritic": False,
+            "flags": sorted(set(qc_flags)),
+            "reason": ";".join(sorted(set(qc_flags))),
+        })
     v = _verify_annotation_cached(
         current_ref if current_ref_exists else None,
         pred_for_verify,
@@ -2618,11 +2751,12 @@ def _evaluate_candidate_for_organ(
         "reference_provenance": _historical_reference_provenance(current_ref) if current_ref_exists else None,
         "metric_family": "pseudo_consistency",
         "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
-        "metric_target": "pseudo-label",
+        "metric_target": METRIC_TARGET_SELECTED_PSEUDO,
         "metric_subject": "E-step output",
         "metric_comparison": "candidate_vs_prior_or_selected_pseudo_reference",
         "metric_interpretation": "pseudo_label_consistency",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "teacher_pseudo_candidate",
+        "supervision_role": "selected_pseudo_label",
         "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
         "dice": dice,
         "pseudo_consistency_dice": dice,
@@ -2635,6 +2769,18 @@ def _evaluate_candidate_for_organ(
         "alias_match": alias_match,
         "candidate_shapekit_status": candidate_shapekit_status,
         "candidate_shapekit_reason": candidate_shapekit_reason,
+        "student_shapekit_status": (
+            per_mask_postprocess.get("student_shapekit_status")
+            if isinstance(per_mask_postprocess, dict) else None
+        ),
+        "student_shapekit_reason": (
+            per_mask_postprocess.get("student_shapekit_reason")
+            if isinstance(per_mask_postprocess, dict) else None
+        ),
+        "student_shapekit_selected_source": (
+            per_mask_postprocess.get("student_shapekit_selected_source")
+            if isinstance(per_mask_postprocess, dict) else None
+        ),
         "candidate_postprocess_row": per_mask_postprocess if isinstance(per_mask_postprocess, dict) else None,
         "candidate_shapekit_report": {
             k: v for k, v in shapekit_report.items()
@@ -3400,7 +3546,8 @@ def _build_gap_rows(
                 "selection_method": selection.get("selection_method", "none"),
                 "selection_status": selection.get("selection_status", "missing"),
                 "dataset_type": "pseudo_label_dataset",
-                "ground_truth_status": "pseudo_label_candidate",
+                "label_role": "withheld_uncertain",
+                "supervision_role": "withheld_uncertain",
             })
             continue
         status = selected.get("shapekit_status")
@@ -3429,7 +3576,8 @@ def _build_gap_rows(
                 "original_mask_usable": original_usable,
                 "selected_mask": str(mask_path or ""),
                 "dataset_type": "pseudo_label_dataset",
-                "ground_truth_status": "pseudo_label_candidate",
+                "label_role": "withheld_uncertain",
+                "supervision_role": "withheld_uncertain",
             })
         qc_status = selected.get("selected_candidate_qc_status")
         if qc_status and qc_status != "pass":
@@ -3449,7 +3597,8 @@ def _build_gap_rows(
                 "candidate_qc_status": qc_status,
                 "candidate_qc_flags": selected.get("selected_candidate_qc_flags", []),
                 "dataset_type": "pseudo_label_dataset",
-                "ground_truth_status": "pseudo_label_candidate",
+                "label_role": "withheld_uncertain",
+                "supervision_role": "withheld_uncertain",
             })
     return rows
 
@@ -3848,7 +3997,8 @@ def _official_pairwise_condorcet_selection(
             "candidate_identity_exposed_to_vlm": False,
             "should_enter_student_training": True,
             "family_role": "audit_only_not_used_for_selection_or_training_gate",
-            "ground_truth_status": "geometric_consensus_pseudo_label_not_expert_accuracy",
+            "label_role": "selected_pseudo_label",
+            "supervision_role": "selected_pseudo_label",
             "accuracy_warning": "Geometric teacher consensus is a pseudo-label safety signal, not expert accuracy.",
             "quality_flags": ["geometric_teacher_consensus"],
             "review_flags": [],
@@ -3926,7 +4076,8 @@ def _official_pairwise_condorcet_selection(
             "should_enter_student_training": True,
             "shortlist_truncated": shortlist_truncated,
             "family_role": "audit_only_not_used_for_selection_or_training_gate",
-            "ground_truth_status": "geometric_consensus_pseudo_label_not_expert_accuracy",
+            "label_role": "selected_pseudo_label",
+            "supervision_role": "selected_pseudo_label",
             "accuracy_warning": "Geometric teacher consensus is a pseudo-label safety signal, not expert accuracy.",
             "quality_flags": ["geometric_teacher_consensus"],
             "review_flags": [],
@@ -5519,11 +5670,12 @@ def run_multimodel_annotation_loop(
                             "reference_role": "prior_or_selected_pseudo_reference" if current_ref_exists else "none",
                             "metric_family": "pseudo_consistency",
                             "metric_scope": "candidate_vs_prior_or_selected_pseudo_reference",
-                            "metric_target": "pseudo-label",
+                            "metric_target": METRIC_TARGET_SELECTED_PSEUDO,
                             "metric_subject": "E-step output",
                             "metric_comparison": "candidate_vs_prior_or_selected_pseudo_reference",
                             "metric_interpretation": "pseudo_label_consistency",
-                            "ground_truth_status": "pseudo_label_candidate",
+                            "label_role": "teacher_pseudo_candidate",
+                            "supervision_role": "selected_pseudo_label",
                             "accuracy_warning": "Dice is pseudo-label consistency, not true expert-label accuracy.",
                             "dice": fv.get("dice"),
                             "pseudo_consistency_dice": fv.get("dice"),
@@ -5723,7 +5875,7 @@ def run_multimodel_annotation_loop(
                 "identity_mismatch_reasons": selected.get("identity_mismatch_reasons", []) if selected else ["no_selected_candidate"],
                 "metric_family": "pseudo_consistency",
                 "metric_scope": "selected_candidate_vs_prior_or_selected_pseudo_reference",
-                "metric_target": "pseudo-label",
+                "metric_target": METRIC_TARGET_SELECTED_PSEUDO,
                 "metric_subject": "E-step output",
                 "metric_comparison": "selected_candidate_vs_prior_or_selected_pseudo_reference",
                 "metric_interpretation": "pseudo_label_consistency",
@@ -5735,7 +5887,8 @@ def run_multimodel_annotation_loop(
                     else "raw_candidate"
                 ),
                 "dataset_type": "pseudo_label_dataset",
-                "ground_truth_status": "pseudo_label_candidate",
+                "label_role": "selected_pseudo_label",
+                "supervision_role": "selected_pseudo_label",
                 **selection,
             }
             selection_record["labelcritic_records"] = selection_record.get("critic_records", [])
@@ -5998,7 +6151,8 @@ def run_multimodel_annotation_loop(
                         "winner_is_original_teacher_medoid",
                     ]
                     selection_record["scoring_schema_version"] = "autolabel_core_v3"
-                    selection_record["ground_truth_status"] = "geometric_consensus_pseudo_label_not_expert_accuracy"
+                    selection_record["label_role"] = "selected_pseudo_label"
+                    selection_record["supervision_role"] = "selected_pseudo_label"
                     selection_record["accuracy_warning"] = (
                         "Geometric teacher consensus is a pseudo-label safety signal, not expert accuracy."
                     )
@@ -6030,7 +6184,7 @@ def run_multimodel_annotation_loop(
                 for c in candidates
             ]
             selection_record["metric_family"] = "pseudo_consistency_and_evidence_reliability"
-            selection_record["metric_target"] = "pseudo-label"
+            selection_record["metric_target"] = METRIC_TARGET_SELECTED_PSEUDO
             selection_record["metric_subject"] = "E-step output"
             selection_record["metric_comparison"] = "selected_candidate_vs_prior_or_selected_pseudo_reference"
             selection_record["metric_interpretation"] = "pseudo_label_consistency"
@@ -6073,6 +6227,7 @@ def run_multimodel_annotation_loop(
                 selection_record["autolabel_target_type_audit"] = autolabel_decision.target_type
                 selection_record["should_enter_student_training"] = selection_record.get("training_weight", 0.0) > 0.0
 
+            _decorate_pseudo_label_record(selection_record)
             selection_rows.append(selection_record)
             all_selection_rows.append(selection_record)
             for critic_record in selection_record.get("labelcritic_records", []) or []:
@@ -6170,14 +6325,13 @@ def run_multimodel_annotation_loop(
                     compare_used=selection_record.get("labelcritic_compare_used"),
                     grade_used=selection_record.get("labelcritic_grade_used"),
                 )
-                selected_metadata.append({
+                selected_meta_record = {
                     **selection_record,
                     "teacher_lineage": [c["model"] for c in candidates],
                     "pre_shapekit_mask": str(copied),
                     "mask_path": None,
                     "mask": None,
                     "dataset_role": "pseudo_label",
-                    "ground_truth_status": "pseudo_label_candidate",
                     "shapekit_status": selected.get("candidate_shapekit_status") if selected else ("skipped_dry_run" if dry_run else "skipped_debug_only"),
                     "shapekit_reason": selected.get("candidate_shapekit_reason") if selected else None,
                     "shapekit_report": selected.get("candidate_shapekit_report") if selected else None,
@@ -6186,7 +6340,9 @@ def run_multimodel_annotation_loop(
                     "review_flags": review_flags,
                     "quality_flags": quality_flags,
                     "quality_status": _quality_status(review_flags, quality_flags),
-                })
+                }
+                _decorate_pseudo_label_record(selected_meta_record)
+                selected_metadata.append(selected_meta_record)
 
         shapekit_result: dict[str, Any] = {
             "stage": "candidate_preselection_shapekit",
@@ -6254,7 +6410,8 @@ def run_multimodel_annotation_loop(
                 "grade": passport["grade"],
                 "training_weight": passport["training_weight"],
                 "label_passport_path": str(passport_path_for_mask(final)) if final else None,
-                "ground_truth_status": "machine_generated_candidate",
+                "label_role": "selected_pseudo_label",
+                "supervision_role": "selected_pseudo_label",
                 "distillation_eligible": float(passport["training_weight"]) > 0.0,
                 "distillation_exclusion_reason": None if float(passport["training_weight"]) > 0.0 else "training_weight_zero",
                 "student_training_priority": passport["grade"],
@@ -6353,7 +6510,8 @@ def run_multimodel_annotation_loop(
             "case_id": case_id,
             "ct_path": str(ct),
             "dataset_type": "pseudo_label_dataset",
-            "ground_truth_status": "pseudo_label_candidate",
+            "label_role": "selected_pseudo_label",
+            "supervision_role": "selected_pseudo_label",
             "candidate_mode": candidate_mode,
             "scan_coverage": (presence_context.get("metadata") or {}).get("scan_coverage"),
             "coverage_regions": (presence_context.get("metadata") or {}).get("coverage_regions"),
@@ -6398,7 +6556,8 @@ def run_multimodel_annotation_loop(
             "ct_path": str(ct),
             "stage": "shapekit_report",
             "dataset_type": "pseudo_label_dataset",
-            "ground_truth_status": "pseudo_label_candidate",
+            "label_role": "selected_pseudo_label",
+            "supervision_role": "selected_pseudo_label",
             "enable_shapekit": enable_shapekit,
             "result": shapekit_result,
             "selected_organs": [
@@ -6482,7 +6641,7 @@ def run_multimodel_annotation_loop(
     round_csv = out / "round_metrics.csv"
     _write_csv(dice_csv, dice_rows, [
         "case_id", "organ", "model", "prediction", "reference", "reference_role",
-        "metric_family", "metric_scope", "ground_truth_status", "accuracy_warning",
+        "metric_family", "metric_scope", "label_role", "supervision_role", "accuracy_warning",
         "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
         "dice", "pseudo_consistency_dice", "decision", "status", "reason",
         "candidate_exists", "alias_match", "requested_canonical_id", "source_local_label",
@@ -6512,9 +6671,19 @@ def run_multimodel_annotation_loop(
             except Exception:
                 pass
     target_type_counts_373: dict[str, int] = {}
+    transition_action_counts_373: dict[str, int] = {}
+    transition_detail_counts_373: dict[str, int] = {}
+    label_role_counts_373: dict[str, int] = {}
     for row in all_selection_rows:
+        _decorate_pseudo_label_record(row)
         key = str(row.get("target_type") or "hard")
         target_type_counts_373[key] = target_type_counts_373.get(key, 0) + 1
+        action = str(row.get("pseudo_label_transition_action") or "unknown")
+        transition_action_counts_373[action] = transition_action_counts_373.get(action, 0) + 1
+        detail = str(row.get("pseudo_label_transition_detail") or action)
+        transition_detail_counts_373[detail] = transition_detail_counts_373.get(detail, 0) + 1
+        role = str(row.get("label_role") or "unknown")
+        label_role_counts_373[role] = label_role_counts_373.get(role, 0) + 1
     case_373_dataset_summary = {
         "stage": "case_373_target_summary",
         "status": "success",
@@ -6527,10 +6696,26 @@ def run_multimodel_annotation_loop(
         "unresolved_review_targets": sum(1 for r in all_selection_rows if str(r.get("target_type")) in {"unresolved_review", "unresolved_visible", "partial_fov"}),
         "all_zero_masks": len({str(r.get("final_mask") or r.get("mask_path") or "") for r in all_selection_rows if str(r.get("target_type")) in {"absent_negative", "negative_absent"} and (r.get("final_mask") or r.get("mask_path"))}),
         "target_type_counts": target_type_counts_373,
+        "pseudo_label_transition_action_counts": transition_action_counts_373,
+        "pseudo_label_transition_detail_counts": transition_detail_counts_373,
+        "label_role_counts": label_role_counts_373,
         "complete_case_373": len(all_selection_rows) == len(cases) * len(organs),
         "cases": case_373_summaries,
     }
     write_json(out / "case_373_target_summary.json", case_373_dataset_summary)
+    write_json(out / "round2_pseudo_label_transition_summary.json", {
+        "stage": "round2_pseudo_label_transition_summary",
+        "status": "success",
+        "scope": "pseudo_label_em_transition",
+        "interpretation": "Counts describe selected pseudo-label transitions, not external-label accuracy.",
+        "pseudo_label_transition_action_counts": transition_action_counts_373,
+        "pseudo_label_transition_detail_counts": transition_detail_counts_373,
+        "label_role_counts": label_role_counts_373,
+        "num_cases": len(cases),
+        "num_classes": len(organs),
+        "manifest_targets": len(all_selection_rows),
+        "complete_case_373": case_373_dataset_summary["complete_case_373"],
+    })
     write_json(out / "full_case_373_manifest.json", {
         "stage": "full_case_373_estep_manifest",
         "status": "success" if case_373_dataset_summary["complete_case_373"] else "failed",
@@ -6542,7 +6727,8 @@ def run_multimodel_annotation_loop(
         "stage": "pseudo_label_gap_report",
         "status": "success",
         "dataset_type": "pseudo_label_dataset",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "withheld_uncertain",
+        "supervision_role": "withheld_uncertain",
         "num_gap_rows": len(all_gap_rows),
         "gap_rows": all_gap_rows,
         "target_space_policy": _load_target_space_policy(project_root, organs),
@@ -6562,7 +6748,8 @@ def run_multimodel_annotation_loop(
         "stage": "shapekit_report",
         "status": "success",
         "dataset_type": "pseudo_label_dataset",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "selected_pseudo_label",
+        "supervision_role": "selected_pseudo_label",
         "enable_shapekit": enable_shapekit,
         "num_case_reports": len(shapekit_reports),
         "case_reports": shapekit_reports,
@@ -6571,7 +6758,7 @@ def run_multimodel_annotation_loop(
     _write_csv(
         out / "pseudo_label_gap_report.csv",
         all_gap_rows,
-        ["case_id", "ct_path", "organ", "gap_type", "reason", "candidate_count", "candidate_models", "selection_method", "selection_status", "shapekit_status", "dataset_type", "ground_truth_status"],
+        ["case_id", "ct_path", "organ", "gap_type", "reason", "candidate_count", "candidate_models", "selection_method", "selection_status", "shapekit_status", "dataset_type", "label_role", "supervision_role"],
     )
     organ_audit_rows = _build_formal_organ_audit_rows(
         selection_rows=all_selection_rows,
@@ -6628,6 +6815,9 @@ def run_multimodel_annotation_loop(
             preseeded_keys=[] if preseeded_parent_only else sorted((preseeded_model_dirs or {}).keys()),
             selection_rows=all_selection_rows,
         ),
+        "pseudo_label_transition_action_counts": transition_action_counts_373,
+        "pseudo_label_transition_detail_counts": transition_detail_counts_373,
+        "label_role_counts": label_role_counts_373,
         "round_rows": round_rows,
         "total_updated": len(rebuilt_selected_metadata),
         "total_labelcritic_decisions": sum(int(r.get("vlm_reviewed", 0) or 0) for r in round_rows),

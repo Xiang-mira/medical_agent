@@ -1,0 +1,1337 @@
+schema_version: hf-release-1.0
+generated_utc: '2026-07-09T09:45:02Z'
+hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+github_code: https://github.com/Xiang-mira/medical_agent
+release_policy: internal_research_collaboration_only; do not externally advertise JHU/private assets
+input_format: 3D CT volume in NIfTI .nii.gz format. The project CLI accepts ct.nii.gz paths; raw nnUNet calls require
+  *_0000.nii.gz.
+output_format: case_id/segmentations/*.nii.gz binary organ masks unless a backend-specific README says otherwise.
+teacher_models:
+- model_key: cads551
+  model_name: CADS Dataset551_Totalseg251 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads551
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - spleen
+  - kidney_right
+  - kidney_left
+  - gallbladder
+  - liver
+  - stomach
+  - aorta
+  - inferior_vena_cava
+  - portal_vein_and_splenic_vein
+  - pancreas
+  - adrenal_gland_right
+  - adrenal_gland_left
+  - lung_upper_lobe_left
+  - lung_lower_lobe_left
+  - lung_upper_lobe_right
+  - lung_middle_lobe_right
+  - lung_lower_lobe_right
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 551 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads551 --dataset-json $HF_ASSET_ROOT/teacher_models/cads551/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads551
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 551 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads551
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads551/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads551
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads552
+  model_name: CADS Dataset552_Totalseg252 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads552
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - vertebrae_L5
+  - vertebrae_L4
+  - vertebrae_L3
+  - vertebrae_L2
+  - vertebrae_L1
+  - vertebrae_T12
+  - vertebrae_T11
+  - vertebrae_T10
+  - vertebrae_T9
+  - vertebrae_T8
+  - vertebrae_T7
+  - vertebrae_T6
+  - vertebrae_T5
+  - vertebrae_T4
+  - vertebrae_T3
+  - vertebrae_T2
+  - vertebrae_T1
+  - vertebrae_C7
+  - vertebrae_C6
+  - vertebrae_C5
+  - vertebrae_C4
+  - vertebrae_C3
+  - vertebrae_C2
+  - vertebrae_C1
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 552 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads552 --dataset-json $HF_ASSET_ROOT/teacher_models/cads552/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads552
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 552 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads552
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads552/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads552
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads553
+  model_name: CADS Dataset553_Totalseg253 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads553
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - esophagus
+  - trachea
+  - heart_myocardium
+  - heart_atrium_left
+  - heart_ventricle_left
+  - heart_atrium_right
+  - heart_ventricle_right
+  - pulmonary_artery
+  - brain
+  - iliac_artery_left
+  - iliac_artery_right
+  - iliac_vena_left
+  - iliac_vena_right
+  - small_bowel
+  - duodenum
+  - colon
+  - urinary_bladder
+  - face
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 553 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads553 --dataset-json $HF_ASSET_ROOT/teacher_models/cads553/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads553
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 553 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads553
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads553/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads553
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads554
+  model_name: CADS Dataset554_Totalseg254 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads554
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - humerus_left
+  - humerus_right
+  - scapula_left
+  - scapula_right
+  - clavicula_left
+  - clavicula_right
+  - femur_left
+  - femur_right
+  - hip_left
+  - hip_right
+  - sacrum
+  - gluteus_maximus_left
+  - gluteus_maximus_right
+  - gluteus_medius_left
+  - gluteus_medius_right
+  - gluteus_minimus_left
+  - gluteus_minimus_right
+  - autochthon_left
+  - autochthon_right
+  - iliopsoas_left
+  - iliopsoas_right
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 554 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads554 --dataset-json $HF_ASSET_ROOT/teacher_models/cads554/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads554
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 554 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads554
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads554/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads554
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads555
+  model_name: CADS Dataset555_Totalseg255 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads555
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - rib_left_1
+  - rib_left_2
+  - rib_left_3
+  - rib_left_4
+  - rib_left_5
+  - rib_left_6
+  - rib_left_7
+  - rib_left_8
+  - rib_left_9
+  - rib_left_10
+  - rib_left_11
+  - rib_left_12
+  - rib_right_1
+  - rib_right_2
+  - rib_right_3
+  - rib_right_4
+  - rib_right_5
+  - rib_right_6
+  - rib_right_7
+  - rib_right_8
+  - rib_right_9
+  - rib_right_10
+  - rib_right_11
+  - rib_right_12
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 555 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads555 --dataset-json $HF_ASSET_ROOT/teacher_models/cads555/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads555
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 555 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads555
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads555/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads555
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads556
+  model_name: CADS Dataset556_GC256 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads556
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - spinal_canal
+  - larynx
+  - heart
+  - bowel_bag
+  - sigmoid
+  - rectum
+  - prostate
+  - seminal_vesicle
+  - left_mammary_gland
+  - right_mammary_gland
+  - sternum
+  - right psoas major
+  - left psoas major
+  - right rectus abdominis
+  - left rectus abdominis
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 556 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads556 --dataset-json $HF_ASSET_ROOT/teacher_models/cads556/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads556
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 556 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads556
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads556/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads556
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads557
+  model_name: CADS Dataset557_Brain257 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads557
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - white matter
+  - gray matter
+  - csf
+  - scalp
+  - eye balls
+  - compact bone
+  - spongy bone
+  - blood
+  - head muscles
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 557 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads557 --dataset-json $HF_ASSET_ROOT/teacher_models/cads557/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads557
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 557 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads557
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads557/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads557
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads558
+  model_name: CADS Dataset558_OAR258 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads558
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - OAR_A_Carotid_L
+  - OAR_A_Carotid_R
+  - OAR_Arytenoid
+  - OAR_Bone_Mandible
+  - OAR_Brainstem
+  - OAR_BuccalMucosa
+  - OAR_Cavity_Oral
+  - OAR_Cochlea_L
+  - OAR_Cochlea_R
+  - OAR_Cricopharyngeus
+  - OAR_Esophagus_S
+  - OAR_Eye_AL
+  - OAR_Eye_AR
+  - OAR_Eye_PL
+  - OAR_Eye_PR
+  - OAR_Glnd_Lacrimal_L
+  - OAR_Glnd_Lacrimal_R
+  - OAR_Glnd_Submand_L
+  - OAR_Glnd_Submand_R
+  - OAR_Glnd_Thyroid
+  - OAR_Glottis
+  - OAR_Larynx_SG
+  - OAR_Lips
+  - OAR_OpticChiasm
+  - OAR_OpticNrv_L
+  - OAR_OpticNrv_R
+  - OAR_Parotid_L
+  - OAR_Parotid_R
+  - OAR_Pituitary
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 558 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads558 --dataset-json $HF_ASSET_ROOT/teacher_models/cads558/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads558
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 558 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads558
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads558/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads558
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: cads559
+  model_name: CADS Dataset559_Saros259 nnUNet
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/cads559
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - subcutaneous_tissue
+  - muscle
+  - abdominal_cavity
+  - thoracic_cavity
+  - bones
+  - glands
+  - pericardium
+  - breast_implant
+  - mediastinum
+  - spinal_cord
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 559 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/cads559 --dataset-json $HF_ASSET_ROOT/teacher_models/cads559/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/cads559
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 559 --nnunet-results $HF_ASSET_ROOT/teacher_models/cads559
+    --dataset-json $HF_ASSET_ROOT/teacher_models/cads559/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/cads559
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: moose666
+  model_name: MOOSE3.0 peripheral bones nnUNet Dataset666
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/moose666
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - carpal_left
+  - carpal_right
+  - clavicle_left
+  - clavicle_right
+  - femur_left
+  - femur_right
+  - fibula_left
+  - fibula_right
+  - fingers_left
+  - fingers_right
+  - humerus_left
+  - humerus_right
+  - metacarpal_left
+  - metacarpal_right
+  - metatarsal_left
+  - metatarsal_right
+  - patella_left
+  - patella_right
+  - radius_left
+  - radius_right
+  - scapula_left
+  - scapula_right
+  - skull
+  - tarsal_left
+  - tarsal_right
+  - tibia_left
+  - tibia_right
+  - toes_left
+  - toes_right
+  - ulna_left
+  - ulna_right
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 666 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/moose666 --dataset-json $HF_ASSET_ROOT/teacher_models/moose666/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/moose666
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 666 --nnunet-results $HF_ASSET_ROOT/teacher_models/moose666
+    --dataset-json $HF_ASSET_ROOT/teacher_models/moose666/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 6-12
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/moose666
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: moose888
+  model_name: MOOSE3.0 cardiac nnUNet Dataset888
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/moose888
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - heart_myocardium
+  - heart_atrium_left
+  - heart_atrium_right
+  - heart_ventricle_left
+  - heart_ventricle_right
+  - aorta
+  - iliac_artery_left
+  - iliac_artery_right
+  - iliac_vena_left
+  - iliac_vena_right
+  - inferior_vena_cava
+  - portal_splenic_vein
+  - pulmonary_artery
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 888 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/moose888 --dataset-json $HF_ASSET_ROOT/teacher_models/moose888/dataset.json --trainer
+    nnUNetTrainerNoMirroring --plans nnUNetPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/moose888
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 888 --nnunet-results $HF_ASSET_ROOT/teacher_models/moose888
+    --dataset-json $HF_ASSET_ROOT/teacher_models/moose888/dataset.json --trainer nnUNetTrainerNoMirroring --plans
+    nnUNetPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 6-12
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/moose888
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: nnunet_private
+  model_name: Private AbdomenAtlas nnUNet Dataset224
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/nnunet_private
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - aorta
+  - gall_bladder
+  - kidney_left
+  - kidney_right
+  - postcava
+  - spleen
+  - stomach
+  - adrenal_gland_left
+  - adrenal_gland_right
+  - bladder
+  - celiac_trunk
+  - colon
+  - duodenum
+  - esophagus
+  - femur_left
+  - femur_right
+  - hepatic_vessel
+  - intestine
+  - lung_left
+  - lung_right
+  - portal_vein_and_splenic_vein
+  - prostate
+  - rectum
+  - liver_segment_1
+  - liver_segment_2
+  - liver_segment_3
+  - liver_segment_4
+  - liver_segment_5
+  - liver_segment_6
+  - liver_segment_7
+  - liver_segment_8
+  - pancreas_head
+  - pancreas_body
+  - pancreas_tail
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 224 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/nnunet_private --dataset-json $HF_ASSET_ROOT/teacher_models/nnunet_private/dataset.json
+    --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/nnunet_private
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 224 --nnunet-results $HF_ASSET_ROOT/teacher_models/nnunet_private
+    --dataset-json $HF_ASSET_ROOT/teacher_models/nnunet_private/dataset.json --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans
+    --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/nnunet_private
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: saros_nnunet
+  model_name: Private SAROS nnUNet Dataset1345
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/saros_nnunet
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - subcutaneous_tissue
+  - muscle
+  - abdominal_cavity
+  - thoracic_cavity
+  - bone
+  - parotid_glands
+  - pericardium
+  - breast_implant
+  - mediastinum
+  - brain
+  - spinal_cord
+  - thyroid_glands
+  - submandibular_glands
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1345 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/saros_nnunet --dataset-json $HF_ASSET_ROOT/teacher_models/saros_nnunet/dataset.json
+    --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name
+    checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/saros_nnunet
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1345 --nnunet-results $HF_ASSET_ROOT/teacher_models/saros_nnunet
+    --dataset-json $HF_ASSET_ROOT/teacher_models/saros_nnunet/dataset.json --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans
+    --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 10-18
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/saros_nnunet
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: atm
+  model_name: ATM airway nnUNet Dataset1370
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/atm
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - airway_tree
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1370 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/atm --dataset-json $HF_ASSET_ROOT/teacher_models/atm/dataset.json --trainer nnUNetTrainer
+    --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/atm
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1370 --nnunet-results $HF_ASSET_ROOT/teacher_models/atm
+    --dataset-json $HF_ASSET_ROOT/teacher_models/atm/dataset.json --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans
+    --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/atm
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: airrc
+  model_name: AirRC airway/vessel nnUNet Dataset1380
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/airrc
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - airway_tree
+  - airway_wall
+  - lung_pulmonary_arteries
+  - lung_pulmonary_veins
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1380 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/airrc --dataset-json $HF_ASSET_ROOT/teacher_models/airrc/dataset.json --trainer
+    nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/airrc
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1380 --nnunet-results $HF_ASSET_ROOT/teacher_models/airrc
+    --dataset-json $HF_ASSET_ROOT/teacher_models/airrc/dataset.json --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans
+    --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/airrc
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: lvp
+  model_name: LVP liver vessel nnUNet Dataset1381 (formerly vsnet)
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/lvp
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - liver_hepatic_vein
+  - liver_portal_vein
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1381 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/lvp --dataset-json $HF_ASSET_ROOT/teacher_models/lvp/dataset.json --trainer nnUNetTrainer
+    --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/lvp
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1381 --nnunet-results $HF_ASSET_ROOT/teacher_models/lvp
+    --dataset-json $HF_ASSET_ROOT/teacher_models/lvp/dataset.json --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans
+    --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 10-18
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/lvp
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: daps
+  model_name: DAPS nnUNet Dataset1347
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/daps
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_best.pth
+  supported_organs:
+  - fat
+  - mediastinal_tissue
+  - gonads
+  - uterocervix
+  - uterus
+  - breast_left
+  - breast_right
+  - thyroid_left
+  - thyroid_right
+  - thymus
+  - sternum_corpus
+  - heart_atrium_left
+  - heart_tissue
+  - heart_atrium_right
+  - heart_myocardium
+  - heart_ventricle_left
+  - heart_ventricle_right
+  - bronchus
+  - cheek_left
+  - cheek_right
+  - eyeball_left
+  - eyeball_right
+  - artery_common_carotid_right
+  - artery_common_carotid_left
+  - sternum_manubrium
+  - artery_internal_carotid_right
+  - artery_internal_carotid_left
+  - artery_brachiocephalic
+  - artery_subclavian_right
+  - artery_subclavian_left
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1347 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/daps --dataset-json $HF_ASSET_ROOT/teacher_models/daps/dataset.json --trainer
+    nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_best.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/daps
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1347 --nnunet-results $HF_ASSET_ROOT/teacher_models/daps
+    --dataset-json $HF_ASSET_ROOT/teacher_models/daps/dataset.json --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans
+    --configuration 3d_fullres --folds all --checkpoint-name checkpoint_best.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/daps
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: epai_20250421
+  model_name: ePAI qchen76 2025-04-21 / Dataset1339 25-class abdomen-pancreas model
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/epai_20250421
+  backend: nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+    redacted: true
+    summary: 25-class abdominal organ/duct/tumor teacher; public metadata intentionally omits class semantics.
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: Use the GitHub MedIA runner with the internal lab label registry. Public HF metadata intentionally
+    omits sensitive ePAI runtime details.
+  example_command: python run_medai_cli.py --json registry-candidates --organs pancreas,pancreatic_duct
+  expected_gpu_memory_gb: 6-12
+  sensitivity_note: Sensitive internal research asset. Public metadata is redacted; keep runtime internals and full
+    private label semantics out of public documentation.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/epai_20250421
+  sensitivity_level: sensitive-redacted
+  access: Public metadata is redacted; full label semantics and runtime details are for authorized internal lab
+    users only.
+  license: See repository README, LICENSES.md, and internal authorization terms.
+- model_key: vsmtrans
+  model_name: VSmTrans BDMAP nnUNet Dataset001
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/vsmtrans
+  backend: nnunetv2
+  checkpoint: fold_0/checkpoint_final.pth
+  supported_organs:
+  - aorta
+  - gall_bladder
+  - kidney_left
+  - kidney_right
+  - liver
+  - pancreas
+  - postcava
+  - spleen
+  - stomach
+  - adrenal_gland_left
+  - adrenal_gland_right
+  - bladder
+  - celiac_trunk
+  - colon
+  - duodenum
+  - esophagus
+  - femur_left
+  - femur_right
+  - hepatic_vessel
+  - intestine
+  - lung_left
+  - lung_right
+  - portal_vein_and_splenic_vein
+  - prostate
+  - rectum
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1 --nnunet-results
+    $HF_ASSET_ROOT/teacher_models/vsmtrans --dataset-json $HF_ASSET_ROOT/teacher_models/vsmtrans/dataset.json --trainer
+    nnUNetTrainer --plans nnUNetPlans --configuration 3d_fullres --folds 0 --checkpoint-name checkpoint_final.pth
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/vsmtrans
+
+    python scripts/nnunetv2_predict_and_split.py --image $CT --output $OUT --dataset-id 1 --nnunet-results $HF_ASSET_ROOT/teacher_models/vsmtrans
+    --dataset-json $HF_ASSET_ROOT/teacher_models/vsmtrans/dataset.json --trainer nnUNetTrainer --plans nnUNetPlans
+    --configuration 3d_fullres --folds 0 --checkpoint-name checkpoint_final.pth'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Internal research collaboration asset. Do not externally advertise as a public JHU model.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/vsmtrans
+  sensitivity_level: internal
+  access: Public HF repo for internal research collaboration only; do not externally advertise.
+  license: See repository README, LICENSES.md, and upstream/internal dataset terms.
+- model_key: vista3d
+  model_name: VISTA3D Inference Pipeline
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/vista3d
+  backend: vista3d
+  checkpoint: models/model.pt
+  supported_organs:
+  - airway
+  - aorta
+  - atrial_appendage_left
+  - autochthon_left
+  - autochthon_right
+  - brachiocephalic_trunk
+  - brachiocephalic_vein_left
+  - brachiocephalic_vein_right
+  - brain
+  - clavicula_left
+  - clavicula_right
+  - common_carotid_artery_left
+  - common_carotid_artery_right
+  - costal_cartilages
+  - gluteus_maximus_left
+  - gluteus_maximus_right
+  - gluteus_medius_left
+  - gluteus_medius_right
+  - gluteus_minimus_left
+  - gluteus_minimus_right
+  - heart
+  - hip_left
+  - hip_right
+  - humerus_left
+  - humerus_right
+  - iliac_artery_left
+  - iliac_artery_right
+  - iliac_vena_left
+  - iliac_vena_right
+  - iliopsoas_left
+  - iliopsoas_right
+  - kidney
+  - lung
+  - lung_lower_left_lobe
+  - lung_lower_right_lobe
+  - lung_middle_right_lobe
+  - lung_upper_left_lobe
+  - lung_upper_right_lobe
+  - pulmonary_vein
+  - rib_left_1
+  - rib_left_10
+  - rib_left_11
+  - rib_left_12
+  - rib_left_2
+  - rib_left_3
+  - rib_left_4
+  - rib_left_5
+  - rib_left_6
+  - rib_left_7
+  - rib_left_8
+  - rib_left_9
+  - rib_right_1
+  - rib_right_10
+  - rib_right_11
+  - rib_right_12
+  - rib_right_2
+  - rib_right_3
+  - rib_right_4
+  - rib_right_5
+  - rib_right_6
+  - rib_right_7
+  - rib_right_8
+  - rib_right_9
+  - sacrum
+  - scapula_left
+  - scapula_right
+  - skull
+  - spinal_cord
+  - sternum
+  - subclavian_artery_left
+  - subclavian_artery_right
+  - superior_vena_cava
+  - thyroid_gland
+  - trachea
+  - vertebrae_c1
+  - vertebrae_c2
+  - vertebrae_c3
+  - vertebrae_c4
+  - vertebrae_c5
+  - vertebrae_c6
+  - vertebrae_c7
+  - vertebrae_l1
+  - vertebrae_l2
+  - vertebrae_l3
+  - vertebrae_l4
+  - vertebrae_l5
+  - vertebrae_s1
+  - vertebrae_t1
+  - vertebrae_t10
+  - vertebrae_t11
+  - vertebrae_t12
+  - vertebrae_t2
+  - vertebrae_t3
+  - vertebrae_t4
+  - vertebrae_t5
+  - vertebrae_t6
+  - vertebrae_t7
+  - vertebrae_t8
+  - vertebrae_t9
+  input_format: Single 3D CT volume in NIfTI .nii.gz format; use the project wrapper, not raw nnUNet naming.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/vista3d_predict_and_split.py --image $CT --output $OUT --vista-root $HF_ASSET_ROOT/teacher_models/vista3d
+    --label-map $HF_ASSET_ROOT/teacher_models/vista3d/label_mappings/label_dict_127_abdomenAtlas3-1.json
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/vista3d
+
+    python scripts/vista3d_predict_and_split.py --image $CT --output $OUT --vista-root $HF_ASSET_ROOT/teacher_models/vista3d
+    --label-map $HF_ASSET_ROOT/teacher_models/vista3d/label_mappings/label_dict_127_abdomenAtlas3-1.json'
+  expected_gpu_memory_gb: 16-24
+  sensitivity_note: Reusable research asset; backend-specific runtime required.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/vista3d
+  sensitivity_level: research-runtime
+  access: Reusable research asset; backend-specific runtime and upstream terms apply.
+  license: See repository README, LICENSES.md, and upstream VISTA3D/MONAI terms.
+- model_key: unest
+  model_name: UNEST renalStructures segmentation
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/unest
+  backend: unest
+  checkpoint: models/model.pt
+  supported_organs:
+  - kidney_cortex
+  - kidney_medulla
+  - kidney_pelvicalyceal_system
+  input_format: Single 3D CT volume in NIfTI .nii.gz format; use the project wrapper, not raw nnUNet naming.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/unest_predict_and_split.py --image $CT --output $OUT --unest-root $HF_ASSET_ROOT/teacher_models/unest
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/unest
+
+    python scripts/unest_predict_and_split.py --image $CT --output $OUT --unest-root $HF_ASSET_ROOT/teacher_models/unest'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Reusable research asset; backend-specific runtime required.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/unest
+  sensitivity_level: research-runtime
+  access: Reusable research asset; backend-specific runtime and upstream terms apply.
+  license: See repository README, LICENSES.md, and upstream UNEST/MONAI terms.
+- model_key: totalsegmentator
+  model_name: TotalSegmentator
+  role: teacher
+  release_status: external_runtime_no_mirrored_weights
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/totalsegmentator
+  backend: external_totalsegmentator_runtime
+  checkpoint: null
+  supported_organs:
+  - anterior_scalene_left
+  - anterior_scalene_right
+  - auditory_canal_left
+  - auditory_canal_right
+  - body
+  - body_extremities
+  - body_trunc
+  - brain_ventricle
+  - brainstem
+  - carpal
+  - caudate_nucleus
+  - central_sulcus
+  - cerebellum
+  - coronary_artery
+  - cricoid_cartilage
+  - digastric_left
+  - digastric_right
+  - eye_lens_left
+  - eye_lens_right
+  - fibula
+  - frontal_lobe
+  - hard_palate
+  - hyoid
+  - hypopharynx
+  - inferior_oblique_muscle_left
+  - inferior_oblique_muscle_right
+  - inferior_pharyngeal_constrictor
+  - inferior_rectus_muscle_left
+  - inferior_rectus_muscle_right
+  - inferior_vena_cava
+  - insular_cortex
+  - internal_capsule
+  - internal_carotid_artery_left
+  - internal_carotid_artery_right
+  - internal_jugular_vein_left
+  - internal_jugular_vein_right
+  - lateral_pterygoid_left
+  - lateral_pterygoid_right
+  - lateral_rectus_muscle_left
+  - lateral_rectus_muscle_right
+  - lentiform_nucleus
+  - levator_palpebrae_superioris_left
+  - levator_palpebrae_superioris_right
+  - levator_scapulae_left
+  - levator_scapulae_right
+  - liver_segment_1
+  - liver_segment_2
+  - liver_segment_3
+  - liver_segment_4
+  - liver_segment_5
+  - liver_segment_6
+  - liver_segment_7
+  - liver_segment_8
+  - lung_trachea_bronchia
+  - lung_vessels
+  - masseter_left
+  - masseter_right
+  - medial_pterygoid_left
+  - medial_pterygoid_right
+  - medial_rectus_muscle_left
+  - medial_rectus_muscle_right
+  - metacarpal
+  - metatarsal
+  - middle_pharyngeal_constrictor
+  - middle_scalene_left
+  - middle_scalene_right
+  - nasal_cavity_left
+  - nasal_cavity_right
+  - nasopharynx
+  - occipital_lobe
+  - optic_nerve_left
+  - optic_nerve_right
+  - oropharynx
+  - parietal_lobe
+  - parotid_gland_left
+  - parotid_gland_right
+  - patella
+  - phalanges_feet
+  - phalanges_hand
+  - platysma_left
+  - platysma_right
+  - posterior_scalene_left
+  - posterior_scalene_right
+  - prevertebral_left
+  - prevertebral_right
+  - pulmonary_artery
+  - radius
+  - rib_cartilage
+  - septum_pellucidum
+  - skin
+  - small_bowel
+  - soft_palate
+  - sterno_thyroid_left
+  - sterno_thyroid_right
+  - sternocleidomastoid_left
+  - sternocleidomastoid_right
+  - styloid_process_left
+  - styloid_process_right
+  - subarachnoid_space
+  - submandibular_gland_left
+  - submandibular_gland_right
+  - superior_oblique_muscle_left
+  - superior_oblique_muscle_right
+  - superior_rectus_muscle_left
+  - superior_rectus_muscle_right
+  - tarsal
+  - temporal_lobe
+  - temporalis_left
+  - temporalis_right
+  - thalamus
+  - thyrohyoid_left
+  - thyrohyoid_right
+  - thyroid_cartilage
+  - tibia
+  - tongue
+  - trapezius_left
+  - trapezius_right
+  - ulna
+  - venous_sinuses
+  - zygomatic_arch_left
+  - zygomatic_arch_right
+  input_format: Single 3D CT volume in NIfTI .nii.gz format accepted by the installed TotalSegmentator CLI.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python run_medai_cli.py --json infer --image $CT --output-folder $OUT --backend totalseg
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/totalsegmentator
+
+    python run_medai_cli.py --json infer --image $CT --output-folder $OUT --backend totalseg'
+  expected_gpu_memory_gb: 6-12
+  sensitivity_note: External public runtime. Official TotalSegmentator weights are not mirrored in this HF asset
+    repo.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/totalsegmentator
+  sensitivity_level: external-runtime
+  access: External public runtime; this HF repo stores MedIA metadata/config only and does not mirror official weights.
+  license: External TotalSegmentator license and model terms apply; no official weights are mirrored here.
+- model_key: atlasnet
+  model_name: ATLAS-Net nnUNet v2 abdominal 25-class model
+  role: teacher
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: teacher_models/atlasnet
+  backend: atlasnet_wrapper_over_nnunetv2
+  checkpoint: fold_all/checkpoint_final.pth
+  supported_organs:
+  - adrenal_gland_left
+  - adrenal_gland_right
+  - aorta
+  - cbd_stent
+  - celiac_aa (celiac_artery)
+  - colon
+  - common_bile_duct
+  - duodenum
+  - gall_bladder
+  - inferior_vena_cava
+  - kidney_left
+  - kidney_right
+  - liver
+  - pancreas
+  - pancreatic_cyst
+  - pancreatic_duct
+  - pancreatic_pdac
+  - pancreatic_pnet
+  - portal_vein_and_splenic_vein
+  - renal_vein_left
+  - renal_vein_right
+  - intestine
+  - spleen
+  - stomach
+  - superior_mesenteric_artery
+  input_format: Single 3D CT volume in NIfTI .nii.gz format. The project wrapper accepts any file path; raw nnUNet
+    expects *_0000.nii.gz.
+  output_format: 'MedIA project contract: case_id/segmentations/*.nii.gz per-organ binary masks, plus backend logs/summary
+    where available.'
+  cli_command: python scripts/atlasnet_predict_and_split.py --image $CT --output $OUT --atlas-root $HF_ASSET_ROOT/teacher_models/atlasnet
+    --label-map configs/atlasnet_label_map.json --device cuda:0 --postprocess-mode auto
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    export CT=/path/to/case_001/ct.nii.gz
+
+    export OUT=outputs/hf_smoke/atlasnet
+
+    python scripts/atlasnet_predict_and_split.py --image $CT --output $OUT --atlas-root $HF_ASSET_ROOT/teacher_models/atlasnet
+    --label-map configs/atlasnet_label_map.json --device cuda:0 --postprocess-mode auto'
+  expected_gpu_memory_gb: 8-16
+  sensitivity_note: Public ATLAS-Net-derived teacher route adapted to the MedIA output contract.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/teacher_models/atlasnet
+  sensitivity_level: public-derived
+  access: Public upstream-derived teacher route adapted to the MedIA research output contract.
+  license: See repository README, LICENSES.md, and upstream ATLAS-Net terms.
+student_models:
+- model_key: voxtell_style_student_round1
+  model_name: VoxTell-style prompt-conditioned student round 1
+  role: student
+  release_status: uploaded
+  hf_repo_id: Xiang-mira/MedIA-Agentic-AI
+  hf_path: student_models/voxtell_style_student_round1
+  backend: voxtell_style_3d_prompt
+  checkpoint: voxtell_finetuned_model/fold_0/checkpoint_final.pth
+  supported_organs:
+    summary: 373 exact prompt-conditioned target structures; see configs/student_3d_prompt_target_organs.json.
+  input_format: 3D CT volume in NIfTI .nii.gz format plus the project prompt target configuration.
+  output_format: Prompt-conditioned predicted masks using the MedIA project student pipeline.
+  cli_command: python scripts/train_voxtell_prompt_student.py --model-dir $HF_ASSET_ROOT/student_models/voxtell_style_student_round1/voxtell_finetuned_model
+    --dry-run
+  example_command: 'export HF_ASSET_ROOT=/path/to/MedIA-Agentic-AI
+
+    python scripts/train_voxtell_prompt_student.py --model-dir $HF_ASSET_ROOT/student_models/voxtell_style_student_round1/voxtell_finetuned_model
+    --dry-run'
+  expected_gpu_memory_gb: 16-24
+  sensitivity_note: Project prompt-distillation student initialized from official VoxTell assets; do not describe
+    as official VoxTell finetuning.
+  revision: main
+  local_mount_path: $HF_ASSET_ROOT/student_models/voxtell_style_student_round1
+  sensitivity_level: project-student
+  access: Project research checkpoint; not an official VoxTell release.
+  license: See repository README, LICENSES.md, and upstream VoxTell/project terms.
+revision: main
+default_local_mount_path: $HF_ASSET_ROOT
+access: Public Hugging Face repository for internal research collaboration; do not externally advertise JHU/private
+  assets.
+license: See README, LICENSES.md, and upstream/internal asset terms.

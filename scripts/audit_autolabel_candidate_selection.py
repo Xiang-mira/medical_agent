@@ -164,9 +164,9 @@ def reference_kind(path: str | Path | None) -> str:
         return "missing"
     text = str(path)
     if "/data/PanTS/LabelTr/" in text or "data/PanTS/LabelTr/" in text:
-        return "pants_gt"
+        return "historical_pseudo_reference"
     if "annotation_versions" in text or "standard_dataset" in text or "outputs/" in text:
-        return "pseudo_gt"
+        return "historical_pseudo_reference"
     return "unknown_reference"
 
 
@@ -261,10 +261,8 @@ def relative_score_by_model(selection: dict[str, Any]) -> dict[str, float | None
 
 
 def reference_metric_names(kind: str) -> tuple[str, str]:
-    if kind == "pants_gt":
-        return "dice_selected_vs_gt", "selected_rank_by_gt"
-    if kind == "pseudo_gt":
-        return "dice_selected_vs_pseudo_gt", "selected_rank_by_pseudo_gt"
+    if kind == "historical_pseudo_reference":
+        return "dice_selected_vs_pseudo_reference", "selected_rank_by_pseudo_reference"
     return "dice_selected_vs_unknown_reference", "selected_rank_by_unknown_reference"
 
 

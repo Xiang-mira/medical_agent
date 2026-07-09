@@ -95,7 +95,6 @@ def test_segmentation_chain_writes_long_metric_targets(tmp_path, monkeypatch):
     arr[1:3, 1:3, 1:3] = 1
     write_sitk(tmp_path / "student" / "case_001" / "liver.nii.gz", arr)
     write_sitk(tmp_path / "teacher" / "case_001" / "updated" / "liver.nii.gz", arr)
-    write_sitk(tmp_path / "gt" / "case_001" / "segmentations" / "liver.nii.gz", arr)
     targets = tmp_path / "targets.json"
     targets.write_text(json.dumps({"target_organs": ["liver"]}), encoding="utf-8")
     out = tmp_path / "chain"
@@ -104,7 +103,6 @@ def test_segmentation_chain_writes_long_metric_targets(tmp_path, monkeypatch):
         "evaluate_segmentation_chain.py",
         "--student-root", str(tmp_path / "student"),
         "--teacher-root", str(tmp_path / "teacher"),
-        "--gt-root", str(tmp_path / "gt"),
         "--target-config", str(targets),
         "--output-dir", str(out),
     ])
@@ -113,9 +111,48 @@ def test_segmentation_chain_writes_long_metric_targets(tmp_path, monkeypatch):
         rows = list(csv.DictReader(f))
     targets_seen = {row["metric_target"] for row in rows}
     comparisons = {row["metric_comparison"] for row in rows}
-    assert {"GT", "teacher"} <= targets_seen
-    assert "student_vs_expert_gt" in comparisons
-    assert "student_vs_selected_teacher" in comparisons
+    assert targets_seen == {"selected_pseudo_label"}
+    assert "student_candidate_vs_selected_pseudo_label" in comparisons
+
+
+def test_formal_em_pipeline_has_no_gt_entrypoint() -> None:
+    source = (Path(__file__).resolve().parents[2] / "scripts" / "run_em_training.py").read_text(encoding="utf-8")
+    assert "MEDAI_GT_ROOT" not in source
+    assert "--gt-root" not in source
+    assert "student_vs_gt.csv" not in source
+    assert "teacher_vs_gt.csv" not in source
+
+
+def test_student_shapekit_materializes_flat_candidate_root(tmp_path, monkeypatch):
+    runner = load_script("run_em_training.py")
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[1:3, 1:3, 1:3] = 1
+    write_nib(tmp_path / "outputs" / "round1" / "student_predictions" / "case_001" / "liver.nii.gz", arr)
+    targets = tmp_path / "targets.json"
+    targets.write_text(json.dumps({"target_organs": ["liver"]}), encoding="utf-8")
+
+    from cli_anything.medai.core import shapekit_runner
+
+    def fake_run_shapekit(shapekit_root, input_folder, output_folder, log_folder, **kwargs):
+        src = Path(input_folder) / "case_001" / "segmentations" / "liver.nii.gz"
+        dst = Path(output_folder) / "case_001" / "segmentations" / "liver.nii.gz"
+        dst.parent.mkdir(parents=True)
+        shutil.copy2(src, dst)
+        return {"status": "success", "reason": None}
+
+    import shutil
+    monkeypatch.setattr(shapekit_runner, "run_shapekit", fake_run_shapekit)
+    monkeypatch.setattr(runner, "OUTPUT_ROOT", tmp_path / "outputs")
+    monkeypatch.setattr(runner, "PROMPT_TARGET_CONFIG", targets)
+    monkeypatch.setattr(runner, "ENABLE_SHAPEKIT", True)
+
+    summary = runner.apply_round_student_shapekit(1)
+    assert summary["status"] == "success"
+    assert summary["processed_by_shapekit"] == 1
+    assert (tmp_path / "outputs" / "round1" / "student_predictions_shapekit" / "case_001" / "liver.nii.gz").is_file()
+    with (tmp_path / "outputs" / "round1" / "student_predictions_shapekit" / "student_shapekit_manifest.csv").open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["student_shapekit_status"] == "success"
 
 
 def test_compute_round_metrics_marks_student_dice_as_pseudo_label(tmp_path, monkeypatch):
@@ -130,10 +167,10 @@ def test_compute_round_metrics_marks_student_dice_as_pseudo_label(tmp_path, monk
     monkeypatch.setattr(runner, "OUTPUT_ROOT", tmp_path / "outputs")
 
     result = runner.compute_round_metrics(2, reference_round=1)
-    assert result["metric_target"] == "pseudo-label"
+    assert result["metric_target"] == "selected_pseudo_label"
     with (tmp_path / "outputs" / "round2" / "metrics" / "student_dice_per_organ.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
-    assert rows[0]["metric_target"] == "pseudo-label"
+    assert rows[0]["metric_target"] == "selected_pseudo_label"
     assert rows[0]["metric_comparison"] == "student_vs_selected_pseudo_label"
 
 

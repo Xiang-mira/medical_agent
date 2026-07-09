@@ -847,7 +847,7 @@ def ensure_evaluation_protocol() -> dict:
         "protected_organs": protected,
         "raw_and_postprocessed_metrics_required": True,
         "baseline_round": 1,
-        "gt_usage": "final_promotion_only_when_configured",
+        "external_reference_usage": "not_used_for_student_training_or_mainline_metrics",
         "reference_root": str(reference_root) if reference_root else None,
         "reference_kind": os.getenv(
             "MEDAI_REFERENCE_KIND", "frozen_teacher_anchor"
@@ -1106,6 +1106,11 @@ def record_checkpoint_promotion(
     regression = _load_json(regression_path)
     if status == "promoted" and not regression:
         regression = build_quality_regression_audit(round_idx)
+    training_audit = _load_json(
+        OUTPUT_ROOT / f"round{round_idx}" / "metrics" / "student_training_convergence_summary.json"
+    )
+    if status == "promoted" and not training_audit:
+        training_audit = compute_student_training_audit(round_idx, mstep_result=mstep_result)
     positive_records = [
         row for row in (manifest_doc.get("items") or [])
         if row.get("supervision_type") == "positive"
@@ -1136,6 +1141,10 @@ def record_checkpoint_promotion(
                 status != "promoted"
                 or round_idx == 1
                 or retention.get("status") == "passed"
+            ),
+            "student_training_convergence": (
+                status != "promoted"
+                or training_audit.get("status") == "passed"
             ),
             "central_round_state_machine": (
                 status != "promoted"
@@ -1174,6 +1183,7 @@ def record_checkpoint_promotion(
         "inference_run_id": (inference_audit.get("provenance") or {}).get("run_id"),
         "promotion_decision": decision,
         "quality_regression_audit": regression if regression else None,
+        "student_training_convergence_audit": training_audit if training_audit else None,
         "novelty_audit": novelty if novelty else None,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -1567,6 +1577,13 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
         "validated_masks": 0,
         "reasons": [],
     }
+    training_audit_path = OUTPUT_ROOT / f"round{previous}" / "metrics" / "student_training_convergence_summary.json"
+    training_audit = _load_json(training_audit_path)
+    audit["student_training_convergence_audit_path"] = str(training_audit_path)
+    audit["student_training_convergence_status"] = training_audit.get("status")
+    audit["student_training_round2_progression_allowed"] = training_audit.get("round2_progression_allowed")
+    if training_audit.get("status") != "passed" or training_audit.get("round2_progression_allowed") is not True:
+        audit["reasons"].append("student_training_convergence_audit_not_passed")
     doc = {}
     allowed: set[str] = set()
     allowed_case_organs: set[tuple[str, str]] | None = None
@@ -1643,8 +1660,20 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
                 audit["reasons"].append("postprocessed_root_aliases_raw_root")
             if not summary_input_root.is_dir():
                 audit["reasons"].append("postprocess_summary_input_root_missing")
-            if summary_input_root.name != "student_predictions":
+            if summary_input_root.name not in {"student_predictions", "student_predictions_shapekit"}:
                 audit["reasons"].append("postprocess_input_not_raw_student_predictions_root")
+            if summary_input_root.name == "student_predictions_shapekit":
+                shapekit_summary = _load_json(summary_input_root / "student_shapekit_summary.json")
+                audit["student_shapekit_summary_path"] = str(summary_input_root / "student_shapekit_summary.json")
+                audit["student_shapekit_status"] = shapekit_summary.get("status")
+                audit["student_shapekit_processed_by_shapekit"] = shapekit_summary.get("processed_by_shapekit")
+                audit["student_shapekit_fallback_original"] = shapekit_summary.get("fallback_original")
+                if shapekit_summary.get("status") not in {"success", "partial_success"}:
+                    audit["reasons"].append("student_shapekit_summary_not_success")
+                if int(shapekit_summary.get("processed_by_shapekit") or 0) <= 0:
+                    audit["reasons"].append("student_shapekit_processed_no_masks")
+            else:
+                audit["reasons"].append("student_shapekit_input_missing")
         else:
             audit["reasons"].append("postprocess_summary_input_root_missing")
     if summary_input_root is not None and summary_input_root.is_dir():
@@ -3381,7 +3410,7 @@ def run_voxtell_student_quality_gate(round_idx: int, model_dir: Path, manifest_p
             eval_rows.append({
                 "case_id": case_id,
                 "organ": organ,
-                "metric_target": "pseudo-label",
+                "metric_target": "selected_pseudo_label",
                 "metric_subject": "student",
                 "metric_comparison": "student_vs_selected_pseudo_label",
                 "metric_interpretation": "pseudo_label_consistency",
@@ -4013,16 +4042,18 @@ def run_student_mstep(round_idx: int, dataset_path: Path, global_consolidation: 
 
 # ── 评估指标 ──────────────────────────────────────────────────────────────────
 
-def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> dict:
-    """Run the formal multi-evidence QC chain for a completed student round."""
+def compute_round_pseudo_qc_chain(round_idx: int, reference_round: int = 1) -> dict:
+    """Run formal pseudo-label QC for a completed student round.
+
+    This mainline chain intentionally does not read external fine-label roots
+    or emit accuracy metrics. It compares student predictions to the previous
+    selected pseudo labels and writes consistency, volume, empty-mask, and
+    next-round blocklist artifacts.
+    """
     import runpy
 
     student_root = _round_student_prediction_root_for_qc(round_idx)
     teacher_root = resolve_round_reference_root(reference_round)
-    gt_env = os.getenv("MEDAI_GT_ROOT", "").strip()
-    gt_root = Path(gt_env).expanduser() if gt_env else None
-    if gt_root is not None and not gt_root.is_absolute():
-        gt_root = PROJECT_ROOT / gt_root
     output_dir = _round_evaluation_chain_dir(round_idx)
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / "evaluation_chain_summary.json"
@@ -4056,8 +4087,6 @@ def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> 
         "--output-dir", str(output_dir),
         "--volume-policy", str(PROJECT_ROOT / "configs/organ_postprocess_policy.yaml"),
     ]
-    if gt_root and gt_root.exists():
-        sys.argv.extend(["--gt-root", str(gt_root)])
     try:
         try:
             runpy.run_path(str(PROJECT_ROOT / "scripts/evaluate_segmentation_chain.py"), run_name="__main__")
@@ -4070,11 +4099,10 @@ def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> 
             "reason": str(exc),
             "student_root": str(student_root),
             "teacher_root": str(teacher_root),
-            "gt_root": str(gt_root) if gt_root else None,
             "output_dir": str(output_dir),
         }
         summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        log(f"evaluation_chain 失败: {exc}")
+        log(f"pseudo_qc_chain 失败: {exc}")
         return summary
     finally:
         sys.argv = old_argv
@@ -4084,15 +4112,21 @@ def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> 
         "status": "success",
         "student_root": str(student_root),
         "teacher_root": str(teacher_root),
-        "gt_root": str(gt_root) if gt_root and gt_root.exists() else None,
         "output_dir": str(output_dir),
+        "metric_target": "selected_pseudo_label",
+        "metric_interpretation": "pseudo_label_consistency",
     })
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     log(
-        "evaluation_chain 完成: "
+        "pseudo_qc_chain 完成: "
         f"rows={summary.get('rows')}, blocklist={summary.get('outputs', {}).get('next_round_blocklist')}"
     )
     return summary
+
+
+def compute_round_evaluation_chain(round_idx: int, reference_round: int = 1) -> dict:
+    """Backward-compatible wrapper for the pseudo-only QC chain."""
+    return compute_round_pseudo_qc_chain(round_idx, reference_round=reference_round)
 
 
 def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
@@ -4108,7 +4142,7 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
     metrics_dir = OUTPUT_ROOT / f"round{round_idx}" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    student_pred_dir = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+    student_pred_dir = _round_student_prediction_root_for_qc(round_idx)
     pseudo_reference_root = resolve_round_reference_root(reference_round)
     cases = []
     with open(CASE_LIST) as f:
@@ -4147,11 +4181,12 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
                     "pseudo_consistency_dsc": dsc,
                     "metric_family": "pseudo_consistency",
                     "metric_scope": "student_vs_selected_pseudo_label",
-                    "metric_target": "pseudo-label",
+                    "metric_target": "selected_pseudo_label",
                     "metric_subject": "student",
                     "metric_comparison": "student_vs_selected_pseudo_label",
                     "metric_interpretation": "pseudo_label_consistency",
-                    "ground_truth_status": "pseudo_label_candidate",
+                    "label_role": "student_pseudo_candidate",
+                    "supervision_role": "selected_pseudo_label",
                 })
                 organ_dices.setdefault(organ, []).append(dsc)
                 case_dices.setdefault(case_id, []).append(dsc)
@@ -4164,7 +4199,7 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
                 "round", "reference_round", "case_id", "organ", "dsc",
                 "pseudo_consistency_dsc", "metric_family", "metric_scope",
                 "metric_target", "metric_subject", "metric_comparison", "metric_interpretation",
-                "ground_truth_status",
+                "label_role", "supervision_role",
             ])
             w.writeheader(); w.writerows(dice_rows)
 
@@ -4174,7 +4209,7 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
         organ_summary.append({"round": round_idx, "organ": organ, "n": len(dscs),
                                "mean_dsc": round(float(arr.mean()), 4),
                                "std_dsc": round(float(arr.std()), 4),
-                               "metric_target": "pseudo-label",
+                               "metric_target": "selected_pseudo_label",
                                "metric_subject": "student",
                                "metric_comparison": "student_vs_selected_pseudo_label",
                                "metric_interpretation": "pseudo_label_consistency"})
@@ -4191,14 +4226,16 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
     round_metrics = {
         "round": round_idx,
         "reference_round": reference_round,
-        "source": "student_predictions",
+        "source": "student_predictions_postprocessed" if student_pred_dir.name == "student_predictions_postprocessed" else "student_predictions",
+        "student_prediction_root": str(student_pred_dir),
         "metric_family": "pseudo_consistency",
         "metric_scope": "student_vs_selected_pseudo_label",
-        "metric_target": "pseudo-label",
+        "metric_target": "selected_pseudo_label",
         "metric_subject": "student",
         "metric_comparison": "student_vs_selected_pseudo_label",
         "metric_interpretation": "pseudo_label_consistency",
-        "ground_truth_status": "pseudo_label_candidate",
+        "label_role": "student_pseudo_candidate",
+        "supervision_role": "selected_pseudo_label",
         "pseudo_reference_root": str(pseudo_reference_root),
         "accuracy_warning": "No expert fine-label set is assumed. These are not true accuracy metrics.",
         "n_evaluations": len(dice_rows),
@@ -4216,12 +4253,455 @@ def compute_round_metrics(round_idx: int, reference_round: int = 1) -> dict:
     return round_metrics
 
 
+def _manifest_image_path(row: dict) -> Path | None:
+    raw = row.get("image") or row.get("ct_path")
+    if not raw:
+        return None
+    return Path(str(raw)).expanduser()
+
+
+def _manifest_mask_path(row: dict) -> Path | None:
+    raw = row.get("mask_path") or row.get("mask") or row.get("final_mask")
+    if not raw:
+        return None
+    return Path(str(raw)).expanduser()
+
+
+def _nifti_audit_meta(path: Path | None) -> tuple[dict, str | None]:
+    if path is None:
+        return {}, "missing_path"
+    if not path.exists():
+        return {}, "file_missing"
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        img = nib.load(str(path))
+        arr = np.asanyarray(img.dataobj)
+        affine = np.asarray(img.affine, dtype=float)
+        return {
+            "shape": list(arr.shape[:3]),
+            "spacing": [round(float(v), 6) for v in img.header.get_zooms()[:3]],
+            "orientation": "".join(nib.aff2axcodes(affine)),
+            "affine": [[round(float(v), 6) for v in row] for row in affine.tolist()],
+            "foreground_voxels": int((arr > 0).sum()),
+            "voxel_count": int(arr.size),
+            "foreground_voxel_ratio": float((arr > 0).sum() / max(1, arr.size)),
+        }, None
+    except Exception as exc:
+        return {}, f"unreadable:{exc}"
+
+
+def _alignment_fail_reasons(image_meta: dict, mask_meta: dict, row: dict) -> list[str]:
+    import numpy as np
+
+    reasons: list[str] = []
+    if image_meta.get("shape") != mask_meta.get("shape"):
+        reasons.append("shape_mismatch")
+    if image_meta.get("spacing") != mask_meta.get("spacing"):
+        reasons.append("spacing_mismatch")
+    if image_meta.get("orientation") != mask_meta.get("orientation"):
+        reasons.append("orientation_mismatch")
+    try:
+        if not np.allclose(
+            np.asarray(image_meta.get("affine"), dtype=float),
+            np.asarray(mask_meta.get("affine"), dtype=float),
+            rtol=1e-3,
+            atol=1e-3,
+        ):
+            reasons.append("affine_mismatch")
+    except Exception:
+        reasons.append("affine_unavailable")
+    target_type = str(row.get("target_type") or "").lower()
+    supervision_type = str(row.get("supervision_type") or "positive").lower()
+    fg = int(mask_meta.get("foreground_voxels") or 0)
+    if supervision_type == "positive" and target_type not in {"negative_absent", "absent_negative"} and fg <= 0:
+        reasons.append("positive_mask_empty")
+    if target_type in {"negative_absent", "absent_negative"} and fg > 0:
+        reasons.append("negative_absent_mask_nonzero")
+    return reasons
+
+
+def _diagnose_loss_curve(finite_losses: list[float], first_mean: float | None, last_mean: float | None) -> dict:
+    if not finite_losses:
+        status = "insufficient_steps"
+        recommendation = "No usable training loss was recorded; audit the trainer invocation and loss_history.json before advancing EM."
+    elif any(not math.isfinite(v) for v in finite_losses):
+        status = "diverged"
+        recommendation = "Loss contains non-finite values; lower learning rate and inspect inputs, masks, prompts, and loss weights."
+    elif first_mean is None or last_mean is None or len(finite_losses) < 5:
+        status = "insufficient_steps"
+        recommendation = "Run more M-step iterations before judging convergence."
+    else:
+        ratio = last_mean / max(first_mean, 1e-8)
+        if ratio <= 0.98:
+            status = "decreasing"
+            recommendation = "Loss is decreasing; keep this configuration if trainset pseudo-consistency and QC also pass."
+        elif ratio <= 1.02:
+            status = "stable"
+            recommendation = "Loss is stable but not clearly improving; inspect trainset pseudo-consistency and consider a small learning-rate sweep."
+        else:
+            status = "increasing"
+            recommendation = "Loss increased; first check data alignment and prompt-mask mapping, then retry with a lower learning rate."
+    return {
+        "stage": "loss_curve_diagnosis",
+        "status": status,
+        "num_finite_losses": len(finite_losses),
+        "first_loss_window_mean": first_mean,
+        "last_loss_window_mean": last_mean,
+        "recommendation": recommendation,
+        "decision_policy": "This diagnosis measures adaptation to selected pseudo labels only, never external-label accuracy.",
+    }
+
+
+def compute_student_training_audit(round_idx: int, mstep_result: dict | None = None, round_metrics: dict | None = None) -> dict:
+    """Write the required M-step convergence and alignment audit artifacts."""
+    import csv as csv_mod
+
+    metrics_dir = OUTPUT_ROOT / f"round{round_idx}" / "metrics"
+    mstep_dir = OUTPUT_ROOT / f"round{round_idx}" / "mstep"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    mstep_result = mstep_result or _round_mstep_result(round_idx)
+    round_metrics = round_metrics or _load_json(metrics_dir / "round_metrics.json")
+    manifest_path = mstep_dir / "voxtell_prompt_student_manifest.json"
+    manifest_doc = _load_json(manifest_path)
+    items = manifest_doc.get("items") or []
+
+    loss_doc = _load_json(mstep_dir / "loss_history.json")
+    loss_history = loss_doc.get("history") or []
+    loss_csv = metrics_dir / "student_training_loss_curve.csv"
+    loss_fields = [
+        "step", "loss", "task_loss", "retention_loss", "learning_rate",
+        "grad_norm_before_clip", "case_id", "organ", "prompt", "sample_kind",
+        "target_type", "negative_source", "negative_source_class", "fov_status",
+        "foreground_voxel_ratio", "all_zero_target",
+    ]
+    with loss_csv.open("w", newline="", encoding="utf-8") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=loss_fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(loss_history)
+
+    loss_png = metrics_dir / "student_training_loss_curve.png"
+    plot_status = "skipped_no_loss_history"
+    finite_losses: list[float] = []
+    for row in loss_history:
+        try:
+            value = float(row.get("loss"))
+            if math.isfinite(value):
+                finite_losses.append(value)
+        except Exception:
+            pass
+    if finite_losses:
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+
+            steps = [int(row.get("step") or idx + 1) for idx, row in enumerate(loss_history)]
+            values = [float(row.get("loss")) if row.get("loss") is not None else float("nan") for row in loss_history]
+            plt.figure(figsize=(8, 4))
+            plt.plot(steps, values, linewidth=1.5)
+            plt.xlabel("step")
+            plt.ylabel("training loss")
+            plt.tight_layout()
+            plt.savefig(loss_png, dpi=160)
+            plt.close()
+            plot_status = "written"
+        except Exception as exc:
+            plot_status = f"skipped_plot_error:{exc}"
+
+    window = max(1, len(finite_losses) // 5) if finite_losses else 0
+    first_mean = sum(finite_losses[:window]) / window if window else None
+    last_mean = sum(finite_losses[-window:]) / window if window else None
+    loss_decreased = bool(
+        first_mean is not None
+        and last_mean is not None
+        and last_mean <= first_mean * (1.0 + float(os.getenv("MEDAI_LOSS_STABILITY_TOL", "0.02")))
+    )
+    min_trainset_dsc = float(os.getenv("MEDAI_MIN_TRAINSET_PSEUDO_DSC", "0.60"))
+    overall_dsc = round_metrics.get("overall_mean_dsc")
+    consistency_passed = overall_dsc is None or float(overall_dsc) >= min_trainset_dsc
+
+    positive = [r for r in items if str(r.get("supervision_type") or "positive") == "positive"]
+    negative = [r for r in items if str(r.get("target_type") or "") in {"negative_absent", "absent_negative"}]
+    withheld = [
+        r for r in items
+        if str(r.get("target_type") or "") in {"withheld_uncertain", "unresolved_review", "unresolved_visible", "partial_fov"}
+        or float(r.get("training_weight") or 0.0) == 0.0
+    ]
+    missing_image = [
+        r for r in items
+        if r.get("image") and not Path(str(r.get("image"))).exists()
+    ][:20]
+    missing_mask = [
+        r for r in items
+        if (r.get("mask") or r.get("mask_path")) and not Path(str(r.get("mask") or r.get("mask_path"))).exists()
+    ][:20]
+    prompt_missing = [r for r in items if not r.get("prompt") and str(r.get("supervision_type") or "positive") == "positive"][:20]
+    alignment_rows: list[dict] = []
+    alignment_failures: list[dict] = []
+    foreground_ratios: list[float] = []
+    positive_empty = 0
+    negative_nonzero = 0
+    for idx, row in enumerate(items):
+        image_path = _manifest_image_path(row)
+        mask_path = _manifest_mask_path(row)
+        image_meta, image_error = _nifti_audit_meta(image_path)
+        mask_meta, mask_error = _nifti_audit_meta(mask_path)
+        reasons: list[str] = []
+        if image_error:
+            reasons.append(f"image_{image_error}")
+        if mask_error:
+            reasons.append(f"mask_{mask_error}")
+        if not image_error and not mask_error:
+            reasons.extend(_alignment_fail_reasons(image_meta, mask_meta, row))
+        if "positive_mask_empty" in reasons:
+            positive_empty += 1
+        if "negative_absent_mask_nonzero" in reasons:
+            negative_nonzero += 1
+        if mask_meta.get("foreground_voxel_ratio") is not None:
+            foreground_ratios.append(float(mask_meta["foreground_voxel_ratio"]))
+        audit_row = {
+            "row_index": idx,
+            "case_id": row.get("case_id"),
+            "organ": row.get("organ"),
+            "supervision_type": row.get("supervision_type", "positive"),
+            "target_type": row.get("target_type"),
+            "image_path": str(image_path) if image_path else "",
+            "mask_path": str(mask_path) if mask_path else "",
+            "image_shape": image_meta.get("shape"),
+            "mask_shape": mask_meta.get("shape"),
+            "image_spacing": image_meta.get("spacing"),
+            "mask_spacing": mask_meta.get("spacing"),
+            "image_orientation": image_meta.get("orientation"),
+            "mask_orientation": mask_meta.get("orientation"),
+            "mask_foreground_voxels": mask_meta.get("foreground_voxels"),
+            "mask_foreground_voxel_ratio": mask_meta.get("foreground_voxel_ratio"),
+            "status": "failed" if reasons else "passed",
+            "reasons": reasons,
+        }
+        alignment_rows.append(audit_row)
+        if reasons:
+            alignment_failures.append(audit_row)
+
+    alignment_passed = (
+        not missing_image
+        and not missing_mask
+        and not prompt_missing
+        and not alignment_failures
+    )
+    alignment_audit = {
+        "stage": "prompt_mask_ct_alignment_audit",
+        "status": "passed" if alignment_passed else "failed",
+        "manifest": str(manifest_path),
+        "policy": "CT is the real input image; masks are project-generated selected pseudo labels used as student supervision.",
+        "items": len(items),
+        "positive_items": len(positive),
+        "negative_absent_items": len(negative),
+        "withheld_or_zero_weight_items": len(withheld),
+        "missing_image_examples": missing_image,
+        "missing_mask_examples": missing_mask,
+        "prompt_missing_examples": prompt_missing,
+        "num_alignment_failures": len(alignment_failures),
+        "alignment_failure_examples": alignment_failures[:20],
+        "positive_empty_masks": positive_empty,
+        "negative_absent_nonzero_masks": negative_nonzero,
+        "mean_mask_foreground_voxel_ratio": (
+            float(sum(foreground_ratios) / len(foreground_ratios))
+            if foreground_ratios else None
+        ),
+        "positive_negative_ratio": (len(positive) / max(1, len(negative))) if negative else None,
+    }
+    (metrics_dir / "prompt_mask_ct_alignment_audit.json").write_text(
+        json.dumps(alignment_audit, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    prompt_mapping_rows = []
+    for idx, row in enumerate(items):
+        prompt_mapping_rows.append({
+            "row_index": idx,
+            "case_id": row.get("case_id"),
+            "organ": row.get("organ"),
+            "canonical_organ_name": row.get("canonical_organ_name") or row.get("organ"),
+            "student_target_id": row.get("student_target_id"),
+            "prompt": row.get("prompt") or row.get("prompt_text"),
+            "prompt_type": row.get("prompt_type"),
+            "supervision_type": row.get("supervision_type", "positive"),
+            "target_type": row.get("target_type"),
+            "label_role": row.get("label_role"),
+            "supervision_role": row.get("supervision_role"),
+            "mask_path": row.get("mask_path") or row.get("mask"),
+            "training_weight": row.get("training_weight"),
+        })
+    prompt_mapping_csv = metrics_dir / "prompt_organ_mapping_audit.csv"
+    with prompt_mapping_csv.open("w", newline="", encoding="utf-8") as f:
+        fieldnames = [
+            "row_index", "case_id", "organ", "canonical_organ_name",
+            "student_target_id", "prompt", "prompt_type", "supervision_type",
+            "target_type", "label_role", "supervision_role", "mask_path",
+            "training_weight",
+        ]
+        writer = csv_mod.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(prompt_mapping_rows)
+    prompt_mapping_failures = [
+        row for row in prompt_mapping_rows
+        if not row.get("organ") or not row.get("prompt") or not row.get("mask_path")
+    ]
+    prompt_mapping_audit = {
+        "stage": "prompt_organ_mapping_audit",
+        "status": "passed" if not prompt_mapping_failures else "failed",
+        "csv": str(prompt_mapping_csv),
+        "items": len(prompt_mapping_rows),
+        "unique_organs": len({str(r.get("organ")) for r in prompt_mapping_rows if r.get("organ")}),
+        "unique_prompts": len({str(r.get("prompt")) for r in prompt_mapping_rows if r.get("prompt")}),
+        "missing_mapping_examples": prompt_mapping_failures[:20],
+    }
+    (metrics_dir / "prompt_organ_mapping_audit.json").write_text(
+        json.dumps(prompt_mapping_audit, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    sampling_history = loss_doc.get("sampling_history") or mstep_result.get("sampling_history") or []
+    positive_steps = sum(1 for row in loss_history if str(row.get("sample_kind") or "") != "negative")
+    negative_steps = sum(1 for row in loss_history if str(row.get("sample_kind") or "") == "negative")
+    window_positive = sum(int(row.get("batch_positive_count") or 0) for row in sampling_history)
+    window_negative = sum(int(row.get("batch_negative_count") or 0) for row in sampling_history)
+    sampled_positive = window_positive or positive_steps
+    sampled_negative = window_negative or negative_steps
+    configured_ratio = (
+        mstep_result.get("pos_neg_ratio")
+        or mstep_result.get("configured_pos_neg_ratio")
+        or os.getenv("MEDAI_POS_NEG_RATIO", "2:1")
+    )
+    actual_ratio = (float(sampled_positive) / float(sampled_negative)) if sampled_negative else None
+    bad_negative_sources = [
+        row for row in loss_history
+        if str(row.get("sample_kind") or "") == "negative"
+        and str(row.get("negative_source") or row.get("negative_source_class") or "") in {"", "teacher_missing", "missing_teacher_output"}
+    ][:20]
+    sampling_passed = bool(loss_history) and not bad_negative_sources and sampled_positive >= 0 and sampled_negative >= 0
+    sample_distribution_audit = {
+        "stage": "training_sample_distribution_audit",
+        "status": "passed" if sampling_passed else "failed",
+        "configured_pos_neg_ratio": configured_ratio,
+        "sampled_positive_count": sampled_positive,
+        "sampled_negative_count": sampled_negative,
+        "actual_pos_neg_ratio": actual_ratio,
+        "sampling_history_windows": len(sampling_history),
+        "all_zero_target_count": sum(int(row.get("all_zero_target") or 0) for row in loss_history),
+        "mean_runtime_foreground_voxel_ratio": (
+            float(sum(float(row.get("foreground_voxel_ratio") or 0.0) for row in loss_history) / len(loss_history))
+            if loss_history else None
+        ),
+        "negative_source_policy": "Negatives must be confirmed absent/out-of-FOV zero masks or legal derived empty-crop negatives, not teacher-missing positives.",
+        "bad_negative_source_examples": bad_negative_sources,
+    }
+    (metrics_dir / "training_sample_distribution_audit.json").write_text(
+        json.dumps(sample_distribution_audit, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    loss_diagnosis = _diagnose_loss_curve(finite_losses, first_mean, last_mean)
+    loss_diagnosis.update({
+        "learning_rate": mstep_result.get("learning_rate") or os.getenv("MEDAI_MSTEP_LR"),
+        "scheduler": mstep_result.get("scheduler") or mstep_result.get("lr_scheduler") or "poly",
+        "optimizer": mstep_result.get("optimizer"),
+    })
+    (metrics_dir / "loss_curve_diagnosis.json").write_text(
+        json.dumps(loss_diagnosis, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    training_code_audit = {
+        "stage": "voxtell_training_code_audit",
+        "status": "passed" if alignment_passed and prompt_mapping_audit["status"] == "passed" and sample_distribution_audit["status"] == "passed" else "failed",
+        "student_model_family": "VoxTell/BoxToTail-style 3D prompt student",
+        "input_policy": "CT is the real image input; selected pseudo labels are the only student supervision in the formal EM path.",
+        "text_prompt_policy": "Organ prompts are mapped from the 373-organ target space to VoxTell text embeddings; prompt rows must match exactly one pseudo mask row.",
+        "prompt_fusion_policy": "Frozen text embeddings are projected into prompt queries that condition the 3D decoder/mask path.",
+        "loss_policy": mstep_result.get("loss_mode") or "nnUNet Dice+BCE or project weighted Dice+BCE depending on training profile",
+        "optimizer": mstep_result.get("optimizer"),
+        "learning_rate": mstep_result.get("learning_rate") or os.getenv("MEDAI_MSTEP_LR"),
+        "scheduler": mstep_result.get("scheduler") or mstep_result.get("lr_scheduler") or "poly",
+        "batch_size": mstep_result.get("batch_size"),
+        "effective_batch_size": mstep_result.get("effective_batch_size"),
+        "training_profile": mstep_result.get("training_profile"),
+        "positive_negative_ratio": configured_ratio,
+        "artifacts": {
+            "alignment": str(metrics_dir / "prompt_mask_ct_alignment_audit.json"),
+            "prompt_mapping": str(metrics_dir / "prompt_organ_mapping_audit.json"),
+            "sample_distribution": str(metrics_dir / "training_sample_distribution_audit.json"),
+            "loss_diagnosis": str(metrics_dir / "loss_curve_diagnosis.json"),
+        },
+    }
+    (metrics_dir / "voxtell_training_code_audit.json").write_text(
+        json.dumps(training_code_audit, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    trainset_csv = metrics_dir / "student_trainset_pseudo_consistency.csv"
+    dice_csv = metrics_dir / "student_dice_per_organ.csv"
+    if dice_csv.exists():
+        shutil.copyfile(dice_csv, trainset_csv)
+    else:
+        trainset_csv.write_text(
+            "case_id,organ,pseudo_consistency_dsc,metric_target,metric_interpretation\n",
+            encoding="utf-8",
+        )
+
+    audit_passed = (
+        bool(finite_losses)
+        and loss_decreased
+        and consistency_passed
+        and alignment_passed
+        and prompt_mapping_audit["status"] == "passed"
+        and sample_distribution_audit["status"] == "passed"
+        and str(mstep_result.get("status") or "") == "success"
+    )
+    summary = {
+        "stage": "student_training_convergence_audit",
+        "status": "passed" if audit_passed else "failed",
+        "round": round_idx,
+        "loss_history_path": str(mstep_dir / "loss_history.json"),
+        "loss_curve_csv": str(loss_csv),
+        "loss_curve_png": str(loss_png) if loss_png.exists() else "",
+        "loss_curve_plot_status": plot_status,
+        "loss_steps": len(loss_history),
+        "first_loss_window_mean": first_mean,
+        "last_loss_window_mean": last_mean,
+        "loss_decreased_or_stable": loss_decreased,
+        "learning_rate": mstep_result.get("learning_rate") or os.getenv("MEDAI_MSTEP_LR"),
+        "scheduler": mstep_result.get("scheduler") or mstep_result.get("lr_scheduler") or "unknown",
+        "trainset_pseudo_consistency_csv": str(trainset_csv),
+        "overall_trainset_pseudo_consistency_dsc": overall_dsc,
+        "min_trainset_pseudo_consistency_dsc": min_trainset_dsc,
+        "trainset_pseudo_consistency_passed": consistency_passed,
+        "prompt_mask_ct_alignment_audit": str(metrics_dir / "prompt_mask_ct_alignment_audit.json"),
+        "prompt_organ_mapping_audit": str(metrics_dir / "prompt_organ_mapping_audit.json"),
+        "training_sample_distribution_audit": str(metrics_dir / "training_sample_distribution_audit.json"),
+        "loss_curve_diagnosis": str(metrics_dir / "loss_curve_diagnosis.json"),
+        "voxtell_training_code_audit": str(metrics_dir / "voxtell_training_code_audit.json"),
+        "alignment_passed": alignment_passed,
+        "prompt_mapping_passed": prompt_mapping_audit["status"] == "passed",
+        "sample_distribution_passed": sample_distribution_audit["status"] == "passed",
+        "loss_curve_diagnosis_status": loss_diagnosis["status"],
+        "positive_items": len(positive),
+        "negative_absent_items": len(negative),
+        "withheld_or_zero_weight_items": len(withheld),
+        "round2_progression_allowed": audit_passed,
+        "failure_policy": "If this audit fails, the next formal EM round must not let student outputs replace previous selected pseudo labels.",
+        "interpretation_policy": "Artifacts describe pseudo-label consistency and student learning of project-generated supervision only.",
+    }
+    (metrics_dir / "student_training_convergence_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    log(f"Student training audit: status={summary['status']}, loss_steps={len(loss_history)}, trainset_dsc={overall_dsc}")
+    return summary
+
+
 def build_quality_regression_audit(round_idx: int) -> dict:
     """Compare a candidate to both the previous promoted round and baseline.
 
-    The metric family is frozen student-vs-reference pseudo consistency unless
-    the run supplies a trusted GT audit.  Cohort size and target count are read
-    from artifacts; no experiment-specific counts are assumed.
+    The metric family is frozen student-vs-selected-pseudo consistency. Cohort
+    size and target count are read from artifacts; no experiment-specific counts
+    are assumed.
     """
     import csv as csv_mod
     import statistics
@@ -4240,21 +4720,9 @@ def build_quality_regression_audit(round_idx: int) -> dict:
         write_contract_json(output, audit)
         return audit
 
-    def load_rows(
-        index: int,
-        *,
-        trusted_gt: bool = False,
-    ) -> dict[tuple[str, str], float]:
-        path = (
-            OUTPUT_ROOT
-            / f"round{index}"
-            / "metrics"
-            / (
-                "evaluation_chain/evaluation_chain_per_case_organ.csv"
-                if trusted_gt else "student_dice_per_organ.csv"
-            )
-        )
-        value_column = "student_gt_dice" if trusted_gt else "dsc"
+    def load_rows(index: int) -> dict[tuple[str, str], float]:
+        path = OUTPUT_ROOT / f"round{index}" / "metrics" / "student_dice_per_organ.csv"
+        value_column = "dsc"
         rows: dict[tuple[str, str], float] = {}
         if not path.exists():
             return rows
@@ -4268,10 +4736,9 @@ def build_quality_regression_audit(round_idx: int) -> dict:
                     continue
         return rows
 
-    gt_configured = bool(os.getenv("MEDAI_GT_ROOT", "").strip())
-    current = load_rows(round_idx, trusted_gt=gt_configured)
-    previous = load_rows(round_idx - 1, trusted_gt=gt_configured)
-    baseline = load_rows(1, trusted_gt=gt_configured)
+    current = load_rows(round_idx)
+    previous = load_rows(round_idx - 1)
+    baseline = load_rows(1)
     pseudo_current = load_rows(round_idx)
     pseudo_previous = load_rows(round_idx - 1)
     common_previous = sorted(set(current) & set(previous))
@@ -4300,10 +4767,7 @@ def build_quality_regression_audit(round_idx: int) -> dict:
     audit = {
         "stage": "quality_regression_audit",
         "status": "passed" if previous_deltas and baseline_deltas else "failed",
-        "evidence_level": (
-            "trusted_gt_final_promotion"
-            if gt_configured else "frozen_reference_anchor"
-        ),
+        "evidence_level": "frozen_selected_pseudo_anchor",
         "round": round_idx,
         "paired_previous_count": len(previous_deltas),
         "paired_baseline_count": len(baseline_deltas),
@@ -4682,11 +5146,185 @@ def save_prompt_student_predictions(round_idx: int):
     return summary
 
 
-def apply_round_organ_type_postprocess(round_idx: int) -> dict:
-    """Materialize organ-type-aware postprocessed student predictions for formal QC/next EM."""
-    import runpy
+def _flat_student_shapekit_output_path(shapekit_output_root: Path, case_id: str, organ: str) -> Path:
+    return shapekit_output_root / case_id / "segmentations" / f"{organ}.nii.gz"
+
+
+def apply_round_student_shapekit(round_idx: int) -> dict:
+    """Run ShapeKit on raw student masks and publish a flat 373-organ candidate root.
+
+    ShapeKit uses a case/segmentations layout, while the student EM handoff uses
+    case/*.nii.gz. This function stages the raw student masks for ShapeKit,
+    runs the tool, then materializes a flat root that keeps all 373 targets:
+    ShapeKit output is preferred when available; otherwise the raw student mask
+    is retained with an explicit fallback status for downstream QC.
+    """
+    from cli_anything.medai.core.shapekit_runner import run_shapekit
 
     input_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+    staged_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_shapekit_input"
+    raw_output_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_shapekit_raw_output"
+    flat_output_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_shapekit"
+    summary_path = flat_output_root / "student_shapekit_summary.json"
+    manifest_path = flat_output_root / "student_shapekit_manifest.csv"
+
+    if not input_root.exists() or not any(p.is_dir() for p in input_root.iterdir()):
+        flat_output_root.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "stage": "student_candidate_shapekit",
+            "status": "skipped",
+            "reason": "student_predictions_missing",
+            "input_root": str(input_root),
+            "flat_output_root": str(flat_output_root),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+    if not ENABLE_SHAPEKIT:
+        flat_output_root.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "stage": "student_candidate_shapekit",
+            "status": "skipped_debug_only",
+            "reason": "ShapeKit disabled; formal runs must keep MEDAI_ENABLE_SHAPEKIT on.",
+            "input_root": str(input_root),
+            "flat_output_root": str(flat_output_root),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+
+    for path in [staged_root, raw_output_root, flat_output_root]:
+        if path.exists():
+            shutil.rmtree(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+    target_organs = set(load_student_target_organs())
+    staged_masks = 0
+    for case_dir in sorted(p for p in input_root.iterdir() if p.is_dir()):
+        staged_seg = staged_root / case_dir.name / "segmentations"
+        staged_seg.mkdir(parents=True, exist_ok=True)
+        for mask in sorted(case_dir.glob("*.nii.gz")):
+            organ = mask.name[:-7]
+            if organ not in target_organs:
+                continue
+            shutil.copy2(mask, staged_seg / mask.name)
+            staged_masks += 1
+
+    if staged_masks == 0:
+        summary = {
+            "stage": "student_candidate_shapekit",
+            "status": "failed",
+            "reason": "no_student_masks_to_stage_for_shapekit",
+            "input_root": str(input_root),
+            "flat_output_root": str(flat_output_root),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+
+    result = run_shapekit(
+        PROJECT_ROOT / "third_party/ShapeKit-main",
+        staged_root,
+        raw_output_root,
+        raw_output_root / "logs",
+        cpu_count=2,
+        dry_run=False,
+        auto_config=True,
+        timeout_sec=min(INFER_TIMEOUT_SEC, 1800),
+    )
+
+    rows: list[dict] = []
+    processed = fallback = missing = 0
+    for case_dir in sorted(p for p in input_root.iterdir() if p.is_dir()):
+        out_case = flat_output_root / case_dir.name
+        out_case.mkdir(parents=True, exist_ok=True)
+        for raw_mask in sorted(case_dir.glob("*.nii.gz")):
+            organ = raw_mask.name[:-7]
+            if organ not in target_organs:
+                continue
+            sk_mask = _flat_student_shapekit_output_path(raw_output_root, case_dir.name, organ)
+            if result.get("status") == "success" and sk_mask.exists():
+                source = sk_mask
+                status = "success"
+                reason = "student_mask_processed_by_shapekit"
+                processed += 1
+            elif raw_mask.exists():
+                source = raw_mask
+                status = "fallback_original"
+                reason = "ShapeKit did not produce this student organ mask; raw student mask retained for downstream QC"
+                fallback += 1
+            else:
+                source = None
+                status = "missing"
+                reason = "raw student mask missing"
+                missing += 1
+            dst = out_case / f"{organ}.nii.gz"
+            if source is not None:
+                shutil.copy2(source, dst)
+            rows.append({
+                "case_id": case_dir.name,
+                "organ": organ,
+                "raw_student_mask": str(raw_mask),
+                "shapekit_mask": str(sk_mask) if sk_mask.exists() else "",
+                "output_path": str(dst) if dst.exists() else "",
+                "student_shapekit_status": status,
+                "student_shapekit_reason": reason,
+                "selected_for_student_candidate": "shapekit" if status == "success" else "raw_fallback",
+            })
+
+    if rows:
+        with manifest_path.open("w", newline="", encoding="utf-8") as f:
+            fieldnames = sorted({k for row in rows for k in row.keys()})
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    for meta_name in ["student_inference_summary.json", "inference_audit.json"]:
+        src = input_root / meta_name
+        if src.exists():
+            shutil.copy2(src, flat_output_root / meta_name)
+
+    status = "success" if result.get("status") == "success" and processed > 0 else "partial_success" if processed > 0 else "failed"
+    summary = {
+        "stage": "student_candidate_shapekit",
+        "status": status,
+        "round": round_idx,
+        "input_root": str(input_root),
+        "staged_root": str(staged_root),
+        "raw_shapekit_output_root": str(raw_output_root),
+        "flat_output_root": str(flat_output_root),
+        "manifest_csv": str(manifest_path),
+        "staged_masks": staged_masks,
+        "processed_by_shapekit": processed,
+        "fallback_original": fallback,
+        "missing": missing,
+        "shapekit_result": result,
+        "formal_policy": "student candidates must pass through ShapeKit before Round2+ LabelCritic/verifier comparison; raw fallback is explicit and QC-visible.",
+    }
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    log(f"student ShapeKit 完成: status={status}, processed={processed}, fallback={fallback}, output={flat_output_root}")
+    return summary
+
+
+def apply_round_organ_type_postprocess(round_idx: int) -> dict:
+    """Materialize ShapeKit+organ-type postprocessed student predictions for formal QC/next EM."""
+    import runpy
+
+    raw_input_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions"
+    shapekit_summary = apply_round_student_shapekit(round_idx)
+    if ENABLE_SHAPEKIT and shapekit_summary.get("status") not in {"success", "partial_success"}:
+        output_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_postprocessed"
+        summary_path = output_root / "organ_type_postprocess_summary.json"
+        output_root.mkdir(parents=True, exist_ok=True)
+        summary = {
+            "stage": "student_shape_then_organ_type_postprocess",
+            "status": "failed",
+            "reason": "student_shapekit_failed",
+            "student_shapekit_summary": shapekit_summary,
+            "input_root": str(raw_input_root),
+            "output_root": str(output_root),
+        }
+        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        return summary
+
+    input_root = Path(str(shapekit_summary.get("flat_output_root") or raw_input_root))
     output_root = OUTPUT_ROOT / f"round{round_idx}" / "student_predictions_postprocessed"
     summary_path = output_root / "organ_type_postprocess_summary.json"
     if not input_root.exists() or not any(p.is_dir() for p in input_root.iterdir()):
@@ -4722,6 +5360,13 @@ def apply_round_organ_type_postprocess(round_idx: int) -> dict:
         sys.argv = old_argv
     summary = _load_json(summary_path)
     summary.setdefault("status", "success")
+    summary["student_shapekit_summary"] = shapekit_summary
+    summary["student_shape_then_organ_type_postprocess"] = True
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    for meta_name in ["student_shapekit_manifest.csv", "student_shapekit_summary.json"]:
+        src = input_root / meta_name
+        if src.exists():
+            shutil.copy2(src, output_root / meta_name)
     log(f"organ-type postprocess 完成: masks={summary.get('processed_masks')}, output={output_root}")
     return summary
 
@@ -5150,14 +5795,17 @@ def main():
 
             # 评估 student 与 Round1 selected pseudo label 的一致性；不能当真实 accuracy。
             round_metrics = compute_round_metrics(round_idx)
-            # 正式 QC evidence chain：teacher-vs-GT（如有 GT）、student-vs-teacher、student-vs-GT（如有 GT）、
-            # volume/empty/false-positive/organ-group gates，并生成下一轮 blocklist。
-            evaluation_chain = compute_round_evaluation_chain(round_idx)
-            round_metrics["evaluation_chain"] = evaluation_chain
+            training_audit = compute_student_training_audit(round_idx, mstep_result=mstep_result, round_metrics=round_metrics)
+            # 正式 pseudo QC chain：student-vs-selected-pseudo、volume/empty/
+            # false-positive/organ-group gates，并生成下一轮 blocklist；不读取外部精标。
+            pseudo_qc_chain = compute_round_pseudo_qc_chain(round_idx)
+            round_metrics["pseudo_qc_chain"] = pseudo_qc_chain
+            round_metrics["evaluation_chain"] = pseudo_qc_chain
+            round_metrics["student_training_audit"] = training_audit
             round_state.advance(
                 "evaluation",
-                str(evaluation_chain.get("status") or "completed"),
-                artifacts={"evaluation_chain": evaluation_chain},
+                str(pseudo_qc_chain.get("status") or "completed"),
+                artifacts={"pseudo_qc_chain": pseudo_qc_chain, "student_training_audit": training_audit},
             )
 
         round_elapsed = time.time() - round_start
@@ -5180,7 +5828,9 @@ def main():
                 "accuracy_warning": round_metrics.get("accuracy_warning", "Not true accuracy."),
                 "top5_organs": round_metrics.get("top5_organs", []),
                 "bottom5_organs": round_metrics.get("bottom5_organs", []),
+                "pseudo_qc_chain": round_metrics.get("pseudo_qc_chain", round_metrics.get("evaluation_chain", {})),
                 "evaluation_chain": round_metrics.get("evaluation_chain", {}),
+                "student_training_audit": round_metrics.get("student_training_audit", {}),
                 "organ_type_postprocess": locals().get("postprocess_summary", {}),
             },
             "label_scoring_dashboard": label_scoring_dashboard,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CPU-only Student/Teacher/GT evidence-chain audit.
+"""CPU-only Student/Teacher pseudo-label evidence-chain audit.
 
 This script reads existing masks only. It never runs inference, training,
 LabelCritic, Qwen, ShapeKit, torch, or CUDA.
@@ -95,7 +95,7 @@ def selected_pseudo_path(selection: dict[str, Any], selected_meta: dict[str, Any
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="CPU-only evidence chain audit for Student, Teachers, selected pseudo-labels, and GT.")
+    ap = argparse.ArgumentParser(description="CPU-only evidence chain audit for Student, Teachers, and selected pseudo-labels.")
     ap.add_argument("--estep", default=str(DEFAULT_ESTEP))
     ap.add_argument("--student-dir", default="", help="Optional existing student prediction root.")
     ap.add_argument("--output-dir", default="", help="Default: <estep>/audits/segmentation_evidence_chain")
@@ -121,115 +121,62 @@ def main() -> int:
         selection_rows = [r for r in selection_rows if str(r.get("organ")) in keep_organs]
 
     selected_by_key = load_selected_by_key(estep)
-    student_vs_gt: list[dict[str, Any]] = []
     student_vs_pseudo: list[dict[str, Any]] = []
-    teacher_vs_gt: list[dict[str, Any]] = []
-    student_minus_teacher: list[dict[str, Any]] = []
+    teacher_vs_pseudo: list[dict[str, Any]] = []
 
     for selection in selection_rows:
         case_id = str(selection["case_id"])
         organ = str(selection["organ"])
         selected_meta = selected_by_key.get((case_id, organ), {})
-        ref = selection.get("reference") or selected_meta.get("reference")
-        ref_path = Path(str(ref)) if ref else None
-        ref_kind = reference_kind(ref)
-        gt_available = bool(ref_path and ref_path.exists() and ref_kind == "pants_gt")
         pseudo_path = selected_pseudo_path(selection, selected_meta)
         pseudo_exists = bool(pseudo_path and Path(str(pseudo_path)).exists())
         student_path, student_missing_reason = find_student_mask(student_dir, case_id, organ)
         student_exists = student_path is not None
 
-        dice_student_gt = None if args.skip_dice else binary_dice_paths(student_path, ref_path)
         dice_student_pseudo = None if args.skip_dice else binary_dice_paths(student_path, pseudo_path)
-        student_vs_gt.append({
-            "case_id": case_id,
-            "organ": organ,
-            "metric_target": "GT",
-            "metric_subject": "student",
-            "metric_comparison": "student_vs_expert_gt",
-            "metric_interpretation": "real_gt_segmentation_performance",
-            "student_mask": str(student_path) if student_path else "",
-            "gt_mask": str(ref_path) if ref_path else "",
-            "reference_kind": ref_kind,
-            "gt_available": gt_available,
-            "dice_student_vs_gt": dice_student_gt if gt_available else None,
-            "not_evaluable_reason": None if gt_available and student_exists and dice_student_gt is not None else not_evaluable_reason(gt_available, student_exists, student_missing_reason, ref_path),
-        })
         student_vs_pseudo.append({
             "case_id": case_id,
             "organ": organ,
-            "metric_target": "pseudo-label",
-            "metric_subject": "student",
-            "metric_comparison": "student_vs_selected_pseudo_label",
+            "metric_target": "selected_pseudo_label",
+            "metric_subject": "student_candidate",
+            "metric_comparison": "student_candidate_vs_selected_pseudo_label",
             "metric_interpretation": "pseudo_label_consistency",
             "student_mask": str(student_path) if student_path else "",
             "pseudo_mask": str(pseudo_path) if pseudo_path else "",
             "pseudo_available": pseudo_exists,
+            "pseudo_consistency_dsc": dice_student_pseudo if pseudo_exists and student_exists else None,
             "dice_student_vs_pseudo": dice_student_pseudo if pseudo_exists and student_exists else None,
             "not_evaluable_reason": None if pseudo_exists and student_exists and dice_student_pseudo is not None else (student_missing_reason or "pseudo_mask_missing"),
         })
 
-        teacher_scores: list[tuple[str, float | None, str]] = []
         for candidate in selection.get("candidate_predictions", []) or []:
             if not isinstance(candidate, dict):
                 continue
             model = str(candidate.get("model") or "unknown")
             pred = str(candidate.get("prediction") or "")
-            dice_teacher_gt = None if args.skip_dice else binary_dice_paths(pred, ref_path)
-            teacher_scores.append((model, dice_teacher_gt, pred))
-            teacher_vs_gt.append({
+            dice_teacher_pseudo = None if args.skip_dice else binary_dice_paths(pred, pseudo_path)
+            teacher_vs_pseudo.append({
                 "case_id": case_id,
                 "organ": organ,
-                "metric_target": "GT",
-                "metric_subject": "teacher",
-                "metric_comparison": "teacher_vs_expert_gt",
-                "metric_interpretation": "real_gt_segmentation_performance",
+                "metric_target": "selected_pseudo_label",
+                "metric_subject": "teacher_candidate",
+                "metric_comparison": "teacher_candidate_vs_selected_pseudo_label",
+                "metric_interpretation": "pseudo_label_consistency",
                 "teacher": model,
                 "teacher_mask": pred,
-                "gt_mask": str(ref_path) if ref_path else "",
-                "reference_kind": ref_kind,
-                "gt_available": gt_available,
-                "dice_teacher_vs_gt": dice_teacher_gt if gt_available else None,
-                "not_evaluable_reason": None if gt_available and dice_teacher_gt is not None else ("gt_missing" if not gt_available else "teacher_or_geometry_unreadable"),
+                "pseudo_mask": str(pseudo_path) if pseudo_path else "",
+                "pseudo_available": pseudo_exists,
+                "pseudo_consistency_dsc": dice_teacher_pseudo if pseudo_exists else None,
+                "not_evaluable_reason": None if pseudo_exists and dice_teacher_pseudo is not None else ("pseudo_mask_missing" if not pseudo_exists else "teacher_or_geometry_unreadable"),
                 "is_selected_teacher": model == str(selection.get("selected_model")),
             })
-        valid_teacher_scores = [(m, d, p) for m, d, p in teacher_scores if d is not None]
-        best_teacher = max(valid_teacher_scores, key=lambda item: item[1]) if valid_teacher_scores else (None, None, None)
-        student_minus_teacher.append({
-            "case_id": case_id,
-            "organ": organ,
-            "metric_target": "GT",
-            "metric_subject": "student",
-            "metric_comparison": "student_vs_best_teacher_on_expert_gt",
-            "metric_interpretation": "real_gt_segmentation_performance_delta",
-            "student_mask": str(student_path) if student_path else "",
-            "best_teacher": best_teacher[0],
-            "best_teacher_mask": best_teacher[2],
-            "dice_student_vs_gt": dice_student_gt if gt_available else None,
-            "best_teacher_vs_gt": best_teacher[1] if gt_available else None,
-            "student_minus_best_teacher_gt": (dice_student_gt - best_teacher[1]) if gt_available and dice_student_gt is not None and best_teacher[1] is not None else None,
-            "student_exceeds_best_teacher": (dice_student_gt > best_teacher[1]) if gt_available and dice_student_gt is not None and best_teacher[1] is not None else None,
-            "not_evaluable_reason": None if gt_available and dice_student_gt is not None and best_teacher[1] is not None else "missing_student_gt_or_teacher_gt",
-        })
 
-    write_csv(output_dir / "student_vs_gt.csv", student_vs_gt)
-    write_csv(output_dir / "teacher_vs_gt.csv", teacher_vs_gt)
-    write_csv(output_dir / "student_vs_pseudo.csv", student_vs_pseudo)
-    write_csv(output_dir / "student_minus_best_teacher.csv", student_minus_teacher)
-    summary = build_summary(student_vs_gt, student_vs_pseudo, teacher_vs_gt, student_minus_teacher, args.skip_dice)
+    write_csv(output_dir / "student_vs_selected_pseudo.csv", student_vs_pseudo)
+    write_csv(output_dir / "teacher_candidate_vs_selected_pseudo.csv", teacher_vs_pseudo)
+    summary = build_summary(student_vs_pseudo, teacher_vs_pseudo, args.skip_dice)
     write_json(output_dir / "evidence_chain_summary.json", summary)
-    print(json.dumps({k: summary[k] for k in ["status", "student_vs_gt_evaluable", "student_vs_pseudo_evaluable", "teacher_vs_gt_evaluable", "student_exceeds_best_teacher_count"]}, indent=2))
+    print(json.dumps({k: summary[k] for k in ["status", "student_vs_pseudo_evaluable", "teacher_vs_pseudo_evaluable"]}, indent=2))
     return 0
-
-
-def not_evaluable_reason(gt_available: bool, student_exists: bool, student_reason: str | None, ref_path: Path | None) -> str:
-    if not gt_available:
-        return "gt_missing_or_not_real_gt"
-    if not ref_path or not ref_path.exists():
-        return "gt_path_missing"
-    if not student_exists:
-        return student_reason or "student_mask_missing"
-    return "geometry_or_mask_unreadable"
 
 
 def mean_or_none(values: list[float]) -> float | None:
@@ -237,34 +184,26 @@ def mean_or_none(values: list[float]) -> float | None:
 
 
 def build_summary(
-    student_vs_gt: list[dict[str, Any]],
     student_vs_pseudo: list[dict[str, Any]],
-    teacher_vs_gt: list[dict[str, Any]],
-    student_minus_teacher: list[dict[str, Any]],
+    teacher_vs_pseudo: list[dict[str, Any]],
     skip_dice: bool,
 ) -> dict[str, Any]:
-    svg = [float(r["dice_student_vs_gt"]) for r in student_vs_gt if r.get("dice_student_vs_gt") is not None]
-    svp = [float(r["dice_student_vs_pseudo"]) for r in student_vs_pseudo if r.get("dice_student_vs_pseudo") is not None]
-    tvg = [float(r["dice_teacher_vs_gt"]) for r in teacher_vs_gt if r.get("dice_teacher_vs_gt") is not None]
-    deltas = [float(r["student_minus_best_teacher_gt"]) for r in student_minus_teacher if r.get("student_minus_best_teacher_gt") is not None]
+    svp = [float(r["pseudo_consistency_dsc"]) for r in student_vs_pseudo if r.get("pseudo_consistency_dsc") is not None]
+    tvp = [float(r["pseudo_consistency_dsc"]) for r in teacher_vs_pseudo if r.get("pseudo_consistency_dsc") is not None]
     return {
         "stage": "segmentation_evidence_chain_audit",
         "status": "success",
         "skip_dice": skip_dice,
-        "student_vs_gt_rows": len(student_vs_gt),
-        "student_vs_gt_evaluable": len(svg),
-        "mean_dice_student_vs_gt": mean_or_none(svg),
         "student_vs_pseudo_rows": len(student_vs_pseudo),
         "student_vs_pseudo_evaluable": len(svp),
-        "mean_dice_student_vs_pseudo": mean_or_none(svp),
-        "teacher_vs_gt_rows": len(teacher_vs_gt),
-        "teacher_vs_gt_evaluable": len(tvg),
-        "mean_dice_teacher_vs_gt": mean_or_none(tvg),
-        "student_minus_best_teacher_evaluable": len(deltas),
-        "mean_student_minus_best_teacher_gt": mean_or_none(deltas),
-        "student_exceeds_best_teacher_count": sum(1 for r in student_minus_teacher if r.get("student_exceeds_best_teacher") is True),
-        "not_evaluable_reasons": dict(Counter(str(r.get("not_evaluable_reason")) for r in [*student_vs_gt, *student_vs_pseudo, *teacher_vs_gt, *student_minus_teacher] if r.get("not_evaluable_reason"))),
-        "accuracy_warning": "Student-vs-pseudo is distillation consistency. Student-vs-GT is real segmentation performance only when reference_kind=pants_gt.",
+        "mean_pseudo_consistency_dsc_student_vs_selected": mean_or_none(svp),
+        "teacher_vs_pseudo_rows": len(teacher_vs_pseudo),
+        "teacher_vs_pseudo_evaluable": len(tvp),
+        "mean_pseudo_consistency_dsc_teacher_vs_selected": mean_or_none(tvp),
+        "not_evaluable_reasons": dict(Counter(str(r.get("not_evaluable_reason")) for r in [*student_vs_pseudo, *teacher_vs_pseudo] if r.get("not_evaluable_reason"))),
+        "metric_target": "selected_pseudo_label",
+        "metric_interpretation": "pseudo_label_consistency",
+        "accuracy_warning": "This mainline audit is pseudo-label consistency only; it does not read or report GT accuracy.",
         "gpu_policy": "CPU-only audit; does not call inference, training, LabelCritic, Qwen, ShapeKit, torch, or CUDA.",
     }
 

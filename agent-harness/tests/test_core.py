@@ -2707,7 +2707,7 @@ class TestTeacherMeetingPipeline:
             rows = list(_csv.DictReader(f))
         assert rows
         assert set(rows[0]) >= {"metric_target", "metric_subject", "metric_comparison", "metric_interpretation"}
-        assert {r["metric_target"] for r in rows} == {"pseudo-label"}
+        assert {r["metric_target"] for r in rows} == {"selected_pseudo_label"}
         liver_models = {r["model"] for r in rows if r["organ"] == "liver"}
         pancreas_models = {r["model"] for r in rows if r["organ"] == "pancreas"}
         # Conservative fusion v1: low-agreement teacher masks do not produce fusion.
@@ -2755,7 +2755,7 @@ class TestTeacherMeetingPipeline:
         assert by_organ["brain"]["grade_scope"] == "absence"
         assert by_organ["brain"]["training_weight"] == 0.2
         assert by_organ["brain"]["labelcritic_called"] is False
-        assert by_organ["brain"]["metric_target"] == "all-zero target"
+        assert by_organ["brain"]["metric_target"] == "absent_negative_zero_mask"
         assert by_organ["brain"]["metric_interpretation"] == "negative_absence_quality"
         assert by_organ["brain"]["final_mask"] == str((tmp_path / "updated" / "brain.nii.gz").resolve())
         assert (tmp_path / "updated" / "brain.nii.gz").is_file()
@@ -2765,6 +2765,146 @@ class TestTeacherMeetingPipeline:
         zero = nib.load(by_organ["brain"]["mask_path"])
         assert zero.shape[:3] == (8, 8, 8)
         assert np.asanyarray(zero.dataobj).sum() == 0
+
+    def test_round2_transition_actions_are_pseudo_label_only(self):
+        from cli_anything.medai.core import multimodel_loop as ml
+
+        accepted = ml._decorate_pseudo_label_record({
+            "target_type": "hard",
+            "selected_model": "student_prev",
+            "selection_status": "selected",
+            "em_student_vs_previous_gate": {"status": "student_replacement_accepted"},
+            "ground_truth_status": "legacy_name",
+        })
+        kept = ml._decorate_pseudo_label_record({
+            "target_type": "hard",
+            "selected_model": "round_prev_selected",
+            "selection_status": "selected",
+            "em_student_vs_previous_gate": {"status": "previous_carried_forward"},
+        })
+        absent = ml._decorate_pseudo_label_record({
+            "target_type": "negative_absent",
+            "selection_status": "selected",
+        })
+
+        assert accepted["pseudo_label_transition_action"] == "student_output_selected"
+        assert accepted["metric_target"] == "student_candidate"
+        assert "ground_truth_status" not in accepted
+        assert accepted["legacy_ground_truth_status"] == "legacy_name"
+        assert kept["pseudo_label_transition_action"] == "previous_selected_kept"
+        assert kept["metric_target"] == "selected_pseudo_label"
+        assert absent["pseudo_label_transition_action"] == "negative_absent_selected"
+        assert absent["metric_target"] == "absent_negative_zero_mask"
+
+    def test_student_training_audit_writes_pseudo_only_voxtell_artifacts(self, monkeypatch, tmp_path):
+        import csv as _csv
+        import importlib.util
+        import sys
+
+        monkeypatch.setenv("MEDAI_OUTPUT_ROOT", str(tmp_path / "outputs"))
+        spec = importlib.util.spec_from_file_location("run_em_training_audit_test", Path("scripts/run_em_training.py"))
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules.pop("run_em_training_audit_test", None)
+        spec.loader.exec_module(module)
+
+        round_dir = tmp_path / "outputs" / "round1"
+        mstep_dir = round_dir / "mstep"
+        metrics_dir = round_dir / "metrics"
+        mstep_dir.mkdir(parents=True)
+        metrics_dir.mkdir(parents=True)
+        ct = _make_nii(np.zeros((4, 4, 4), dtype=np.float32), tmp_path / "ct.nii.gz")
+        mask_arr = np.zeros((4, 4, 4), dtype=np.uint8)
+        mask_arr[1:3, 1:3, 1:3] = 1
+        mask = _make_nii(mask_arr, tmp_path / "liver.nii.gz")
+        zero = _make_nii(np.zeros((4, 4, 4), dtype=np.uint8), tmp_path / "brain.nii.gz")
+        (mstep_dir / "voxtell_prompt_student_manifest.json").write_text(json.dumps({
+            "items": [
+                {
+                    "case_id": "case_001",
+                    "organ": "liver",
+                    "image": str(ct),
+                    "mask_path": str(mask),
+                    "prompt": "liver",
+                    "student_target_id": 1,
+                    "supervision_type": "positive",
+                    "target_type": "positive_hard",
+                    "label_role": "selected_pseudo_label",
+                    "supervision_role": "selected_pseudo_label",
+                    "training_weight": 1.0,
+                },
+                {
+                    "case_id": "case_001",
+                    "organ": "brain",
+                    "image": str(ct),
+                    "mask_path": str(zero),
+                    "prompt": "brain",
+                    "student_target_id": 2,
+                    "supervision_type": "negative",
+                    "target_type": "negative_absent",
+                    "label_role": "absent_negative_zero_mask",
+                    "supervision_role": "absent_negative_zero_mask",
+                    "training_weight": 0.1,
+                },
+            ]
+        }), encoding="utf-8")
+        (mstep_dir / "loss_history.json").write_text(json.dumps({
+            "history": [
+                {"step": 1, "loss": 1.0, "task_loss": 1.0, "learning_rate": 1e-4, "case_id": "case_001", "organ": "liver", "prompt": "liver", "sample_kind": "positive", "target_type": "positive_hard", "foreground_voxel_ratio": 0.125, "all_zero_target": 0},
+                {"step": 2, "loss": 0.7, "task_loss": 0.7, "learning_rate": 9e-5, "case_id": "case_001", "organ": "brain", "prompt": "brain", "sample_kind": "negative", "target_type": "negative_absent", "negative_source": "case_373_expected_absent", "foreground_voxel_ratio": 0.0, "all_zero_target": 1},
+                {"step": 3, "loss": 0.5, "task_loss": 0.5, "learning_rate": 8e-5, "case_id": "case_001", "organ": "liver", "prompt": "liver", "sample_kind": "positive", "target_type": "positive_hard", "foreground_voxel_ratio": 0.125, "all_zero_target": 0},
+            ],
+            "sampling_history": [{"batch_positive_count": 2, "batch_negative_count": 1}],
+        }), encoding="utf-8")
+        (metrics_dir / "round_metrics.json").write_text(json.dumps({"overall_mean_dsc": 0.9}), encoding="utf-8")
+
+        summary = module.compute_student_training_audit(1, mstep_result={
+            "status": "success",
+            "optimizer": "sgd",
+            "learning_rate": 1e-4,
+            "scheduler": "poly",
+            "batch_size": 2,
+            "effective_batch_size": 2,
+            "training_profile": "paper_aligned",
+            "loss_mode": "nnUNet Dice+BCE",
+            "pos_neg_ratio": "2:1",
+        })
+
+        assert summary["status"] == "passed"
+        for name in [
+            "loss_curve_diagnosis.json",
+            "prompt_mask_ct_alignment_audit.json",
+            "prompt_organ_mapping_audit.json",
+            "prompt_organ_mapping_audit.csv",
+            "training_sample_distribution_audit.json",
+            "voxtell_training_code_audit.json",
+            "student_training_convergence_summary.json",
+        ]:
+            assert (metrics_dir / name).exists()
+        with (metrics_dir / "prompt_organ_mapping_audit.csv").open(newline="", encoding="utf-8") as f:
+            rows = list(_csv.DictReader(f))
+        assert rows[0]["supervision_role"] == "selected_pseudo_label"
+        assert "ground_truth_status" not in rows[0]
+
+    def test_student_postprocess_status_merges_shapekit_manifest(self, tmp_path):
+        from cli_anything.medai.core import multimodel_loop as ml
+        import csv as _csv
+
+        root = tmp_path / "student_predictions_postprocessed"
+        root.mkdir()
+        with (root / "student_containment_postprocess_per_mask.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = _csv.DictWriter(f, fieldnames=["case_id", "organ", "status", "output_path"])
+            writer.writeheader()
+            writer.writerow({"case_id": "case_001", "organ": "liver", "status": "postprocessed", "output_path": str(root / "case_001" / "liver.nii.gz")})
+        with (root / "student_shapekit_manifest.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = _csv.DictWriter(f, fieldnames=["case_id", "organ", "student_shapekit_status", "student_shapekit_reason", "shapekit_mask", "selected_for_student_candidate", "raw_student_mask", "output_path"])
+            writer.writeheader()
+            writer.writerow({"case_id": "case_001", "organ": "liver", "student_shapekit_status": "success", "student_shapekit_reason": "student_mask_processed_by_shapekit", "shapekit_mask": "/tmp/sk.nii.gz", "selected_for_student_candidate": "shapekit", "raw_student_mask": "/tmp/raw.nii.gz", "output_path": str(root / "case_001" / "liver.nii.gz")})
+
+        rows = ml._load_student_postprocess_status_by_organ(root, "case_001")
+        assert rows["liver"]["status"] == "postprocessed"
+        assert rows["liver"]["student_shapekit_status"] == "success"
+        assert rows["liver"]["student_shapekit_selected_source"] == "shapekit"
 
     def test_gap_rows_distinguish_expected_absent_from_route_failure(self, tmp_path):
         from cli_anything.medai.core import multimodel_loop as ml
@@ -2857,7 +2997,7 @@ class TestTeacherMeetingPipeline:
             rows = list(_csv.DictReader(f))
         assert rows
         assert set(rows[0]) >= {"metric_target", "metric_subject", "metric_comparison", "metric_interpretation"}
-        assert {r["metric_target"] for r in rows} == {"pseudo-label"}
+        assert {r["metric_target"] for r in rows} == {"selected_pseudo_label"}
         liver_models = {r["model"] for r in rows if r["organ"] == "liver"}
         assert "fusion_consensus" not in liver_models
         sel = json.loads((out / "annotation_versions" / "case_001" / "selection_metadata.json").read_text(encoding="utf-8"))

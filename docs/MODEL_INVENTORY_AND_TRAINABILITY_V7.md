@@ -1,46 +1,47 @@
-# Teacher Model Inventory and Trainability (v7)
+# Teacher Model Inventory and HF Release Status
 
-The current registry contains **18 teacher-provided or teacher-referenced model families**, excluding the synthetic `mock_seg` dry-run backend.
+The current HF release at `https://huggingface.co/Xiang-mira/MedIA-Agentic-AI` contains 23 teacher models and one VoxTell-style student checkpoint. `mock_seg` and `epai_finetuned` are intentionally excluded from the HF release.
 
-## Directly integrated model families
+## Released teacher models
 
-These have source folders, lightweight Drive exports, model cards, or wrappers integrated in the project.
+| Model key | Backend | HF path | Checkpoint | Organs | Notes |
+|---|---|---|---|---:|---|
+| `cads551` | `nnunetv2` | `teacher_models/cads551` | `fold_all/checkpoint_final.pth` | 17 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads552` | `nnunetv2` | `teacher_models/cads552` | `fold_all/checkpoint_final.pth` | 24 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads553` | `nnunetv2` | `teacher_models/cads553` | `fold_all/checkpoint_final.pth` | 18 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads554` | `nnunetv2` | `teacher_models/cads554` | `fold_all/checkpoint_final.pth` | 21 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads555` | `nnunetv2` | `teacher_models/cads555` | `fold_all/checkpoint_final.pth` | 24 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads556` | `nnunetv2` | `teacher_models/cads556` | `fold_all/checkpoint_final.pth` | 15 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads557` | `nnunetv2` | `teacher_models/cads557` | `fold_all/checkpoint_final.pth` | 9 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads558` | `nnunetv2` | `teacher_models/cads558` | `fold_all/checkpoint_final.pth` | 29 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `cads559` | `nnunetv2` | `teacher_models/cads559` | `fold_all/checkpoint_final.pth` | 10 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `moose666` | `nnunetv2` | `teacher_models/moose666` | `fold_all/checkpoint_final.pth` | 31 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `moose888` | `nnunetv2` | `teacher_models/moose888` | `fold_all/checkpoint_final.pth` | 13 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `nnunet_private` | `nnunetv2` | `teacher_models/nnunet_private` | `fold_all/checkpoint_final.pth` | 34 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `saros_nnunet` | `nnunetv2` | `teacher_models/saros_nnunet` | `fold_all/checkpoint_final.pth` | 13 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `atm` | `nnunetv2` | `teacher_models/atm` | `fold_all/checkpoint_final.pth` | 1 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `airrc` | `nnunetv2` | `teacher_models/airrc` | `fold_all/checkpoint_final.pth` | 4 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `lvp` | `nnunetv2` | `teacher_models/lvp` | `fold_all/checkpoint_final.pth` | 2 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `daps` | `nnunetv2` | `teacher_models/daps` | `fold_all/checkpoint_best.pth` | 30 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `epai_20250421` | `nnunetv2` | `teacher_models/epai_20250421` | `fold_all/checkpoint_final.pth` | redacted | Sensitive internal research asset. Public metadata is redacted; runtime internals and full private label semantics are intentionally omitted. |
+| `vsmtrans` | `nnunetv2` | `teacher_models/vsmtrans` | `fold_0/checkpoint_final.pth` | 25 | Internal research collaboration asset. Do not externally advertise as a public JHU model. |
+| `vista3d` | `vista3d` | `teacher_models/vista3d` | `models/model.pt` | 99 | Reusable research asset; backend-specific runtime required. |
+| `unest` | `unest` | `teacher_models/unest` | `models/model.pt` | 3 | Reusable research asset; backend-specific runtime required. |
+| `totalsegmentator` | `external_totalsegmentator_runtime` | `teacher_models/totalsegmentator` | `null` | 121 | External public runtime. Official TotalSegmentator weights are not mirrored in this HF asset repo. |
+| `atlasnet` | `atlasnet_wrapper_over_nnunetv2` | `teacher_models/atlasnet` | `fold_all/checkpoint_final.pth` | 25 | Public ATLAS-Net-derived teacher route adapted to the MedIA output contract. |
 
-| Model key | Source material | Current runnable status | Trainable in this project? | Why |
+
+## Released student model
+
+| Model key | Backend | HF path | Checkpoint | Notes |
 |---|---|---|---|---|
-| `epai_20250421` | ePAI source + qchen76_2025_0421 Dataset1017 | Ready if teacher checkpoint folder is mounted | Yes, if nnUNet-compatible checkpoint/training state is present | Verified 25-class abdominal organ/duct/tumor nnUNet-style model; preferred M-step target for PanTS pancreas tasks and a candidate for related organ refinement. |
-| `cads` | CADS_series + class_checkpoint_map | Ready if CADS checkpoint folder is mounted | Yes, conditional | Exposed as nnUNet-style Dataset551; can be fine-tuned if full training/checkpoint state exists. |
-| `moose` | MOOSE_series + class_checkpoint_map | Partially ready if checkpoint folder is mounted | Yes, conditional | Current lightweight export exposes limited MOOSE datasets; trainability depends on full nnUNet training state. |
-| `moose3_0` | MOOSE_series + class_checkpoint_map | Partially ready if checkpoint folder is mounted | Yes, conditional | Same as MOOSE; use only when relevant dataset/checkpoint is available. |
-| `vsmtrans` | VSmTrans lightweight export + class_checkpoint_map | Ready if VSmTrans/nnUNet results are mounted | Yes, conditional | Routed to abdominal organs; fine-tuning depends on full nnUNet-compatible state. |
-| `nnunet_private` | Teacher Drive top-level nnUNet_private folder | Ready if Dataset224 files are mounted | Yes, conditional | Private AbdomenAtlas-style organ backend; suitable trainable M-step backend if full state exists. |
-| `saros_nnunet` | nnUNet_private + class_checkpoint_map | Ready if Dataset1345 files are mounted | Yes, conditional | Private nnUNet-style SAROS model; not first-choice for PanTS pancreas but trainable if files exist. |
-| `atlasnet` | “Another version of ShapeKit” model card | Ready if downloaded ATLAS-Net weights are present | Yes, conditional | ATLAS-Net is an nnUNet v2 abdominal 25-class model; training/fine-tuning needs compatible weights/training files. |
-| `totalsegmentator` | TotalSegmentator source/package | Ready if installed | No, not in this project | Used as public baseline/E-step candidate. Retraining released TotalSegmentator would require its full upstream training recipe. |
-| `vista3d` | VISTA3D inference pipeline | Ready if VISTA3D env/checkpoint exists | No, not with current wrapper | Integrated as foundation inference candidate; training requires MONAI/VISTA3D training recipe. |
-| `unest` | UNEST lightweight run script | Ready if UNEST env/checkpoint exists | No, external script required | Kidney cortex/medulla inference candidate; no training wrapper included. |
+| `voxtell_style_student_round1` | `voxtell_style_3d_prompt` | `student_models/voxtell_style_student_round1` | `voxtell_finetuned_model/fold_0/checkpoint_final.pth` | Project prompt-distillation student initialized from official VoxTell assets; not official VoxTell finetuning. |
 
-## Template-only model families from class_checkpoint_map.xlsx
+## Excluded entries
 
-These names appear in the teacher-provided class map, but no complete runnable script/checkpoint folder was available in the lightweight export. They are kept as registry templates so they can be activated later.
+| Entry | Reason |
+|---|---|
+| `mock_seg` | Synthetic dry-run backend with no real weights. |
+| `epai_finetuned` | Local experimental M-step output; not a current reusable HF release. |
 
-| Model key | Status | Trainable? | Reason |
-|---|---|---|---|
-| `airrc` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-| `atm` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-| `dap` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-| `duke` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-| `goacc` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-| `pedro` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-| `vsnet` | Template | Unknown / no | Appears in class map; no complete inference/training script. |
-
-## Practical routing policy
-
-| Task / organ group | Primary model | Auxiliary candidates | M-step target |
-|---|---|---|---|
-| Pancreas / pancreatic duct / pancreatic tumor | `epai_20250421` | `atlasnet`, `vsmtrans`, `cads`, `moose3_0`, `totalsegmentator`, `vista3d` | `epai_20250421` if checkpoint is compatible. |
-| Broad abdominal organs | `vsmtrans` | `cads`, `moose3_0`, `atlasnet`, `totalsegmentator`, `vista3d`, `nnunet_private` | `vsmtrans` or `cads`, depending on available checkpoint. |
-| Aorta / vascular structures | `cads` | `vista3d`, `moose3_0`, `atlasnet`, `vsmtrans`, `totalsegmentator` | `cads` if checkpoint is compatible. |
-| Kidney cortex / medulla | `unest` | `nnunet_private`, `cads`, `vsmtrans` | No current UNEST M-step; use external training script or compatible nnUNet fallback. |
-
-Use `python run_medai_cli.py --json model-inventory` and `python run_medai_cli.py --json route-models --organs ...` to inspect this programmatically.
+Use `configs/hf_model_manifest.yaml` for download paths, commands, supported organs, and expected GPU memory.

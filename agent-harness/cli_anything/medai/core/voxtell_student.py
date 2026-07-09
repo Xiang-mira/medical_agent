@@ -161,8 +161,9 @@ def _positive_replay_candidate_reason(row: dict[str, Any]) -> str | None:
     """Return None for rows that may be considered for historical replay.
 
     This is intentionally stricter than ordinary manifest inclusion. Historical
-    replay must never promote student predictions, GT rows, empty masks, failed
-    QC labels, or absent-negative all-zero masks into the positive memory.
+    replay must never promote student predictions, external fine-label rows,
+    empty masks, failed QC labels, or absent-negative all-zero masks into the
+    positive memory.
     """
     if not isinstance(row, dict):
         return "not_a_manifest_row"
@@ -956,6 +957,8 @@ class VoxTellStudent:
                     "mask": str(resolved_training_mask),
                     "mask_path": str(resolved_training_mask),
                     "supervision_type": "positive",
+                    "label_role": meta.get("label_role", "selected_pseudo_label"),
+                    "supervision_role": "selected_pseudo_label",
                     "distillation_role": "positive",
                     "negative_reason": None,
                     "official_prompt_mapping": official_mapping,
@@ -1073,6 +1076,8 @@ class VoxTellStudent:
                     "distillation_eligible": bool(meta.get("distillation_eligible", True)),
                     "student_training_priority": "negative_absent",
                     "supervision_type": "negative",
+                    "label_role": "absent_negative_zero_mask",
+                    "supervision_role": "absent_negative_zero_mask",
                     "distillation_role": "negative",
                     "target_type": "negative_absent",
                     "negative_reason": meta.get("negative_reason") or "out_of_scan_by_scan_coverage",
@@ -1354,7 +1359,7 @@ class VoxTellStudent:
                 "memory_rejected_items": len(memory_rejected_rows),
                 "memory_rejected_rows": memory_rejected_rows[:200],
                 "negative_absent_is_positive": False,
-                "student_prediction_gt_empty_qc_fail_replay_blocked": True,
+                "student_prediction_empty_reference_qc_fail_replay_blocked": True,
             },
             "zero_mask_targets": zero_mask_targets,
             "skipped_missing_image": skipped_missing_image,
@@ -1362,7 +1367,7 @@ class VoxTellStudent:
             "num_skipped_ineligible_positive": len(skipped_ineligible_positive),
             "items": rows,
             "training_note": (
-                "VoxTell-aligned pseudo-label distillation student manifest. "
+                "VoxTell-aligned project pseudo-label distillation student manifest. "
                 "This is not a reproduction of official large-scale VoxTell CT/MRI/PET training."
             ),
         }
@@ -1407,6 +1412,7 @@ def _expand_prompt_manifest_item(item: dict[str, Any], mode: str | bool, doc: di
     rows: list[dict[str, Any]] = []
     for idx, prompt in enumerate(prompts):
         row = dict(item)
+        row.pop("ground_truth_status", None)
         row["prompt"] = prompt
         row["prompt_text"] = prompt
         row["canonical_prompt"] = canonical or prompt
@@ -1418,6 +1424,12 @@ def _expand_prompt_manifest_item(item: dict[str, Any], mode: str | bool, doc: di
         record = prompt_record_for(bank_entry, prompt) if isinstance(bank_entry, dict) else None
         row["prompt_provenance"] = record
         row["prompt_family_id"] = f"{row.get('case_id')}:{row.get('organ')}:{row.get('supervision_type', 'positive')}"
+        if str(row.get("target_type") or "").lower() in {"negative_absent", "absent_negative"}:
+            row.setdefault("label_role", "absent_negative_zero_mask")
+            row.setdefault("supervision_role", "absent_negative_zero_mask")
+        else:
+            row.setdefault("label_role", "selected_pseudo_label")
+            row.setdefault("supervision_role", "selected_pseudo_label")
         row.setdefault("negative_source", None)
         rows.append(row)
     return rows
@@ -1717,7 +1729,7 @@ def _manifest_base_item(
         "selected_pseudo_consistency_dice": meta.get("selected_pseudo_consistency_dice", meta.get("selected_dice")),
         "metric_family": meta.get("metric_family", "pseudo_consistency"),
         "metric_scope": meta.get("metric_scope", "selected_pseudo_label_for_student_training"),
-        "accuracy_warning": meta.get("accuracy_warning", "Pseudo labels are not expert ground truth; do not report true accuracy from this manifest."),
+        "accuracy_warning": meta.get("accuracy_warning", "Selected pseudo labels are project-generated student supervision; do not report true accuracy from this manifest."),
         "selected_candidate_qc_status": meta.get("selected_candidate_qc_status"),
         "selected_candidate_qc_score": meta.get("selected_candidate_qc_score"),
         "selected_candidate_qc_flags": meta.get("selected_candidate_qc_flags", []),
@@ -1728,7 +1740,8 @@ def _manifest_base_item(
         "shapekit_status": meta.get("shapekit_status"),
         "shapekit_reason": meta.get("shapekit_reason"),
         "dataset_role": meta.get("dataset_role", "pseudo_label"),
-        "ground_truth_status": meta.get("ground_truth_status", "machine_generated_candidate"),
+        "label_role": meta.get("label_role", "teacher_pseudo_candidate"),
+        "supervision_role": meta.get("supervision_role", "selected_pseudo_label"),
         "label_maturity_level": meta.get("label_maturity_level"),
         "auto_fine_label_status": meta.get("auto_fine_label_status", "auto_fine_label_candidate" if meta else "machine_label_candidate"),
         "auto_fine_label_reliability_score": meta.get("auto_fine_label_reliability_score"),

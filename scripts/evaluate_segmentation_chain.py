@@ -25,21 +25,18 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
-METRIC_TARGET_GT = "GT"
-METRIC_TARGET_PSEUDO = "pseudo-label"
-METRIC_TARGET_TEACHER = "teacher"
-INTERPRETATION_REAL_GT = "real_gt_segmentation_performance"
-INTERPRETATION_TEACHER_IMITATION = "teacher_imitation"
+METRIC_TARGET_SELECTED_PSEUDO = "selected_pseudo_label"
+METRIC_TARGET_STUDENT = "student_candidate"
+INTERPRETATION_PSEUDO_CONSISTENCY = "pseudo_label_consistency"
 
 
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Generic teacher/student/GT segmentation evaluation chain.")
+    ap = argparse.ArgumentParser(description="Pseudo-label QC chain for student vs selected pseudo labels.")
     ap.add_argument("--case-list", type=Path, default=None, help="CSV with case_id column. Defaults to student prediction dirs.")
     ap.add_argument("--student-root", type=Path, required=True, help="case_id/*.nii.gz student predictions.")
-    ap.add_argument("--teacher-root", type=Path, default=None, help="case_id/updated/*.nii.gz or case_id/*.nii.gz teacher masks.")
-    ap.add_argument("--gt-root", type=Path, default=None, help="case_id/segmentations/*.nii.gz or case_id/*.nii.gz GT masks.")
+    ap.add_argument("--teacher-root", type=Path, default=None, help="case_id/updated/*.nii.gz or case_id/*.nii.gz selected pseudo-label masks.")
     ap.add_argument("--target-config", type=Path, default=ROOT / "configs/student_3d_prompt_target_organs.json")
-    ap.add_argument("--organ-map", type=Path, default=None, help="Optional JSON/CSV rows mapping organ,student,teacher,gt.")
+    ap.add_argument("--organ-map", type=Path, default=None, help="Optional JSON/CSV rows mapping organ,student,teacher.")
     ap.add_argument("--output-dir", type=Path, required=True)
     ap.add_argument("--thresholds", default="0.3,0.5,0.7,0.9")
     ap.add_argument("--volume-policy", type=Path, default=ROOT / "configs/organ_postprocess_policy.yaml")
@@ -71,7 +68,7 @@ def load_cases(case_list: Path | None, student_root: Path) -> list[str]:
 
 def load_mapping(path: Path | None, targets: list[str]) -> list[dict[str, str]]:
     if path is None:
-        return [{"organ": t, "student": t, "teacher": t, "gt": t} for t in targets]
+        return [{"organ": t, "student": t, "teacher": t} for t in targets]
     if path.suffix.lower() == ".json":
         doc = json.loads(path.read_text(encoding="utf-8"))
         rows = doc.get("mappings", doc) if isinstance(doc, dict) else doc
@@ -84,19 +81,16 @@ def load_mapping(path: Path | None, targets: list[str]) -> list[dict[str, str]]:
             "organ": organ,
             "student": str(row.get("student") or row.get("student_organ") or row.get("target_match_preferred") or organ),
             "teacher": str(row.get("teacher") or row.get("teacher_organ") or row.get("target_match_preferred") or organ),
-            "gt": str(row.get("gt") or row.get("gt_organ") or row.get("pants_organ") or organ),
         })
     return out
 
 
-def candidate_mask_paths(root: Path | None, case_id: str, name: str, *, teacher: bool = False, gt: bool = False) -> list[Path]:
+def candidate_mask_paths(root: Path | None, case_id: str, name: str, *, teacher: bool = False) -> list[Path]:
     if root is None:
         return []
     paths = []
     if teacher:
         paths.extend([root / case_id / "updated" / f"{name}.nii.gz", root / case_id / f"{name}.nii.gz"])
-    elif gt:
-        paths.extend([root / case_id / "segmentations" / f"{name}.nii.gz", root / case_id / f"{name}.nii.gz"])
     else:
         paths.append(root / case_id / f"{name}.nii.gz")
     # A common model-output naming convention.
@@ -299,81 +293,44 @@ def main() -> int:
             min_ratio, max_ratio = volume_thresholds(policy, group)
             student_path = first_existing(candidate_mask_paths(args.student_root, case_id, m["student"]))
             teacher_path = first_existing(candidate_mask_paths(args.teacher_root, case_id, m["teacher"], teacher=True))
-            gt_path = first_existing(candidate_mask_paths(args.gt_root, case_id, m["gt"], gt=True))
             student_raw = read_array(student_path) if student_path else None
             teacher_raw = read_array(teacher_path) if teacher_path else None
-            gt_raw = read_array(gt_path) if gt_path else None
             student = binarize(student_raw) if student_raw is not None else None
             teacher = binarize(teacher_raw) if teacher_raw is not None else None
-            gt = binarize(gt_raw) if gt_raw is not None else None
             row: dict[str, Any] = {
                 "case_id": case_id,
                 "organ": organ,
                 "organ_group": group,
                 "student_name": m["student"],
                 "teacher_name": m["teacher"],
-                "gt_name": m["gt"],
                 "student_path": str(student_path) if student_path else "",
                 "teacher_path": str(teacher_path) if teacher_path else "",
-                "gt_path": str(gt_path) if gt_path else "",
                 "student_exists": student_path is not None,
                 "teacher_exists": teacher_path is not None,
-                "gt_exists": gt_path is not None,
                 "volume_min_ratio": min_ratio,
                 "volume_max_ratio": max_ratio,
             }
-            row.update(metric_block("student_teacher", teacher, student))
-            row.update(metric_block("teacher_gt", gt, teacher))
-            row.update(metric_block("student_gt", gt, student))
+            row.update(metric_block("student_selected_pseudo", teacher, student))
             row.update({
-                "student_teacher_metric_target": METRIC_TARGET_TEACHER,
-                "student_teacher_metric_subject": "student",
-                "student_teacher_metric_comparison": "student_vs_selected_teacher",
-                "student_teacher_metric_interpretation": INTERPRETATION_TEACHER_IMITATION,
-                "teacher_gt_metric_target": METRIC_TARGET_GT,
-                "teacher_gt_metric_subject": "teacher",
-                "teacher_gt_metric_comparison": "teacher_vs_expert_gt",
-                "teacher_gt_metric_interpretation": INTERPRETATION_REAL_GT,
-                "student_gt_metric_target": METRIC_TARGET_GT,
-                "student_gt_metric_subject": "student",
-                "student_gt_metric_comparison": "student_vs_expert_gt",
-                "student_gt_metric_interpretation": INTERPRETATION_REAL_GT,
+                "student_selected_pseudo_metric_target": METRIC_TARGET_SELECTED_PSEUDO,
+                "student_selected_pseudo_metric_subject": METRIC_TARGET_STUDENT,
+                "student_selected_pseudo_metric_comparison": "student_candidate_vs_selected_pseudo_label",
+                "student_selected_pseudo_metric_interpretation": INTERPRETATION_PSEUDO_CONSISTENCY,
+                "dsc": row.get("student_selected_pseudo_dice"),
+                "pseudo_consistency_dsc": row.get("student_selected_pseudo_dice"),
+                "metric_interpretation": INTERPRETATION_PSEUDO_CONSISTENCY,
             })
             long_rows.extend([
                 long_metric_row(
                     base=row,
                     metric_name="dice",
-                    metric_subject="student",
-                    metric_target=METRIC_TARGET_TEACHER,
-                    metric_comparison="student_vs_selected_teacher",
-                    metric_interpretation=INTERPRETATION_TEACHER_IMITATION,
+                    metric_subject=METRIC_TARGET_STUDENT,
+                    metric_target=METRIC_TARGET_SELECTED_PSEUDO,
+                    metric_comparison="student_candidate_vs_selected_pseudo_label",
+                    metric_interpretation=INTERPRETATION_PSEUDO_CONSISTENCY,
                     reference_path=teacher_path,
                     prediction_path=student_path,
                     reference=teacher,
-                    prediction=student,
-                ),
-                long_metric_row(
-                    base=row,
-                    metric_name="dice",
-                    metric_subject="teacher",
-                    metric_target=METRIC_TARGET_GT,
-                    metric_comparison="teacher_vs_expert_gt",
-                    metric_interpretation=INTERPRETATION_REAL_GT,
-                    reference_path=gt_path,
-                    prediction_path=teacher_path,
-                    reference=gt,
-                    prediction=teacher,
-                ),
-                long_metric_row(
-                    base=row,
-                    metric_name="dice",
-                    metric_subject="student",
-                    metric_target=METRIC_TARGET_GT,
-                    metric_comparison="student_vs_expert_gt",
-                    metric_interpretation=INTERPRETATION_REAL_GT,
-                    reference_path=gt_path,
-                    prediction_path=student_path,
-                    reference=gt,
                     prediction=student,
                 ),
             ])
@@ -381,7 +338,7 @@ def main() -> int:
                 row.update({f"student_{k}": v for k, v in component_stats(student).items()})
             teacher_voxels = int(teacher.sum()) if teacher is not None else None
             student_voxels = int(student.sum()) if student is not None else None
-            ratio = row.get("student_teacher_volume_ratio")
+            ratio = row.get("student_selected_pseudo_volume_ratio")
             flags = gate_flags(
                 teacher_voxels=teacher_voxels,
                 student_voxels=student_voxels,
@@ -393,30 +350,22 @@ def main() -> int:
             row["volume_gate_status"] = "pass" if not flags else "review"
             rows.append(row)
 
-            ref_for_sweep = gt_raw if gt_raw is not None else teacher_raw
-            ref_kind = "gt" if gt_raw is not None else ("teacher" if teacher_raw is not None else "")
-            metric_target = METRIC_TARGET_GT if gt_raw is not None else (METRIC_TARGET_TEACHER if teacher_raw is not None else "")
-            metric_interpretation = INTERPRETATION_REAL_GT if metric_target == METRIC_TARGET_GT else (INTERPRETATION_TEACHER_IMITATION if metric_target == METRIC_TARGET_TEACHER else "")
-            metric_comparison = "student_vs_expert_gt_threshold_sweep" if metric_target == METRIC_TARGET_GT else ("student_vs_selected_teacher_threshold_sweep" if metric_target == METRIC_TARGET_TEACHER else "")
-            for srow in threshold_sweep(student_raw, ref_for_sweep, thresholds):
+            for srow in threshold_sweep(student_raw, teacher_raw, thresholds):
                 sweep_rows.append({
                     "case_id": case_id,
                     "organ": organ,
-                    "reference_kind": ref_kind,
-                    "metric_target": metric_target,
-                    "metric_subject": "student",
-                    "metric_comparison": metric_comparison,
-                    "metric_interpretation": metric_interpretation,
+                    "reference_kind": METRIC_TARGET_SELECTED_PSEUDO if teacher_raw is not None else "",
+                    "metric_target": METRIC_TARGET_SELECTED_PSEUDO if teacher_raw is not None else "",
+                    "metric_subject": METRIC_TARGET_STUDENT,
+                    "metric_comparison": "student_candidate_vs_selected_pseudo_label_threshold_sweep",
+                    "metric_interpretation": INTERPRETATION_PSEUDO_CONSISTENCY if teacher_raw is not None else "",
                     **srow,
                 })
 
     per_case = pd.DataFrame(rows)
     for optional_col in [
-        "student_teacher_dice",
-        "teacher_gt_dice",
-        "student_gt_dice",
-        "student_teacher_volume_ratio",
-        "student_gt_volume_ratio",
+        "student_selected_pseudo_dice",
+        "student_selected_pseudo_volume_ratio",
     ]:
         if optional_col not in per_case.columns:
             per_case[optional_col] = np.nan
@@ -437,41 +386,28 @@ def main() -> int:
             "organ": organ,
             "organ_group": g["organ_group"].iloc[0],
             "n": len(g),
-            "student_teacher_mean_dice": pd.to_numeric(g.get("student_teacher_dice"), errors="coerce").mean(),
-            "teacher_gt_mean_dice": pd.to_numeric(g.get("teacher_gt_dice"), errors="coerce").mean(),
-            "student_gt_mean_dice": pd.to_numeric(g.get("student_gt_dice"), errors="coerce").mean(),
-            "student_vs_teacher_mean_dice": pd.to_numeric(g.get("student_teacher_dice"), errors="coerce").mean(),
-            "teacher_vs_expert_gt_mean_dice": pd.to_numeric(g.get("teacher_gt_dice"), errors="coerce").mean(),
-            "student_vs_expert_gt_mean_dice": pd.to_numeric(g.get("student_gt_dice"), errors="coerce").mean(),
-            "student_teacher_mean_volume_ratio": pd.to_numeric(g.get("student_teacher_volume_ratio"), errors="coerce").mean(),
-            "student_gt_mean_volume_ratio": pd.to_numeric(g.get("student_gt_volume_ratio"), errors="coerce").mean(),
+            "student_selected_pseudo_mean_dice": pd.to_numeric(g.get("student_selected_pseudo_dice"), errors="coerce").mean(),
+            "pseudo_consistency_mean_dsc": pd.to_numeric(g.get("student_selected_pseudo_dice"), errors="coerce").mean(),
+            "student_selected_pseudo_mean_volume_ratio": pd.to_numeric(g.get("student_selected_pseudo_volume_ratio"), errors="coerce").mean(),
             "overseg_cases": int(g["qc_flags"].astype(str).str.contains("oversegmentation_volume_ratio").sum()),
             "underseg_cases": int(g["qc_flags"].astype(str).str.contains("undersegmentation_volume_ratio").sum()),
             "empty_failure_cases": int(g["qc_flags"].astype(str).str.contains("empty_failure").sum()),
             "false_positive_cases": int(g["qc_flags"].astype(str).str.contains("false_positive_present").sum()),
             "review_cases": int((g["volume_gate_status"] == "review").sum()),
         })
-    organ_summary = pd.DataFrame(summary_rows).sort_values(["student_gt_mean_dice", "student_teacher_mean_dice"], ascending=[False, False])
+    organ_summary = pd.DataFrame(summary_rows).sort_values(["student_selected_pseudo_mean_dice"], ascending=[False])
     organ_summary.to_csv(args.output_dir / "evaluation_chain_organ_summary.csv", index=False)
     case_summary = per_case.groupby("case_id").agg(
         organs=("organ", "size"),
-        student_teacher_mean_dice=("student_teacher_dice", "mean"),
-        teacher_gt_mean_dice=("teacher_gt_dice", "mean"),
-        student_gt_mean_dice=("student_gt_dice", "mean"),
+        student_selected_pseudo_mean_dice=("student_selected_pseudo_dice", "mean"),
         review_cases=("volume_gate_status", lambda s: int((s == "review").sum())),
     ).reset_index()
-    case_summary["student_vs_teacher_mean_dice"] = case_summary["student_teacher_mean_dice"]
-    case_summary["teacher_vs_expert_gt_mean_dice"] = case_summary["teacher_gt_mean_dice"]
-    case_summary["student_vs_expert_gt_mean_dice"] = case_summary["student_gt_mean_dice"]
+    case_summary["pseudo_consistency_mean_dsc"] = case_summary["student_selected_pseudo_mean_dice"]
     case_summary.to_csv(args.output_dir / "evaluation_chain_case_summary.csv", index=False)
     group_summary = organ_summary.groupby("organ_group").agg(
         organs=("organ", "size"),
-        student_teacher_mean_dice=("student_teacher_mean_dice", "mean"),
-        teacher_gt_mean_dice=("teacher_gt_mean_dice", "mean"),
-        student_gt_mean_dice=("student_gt_mean_dice", "mean"),
-        student_vs_teacher_mean_dice=("student_vs_teacher_mean_dice", "mean"),
-        teacher_vs_expert_gt_mean_dice=("teacher_vs_expert_gt_mean_dice", "mean"),
-        student_vs_expert_gt_mean_dice=("student_vs_expert_gt_mean_dice", "mean"),
+        student_selected_pseudo_mean_dice=("student_selected_pseudo_mean_dice", "mean"),
+        pseudo_consistency_mean_dsc=("pseudo_consistency_mean_dsc", "mean"),
         overseg_cases=("overseg_cases", "sum"),
         review_cases=("review_cases", "sum"),
     ).reset_index()
@@ -483,14 +419,16 @@ def main() -> int:
     )
     blocklist = per_case.loc[block_flags, [
         "case_id", "organ", "student_name", "teacher_name", "organ_group",
-        "qc_flags", "student_teacher_volume_ratio", "volume_min_ratio", "volume_max_ratio",
+        "qc_flags", "student_selected_pseudo_volume_ratio", "volume_min_ratio", "volume_max_ratio",
         "student_path", "teacher_path",
     ]].copy()
     if not blocklist.empty:
         blocklist["block_reason"] = blocklist["qc_flags"]
     blocklist.to_csv(args.output_dir / "next_round_blocklist.csv", index=False)
     report = {
-        "metric_warning": "GT metrics are true accuracy only when supplied GT is trusted. Student-teacher metrics are consistency metrics.",
+        "metric_warning": "Pseudo-label QC only: metrics are student-candidate consistency against selected pseudo labels, not true accuracy.",
+        "metric_target": METRIC_TARGET_SELECTED_PSEUDO,
+        "metric_interpretation": INTERPRETATION_PSEUDO_CONSISTENCY,
         "cases": len(cases),
         "organs": len(mappings),
         "rows": len(rows),

@@ -77,9 +77,9 @@ def test_grade_calibration_marks_missing_gt_as_insufficient() -> None:
     assert rows["B"]["status"] == "insufficient_gt_for_calibration"
     assert rows["D"]["status"] == "insufficient_gt_for_calibration"
 
-def test_reference_kind_keeps_gt_and_pseudo_separate() -> None:
-    assert reference_kind("/workspace/data/PanTS/LabelTr/case.nii.gz") == "pants_gt"
-    assert reference_kind("outputs/run/annotation_versions/case/updated/liver.nii.gz") == "pseudo_gt"
+def test_reference_kind_treats_pants_as_non_mainline_pseudo_reference() -> None:
+    assert reference_kind("/workspace/data/PanTS/LabelTr/case.nii.gz") == "historical_pseudo_reference"
+    assert reference_kind("outputs/run/annotation_versions/case/updated/liver.nii.gz") == "historical_pseudo_reference"
     assert reference_kind("/external/manual_ref/liver.nii.gz") == "unknown_reference"
 
 

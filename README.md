@@ -162,6 +162,35 @@ Before GPU execution:
 PYTHONPATH=agent-harness python scripts/check_gpu_resources.py
 ```
 
+
+## Hugging Face model assets
+
+Large model weights are released in the Hugging Face model-assets repository, not in GitHub:
+
+```text
+https://huggingface.co/Xiang-mira/MedIA-Agentic-AI
+```
+
+The HF release currently includes 23 teacher models and one VoxTell-style student model. It intentionally excludes `mock_seg` and `epai_finetuned`. Internal/JHU/private assets are listed for lab collaboration but should not be externally advertised.
+
+Download on a new GPU/HPC machine:
+
+```bash
+git lfs install
+git clone https://huggingface.co/Xiang-mira/MedIA-Agentic-AI checkpoints/MedIA-Agentic-AI
+export HF_ASSET_ROOT="$PWD/checkpoints/MedIA-Agentic-AI"
+```
+
+Or use:
+
+```bash
+python examples/download_from_hf.py \
+  --repo-id Xiang-mira/MedIA-Agentic-AI \
+  --local-dir checkpoints/MedIA-Agentic-AI
+```
+
+See [Hugging Face model release guide](docs/HUGGINGFACE_MODEL_RELEASE.md) and [HF model manifest](configs/hf_model_manifest.yaml) for the full model list, supported organs, input/output formats, CLI commands, expected GPU memory, and HPC examples.
+
 ## Data and checkpoints
 
 The default formal case manifest is:
@@ -177,8 +206,9 @@ case_id,ct_path,annotation_folder
 ```
 
 Optional report, clinical, and pathology fields are supported by the CLI.
-`annotation_folder` should contain PanTS/ShapeKit-style
-`segmentations/*.nii.gz` masks.
+`annotation_folder` is a legacy/debug pseudo-reference hook, not a mainline
+accuracy reference. The formal loop builds 373-target pseudo-label rows from
+teacher outputs, confirmed absent zero masks, and withheld uncertain targets.
 
 Validate the manifest:
 
@@ -340,13 +370,12 @@ outputs/round1/
       pseudo_label_selection.json
 ```
 
-`dice_metrics.csv` records E-step candidate/selected pseudo-label consistency
-unless an artifact explicitly marks `metric_target=GT`. Do not report its plain
-`dice` column as expert ground-truth segmentation accuracy. Current evaluation
-tables include metric-contract columns such as `metric_target`,
-`metric_subject`, `metric_comparison`, and `metric_interpretation` so results
-can distinguish real GT performance, teacher imitation, pseudo-label
-consistency, and all-zero negative-target quality.
+`dice_metrics.csv` records E-step candidate/selected pseudo-label consistency.
+The formal EM route does not read external fine-label roots or report accuracy.
+Current evaluation tables include metric-contract columns such as
+`metric_target`, `metric_subject`, `metric_comparison`, and
+`metric_interpretation`; mainline targets are `selected_pseudo_label`,
+`teacher_candidate`, `student_candidate`, and `absent_negative_zero_mask`.
 
 Audit or rescore AutoLabelCore results:
 
@@ -382,8 +411,8 @@ python scripts/apply_organ_type_postprocess.py \
 Known limitations: the official LabelCritic benchmark gate is currently blocked
 because licensed benchmark data/checksums are unavailable; generated 373-organ
 descriptions are project extensions; LabelCritic projections are 2D views of 3D
-anatomy; absent negatives require explicit FOV/coverage evidence; metrics
-without expert GT measure teacher/pseudo-label consistency rather than true
+anatomy; absent negatives require explicit FOV/coverage evidence; all mainline
+metrics measure pseudo-label construction/refinement quality, not true
 segmentation accuracy.
 
 ## Formal multi-round EM run
