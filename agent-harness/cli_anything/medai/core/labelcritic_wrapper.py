@@ -115,7 +115,66 @@ def _load_organ_description(organ: str) -> dict[str, Any]:
             None,
         )
     if not isinstance(entry, dict):
-        raise ValueError(f"No organ-specific CT appearance entry for {organ}")
+        target_doc = {}
+        try:
+            target_doc = json.loads(_prompt_target_config().read_text(encoding="utf-8"))
+        except Exception:
+            target_doc = {}
+        taxonomy_doc = {}
+        try:
+            taxonomy_doc = json.loads(Path("configs/organ_taxonomy.json").resolve().read_text(encoding="utf-8"))
+        except Exception:
+            taxonomy_doc = {}
+        organ_key = str(organ)
+        prompt = (
+            (target_doc.get("organ_to_prompt") or {}).get(organ_key)
+            or organ_key.replace("_", " ")
+        )
+        taxonomy_entry = (taxonomy_doc.get("organs") or taxonomy_doc or {}).get(organ_key, {})
+        regions = taxonomy_entry.get("expected_body_regions") if isinstance(taxonomy_entry, dict) else None
+        if not isinstance(regions, list) or not regions:
+            regions = ["unknown_or_scan_dependent"]
+        entry = {
+            "canonical_id": organ_key,
+            "canonical_name": organ_key,
+            "canonical_organ": organ_key,
+            "display_name": prompt,
+            "aliases": [prompt, organ_key],
+            "category": "project_extended_373_target",
+            "formal_selection_eligible": True,
+            "requires_manual_review": True,
+            "expected_body_regions": regions,
+            "ct_location": "Use the target name, scan field of view, and nearby visible anatomy to judge whether the highlighted candidate is plausible.",
+            "expected_location": "scan-dependent anatomical location inferred from the target name and CT context",
+            "expected_region": "scan-dependent anatomical region",
+            "ct_appearance": f"CT appearance for {prompt}; compare candidates by anatomical plausibility, continuity, location, and leakage.",
+            "morphology": "target-specific morphology inferred from the anatomical name",
+            "adjacent_structures": [],
+            "landmarks": [],
+            "neighbor_relations": [],
+            "parent_structures": taxonomy_entry.get("parent_ids", []) if isinstance(taxonomy_entry, dict) else [],
+            "continuity_prior": "prefer coherent anatomy unless the target is normally multipart",
+            "symmetry_prior": "No mandatory bilateral symmetry unless the target name specifies laterality.",
+            "partial_fov_behavior": "Boundary truncation may be valid only at a physical scan boundary; internal missing portions should not be excused as FOV.",
+            "penalty_rules": [
+                "Reject or downgrade candidates that clearly segment a different organ.",
+                "Reject or downgrade candidates far outside the expected anatomical region.",
+                "Reject or downgrade scattered false-positive islands when a coherent structure is expected.",
+            ],
+            "common_failure_modes": [
+                "wrong-organ leakage",
+                "gross mislocation",
+                "fragmentation",
+                "over-segmentation into adjacent structures",
+            ],
+            "anatomical_constraints": [
+                "Use CT anatomy and scan coverage rather than candidate size alone.",
+            ],
+            "source": "generic_373_prompt_fallback",
+            "source_type": "project_prompt_fallback",
+            "validation_status": "eligible",
+            "validation_reasons": ["organ_specific_ct_appearance_missing_generic_fallback_used"],
+        }
     return entry
 
 

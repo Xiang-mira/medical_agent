@@ -813,7 +813,12 @@ def reference_tree_sha256(root: Path) -> str | None:
 
 
 def ensure_evaluation_protocol() -> dict:
-    """Freeze cohort-independent evaluation identity at run creation."""
+    """Freeze pseudo-only evaluation identity at run creation.
+
+    Mainline EM does not require an external reference tree. Round metrics are
+    student-vs-selected-pseudo consistency and training convergence checks; an
+    optional reference root is recorded only for legacy/external audits.
+    """
     path = OUTPUT_ROOT / "evaluation_protocol.json"
     cases = case_list_provenance()
     protected = [
@@ -828,11 +833,6 @@ def ensure_evaluation_protocol() -> dict:
         Path(configured_reference).expanduser().resolve()
         if configured_reference else None
     )
-    if not path.exists() and (reference_root is None or not reference_root.is_dir()):
-        raise RuntimeError(
-            "A new formal run requires MEDAI_ROUND_REFERENCE_ROOT so the "
-            "evaluation reference can be frozen before Round1."
-        )
     reference_sha256 = (
         reference_tree_sha256(reference_root)
         if reference_root is not None else None
@@ -847,10 +847,13 @@ def ensure_evaluation_protocol() -> dict:
         "protected_organs": protected,
         "raw_and_postprocessed_metrics_required": True,
         "baseline_round": 1,
-        "external_reference_usage": "not_used_for_student_training_or_mainline_metrics",
+        "metric_family": "pseudo_consistency_and_student_convergence",
+        "mainline_reference_usage": "selected_pseudo_label_only",
+        "external_reference_usage": "not_required_not_used_for_student_training_or_mainline_metrics",
         "reference_root": str(reference_root) if reference_root else None,
         "reference_kind": os.getenv(
-            "MEDAI_REFERENCE_KIND", "frozen_teacher_anchor"
+            "MEDAI_REFERENCE_KIND",
+            "none_mainline_uses_selected_pseudo_label",
         ),
         "reference_tree_sha256": reference_sha256,
     }

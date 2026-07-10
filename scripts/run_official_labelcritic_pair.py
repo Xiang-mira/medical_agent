@@ -191,6 +191,26 @@ def _read_decision(csv_path: Path) -> dict:
     }
 
 
+def _is_left_right_join_only_failure(stderr: str, stdout: str, organ: str, projection_dir: Path) -> bool:
+    """Treat vendor left/right join failure as non-fatal for one-organ pair checks.
+
+    The pinned official projection script always tries to join ``*left*`` with
+    the matching ``*right*`` folder. Our pairwise call intentionally projects one
+    organ at a time, so the comparison images for the requested left organ can be
+    valid even though the optional joined bilateral folder is absent.
+    """
+    if "left" not in organ:
+        return False
+    counterpart = organ.replace("left", "right")
+    text = f"{stderr}\n{stdout}"
+    return (
+        "FileNotFoundError" in text
+        and counterpart in text
+        and (projection_dir / organ).is_dir()
+        and any((projection_dir / organ).glob("*.png"))
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ct", required=True)
@@ -250,7 +270,18 @@ def main() -> None:
         text=True,
         check=False,
     )
-    if projection.returncode != 0:
+    tolerated_projection_warning = None
+    if projection.returncode != 0 and _is_left_right_join_only_failure(
+        projection.stderr,
+        projection.stdout,
+        args.organ,
+        projection_dir,
+    ):
+        tolerated_projection_warning = (
+            "official_projection_left_right_join_counterpart_missing_tolerated"
+        )
+
+    if projection.returncode != 0 and not tolerated_projection_warning:
         result = {
             "stage": "official_labelcritic_pair",
             "status": "failed",
@@ -336,6 +367,11 @@ def main() -> None:
             "official_csv": str(csv_path),
             "projection_command": projection_cmd,
         }
+        if tolerated_projection_warning:
+            result["projection_warning"] = tolerated_projection_warning
+            result["projection_return_code"] = projection.returncode
+            result["projection_stdout_tail"] = projection.stdout[-4000:]
+            result["projection_stderr_tail"] = projection.stderr[-4000:]
 
     output = Path(args.output_json)
     output.parent.mkdir(parents=True, exist_ok=True)
