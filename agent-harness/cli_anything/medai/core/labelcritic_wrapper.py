@@ -893,6 +893,12 @@ def run_labelcritic_compare_batch(
                 dry_run=False,
                 strict_alignment=strict_alignment,
                 timeout_sec=timeout_sec,
+                no_dice_check=bool(job.get("no_dice_check", False)),
+                no_dual_confirmation=bool(job.get("no_dual_confirmation", False)),
+                simple_prompt_ablation=bool(job.get("simple_prompt_ablation", False)),
+                conservative_dual=bool(job.get("conservative_dual", False)),
+                skip_organ_presence_gate=bool(job.get("skip_organ_presence_gate", False)),
+                strict_choice_prompt=bool(job.get("strict_choice_prompt", False)),
                 candidate_context=job.get("candidate_context"),
             )
             for job in jobs
@@ -1165,23 +1171,27 @@ def run_labelcritic_compare(
     ]
     if no_dice_check:
         command.append("--no-dice-check")
+    if no_dual_confirmation:
+        command.append("--no-dual-confirmation")
+    if strict_choice_prompt:
+        command.append("--strict-choice-prompt")
     description_path, rendered_prompt, rendered_hash = _write_organ_description_prompt(
         organ, work_dir, candidate_context
     )
     labelcritic_options = {
         "no_dice_check": bool(no_dice_check),
-        "no_dual_confirmation": False,
+        "no_dual_confirmation": bool(no_dual_confirmation),
         "simple_prompt_ablation": False,
         "conservative_dual": False,
         "skip_organ_presence_gate": False,
-        "strict_choice_prompt": False,
+        "strict_choice_prompt": bool(strict_choice_prompt),
         "requested_nonofficial_options_ignored": {
             "no_dice_check": False,
-            "no_dual_confirmation": no_dual_confirmation,
+            "no_dual_confirmation": False,
             "simple_prompt_ablation": simple_prompt_ablation,
             "conservative_dual": conservative_dual,
             "skip_organ_presence_gate": skip_organ_presence_gate,
-            "strict_choice_prompt": strict_choice_prompt,
+            "strict_choice_prompt": False,
         },
         "run_id": run_id,
         "csv_path": str(csv_path),
@@ -1302,6 +1312,10 @@ def run_labelcritic_compare(
         "failure_taxonomy": driver_doc.get("failure_taxonomy", []),
         "prompt_path": driver_doc.get("prompt_path"),
         "description_rendered_path": driver_doc.get("description_rendered_path"),
+        "prompt_mode": driver_doc.get("prompt_mode"),
+        "projection_mode_requested": driver_doc.get("projection_mode_requested"),
+        "projection_mode_effective": driver_doc.get("projection_mode_effective"),
+        "dual_confirmation_enabled": driver_doc.get("dual_confirmation_enabled"),
         "labelcritic_options": labelcritic_options,
         "rendered_organ_prompt": rendered_prompt,
         "rendered_organ_prompt_hash": rendered_hash,

@@ -120,6 +120,13 @@ def main() -> int:
     ap.add_argument("--base-url", default="http://localhost")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--timeout-sec", type=int, default=120)
+    ap.add_argument("--prompt-mode", choices=["official_dual", "strict_single"], default="official_dual")
+    ap.add_argument("--projection-mode", choices=["ap", "multiview_audit"], default="ap")
+    ap.add_argument("--model-id", default="")
+    ap.add_argument("--min-projection-success-rate", type=float, default=0.95)
+    ap.add_argument("--min-parser-success-rate", type=float, default=0.95)
+    ap.add_argument("--min-ab-ba-consistency-rate", type=float, default=0.90)
+    ap.add_argument("--min-known-better-pick-rate", type=float, default=0.70)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -148,7 +155,10 @@ def main() -> int:
                 ct, good, bad, organ,
                 args.output_dir / "comparisons" / case_id / organ / f"{kind}_good_vs_bad.json",
                 backend="labelcritic", base_url=args.base_url, port=args.port,
-                timeout_sec=args.timeout_sec, no_dice_check=True,
+                timeout_sec=args.timeout_sec,
+                no_dice_check=True,
+                no_dual_confirmation=args.prompt_mode == "strict_single",
+                strict_choice_prompt=args.prompt_mode == "strict_single",
                 candidate_context=[
                     {"candidate_id": "known_better_selected_pseudo_label", "model": "selected_pseudo_label"},
                     {"candidate_id": f"controlled_corruption_{kind}", "model": "synthetic_corruption"},
@@ -158,7 +168,10 @@ def main() -> int:
                 ct, bad, good, organ,
                 args.output_dir / "comparisons" / case_id / organ / f"{kind}_bad_vs_good.json",
                 backend="labelcritic", base_url=args.base_url, port=args.port,
-                timeout_sec=args.timeout_sec, no_dice_check=True,
+                timeout_sec=args.timeout_sec,
+                no_dice_check=True,
+                no_dual_confirmation=args.prompt_mode == "strict_single",
+                strict_choice_prompt=args.prompt_mode == "strict_single",
                 candidate_context=[
                     {"candidate_id": f"controlled_corruption_{kind}", "model": "synthetic_corruption"},
                     {"candidate_id": "known_better_selected_pseudo_label", "model": "selected_pseudo_label"},
@@ -180,6 +193,9 @@ def main() -> int:
                 "known_better_picked": known_better,
                 "ab_failure_taxonomy": ab.get("failure_taxonomy", []),
                 "ba_failure_taxonomy": ba.get("failure_taxonomy", []),
+                "prompt_mode": args.prompt_mode,
+                "projection_mode": args.projection_mode,
+                "model_id": args.model_id,
             })
 
     total = len(results)
@@ -188,6 +204,14 @@ def main() -> int:
         "stage": "labelcritic_synthetic_benchmark",
         "status": "success",
         "manifest": str(args.manifest),
+        "model_id": args.model_id,
+        "prompt_mode": args.prompt_mode,
+        "projection_mode": args.projection_mode,
+        "projection_mode_note": (
+            "multiview_audit records the requested matrix setting; the current "
+            "official LabelCritic driver still performs formal voting on AP axis-1 projections."
+            if args.projection_mode == "multiview_audit" else None
+        ),
         "num_pairs": total,
         "num_organs": len({r.get("organ") for r in results}),
         "projection_success_rate": None,
@@ -195,17 +219,38 @@ def main() -> int:
         "decisive_rate": None,
         "ab_ba_consistency_rate": None,
         "known_better_pick_rate": None,
+        "thresholds": {
+            "projection_success_rate": args.min_projection_success_rate,
+            "parser_success_rate": args.min_parser_success_rate,
+            "ab_ba_consistency_rate": args.min_ab_ba_consistency_rate,
+            "known_better_pick_rate": args.min_known_better_pick_rate,
+        },
+        "pass": False,
+        "blocker": None,
         "results": results,
         "interpretation": "Synthetic pseudo-label corruption benchmark; not GT accuracy.",
     }
     if non_dry:
-        summary.update({
+        rates = {
             "projection_success_rate": sum(r["ab_status"] == "success" and r["ba_status"] == "success" for r in non_dry) / len(non_dry),
             "parser_success_rate": sum(bool(r["ab_winner"]) and bool(r["ba_winner"]) for r in non_dry) / len(non_dry),
             "decisive_rate": sum(r["ab_winner"] != "uncertain" and r["ba_winner"] != "uncertain" for r in non_dry) / len(non_dry),
             "ab_ba_consistency_rate": sum(bool(r["ab_ba_consistent"]) for r in non_dry) / len(non_dry),
             "known_better_pick_rate": sum(bool(r["known_better_picked"]) for r in non_dry) / len(non_dry),
-        })
+        }
+        passed = (
+            rates["projection_success_rate"] >= args.min_projection_success_rate
+            and rates["parser_success_rate"] >= args.min_parser_success_rate
+            and rates["ab_ba_consistency_rate"] >= args.min_ab_ba_consistency_rate
+            and rates["known_better_pick_rate"] >= args.min_known_better_pick_rate
+        )
+        summary.update(rates)
+        summary["pass"] = passed
+        summary["status"] = "passed" if passed else "failed"
+        if not passed:
+            summary["blocker"] = "model_or_prompt_capacity_blocker"
+    elif args.dry_run:
+        summary["status"] = "dry_run"
     write_json(args.output_dir / "labelcritic_synthetic_benchmark_summary.json", summary)
     print(json.dumps({k: summary[k] for k in summary if k != "results"}, indent=2, ensure_ascii=False))
     return 0

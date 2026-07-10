@@ -103,9 +103,15 @@ def test_labelcritic_compare_no_dice_check_reaches_driver_command(tmp_path: Path
         tmp_path / "compare.json",
         backend="stub",
         no_dice_check=True,
+        no_dual_confirmation=True,
+        strict_choice_prompt=True,
     )
     assert "--no-dice-check" in result["command"]
+    assert "--no-dual-confirmation" in result["command"]
+    assert "--strict-choice-prompt" in result["command"]
     assert result["labelcritic_options"]["no_dice_check"] is True
+    assert result["labelcritic_options"]["no_dual_confirmation"] is True
+    assert result["labelcritic_options"]["strict_choice_prompt"] is True
     assert result["labelcritic_options"]["method_contract"] == "official_ap_projection_no_dice_gate_dual_confirmation"
 
 
@@ -192,6 +198,102 @@ def test_materialized_case_has_exactly_373_fail_closed_records(tmp_path: Path) -
         if row["target_type"] == "negative_absent":
             assert row["absence_confidence"] == "high"
             assert row["fov_status"] == "out_of_fov"
+            assert row["requested_canonical_id"] == row["organ"]
+            assert row["resolved_canonical_id"] == row["organ"]
+            assert row["source_local_label"] == row["organ"]
+            assert row["identity_status"] == "valid"
+
+
+def test_negative_absent_out_of_fov_contract_is_trainable(tmp_path: Path) -> None:
+    from cli_anything.medai.core.continual_learning import canonicalize_training_record
+
+    image = tmp_path / "ct.nii.gz"
+    mask = tmp_path / "zero.nii.gz"
+    nib.save(nib.Nifti1Image(np.zeros((8, 8, 8), dtype=np.int16), np.eye(4)), image)
+    nib.save(nib.Nifti1Image(np.zeros((8, 8, 8), dtype=np.uint8), np.eye(4)), mask)
+
+    row = canonicalize_training_record({
+        "case_id": "case",
+        "organ": "brain",
+        "image": str(image),
+        "mask_path": str(mask),
+        "target_type": "negative_absent",
+        "grade": "A",
+        "training_weight": 0.1,
+        "distillation_eligible": True,
+        "student_target_id": 35,
+        "requested_canonical_id": "brain",
+        "resolved_canonical_id": "brain",
+        "source_local_label": "brain",
+        "identity_status": "valid",
+        "fov_status": "out_of_fov",
+        "fov_evidence": ["abdomen coverage excludes head"],
+        "negative_source": "case_373_expected_absent",
+        "zero_mask_role": "negative_absent_target_mask",
+    })
+    assert row["training_eligible"] is True
+    assert row["contract_failures"] == []
+    assert row["negative_zero_mask_audit"]["status"] == "passed"
+
+
+def test_negative_absent_missing_evidence_contract_fails(tmp_path: Path) -> None:
+    from cli_anything.medai.core.continual_learning import canonicalize_training_record
+
+    image = tmp_path / "ct.nii.gz"
+    mask = tmp_path / "zero.nii.gz"
+    nib.save(nib.Nifti1Image(np.zeros((8, 8, 8), dtype=np.int16), np.eye(4)), image)
+    nib.save(nib.Nifti1Image(np.zeros((8, 8, 8), dtype=np.uint8), np.eye(4)), mask)
+
+    row = canonicalize_training_record({
+        "case_id": "case",
+        "organ": "brain",
+        "image": str(image),
+        "mask_path": str(mask),
+        "target_type": "negative_absent",
+        "grade": "A",
+        "training_weight": 0.1,
+        "distillation_eligible": True,
+        "student_target_id": 35,
+        "requested_canonical_id": "brain",
+        "resolved_canonical_id": "brain",
+        "source_local_label": "brain",
+        "identity_status": "valid",
+        "fov_status": "out_of_fov",
+        "negative_source": "case_373_expected_absent",
+        "zero_mask_role": "negative_absent_target_mask",
+    })
+    assert row["training_eligible"] is False
+    assert "negative_absent_missing_fov_evidence" in row["contract_failures"]
+
+
+def test_positive_grade_c_hard_contract_still_fails(tmp_path: Path) -> None:
+    from cli_anything.medai.core.continual_learning import canonicalize_training_record
+
+    image = tmp_path / "ct.nii.gz"
+    mask = tmp_path / "mask.nii.gz"
+    arr = np.zeros((8, 8, 8), dtype=np.uint8)
+    arr[2:5, 2:5, 2:5] = 1
+    nib.save(nib.Nifti1Image(np.zeros((8, 8, 8), dtype=np.int16), np.eye(4)), image)
+    nib.save(nib.Nifti1Image(arr, np.eye(4)), mask)
+
+    row = canonicalize_training_record({
+        "case_id": "case",
+        "organ": "liver",
+        "image": str(image),
+        "mask_path": str(mask),
+        "target_type": "positive_hard",
+        "grade": "C",
+        "training_weight": 0.5,
+        "distillation_eligible": True,
+        "student_target_id": 157,
+        "requested_canonical_id": "liver",
+        "resolved_canonical_id": "liver",
+        "source_local_label": "liver",
+        "identity_status": "valid",
+        "selected_model": "teacher_a",
+    })
+    assert row["training_eligible"] is False
+    assert "grade_C_requires_probability_target" in row["contract_failures"]
 
 
 def test_near_identical_selection_is_order_invariant_and_never_fusion(

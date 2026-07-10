@@ -82,6 +82,21 @@ def _project_extension_compare_prompt(organ: str, description: str) -> str:
     )
 
 
+def _strict_choice_compare_prompt(organ: str, description: str) -> str:
+    display = organ.replace("_", " ")
+    return (
+        "You are comparing two anonymous candidate segmentation overlays for the "
+        f"same target structure: {display}.\n"
+        "Use the CT/projection anatomy, target location, continuity, laterality, "
+        "and leakage/oversegmentation rules below. If one overlay is clearly "
+        "better, choose it even if both are imperfect. Use 0.5 only when the two "
+        "overlays are genuinely indistinguishable or both are unusable.\n"
+        f"Target-specific guidance:\n{description}\n"
+        "Final answer format is strict: reply with exactly one token: 1, 2, or 0.5. "
+        "1 means overlay 1 is better. 2 means overlay 2 is better. 0.5 means uncertain."
+    )
+
+
 def _structured_assessment(
     decision: dict,
     candidate_context: list[dict],
@@ -256,6 +271,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--dice-threshold", type=float, default=0.5)
     parser.add_argument("--no-dice-check", action="store_true")
+    parser.add_argument("--no-dual-confirmation", action="store_true")
+    parser.add_argument("--strict-choice-prompt", action="store_true")
+    parser.add_argument("--projection-mode", choices=["ap", "multiview_audit"], default="ap")
     args = parser.parse_args()
     vendor_lock = _verify_vendor_lock()
 
@@ -370,15 +388,17 @@ def main() -> None:
                 raise SystemExit(2)
             project_extension_description = _render_description(entry)
             descriptions[args.organ] = project_extension_description
-        text_multi_image_prompt_2 = (
-            ed.Compare2Images
-            if args.organ in ed.DescriptionsED
-            else _project_extension_compare_prompt(args.organ, project_extension_description or descriptions[args.organ])
-        )
         rendered_description = (
             project_extension_description
             if project_extension_description is not None
             else str(descriptions.get(args.organ) or "")
+        )
+        text_multi_image_prompt_2 = (
+            _strict_choice_compare_prompt(args.organ, rendered_description)
+            if args.strict_choice_prompt
+            else ed.Compare2Images
+            if args.organ in ed.DescriptionsED
+            else _project_extension_compare_prompt(args.organ, rendered_description)
         )
         prompt_path = work_dir / "labelcritic_prompt.txt"
         prompt_path.write_text(str(text_multi_image_prompt_2), encoding="utf-8")
@@ -387,6 +407,7 @@ def main() -> None:
 
         base_url = f"{args.base_url.rstrip('/')}:{args.port}/v1"
         dice_gate_enabled = not args.no_dice_check
+        dual_confirmation_enabled = not args.no_dual_confirmation
         ed.SystematicComparisonLMDeploySepFigures(
             pth=str(projection_dir / args.organ),
             base_url=base_url,
@@ -399,7 +420,7 @@ def main() -> None:
                 "auto" if args.organ in ed.DescriptionsED else True
             ),
             text_multi_image_prompt_2=text_multi_image_prompt_2,
-            dual_confirmation=True,
+            dual_confirmation=dual_confirmation_enabled,
             conservative_dual=False,
             dice_check=dice_gate_enabled,
             dice_th=args.dice_threshold,
@@ -426,10 +447,13 @@ def main() -> None:
             "mask_a_dir": str(Path(args.mask_a_dir).resolve()),
             "mask_b_dir": str(Path(args.mask_b_dir).resolve()),
             "projection_backend": "official_labelcritic_ap_axis_1",
+            "projection_mode_requested": args.projection_mode,
+            "projection_mode_effective": "official_labelcritic_ap_axis_1",
             "centered_slice_fallback_used": False,
             "dice_gate_enabled": dice_gate_enabled,
             "dice_threshold": args.dice_threshold,
-            "dual_confirmation_enabled": True,
+            "dual_confirmation_enabled": dual_confirmation_enabled,
+            "prompt_mode": "strict_choice" if args.strict_choice_prompt else "official_dual",
             "order_reversal_enabled": True,
             "order_reversal_backend": "official_dual_confirmation_y1_y2_and_y2_y1",
             "candidate_identity_exposed_to_vlm": False,

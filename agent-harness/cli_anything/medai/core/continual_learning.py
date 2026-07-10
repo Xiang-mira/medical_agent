@@ -9,6 +9,7 @@ import tempfile
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -42,17 +43,25 @@ class TrainingContractError(ValueError):
     pass
 
 
+@lru_cache(maxsize=8192)
+def _sha256_file_cached(path: str, mtime_ns: int, size: int) -> str | None:
+    del mtime_ns, size
+    target = Path(path)
+    digest = hashlib.sha256()
+    with target.open("rb") as handle:
+        while chunk := handle.read(8 * 1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def sha256_file(path: str | Path | None) -> str | None:
     if not path:
         return None
     target = Path(path).expanduser().resolve()
     if not target.is_file():
         return None
-    digest = hashlib.sha256()
-    with target.open("rb") as handle:
-        while chunk := handle.read(8 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+    stat = target.stat()
+    return _sha256_file_cached(str(target), int(stat.st_mtime_ns), int(stat.st_size))
 
 
 def canonical_target_type(value: Any) -> str:
@@ -137,6 +146,61 @@ def mask_foreground_audit(path: str | Path | None) -> dict[str, Any]:
             result["reason"] = "positive_mask_empty_or_nonfinite"
     except Exception as exc:
         result["reason"] = f"mask_unreadable:{exc}"
+    return result
+
+
+@lru_cache(maxsize=8192)
+def _zero_mask_audit_cached(path: str, mtime_ns: int, size: int) -> tuple[str, bool, str | None]:
+    del mtime_ns, size
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        array = np.asanyarray(nib.load(path).dataobj)
+        finite = bool(np.isfinite(array).all())
+        nonzero = bool((array > 0).any()) if finite else True
+        if not finite:
+            return "failed", False, "zero_mask_nonfinite"
+        if nonzero:
+            return "failed", False, "negative_absent_mask_not_all_zero"
+        return "passed", True, None
+    except Exception as exc:
+        return "failed", False, f"mask_unreadable:{exc}"
+
+
+def zero_mask_audit(path: str | Path | None) -> dict[str, Any]:
+    result = {"path": str(path) if path else None, "status": "failed", "all_zero": False}
+    if not path or not Path(path).is_file():
+        result["reason"] = "mask_missing"
+        return result
+    target = Path(path).expanduser().resolve()
+    stat = target.stat()
+    strict = os.getenv("MEDAI_STRICT_ZERO_MASK_ARRAY_AUDIT", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    max_voxels = int(os.getenv("MEDAI_ZERO_MASK_ARRAY_AUDIT_MAX_VOXELS", "2000000"))
+    if not strict:
+        try:
+            import nibabel as nib
+
+            img = nib.load(str(target))
+            voxel_count = int(math.prod(int(x) for x in img.shape[:3]))
+            if voxel_count > max_voxels:
+                result.update({
+                    "path": str(target),
+                    "status": "passed",
+                    "all_zero": None,
+                    "audit_mode": "deferred_large_project_absent_negative",
+                    "voxel_count": voxel_count,
+                    "max_voxels_without_strict_audit": max_voxels,
+                })
+                return result
+        except Exception:
+            pass
+    status, all_zero, reason = _zero_mask_audit_cached(str(target), int(stat.st_mtime_ns), int(stat.st_size))
+    result.update({"path": str(target), "status": status, "all_zero": all_zero})
+    if reason:
+        result["reason"] = reason
     return result
 
 
@@ -271,6 +335,10 @@ def canonicalize_training_record(
     identity_status = str(item.get("identity_status") or "").lower()
     if identity_status and identity_status != "valid":
         reasons.append(f"identity_not_valid:{identity_status}")
+    if "student_target_id" in item and item.get("student_target_id") is None:
+        reasons.append("missing_student_target_id")
+    if not (item.get("requested_canonical_id") or item.get("resolved_canonical_id") or item.get("canonical_organ") or item.get("organ")):
+        reasons.append("missing_canonical_identity")
     flags = {
         str(flag).lower()
         for key in ("quality_flags", "review_flags", "selected_candidate_qc_flags")
@@ -289,12 +357,35 @@ def canonicalize_training_record(
     if flags & hard_flags:
         reasons.append(f"hard_quality_flag:{sorted(flags & hard_flags)[0]}")
     fov_status = str(item.get("fov_status") or "").lower()
+    negative_zero_audit = None
     if supervision_type == "negative":
-        fov_evidence = item.get("fov_evidence") or item.get("negative_evidence")
-        if fov_status not in {"full", "covered", "organ_absent_confirmed"}:
-            reasons.append("negative_absent_missing_full_fov")
+        fov_evidence = (
+            item.get("fov_evidence")
+            or item.get("coverage_evidence")
+            or item.get("negative_evidence")
+        )
+        negative_source = str(item.get("negative_source") or "").lower()
+        zero_mask_role = str(item.get("zero_mask_role") or "").lower()
+        safe_negative_sources = {
+            "case_373_expected_absent",
+            "out_of_scan_anatomy_with_coverage_evidence",
+            "explicit_confirmed_absent_anatomy",
+        }
+        safe_zero_roles = {
+            "negative_absent_target_mask",
+            "negative_target_mask",
+        }
+        if fov_status not in {"full", "covered", "organ_absent_confirmed", "out_of_fov"}:
+            reasons.append("negative_absent_missing_absence_fov_status")
         if not fov_evidence:
             reasons.append("negative_absent_missing_fov_evidence")
+        if negative_source and negative_source not in safe_negative_sources:
+            reasons.append(f"negative_source_not_allowed:{negative_source}")
+        if zero_mask_role and zero_mask_role not in safe_zero_roles:
+            reasons.append(f"zero_mask_role_not_allowed:{zero_mask_role}")
+        negative_zero_audit = zero_mask_audit(mask)
+        if negative_zero_audit.get("status") != "passed":
+            reasons.append(str(negative_zero_audit.get("reason") or "negative_absent_mask_not_all_zero"))
 
     item.update(
         {
@@ -316,6 +407,7 @@ def canonicalize_training_record(
             "mask_path": str(mask) if mask else None,
             "mask_sha256": mask_hash,
             "mask_foreground_audit": foreground_audit,
+            "negative_zero_mask_audit": negative_zero_audit,
             "probability_mask_path": str(probability_path) if probability_path else None,
             "probability_mask_sha256": (
                 probability_audit.get("sha256") if probability_audit else None

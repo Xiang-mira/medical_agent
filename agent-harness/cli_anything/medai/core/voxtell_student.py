@@ -1111,6 +1111,9 @@ class VoxTellStudent:
                     negative_source_shortfalls[source] = negative_source_shortfalls.get(source, 0) + count
                 for neg in negative_candidates:
                     organ = neg["organ"]
+                    if len(target_organs) == 373 and organ not in target_organs:
+                        negative_source_shortfalls[neg["negative_source"]] = negative_source_shortfalls.get(neg["negative_source"], 0) + 1
+                        continue
                     canonical_prompt = neg["prompt"]
                     prompt_variants = [neg["prompt"]]
                     item = _manifest_base_item(
@@ -1694,6 +1697,16 @@ def _manifest_base_item(
     doc: dict[str, Any],
     meta: dict[str, Any],
 ) -> dict[str, Any]:
+    organ_to_student_id = doc.get("organ_to_student_id", {}) or {}
+    target_organs = set(doc.get("target_organs", []) or [])
+    student_target_id = meta.get("student_target_id")
+    if student_target_id is None:
+        student_target_id = organ_to_student_id.get(organ)
+    if student_target_id is None and organ in target_organs:
+        student_target_id = list(doc.get("target_organs", []) or []).index(organ)
+    identity_status = meta.get("identity_status")
+    if not identity_status and student_target_id is not None and (not target_organs or organ in target_organs):
+        identity_status = "valid"
     return {
         "case_id": case_id,
         "dataset_type": "auto_fine_label_dataset",
@@ -1708,7 +1721,13 @@ def _manifest_base_item(
         "teacher_target_id": meta.get("teacher_target_id"),
         "teacher_output_name": meta.get("teacher_output_name") or meta.get("source_output_name") or meta.get("organ"),
         "teacher_output_file": meta.get("teacher_output_file"),
-        "student_target_id": doc.get("organ_to_student_id", {}).get(organ),
+        "student_target_id": student_target_id,
+        "requested_canonical_id": meta.get("requested_canonical_id") or organ,
+        "resolved_canonical_id": meta.get("resolved_canonical_id") or organ,
+        "source_local_label": meta.get("source_local_label") or organ,
+        "identity_status": identity_status,
+        "mapping_type": meta.get("mapping_type") or "target_space_exact",
+        "mapping_source": meta.get("mapping_source") or "configs/student_3d_prompt_target_organs.json",
         "target_mapping_policy": "teacher output/name -> canonical organ name -> student target id; teacher IDs are never reused as student IDs",
         "selected_model": meta.get("selected_model"),
         "source_model": meta.get("source_model", meta.get("selected_model")),
@@ -1775,6 +1794,13 @@ def _manifest_base_item(
         "source_metadata_available": bool(meta),
         "distillation_source": meta.get("selected_model") or meta.get("source_model"),
         "source_quality": meta.get("quality_status") or meta.get("grade", "unknown"),
+        "fov_status": meta.get("fov_status"),
+        "fov_evidence": meta.get("fov_evidence") or meta.get("coverage_evidence"),
+        "coverage_evidence": meta.get("coverage_evidence") or meta.get("fov_evidence"),
+        "absence_confidence": meta.get("absence_confidence"),
+        "negative_source": meta.get("negative_source"),
+        "zero_mask_role": meta.get("zero_mask_role"),
+        "negative_evidence": meta.get("negative_evidence"),
     }
 
 def find_voxtell_executable() -> str | None:

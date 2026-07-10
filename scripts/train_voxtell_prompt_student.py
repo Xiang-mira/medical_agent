@@ -1143,6 +1143,8 @@ def main() -> int:
         invalid_contract_rows = [
             index
             for index, row in enumerate(manifest_document.get("items") or [])
+            if float(row.get("training_weight") or 0.0) > 0.0
+            and row.get("distillation_eligible") is not False
             if row.get("contract_version") != TRAINING_CONTRACT_VERSION
             or row.get("training_eligible") is not True
         ]
@@ -1910,7 +1912,7 @@ def main() -> int:
         "checkpoint_selection": {
             "evaluation_interval": checkpoint_eval_interval,
             "patience": checkpoint_patience,
-            "best_task_objective": best_task_objective if math.isfinite(best_task_objective) else None,
+            "best_task_objective": best_task_score if math.isfinite(best_task_score) else None,
             "retention_anchor_baseline": retention_anchor_baseline,
             "best_new_supervision_foreground_dice": (
                 best_task_score if math.isfinite(best_task_score) else None

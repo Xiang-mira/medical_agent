@@ -174,6 +174,14 @@ def _pseudo_transition_detail(row: dict[str, Any], action: str) -> str:
 
 def _decorate_pseudo_label_record(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize mainline artifacts toward pseudo-label wording."""
+    organ = str(row.get("organ") or row.get("canonical_organ") or "").strip()
+    if organ:
+        row.setdefault("requested_canonical_id", organ)
+        row.setdefault("resolved_canonical_id", organ)
+        row.setdefault("source_local_label", organ)
+        row.setdefault("mapping_type", "target_space_exact")
+        row.setdefault("mapping_source", "configs/student_3d_prompt_target_organs.json")
+        row.setdefault("identity_status", "valid")
     target_type = str(row.get("target_type") or "").lower()
     action = _pseudo_transition_action(row)
     row["pseudo_label_transition_action"] = action

@@ -156,7 +156,9 @@ DEFAULT_VOXTELL_TRAIN_CMD = f'"{sys.executable}" "{PROJECT_ROOT / "scripts/train
 VOXTELL_TRAIN_CMD = os.getenv("MEDAI_VOXTELL_TRAIN_CMD", DEFAULT_VOXTELL_TRAIN_CMD).strip()
 ENABLE_VOXTELL_TRAINING = env_bool("MEDAI_ENABLE_VOXTELL_TRAINING", default=True)
 
-QWEN_MODEL    = PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"
+QWEN_MODEL    = Path(os.getenv("MEDAI_QWEN_VLM_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"))
+if not QWEN_MODEL.is_absolute():
+    QWEN_MODEL = PROJECT_ROOT / QWEN_MODEL
 VLLM_BASE_URL = "http://localhost:8000"
 MANAGE_OWN_VLLM = env_bool("MEDAI_MANAGE_OWN_VLLM", default=False)
 
@@ -3754,6 +3756,75 @@ def run_voxtell_student_quality_gate(round_idx: int, model_dir: Path, manifest_p
     return base
 
 
+def _mstep_manifest_contract_audit(manifest_path: Path, out_dir: Path) -> dict:
+    doc = _load_json(manifest_path)
+    items = doc.get("items") or []
+    failures: list[dict] = []
+    trainable_failures: list[dict] = []
+    for index, row in enumerate(items):
+        weight = float(row.get("training_weight") or 0.0)
+        distillation_on = row.get("distillation_eligible") is not False
+        is_trainable = weight > 0.0 and distillation_on
+        reasons: list[str] = []
+        if row.get("contract_version") != TRAINING_CONTRACT_VERSION:
+            reasons.append("missing_or_stale_contract_version")
+        if row.get("training_eligible") is not True:
+            reasons.extend(str(x) for x in (row.get("contract_failures") or []))
+            if not reasons:
+                reasons.append("training_eligible_false")
+        if reasons:
+            record = {
+                "row_index": index,
+                "case_id": row.get("case_id"),
+                "organ": row.get("organ"),
+                "target_type": row.get("target_type"),
+                "supervision_type": row.get("supervision_type"),
+                "training_weight": weight,
+                "distillation_eligible": distillation_on,
+                "failure_reason": ";".join(dict.fromkeys(reasons)),
+                "student_target_id": row.get("student_target_id"),
+                "requested_canonical_id": row.get("requested_canonical_id"),
+                "resolved_canonical_id": row.get("resolved_canonical_id"),
+                "fov_status": row.get("fov_status"),
+                "negative_source": row.get("negative_source"),
+                "zero_mask_role": row.get("zero_mask_role"),
+            }
+            failures.append(record)
+            if is_trainable:
+                trainable_failures.append(record)
+    audit = {
+        "stage": "mstep_manifest_contract_audit",
+        "status": "passed" if not trainable_failures else "failed",
+        "manifest_path": str(manifest_path),
+        "training_contract_version": TRAINING_CONTRACT_VERSION,
+        "total_rows": len(items),
+        "trainable_rows": sum(
+            1 for row in items
+            if float(row.get("training_weight") or 0.0) > 0.0
+            and row.get("distillation_eligible") is not False
+        ),
+        "failed_rows": len(failures),
+        "failed_trainable_rows": len(trainable_failures),
+        "blocking_failures_preview": trainable_failures[:50],
+        "policy": "Only rows with training_weight > 0 and distillation_eligible=True block M-step launch; zero-weight audit rows may remain non-trainable.",
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_contract_json(out_dir / "mstep_manifest_contract_audit.json", audit)
+    csv_path = out_dir / "mstep_manifest_contract_audit.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        fieldnames = [
+            "row_index", "case_id", "organ", "target_type", "supervision_type",
+            "training_weight", "distillation_eligible", "failure_reason",
+            "student_target_id", "requested_canonical_id", "resolved_canonical_id",
+            "fov_status", "negative_source", "zero_mask_role",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(failures)
+    audit["csv_path"] = str(csv_path)
+    return audit
+
+
 def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consolidation: bool = False) -> dict:
     """Run or plan the VoxTell-style 3D prompt student M-step.
 
@@ -3843,6 +3914,23 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
         return payload
+
+    contract_audit = _mstep_manifest_contract_audit(manifest_path, out_dir)
+    result["mstep_manifest_contract_audit"] = contract_audit
+    if contract_audit.get("status") != "passed":
+        result.update({
+            "status": "failed",
+            "training_status": "failed_mstep_manifest_contract_preflight",
+            "reason": "M-step manifest has trainable rows that fail the training-label contract.",
+            "gpu_training_launched": False,
+            "checkpoint_eligible_for_next_round": False,
+            "eligible_for_next_round_prompt_student": False,
+        })
+        log(
+            "M-step manifest contract preflight failed; training not launched. "
+            f"failed_trainable_rows={contract_audit.get('failed_trainable_rows')}"
+        )
+        return finish(result)
 
     novelty = manifest.get("novelty_audit") or {}
     if round_idx > 1 and novelty.get("decision") == "no_material_update":
