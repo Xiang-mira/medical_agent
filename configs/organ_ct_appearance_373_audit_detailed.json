@@ -1,0 +1,5680 @@
+{
+  "stage": "organ_ct_appearance_373_detailed_prompt_audit",
+  "status": "success",
+  "detailed_audit_status": "success",
+  "target_count": 373,
+  "entry_count": 373,
+  "issue_count": 0,
+  "formal_issue_count": 0,
+  "detailed_formal_issue_count": 0,
+  "audit_only_count": 15,
+  "rows": [
+    {
+      "organ": "abdominal_cavity",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "adrenal_gland_left",
+      "formal_selection_eligible": true,
+      "source": "project_key_organ_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "left upper retroperitoneum, superior and medial to the left kidney and near the diaphragmatic crus",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "adrenal_gland_right",
+      "formal_selection_eligible": true,
+      "source": "project_key_organ_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "right upper retroperitoneum, superior and medial to the right kidney, posterior to the liver and near the inferior vena cava",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "airway",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "airway_tree",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "airway_wall",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "anterior_eyeball_segment_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "anterior_eyeball_segment_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "anterior_scalene_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "anterior_scalene_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "aorta",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "thoracoabdominal midline to left paraspinal course, extending from the mediastinum toward the abdomen/pelvis depending on scan range",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_brachiocephalic",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_common_carotid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_common_carotid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_internal_carotid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_internal_carotid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_subclavian_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "artery_subclavian_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "arytenoid_cartilage",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "atrial_appendage_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "auditory_canal_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "auditory_canal_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "autochthon_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "autochthon_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "bladder",
+      "formal_selection_eligible": true,
+      "source": "project_key_organ_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "pelvis"
+      ],
+      "ct_location": "midline anterior pelvis, inferior to bowel loops and superior/posterior to pubic symphysis when pelvis is covered",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "blood",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "within vascular lumens, cardiac chambers, or venous sinuses that are covered by the CT field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "body",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "entire visible patient body envelope within the CT field of view, excluding surrounding air and table when possible",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "body_extremities",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "visible upper or lower extremity body envelope when limbs are included in the CT field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "body_trunc",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "visible torso/trunk external body envelope across thorax, abdomen, and pelvis, depending on scan range",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "bones",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "all visible skeletal structures within the CT field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "both_lips",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "brachiocephalic_trunk",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "brachiocephalic_vein_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "brachiocephalic_vein_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "brain",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "brain_ventricle",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "brainstem",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "breast_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "breast_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "bronchus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "buccal_mucosa",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "carotid_artery_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "carotid_artery_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "carpal",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "carpal_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "carpal_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "caudate_nucleus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cbd_stent",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "celiac_aa (celiac_artery)",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "celiac_trunk",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "central_sulcus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cerebellum",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cerebrospinal_fluid",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cervical_esophagus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cheek_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cheek_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "clavicula_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "clavicula_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cochlear_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cochlear_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "colon",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "peripheral abdomen and pelvis following the large-bowel frame",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "colostomy_bag",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_bile_duct",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_carotid_artery_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_carotid_artery_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_iliac_artery_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_iliac_artery_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_iliac_vein_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "common_iliac_vein_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "compact_bone",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "dense cortical shell of visible bones throughout the scanned region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "coronary_artery",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "costal_cartilages",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cricoid_cartilage",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "cricopharyngeus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "digastric_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "digastric_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "duodenum",
+      "formal_selection_eligible": true,
+      "source": "project_key_organ_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "upper abdomen, C-shaped course around the pancreatic head from gastric pylorus toward jejunum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "esophagus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "eye_lens_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "eye_lens_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "eyeball",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "eyeball_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "eyeball_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "face",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "fat",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "low-attenuation adipose tissue compartments in subcutaneous, visceral, mediastinal, pelvic, or marrow-adjacent spaces depending on scan range",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "femur_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "femur_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "fibula",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "fibula_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "fibula_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "fingers_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "fingers_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "frontal_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gall_bladder",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "right upper abdomen along the inferior liver surface",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gland_structure",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "named or visible glandular structures such as salivary, endocrine, breast, pancreatic, prostate, or other glandular targets within the scan range",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "glottis",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gluteus_maximus_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gluteus_maximus_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gluteus_medius_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gluteus_medius_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gluteus_minimus_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gluteus_minimus_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gonads",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "gray_matter",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "hard_palate",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "middle mediastinum within the thorax",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart_atrium_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart_atrium_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart_myocardium",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart_tissue",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart_ventricle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "heart_ventricle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "hepatic_vessel",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "within the liver and porta hepatis region of the upper abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "hip_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "hip_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "humerus_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "humerus_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "hyoid",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "hypopharynx",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "iliac_artery_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "iliac_artery_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "iliac_vena_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "iliac_vena_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "iliopsoas_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "iliopsoas_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "inferior_oblique_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "inferior_oblique_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "inferior_pharyngeal_constrictor",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "inferior_rectus_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "inferior_rectus_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "inferior_vena_cava",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "right paraspinal retroperitoneal region, anterior to vertebral bodies and usually right of the aorta",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "insular_cortex",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "internal_capsule",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "internal_carotid_artery_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "internal_carotid_artery_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "internal_jugular_vein_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "internal_jugular_vein_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "intestine",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "kidney",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "kidney_cortex",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "kidney_left",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "left retroperitoneum lateral to the spine, inferior to the spleen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "kidney_medulla",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "kidney_pelvicalyceal_system",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "kidney_right",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "right retroperitoneum lateral to the spine, inferior to the liver",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lacrimal_gland_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lacrimal_gland_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "larynx",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lateral_pterygoid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lateral_pterygoid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lateral_rectus_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lateral_rectus_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lentiform_nucleus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "levator_palpebrae_superioris_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "levator_palpebrae_superioris_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "levator_scapulae_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "levator_scapulae_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen",
+        "thorax"
+      ],
+      "ct_location": "right upper abdomen under the diaphragm and rib cage, often extending across midline",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_hepatic_vein",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "within the liver draining toward the inferior vena cava",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_portal_vein",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "porta hepatis and central liver branching into left and right portal veins",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_2",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_3",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_4",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_5",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_6",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_7",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "liver_segment_8",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "bilateral thoracic cavities inside the rib cage",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_lower_left_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_lower_right_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_middle_right_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_pulmonary_arteries",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_pulmonary_veins",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_trachea_bronchia",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_upper_left_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_upper_right_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "lung_vessels",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "mammary_gland_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "mammary_gland_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "mandible",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "masseter_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "masseter_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "medial_pterygoid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "medial_pterygoid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "medial_rectus_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "medial_rectus_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "mediastinal_tissue",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "mediastinum",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "metacarpal",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "metacarpal_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "metacarpal_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "metatarsal",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "metatarsal_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "metatarsal_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "middle_pharyngeal_constrictor",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "middle_scalene_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "middle_scalene_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "muscle",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "skeletal muscle compartments visible in the scan, bounded by fascia and adjacent bones or organs",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "muscle_of_head",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "visible muscles of the head and face, including masticator, facial-expression, extraocular, tongue-associated, or scalp-related muscle groups when covered",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "nasal_cavity_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "nasal_cavity_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "nasopharynx",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "occipital_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "optic_chiasm",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "optic_nerve_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "optic_nerve_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "oral_cavity",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "oropharynx",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pancreas",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "upper retroperitoneal abdomen posterior to the stomach, from duodenal curve toward splenic hilum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pancreas_body",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pancreas_head",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pancreas_tail",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pancreatic_duct",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "parietal_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "parotid_gland_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "parotid_gland_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "parotid_glands",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "patella",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "patella_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "patella_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pericardium",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "phalanges_feet",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "phalanges_hand",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pituitary_gland",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "platysma_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "platysma_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "portal_vein_and_splenic_vein",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "postcava",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "right paraspinal retroperitoneal region, anterior to vertebral bodies and usually right of the aorta",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "posterior_eyeball_segment_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "posterior_eyeball_segment_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "posterior_scalene_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "posterior_scalene_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "prevertebral_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "prevertebral_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "prostate",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "prosthetic_breast_implant",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "psoas_major_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "psoas_major_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pulmonary_artery",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "pulmonary_vein",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "radius",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "radius_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "radius_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rectum",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rectus_abdominis_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rectus_abdominis_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "renal_vein_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "renal_vein_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_cartilage",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_10",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_11",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_12",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_2",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_3",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_4",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_5",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_6",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_7",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_8",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_left_9",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_10",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_11",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_12",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_2",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_3",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_4",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_5",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_6",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_7",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_8",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "rib_right_9",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sacrum",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "scalp",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "scapula_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "scapula_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "seminal_vesicle",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "septum_pellucidum",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sigmoid_colon",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "skin",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "thin superficial soft-tissue envelope at the external body surface wherever covered by CT",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "skull",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "small_bowel",
+      "formal_selection_eligible": true,
+      "source": "project_key_organ_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "central abdomen and pelvis when covered, internal to the colonic frame and mesentery",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "soft_palate",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "spinal_canal",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "unknown"
+      ],
+      "ct_location": "spinal axis within the scanned body region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "spinal_cord",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "unknown"
+      ],
+      "ct_location": "spinal axis within the scanned body region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "spleen",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen",
+        "thorax"
+      ],
+      "ct_location": "left upper abdomen beneath the left hemidiaphragm and ribs",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "spongy_bone",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "trabecular/cancellous portions within visible bones, especially vertebral bodies, pelvis, ribs, sternum, and long-bone metaphyses when covered",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sterno_thyroid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sterno_thyroid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sternocleidomastoid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sternocleidomastoid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sternum",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sternum_corpus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "sternum_manubrium",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "stomach",
+      "formal_selection_eligible": true,
+      "source": "labelcritic_seed",
+      "source_type": "official_labelcritic_seed",
+      "validation_status": "eligible",
+      "capability_level": "runtime_supported",
+      "automatic_failure_action": "allow_official_benchmark_path",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "left/central upper abdomen between esophagus and duodenum, below the diaphragm",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "styloid_process_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "styloid_process_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "subarachnoid_space",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "subclavian_artery_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "subclavian_artery_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "subcutaneous_adipose_tissue",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "fat-density layer between skin surface and deep fascia/body wall throughout the visible body surface",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "submandibular_gland_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "submandibular_gland_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "submandibular_glands",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "superior_mesenteric_artery",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "superior_oblique_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "superior_oblique_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "superior_rectus_muscle_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "superior_rectus_muscle_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "superior_vena_cava",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen"
+      ],
+      "ct_location": "abdomen and retroperitoneum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "supraglottis",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tarsal",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tarsal_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tarsal_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "temporal_lobe",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "temporalis_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "temporalis_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thalamus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thoracic_cavity",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thymus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thyrohyoid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thyrohyoid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thyroid_cartilage",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thyroid_gland",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thyroid_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "thyroid_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tibia",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tibia_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tibia_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "toes_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "toes_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "tongue",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "trachea",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and upper aerodigestive tract",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "trapezius_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "trapezius_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax or upper mediastinum",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "ulna",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "ulna_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "ulna_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "extremity"
+      ],
+      "ct_location": "appendicular skeleton or extremity field of view",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "uterocervix",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "uterus",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "pelvis and lower abdomen",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "veins",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "abdomen",
+        "extremity",
+        "head_neck",
+        "pelvis",
+        "thorax"
+      ],
+      "ct_location": "visible venous tubular structures in head/neck, thorax, abdomen, pelvis, or extremities depending on scan coverage",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "venous_sinuses",
+      "formal_selection_eligible": false,
+      "source": "project_broad_category_prompt",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "withhold_or_audit_only",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "intracranial dural venous sinus spaces along the skull/dura, such as sagittal, transverse, sigmoid, cavernous, or related sinuses when covered",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C2",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C3",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C4",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C5",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C6",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_C7",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "neck and cervical spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_L1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "abdomen/pelvis and lumbosacral spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_L2",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "abdomen/pelvis and lumbosacral spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_L3",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "abdomen/pelvis and lumbosacral spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_L4",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "abdomen/pelvis and lumbosacral spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_L5",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "abdomen/pelvis and lumbosacral spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_S1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "abdomen",
+        "pelvis"
+      ],
+      "ct_location": "abdomen/pelvis and lumbosacral spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T1",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T10",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T11",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T12",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T2",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T3",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T4",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T5",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T6",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T7",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T8",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "vertebrae_T9",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "thorax"
+      ],
+      "ct_location": "thorax and thoracic spine",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "white_matter",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "zygomatic_arch_left",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    },
+    {
+      "organ": "zygomatic_arch_right",
+      "formal_selection_eligible": true,
+      "source": "generated_from_project_config",
+      "source_type": "project_extension",
+      "validation_status": "eligible",
+      "capability_level": "class_agnostic_extrapolation",
+      "automatic_failure_action": "allow_class_agnostic_pairwise",
+      "expected_body_regions": [
+        "head_neck"
+      ],
+      "ct_location": "head and craniofacial region",
+      "issue_count": 0,
+      "issues": []
+    }
+  ]
+}

@@ -40,6 +40,75 @@ def test_description_v2_and_colon_rules() -> None:
         assert phrase in text
 
 
+def test_prompt_bank_detailed_audit_has_no_formal_generic_gaps() -> None:
+    doc = json.loads((ROOT / "configs" / "organ_ct_appearance_373.json").read_text())
+    detailed = json.loads((ROOT / "configs" / "organ_ct_appearance_373_audit_detailed.json").read_text())
+    bank = doc["organ_ct_appearance"]
+    assert detailed["target_count"] == 373
+    assert detailed["entry_count"] == 373
+    assert detailed["detailed_audit_status"] == "success"
+    assert detailed["detailed_formal_issue_count"] == 0
+    assert detailed["audit_only_count"] == 15
+    assert bank["duodenum"]["expected_body_regions"] == ["abdomen"]
+    assert "head_neck" not in bank["duodenum"]["expected_body_regions"]
+    for organ in (
+        "pancreas", "aorta", "adrenal_gland_left", "adrenal_gland_right",
+        "duodenum", "colon", "small_bowel", "stomach", "spleen",
+        "kidney_left", "kidney_right", "liver", "bladder",
+    ):
+        entry = bank[organ]
+        assert entry["formal_selection_eligible"] is True
+        assert entry["validation_status"] == "eligible"
+        assert entry["ct_location"]
+        assert entry["ct_appearance"]
+        assert entry["morphology"]
+        assert entry["adjacent_structures"]
+        assert entry["common_failure_modes"]
+        assert entry.get("penalty_rules") or entry.get("rejection_rules")
+
+
+def test_readiness_coverage_uses_organ_ct_appearance_entries() -> None:
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from check_labelcritic_25case_readiness import target_coverage_audit
+
+    coverage = target_coverage_audit()
+    assert coverage["status"] == "passed"
+    assert coverage["target_count"] == 373
+    assert coverage["appearance_entry_count"] == 373
+    assert coverage["missing_appearance_entry_count"] == 0
+    assert coverage["generic_prompt_fallback_count"] == 0
+    assert coverage["runtime_only_unverified_count"] == 0
+    assert coverage["formal_selection_eligible_count"] == 358
+    assert coverage["audit_only_count"] == 15
+
+
+def test_labelcritic_compare_no_dice_check_reaches_driver_command(tmp_path: Path) -> None:
+    from cli_anything.medai.core.labelcritic_wrapper import run_labelcritic_compare
+
+    ct = tmp_path / "ct.nii.gz"
+    a = tmp_path / "a.nii.gz"
+    b = tmp_path / "b.nii.gz"
+    arr = np.zeros((8, 8, 8), dtype=np.uint8)
+    arr[2:5, 2:5, 2:5] = 1
+    nib.save(nib.Nifti1Image(arr.astype(np.int16), np.eye(4)), ct)
+    nib.save(nib.Nifti1Image(arr, np.eye(4)), a)
+    nib.save(nib.Nifti1Image(np.roll(arr, 1, axis=0), np.eye(4)), b)
+
+    result = run_labelcritic_compare(
+        ct,
+        a,
+        b,
+        "liver",
+        tmp_path / "compare.json",
+        backend="stub",
+        no_dice_check=True,
+    )
+    assert "--no-dice-check" in result["command"]
+    assert result["labelcritic_options"]["no_dice_check"] is True
+    assert result["labelcritic_options"]["method_contract"] == "official_ap_projection_no_dice_gate_dual_confirmation"
+
+
 def test_short_abdominal_ct_does_not_claim_full_thorax(tmp_path: Path) -> None:
     from cli_anything.medai.core.scan_coverage import infer_scan_coverage
 

@@ -191,6 +191,38 @@ def _read_decision(csv_path: Path) -> dict:
     }
 
 
+def _read_csv_rows(csv_path: Path) -> list[dict]:
+    if not csv_path.exists():
+        return []
+    try:
+        return list(csv.DictReader(csv_path.open(newline="", encoding="utf-8")))
+    except Exception:
+        return []
+
+
+def _failure_taxonomy(
+    *,
+    result_status: str,
+    projection_ok: bool,
+    dice_gate_enabled: bool,
+    csv_rows: list[dict],
+    decision: dict,
+    audit_only: bool,
+) -> list[str]:
+    failures: list[str] = []
+    if not projection_ok:
+        failures.append("projection_failed")
+    if audit_only:
+        failures.append("audit_only_target")
+    if result_status == "success" and dice_gate_enabled and not csv_rows:
+        failures.append("dice_gate_skipped")
+    if str(decision.get("parse_status") or "") in {"missing_csv", "missing_driver_result"}:
+        failures.append("parser_failed")
+    if decision.get("winner") == "uncertain":
+        failures.append("vlm_uncertain")
+    return list(dict.fromkeys(failures))
+
+
 def _is_left_right_join_only_failure(stderr: str, stdout: str, organ: str, projection_dir: Path) -> bool:
     """Treat vendor left/right join failure as non-fatal for one-organ pair checks.
 
@@ -223,6 +255,7 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://localhost")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--dice-threshold", type=float, default=0.5)
+    parser.add_argument("--no-dice-check", action="store_true")
     args = parser.parse_args()
     vendor_lock = _verify_vendor_lock()
 
@@ -289,6 +322,9 @@ def main() -> None:
             "projection_command": projection_cmd,
             "projection_stdout_tail": projection.stdout[-4000:],
             "projection_stderr_tail": projection.stderr[-4000:],
+            "csv_row_count": 0,
+            "raw_csv_rows": [],
+            "failure_taxonomy": ["projection_failed"],
         }
     else:
         sys.path.insert(0, str(VENDOR))
@@ -296,9 +332,31 @@ def main() -> None:
 
         descriptions = dict(ed.DescriptionsED)
         project_extension_description = None
+        audit_only_comparison = False
+        formal_selection_eligible = True
         if args.organ not in descriptions:
             entry = description_entry
-            if not isinstance(entry, dict) or not entry.get("formal_selection_eligible"):
+            if not isinstance(entry, dict):
+                result = {
+                    "stage": "official_labelcritic_pair",
+                    "status": "blocked",
+                    "reason": "description_missing_or_invalid",
+                    "organ": args.organ,
+                }
+                Path(args.output_json).write_text(
+                    json.dumps(result, indent=2, sort_keys=True) + "\n"
+                )
+                print(json.dumps(result, indent=2))
+                raise SystemExit(2)
+            formal_selection_eligible = bool(entry.get("formal_selection_eligible"))
+            audit_only_comparison = (
+                not formal_selection_eligible
+                and str(entry.get("automatic_failure_action") or "") in {
+                    "withhold_or_audit_only",
+                    "audit_only_withhold_from_formal_selection",
+                }
+            )
+            if not formal_selection_eligible and not audit_only_comparison:
                 result = {
                     "stage": "official_labelcritic_pair",
                     "status": "blocked",
@@ -317,8 +375,18 @@ def main() -> None:
             if args.organ in ed.DescriptionsED
             else _project_extension_compare_prompt(args.organ, project_extension_description or descriptions[args.organ])
         )
+        rendered_description = (
+            project_extension_description
+            if project_extension_description is not None
+            else str(descriptions.get(args.organ) or "")
+        )
+        prompt_path = work_dir / "labelcritic_prompt.txt"
+        prompt_path.write_text(str(text_multi_image_prompt_2), encoding="utf-8")
+        description_rendered_path = work_dir / "labelcritic_description.txt"
+        description_rendered_path.write_text(rendered_description, encoding="utf-8")
 
         base_url = f"{args.base_url.rstrip('/')}:{args.port}/v1"
+        dice_gate_enabled = not args.no_dice_check
         ed.SystematicComparisonLMDeploySepFigures(
             pth=str(projection_dir / args.organ),
             base_url=base_url,
@@ -333,14 +401,23 @@ def main() -> None:
             text_multi_image_prompt_2=text_multi_image_prompt_2,
             dual_confirmation=True,
             conservative_dual=False,
-            dice_check=True,
+            dice_check=dice_gate_enabled,
             dice_th=args.dice_threshold,
             csv_file=str(csv_path),
             restart=True,
             examples=0,
         )
+        csv_rows = _read_csv_rows(csv_path)
         decision = _read_decision(csv_path)
         structured_assessment = _structured_assessment(decision, candidate_context)
+        failure_taxonomy = _failure_taxonomy(
+            result_status="success",
+            projection_ok=True,
+            dice_gate_enabled=dice_gate_enabled,
+            csv_rows=csv_rows,
+            decision=decision,
+            audit_only=audit_only_comparison,
+        )
         result = {
             "stage": "official_labelcritic_pair",
             "status": "success",
@@ -350,11 +427,27 @@ def main() -> None:
             "mask_b_dir": str(Path(args.mask_b_dir).resolve()),
             "projection_backend": "official_labelcritic_ap_axis_1",
             "centered_slice_fallback_used": False,
-            "dice_gate_enabled": True,
+            "dice_gate_enabled": dice_gate_enabled,
+            "dice_threshold": args.dice_threshold,
             "dual_confirmation_enabled": True,
             "order_reversal_enabled": True,
             "order_reversal_backend": "official_dual_confirmation_y1_y2_and_y2_y1",
             "candidate_identity_exposed_to_vlm": False,
+            "formal_selection_eligible": formal_selection_eligible,
+            "audit_only_comparison": audit_only_comparison,
+            "automatic_failure_action": (
+                description_entry.get("automatic_failure_action")
+                if isinstance(description_entry, dict)
+                else None
+            ),
+            "csv_row_count": len(csv_rows),
+            "raw_csv_rows": csv_rows[-5:],
+            "raw_answer": csv_rows[-1].get("answer") if csv_rows else None,
+            "raw_answer_1": csv_rows[-1].get("answer_1") if csv_rows else None,
+            "raw_answer_2": csv_rows[-1].get("answer_2") if csv_rows else None,
+            "failure_taxonomy": failure_taxonomy,
+            "prompt_path": str(prompt_path),
+            "description_rendered_path": str(description_rendered_path),
             "vendor_lock": vendor_lock,
             "description_source": (
                 "official_labelcritic_seed"

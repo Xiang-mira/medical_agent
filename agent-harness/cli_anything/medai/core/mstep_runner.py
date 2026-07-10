@@ -121,13 +121,27 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                 if not schema_supported:
                     training_weight_value = 0.0
                     distillation_eligible_value = False
+                unsupported_target_type_value = None
                 try:
                     target_type_value = canonical_target_type(meta.get("target_type", "hard"))
                 except TrainingContractError:
-                    target_type_value = str(meta.get("target_type", "hard")).lower()
+                    unsupported_target_type_value = str(meta.get("target_type", "hard")).lower()
+                    # Rejected / unresolved / partial-FOV rows are audit records,
+                    # not trainable supervision. Keep a canonical placeholder so
+                    # the training-contract normalizer can serialize the row into
+                    # exclusions instead of crashing at the end of a long E-step.
+                    target_type_value = "positive_hard"
+                    training_weight_value = 0.0
+                    distillation_eligible_value = False
                 probability_path_value = meta.get("probability_mask_path")
                 probability_path_exists = bool(probability_path_value and Path(str(probability_path_value)).exists())
-                if not schema_supported:
+                if unsupported_target_type_value is not None:
+                    training_gate_decision = "exclude_unsupported_target_type"
+                    training_gate_policy = (
+                        "Rejected, unresolved, and partial-FOV pseudo-label rows "
+                        "are audit-only and are excluded from student training."
+                    )
+                elif not schema_supported:
                     training_gate_decision = "exclude_unsupported_schema"
                     training_gate_policy = "Unsupported scoring schemas require rescoring before student training."
                 elif grade_value in {"A", "B"} and target_type_value == "positive_hard" and training_weight_value > 0.0:
@@ -204,6 +218,7 @@ def build_training_manifest(updated_annotations_root: str | Path, output_manifes
                     "decision_status": meta.get("decision_status"),
                     "decision_reasons": meta.get("decision_reasons", []),
                     "target_type": target_type_value,
+                    "legacy_target_type": unsupported_target_type_value or meta.get("target_type"),
                     "training_gate_decision": training_gate_decision,
                     "training_gate_policy": training_gate_policy,
                     "probability_mask_path": probability_path_value,

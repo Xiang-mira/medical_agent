@@ -641,7 +641,7 @@ def completed_cases(round_idx: int) -> set:
             if any(
                 isinstance(item, dict)
                 and item.get("organ")
-                and item.get("publication_status") != "rejected_but_recorded"
+                and item.get("publication_status") not in {"rejected_but_recorded", "withheld_unresolved"}
                 and not (updated_dir / f"{item['organ']}.nii.gz").is_file()
                 for item in selected_organs
             ):
@@ -905,6 +905,16 @@ def write_round_run_spec(round_idx: int) -> dict:
         code_commit_sha=_git_commit_sha(),
         protected_organs=tuple(protocol.get("protected_organs") or []),
     ).to_dict()
+    state_path = OUTPUT_ROOT / f"round{round_idx}" / "round_state.json"
+    existing_state = _load_json(state_path)
+    existing_spec = existing_state.get("run_spec") if isinstance(existing_state, dict) else None
+    if isinstance(existing_spec, dict) and existing_spec != spec:
+        comparable_existing = dict(existing_spec)
+        comparable_new = dict(spec)
+        old_code_sha = comparable_existing.pop("code_commit_sha", None)
+        comparable_new.pop("code_commit_sha", None)
+        if comparable_existing == comparable_new:
+            spec["code_commit_sha"] = old_code_sha
     write_contract_json(
         OUTPUT_ROOT / f"round{round_idx}" / "run_spec.json",
         spec,
@@ -1899,6 +1909,210 @@ def _cohort_coverage(
     return coverage, failures, not_applicable
 
 
+def _labelcritic_failure_taxonomy(compare_doc: dict) -> list[str]:
+    failures = list(compare_doc.get("failure_taxonomy") or [])
+    projection = compare_doc.get("projection") or {}
+    decision = compare_doc.get("decision") or {}
+    if compare_doc.get("status") not in {"success", "stub", "dry_run"}:
+        failures.append("labelcritic_call_failed")
+    if projection.get("status") == "failed":
+        failures.append("projection_failed")
+    if int(compare_doc.get("csv_row_count") or 0) == 0 and (compare_doc.get("labelcritic_options") or {}).get("no_dice_check") is False:
+        failures.append("dice_gate_skipped")
+    if decision.get("winner") == "uncertain":
+        failures.append("vlm_uncertain")
+    if decision.get("parse_status") in {"missing_csv", "missing_driver_result"}:
+        failures.append("parser_failed")
+    if compare_doc.get("audit_only_comparison"):
+        failures.append("audit_only_target")
+    if str(compare_doc.get("prompt_source") or "") in {"fallback_generic", "generic_373_prompt_fallback"}:
+        failures.append("prompt_too_generic")
+    return list(dict.fromkeys(str(x) for x in failures if x))
+
+
+def build_labelcritic_diagnosis(round_idx: int) -> dict:
+    estep_root = OUTPUT_ROOT / f"round{round_idx}" / "estep"
+    out_dir = estep_root / "labelcritic_diagnosis"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, object]] = []
+    for path in sorted(estep_root.rglob("*.json")):
+        if "compare_cache" in path.parts:
+            continue
+        try:
+            doc = _load_json(path)
+        except Exception:
+            continue
+        if not isinstance(doc, dict) or doc.get("stage") != "labelcritic":
+            continue
+        decision = doc.get("decision") or {}
+        projection = doc.get("projection") or {}
+        failures = _labelcritic_failure_taxonomy(doc)
+        rows.append({
+            "path": str(path),
+            "case_id": next((part for part in path.parts if str(part).startswith("PanTS_")), ""),
+            "organ": doc.get("organ"),
+            "status": doc.get("status"),
+            "projection_status": projection.get("status"),
+            "dice_gate_enabled": not bool((doc.get("labelcritic_options") or {}).get("no_dice_check")),
+            "csv_row_count": doc.get("csv_row_count"),
+            "raw_answer": doc.get("raw_answer"),
+            "raw_answer_1": doc.get("raw_answer_1"),
+            "raw_answer_2": doc.get("raw_answer_2"),
+            "winner": decision.get("winner"),
+            "parse_status": decision.get("parse_status"),
+            "decision": decision.get("decision"),
+            "should_enter_student_training": decision.get("should_enter_student_training"),
+            "prompt_hash": doc.get("rendered_organ_prompt_hash") or doc.get("organ_description_hash"),
+            "prompt_source": doc.get("prompt_source"),
+            "model_id": ((doc.get("service") or {}).get("model") or os.getenv("MEDAI_LABELCRITIC_MODEL_ID", "unknown")),
+            "timeout": doc.get("status") == "timed_out",
+            "uncertain_reason": decision.get("reason") if decision.get("winner") == "uncertain" else "",
+            "failure_taxonomy": failures,
+        })
+    counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        for failure in row["failure_taxonomy"]:
+            counts[str(failure)] += 1
+    payload = {
+        "stage": "labelcritic_failure_taxonomy",
+        "status": "success",
+        "round": round_idx,
+        "num_compare_artifacts": len(rows),
+        "failure_counts": dict(sorted(counts.items())),
+        "rows": rows,
+        "interpretation": "LabelCritic diagnosis for pseudo-label selection plumbing; not GT accuracy.",
+    }
+    (out_dir / "labelcritic_failure_taxonomy.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with (out_dir / "labelcritic_failure_taxonomy.csv").open("w", newline="", encoding="utf-8") as f:
+        fieldnames = [
+            "path", "case_id", "organ", "status", "projection_status",
+            "dice_gate_enabled", "csv_row_count", "raw_answer", "raw_answer_1",
+            "raw_answer_2", "winner", "parse_status", "decision",
+            "should_enter_student_training", "prompt_hash", "prompt_source",
+            "model_id", "timeout", "uncertain_reason", "failure_taxonomy",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({**row, "failure_taxonomy": json.dumps(row["failure_taxonomy"], ensure_ascii=False)})
+    return payload
+
+
+def _key_organ_failure_reason(
+    row: dict,
+    selected_item: dict | None,
+    trainable_positive_keys: set[tuple[str, str]],
+) -> str:
+    case_id = str(row.get("case_id") or "")
+    organ = str(row.get("organ") or "")
+    if (case_id, organ) in trainable_positive_keys:
+        return "usable_trainable_positive"
+    if not selected_item:
+        if int(row.get("candidate_count") or 0) <= 0:
+            return "no_candidate"
+        if row.get("labelcritic_uncertain"):
+            return "labelcritic_uncertain"
+        if str(row.get("selection_status") or "") != "selected":
+            return "selection_inconclusive_or_rejected"
+        return "missing_selected_metadata"
+    if not (selected_item.get("final_mask") or selected_item.get("mask_path")):
+        if str(selected_item.get("publication_status") or "") == "rejected_but_recorded":
+            return "published_as_rejected_no_trainable_mask"
+        return "missing_final_mask"
+    if str(selected_item.get("shapekit_status") or "") in {"failed", "postprocess_failed", "fallback_original"}:
+        return "shapekit_failed"
+    if row.get("labelcritic_uncertain"):
+        return "labelcritic_uncertain"
+    if str(selected_item.get("target_type") or row.get("target_type") or "") in {"partial_fov", "withheld_uncertain", "unresolved_visible", "rejected"}:
+        return str(selected_item.get("target_type") or row.get("target_type"))
+    if selected_item.get("distillation_eligible") is False:
+        return str(selected_item.get("distillation_exclusion_reason") or "distillation_eligible_false")
+    try:
+        if float(selected_item.get("training_weight") or 0.0) <= 0.0:
+            return "training_weight_zero"
+    except Exception:
+        return "invalid_training_weight"
+    return "manifest_metadata_mismatch"
+
+
+def _write_key_organ_coverage_diagnosis(
+    round_idx: int,
+    selection_rows: list[dict],
+    selected_by_key: dict[tuple[str, str], dict],
+    trainable_positive_keys: set[tuple[str, str]],
+    key_organs: list[str],
+) -> dict:
+    out_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep"
+    rows: list[dict[str, object]] = []
+    for row in selection_rows:
+        organ = str(row.get("organ") or "")
+        if organ not in key_organs:
+            continue
+        case_id = str(row.get("case_id") or "")
+        selected = selected_by_key.get((case_id, organ))
+        reason = _key_organ_failure_reason(row, selected, trainable_positive_keys)
+        rows.append({
+            "case_id": case_id,
+            "organ": organ,
+            "expected_presence": row.get("expected_presence"),
+            "fov_status": row.get("fov_status"),
+            "candidate_count": row.get("candidate_count"),
+            "candidate_models": row.get("candidate_models", []),
+            "comparison_candidate_models": row.get("comparison_candidate_models", []),
+            "selection_status": row.get("selection_status"),
+            "selection_method": row.get("selection_method"),
+            "target_type": row.get("target_type"),
+            "grade": row.get("grade"),
+            "mask_exists": bool(
+                selected
+                and (selected.get("final_mask") or selected.get("mask_path"))
+                and Path(str(selected.get("final_mask") or selected.get("mask_path"))).exists()
+            ),
+            "trainable_positive": (case_id, organ) in trainable_positive_keys,
+            "training_weight": (selected or row).get("training_weight"),
+            "distillation_eligible": (selected or row).get("distillation_eligible"),
+            "distillation_exclusion_reason": (selected or row).get("distillation_exclusion_reason"),
+            "training_gate_decision": (selected or row).get("training_gate_decision"),
+            "shapekit_status": (selected or row).get("shapekit_status"),
+            "labelcritic_used": row.get("labelcritic_used"),
+            "labelcritic_compare_used": row.get("labelcritic_compare_used"),
+            "labelcritic_uncertain": row.get("labelcritic_uncertain"),
+            "failure_reason": reason,
+        })
+    reason_counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        reason_counts[str(row["failure_reason"])] += 1
+    payload = {
+        "stage": "key_organ_coverage_diagnosis",
+        "status": "success",
+        "round": round_idx,
+        "num_rows": len(rows),
+        "failure_reason_counts": dict(sorted(reason_counts.items())),
+        "rows": rows,
+        "policy": "Expected-present organs without reliable masks remain withheld; they are never converted to absent-negative zero masks.",
+    }
+    (out_dir / "key_organ_coverage_diagnosis.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with (out_dir / "key_organ_coverage_diagnosis.csv").open("w", newline="", encoding="utf-8") as f:
+        fieldnames = [
+            "case_id", "organ", "expected_presence", "fov_status", "candidate_count",
+            "candidate_models", "comparison_candidate_models", "selection_status",
+            "selection_method", "target_type", "grade", "mask_exists",
+            "trainable_positive", "training_weight", "distillation_eligible",
+            "distillation_exclusion_reason", "training_gate_decision",
+            "shapekit_status", "labelcritic_used", "labelcritic_compare_used",
+            "labelcritic_uncertain", "failure_reason",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({
+                **row,
+                "candidate_models": json.dumps(row.get("candidate_models", []), ensure_ascii=False),
+                "comparison_candidate_models": json.dumps(row.get("comparison_candidate_models", []), ensure_ascii=False),
+            })
+    return payload
+
+
 def _manifest_trainable_positive_summary(
     manifest_path: Path | None,
     key_organs: list[str],
@@ -2187,6 +2401,14 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
     cohort_coverage, cohort_coverage_failures, fov_not_applicable_key_organs = _cohort_coverage(
         key_organs, selection_rows, selected_by_key, trainable_positive_keys=trainable_positive_keys
     )
+    key_organ_diagnosis = _write_key_organ_coverage_diagnosis(
+        round_idx,
+        selection_rows,
+        selected_by_key,
+        trainable_positive_keys,
+        key_organs,
+    )
+    labelcritic_diagnosis = build_labelcritic_diagnosis(round_idx)
     manifest_required_organs = {
         organ
         for organ, counts in cohort_coverage.items()
@@ -2230,6 +2452,42 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         and geometry_error_labels == 0
         and ab_nonzero > 0
     )
+    artifact_completeness_gate = {
+        "status": "success" if (
+            estep_result.get("status") == "success"
+            and quality_contract_mismatches == 0
+            and fov_policy_mismatches == 0
+            and missing_case_metadata == 0
+        ) else "failed",
+        "quality_contract_mismatches": quality_contract_mismatches,
+        "fov_policy_mismatches": fov_policy_mismatches,
+        "missing_case_metadata": missing_case_metadata,
+    }
+    mstep_debug_gate = {
+        "status": "success" if (
+            artifact_completeness_gate["status"] == "success"
+            and geometry_error_labels == 0
+            and ab_nonzero > 0
+        ) else "failed",
+        "num_trainable_positive_items": manifest_positive_summary.get("num_trainable_positive_items"),
+        "ab_nonzero": ab_nonzero,
+        "metadata_mismatch_count": metadata_mismatch_count,
+        "metadata_mismatch_policy": (
+            "non_blocking_for_debug_mstep_when_trainable_manifest_items_are_valid; "
+            "still blocks formal_round2_gate"
+        ),
+        "geometry_error_labels": geometry_error_labels,
+        "policy": "Allows student debug M-step on reliable pseudo labels while formal Round2 replacement remains blocked.",
+    }
+    formal_round2_gate = {
+        "status": "success" if passed else "failed",
+        "reason": None if passed else (
+            "cohort_key_organ_coverage_failed" if cohort_coverage_failures else
+            "formal_estep_gate_failed"
+        ),
+        "requires_key_organ_coverage": True,
+        "requires_labelcritic_shape_student_convergence": True,
+    }
     gate = {
         "stage": "formal_estep_gate",
         "status": "success" if passed else "failed",
@@ -2241,6 +2499,19 @@ def formal_estep_gate(round_idx: int, estep_result: dict, manifest_path: Path | 
         "key_organ_coverage": key_coverage,
         "missing_key_organs": missing_key_organs,
         "manifest_trainable_positive_summary": manifest_positive_summary,
+        "artifact_completeness_gate": artifact_completeness_gate,
+        "mstep_debug_gate": mstep_debug_gate,
+        "formal_round2_gate": formal_round2_gate,
+        "key_organ_coverage_diagnosis": {
+            "path_json": str(OUTPUT_ROOT / f"round{round_idx}" / "estep" / "key_organ_coverage_diagnosis.json"),
+            "path_csv": str(OUTPUT_ROOT / f"round{round_idx}" / "estep" / "key_organ_coverage_diagnosis.csv"),
+            "failure_reason_counts": key_organ_diagnosis.get("failure_reason_counts", {}),
+        },
+        "labelcritic_diagnosis": {
+            "path_json": str(OUTPUT_ROOT / f"round{round_idx}" / "estep" / "labelcritic_diagnosis" / "labelcritic_failure_taxonomy.json"),
+            "path_csv": str(OUTPUT_ROOT / f"round{round_idx}" / "estep" / "labelcritic_diagnosis" / "labelcritic_failure_taxonomy.csv"),
+            "failure_counts": labelcritic_diagnosis.get("failure_counts", {}),
+        },
         "manifest_positive_coverage_failures": manifest_positive_coverage_failures,
         "historical_replay_deficits": historical_replay_deficits,
         "fov_not_applicable_key_organs": fov_not_applicable_key_organs,
@@ -5609,7 +5880,9 @@ def main():
         gate_path = OUTPUT_ROOT / f"round{round_idx}" / "estep" / "formal_gate.json"
         gate_path.parent.mkdir(parents=True, exist_ok=True)
         gate_path.write_text(json.dumps(estep_gate, indent=2, ensure_ascii=False), encoding="utf-8")
-        if estep_gate.get("status") != "success":
+        allow_debug_mstep = env_bool("MEDAI_ALLOW_DEBUG_MSTEP_ON_FORMAL_GATE_FAIL", True)
+        debug_gate_passed = (estep_gate.get("mstep_debug_gate") or {}).get("status") == "success"
+        if estep_gate.get("status") != "success" and not (allow_debug_mstep and debug_gate_passed):
             log(f"E-step 正式门禁失败，阻断 M-step: {estep_gate.get('reason')}")
             round_elapsed = time.time() - round_start
             summary = {
@@ -5629,6 +5902,11 @@ def main():
             with open(summary_path, "w") as f:
                 json.dump(summary, f, indent=2, ensure_ascii=False)
             continue
+        if estep_gate.get("status") != "success" and allow_debug_mstep and debug_gate_passed:
+            log(
+                "E-step 正式门禁失败，但 debug M-step gate 通过；"
+                "继续训练 student 仅用于训练核验，Round2 replacement 仍 fail-closed。"
+            )
 
         # M-step — 실패 시 1회 재시도
         mstep_result = run_student_mstep(round_idx, dataset_path, global_consolidation=is_consolidation)

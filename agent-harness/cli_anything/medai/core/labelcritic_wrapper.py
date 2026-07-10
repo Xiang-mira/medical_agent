@@ -1163,18 +1163,20 @@ def run_labelcritic_compare(
         "--output-json", str(driver_result),
         "--description-json", str(work_dir / "organ_description.json"),
     ]
+    if no_dice_check:
+        command.append("--no-dice-check")
     description_path, rendered_prompt, rendered_hash = _write_organ_description_prompt(
         organ, work_dir, candidate_context
     )
     labelcritic_options = {
-        "no_dice_check": False,
+        "no_dice_check": bool(no_dice_check),
         "no_dual_confirmation": False,
         "simple_prompt_ablation": False,
         "conservative_dual": False,
         "skip_organ_presence_gate": False,
         "strict_choice_prompt": False,
         "requested_nonofficial_options_ignored": {
-            "no_dice_check": no_dice_check,
+            "no_dice_check": False,
             "no_dual_confirmation": no_dual_confirmation,
             "simple_prompt_ablation": simple_prompt_ablation,
             "conservative_dual": conservative_dual,
@@ -1183,7 +1185,11 @@ def run_labelcritic_compare(
         },
         "run_id": run_id,
         "csv_path": str(csv_path),
-        "method_contract": "official_ap_projection_dice_gate_dual_confirmation",
+        "method_contract": (
+            "official_ap_projection_no_dice_gate_dual_confirmation"
+            if no_dice_check
+            else "official_ap_projection_dice_gate_dual_confirmation"
+        ),
     }
 
     if dry_run or backend == "stub":
@@ -1255,6 +1261,18 @@ def run_labelcritic_compare(
         "parse_status": "missing_driver_result",
     }
     decision = _structured_pair_decision(raw_decision, candidate_context)
+    if driver_doc.get("audit_only_comparison"):
+        modes = list(decision.get("failure_modes") or [])
+        if "audit_only_broad_category" not in modes:
+            modes.append("audit_only_broad_category")
+        decision.update({
+            "decision": "audit_only_no_formal_replacement",
+            "should_enter_student_training": False,
+            "review_needed": True,
+            "failure_modes": modes,
+            "formal_selection_eligible": False,
+            "automatic_failure_action": driver_doc.get("automatic_failure_action") or "withhold_or_audit_only",
+        })
     proj = {
         "status": "success" if driver_doc.get("status") == "success" else "failed",
         "projection_backend": driver_doc.get("projection_backend"),
@@ -1273,6 +1291,17 @@ def run_labelcritic_compare(
         "anonymous_candidate_context": driver_doc.get("candidate_context", candidate_context or []),
         "structured_assessment": driver_doc.get("structured_assessment", {}),
         "candidate_identity_exposed_to_vlm": False,
+        "formal_selection_eligible": driver_doc.get("formal_selection_eligible"),
+        "audit_only_comparison": bool(driver_doc.get("audit_only_comparison")),
+        "automatic_failure_action": driver_doc.get("automatic_failure_action"),
+        "csv_row_count": driver_doc.get("csv_row_count"),
+        "raw_csv_rows": driver_doc.get("raw_csv_rows", []),
+        "raw_answer": driver_doc.get("raw_answer"),
+        "raw_answer_1": driver_doc.get("raw_answer_1"),
+        "raw_answer_2": driver_doc.get("raw_answer_2"),
+        "failure_taxonomy": driver_doc.get("failure_taxonomy", []),
+        "prompt_path": driver_doc.get("prompt_path"),
+        "description_rendered_path": driver_doc.get("description_rendered_path"),
         "labelcritic_options": labelcritic_options,
         "rendered_organ_prompt": rendered_prompt,
         "rendered_organ_prompt_hash": rendered_hash,
