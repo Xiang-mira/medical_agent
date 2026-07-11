@@ -1612,6 +1612,18 @@ def _materialize_case_373_targets(
             if existing_fov in {"fully_visible", "partially_visible", "out_of_fov", "unknown"}
             else _fov_status_for_organ(str(row.get("organ") or ""), presence_context)
         )
+        row.setdefault("expected_presence", _expected_presence_for_organ(str(row.get("organ") or ""), presence_context))
+        if (
+            row["fov_status"] == "out_of_fov"
+            and row["target_type"] in {
+                "withheld_uncertain",
+                "unresolved_visible",
+                "unresolved_review",
+                "review_gap",
+            }
+        ):
+            row["legacy_target_type_before_absent_negative"] = row["target_type"]
+            row["target_type"] = "negative_absent"
         if (
             row["fov_status"] == "partially_visible"
             and row["target_type"] in {"positive_hard", "positive_soft"}
@@ -1635,12 +1647,31 @@ def _materialize_case_373_targets(
                 row.update({
                     "absence_confidence": "high",
                     "grade_scope": "absence",
+                    "grade": "A",
                     "record_type": "negative_absent",
                     "selection_method": "negative_absent",
+                    "selection_status": "selected",
                     "zero_mask_role": "negative_absent_target_mask",
                     "negative_source": "case_373_expected_absent",
+                    "negative_reason": "out_of_scan_by_scan_coverage",
                     "dataset_role": "semantic_absent_negative",
                     "fov_evidence": list(presence_context.get("coverage_evidence") or []),
+                    "confidence": 1.0,
+                    "label_confidence": 1.0,
+                    "training_weight": float(negative_absent_training_weight),
+                    "distillation_eligible": float(negative_absent_training_weight) > 0.0,
+                    "supervision_type": "negative",
+                    "distillation_role": "negative",
+                    "should_enter_student_training": float(negative_absent_training_weight) > 0.0,
+                    "requested_canonical_id": organ_name,
+                    "resolved_canonical_id": organ_name,
+                    "source_local_label": organ_name,
+                    "identity_status": "valid",
+                    "quality_flags": [],
+                    "review_flags": [],
+                    "selected_candidate_qc_flags": [],
+                    "selected_candidate_qc_status": "pass",
+                    "candidate_qc_status": "pass",
                     "selected_prediction": published_zero,
                     "mask_path": published_zero,
                     "mask": published_zero,
@@ -3256,47 +3287,50 @@ def _fov_status_for_organ(organ: str, presence_context: dict[str, Any] | None = 
         return "fully_visible"
     if "head_neck" in appearance_regions:
         return "fully_visible" if has_head else (
-            "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+            "out_of_fov" if has_any_region else "unknown"
         )
     if "thorax" in appearance_regions:
         if has_thorax:
             return "fully_visible"
         if partial_thorax:
             return "partially_visible"
-        return "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+        return "out_of_fov" if (has_abdomen or has_pelvis or has_head or has_extremity) else "unknown"
     if "extremity" in appearance_regions:
         return "fully_visible" if has_extremity else (
-            "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+            "out_of_fov" if has_any_region else "unknown"
         )
     if hinted_region == "head_neck":
         return "fully_visible" if has_head else (
-            "out_of_fov" if has_abdomen and not has_thorax and not has_pelvis else "unknown"
+            "out_of_fov" if has_any_region else "unknown"
         )
     if hinted_region == "thorax":
         if has_thorax:
             return "fully_visible"
         if partial_thorax:
             return "partially_visible"
-        return "unknown"
+        return "out_of_fov" if (has_abdomen or has_pelvis or has_head or has_extremity) else "unknown"
     if hinted_region == "abdomen":
         return "fully_visible" if has_abdomen else "unknown"
     if hinted_region == "pelvis":
         return "fully_visible" if has_pelvis else "unknown"
     if hinted_region == "extremity":
         return "fully_visible" if has_extremity else (
-            "out_of_fov" if has_abdomen and not has_pelvis else "unknown"
+            "out_of_fov" if has_any_region else "unknown"
         )
     region, _ = _infer_region_and_landmarks(norm)
     if region == "head and craniofacial region" or region == "neck and upper aerodigestive tract":
-        return "fully_visible" if has_head else "unknown"
+        return "fully_visible" if has_head else ("out_of_fov" if has_any_region else "unknown")
     if region == "thorax or upper mediastinum":
-        return "fully_visible" if has_thorax else ("partially_visible" if partial_thorax else "unknown")
+        return "fully_visible" if has_thorax else (
+            "partially_visible" if partial_thorax
+            else ("out_of_fov" if (has_abdomen or has_pelvis or has_head or has_extremity) else "unknown")
+        )
     if region == "abdomen and retroperitoneum":
         return "fully_visible" if has_abdomen else "unknown"
     if region == "pelvis and lower abdomen":
         return "fully_visible" if has_pelvis else "unknown"
     if region == "appendicular skeleton or extremity field of view":
-        return "fully_visible" if has_extremity else "unknown"
+        return "fully_visible" if has_extremity else ("out_of_fov" if has_any_region else "unknown")
     return "unknown"
 
 

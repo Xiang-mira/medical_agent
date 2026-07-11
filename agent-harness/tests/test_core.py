@@ -2729,28 +2729,41 @@ class TestTeacherMeetingPipeline:
         selection_rows = [{
             "case_id": "case_001", "organ": "liver", "selection_status": "selected",
             "target_type": "hard", "expected_presence": "expected_present",
+        }, {
+            "case_id": "case_001", "organ": "eyeball_left", "selection_status": "review_required",
+            "target_type": "withheld_uncertain", "training_weight": 0.0,
         }]
         selected_metadata = [{
             "case_id": "case_001", "organ": "liver", "final_mask": str(ct), "target_type": "hard",
+        }, {
+            "case_id": "case_001", "organ": "eyeball_left", "final_mask": "", "target_type": "withheld_uncertain",
         }]
         summary = ml._materialize_case_373_targets(
             case_id="case_001",
             ct=ct,
-            organs=["liver", "brain", "pancreas"],
+            organs=["liver", "brain", "pancreas", "eyeball_left"],
             case_updated=tmp_path / "updated",
             selection_rows=selection_rows,
             selected_metadata=selected_metadata,
             presence_context={
                 "has_region_evidence": True,
                 "has_abdomen_coverage": True,
+                "has_pelvis_coverage": True,
                 "has_head_coverage": False,
             },
             negative_absent_training_weight=0.2,
         )
 
         by_organ = {row["organ"]: row for row in selection_rows}
-        assert summary["expected_targets"] == 3
+        assert summary["expected_targets"] == 4
         assert by_organ["brain"]["target_type"] == "negative_absent"
+        assert by_organ["eyeball_left"]["target_type"] == "negative_absent"
+        assert by_organ["eyeball_left"]["legacy_target_type_before_absent_negative"] == "withheld_uncertain"
+        assert by_organ["eyeball_left"]["supervision_type"] == "negative"
+        assert by_organ["eyeball_left"]["training_weight"] == 0.2
+        assert by_organ["eyeball_left"]["distillation_eligible"] is True
+        assert by_organ["eyeball_left"]["identity_status"] == "valid"
+        assert by_organ["eyeball_left"]["selected_candidate_qc_status"] == "pass"
         assert by_organ["brain"]["grade"] == "A"
         assert by_organ["brain"]["grade_scope"] == "absence"
         assert by_organ["brain"]["training_weight"] == 0.2

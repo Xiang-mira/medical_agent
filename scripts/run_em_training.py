@@ -4339,7 +4339,10 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
     ):
         result["status"] = "failed"
         result["training_status"] = "completed_organ_gradient_audit_failed"
-        result["reason"] = "organ_gradient_share_below_policy_minimum"
+        result["reason"] = ",".join(
+            organ_gradient_audit.get("failure_reasons")
+            or ["organ_gradient_share_below_policy_minimum"]
+        )
     if canonical_training_backend == PROJECT_PROMPT_STUDENT:
         result["trainer"] = PROJECT_PROMPT_STUDENT
         result["uses_official_voxtell_model"] = True

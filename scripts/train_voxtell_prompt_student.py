@@ -10,6 +10,7 @@ fine-tunes the 3D prompt segmentation network with frozen text embeddings.
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import math
@@ -19,6 +20,7 @@ import random
 import shutil
 import sys
 import time
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -98,6 +100,12 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--learning-rate", type=float, default=float(env.get("MEDAI_MSTEP_LR", "1e-4")))
     ap.add_argument("--weight-decay", type=float, default=float(env.get("MEDAI_WEIGHT_DECAY", "3e-5")))
     ap.add_argument("--optimizer", choices=["sgd", "adamw"], default=env.get("MEDAI_OPTIMIZER", "sgd"))
+    ap.add_argument(
+        "--amp-mode",
+        choices=["auto", "off"],
+        default=env.get("MEDAI_AMP_MODE", "auto"),
+        help="auto enables CUDA AMP; off uses full precision and disables GradScaler.",
+    )
     ap.add_argument("--poly-power", type=float, default=float(env.get("MEDAI_POLY_POWER", "0.9")))
     ap.add_argument("--deep-supervision", action="store_true", default=env.get("MEDAI_DEEP_SUPERVISION", "1").lower() not in {"0", "false", "no"})
     ap.add_argument("--foreground-prob", type=float, default=float(env.get("MEDAI_FOREGROUND_PROB", "0.85")))
@@ -172,6 +180,706 @@ def outbound_write_audit() -> dict[str, Any]:
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = sorted({key for row in rows for key in row})
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({
+                key: json.dumps(value, ensure_ascii=False)
+                if isinstance(value, (list, dict)) else value
+                for key, value in row.items()
+            })
+
+
+def _to_jsonable(value: Any) -> Any:
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    return value
+
+
+def _manifest_image_path(row: dict[str, Any]) -> Path | None:
+    value = row.get("image") or row.get("ct_path")
+    return Path(str(value)) if value else None
+
+
+def _manifest_mask_path(row: dict[str, Any]) -> Path | None:
+    value = row.get("mask") or row.get("mask_path")
+    return Path(str(value)) if value else None
+
+
+@lru_cache(maxsize=8192)
+def _nifti_audit_meta_cached(path_text: str, inspect_foreground: bool) -> tuple[dict[str, Any], str | None]:
+    path = Path(path_text)
+    if not path.exists():
+        return {}, "missing"
+    try:
+        import nibabel as nib
+        img = nib.load(str(path))
+        shape = tuple(int(x) for x in img.shape[:3])
+        zooms = tuple(float(x) for x in img.header.get_zooms()[:3])
+        affine = np.asarray(img.affine, dtype=float)
+        try:
+            orientation = "".join(nib.orientations.aff2axcodes(affine))
+        except Exception:
+            orientation = None
+        meta: dict[str, Any] = {
+            "shape": list(shape),
+            "spacing": [round(x, 6) for x in zooms],
+            "orientation": orientation,
+            "affine": [[round(float(v), 6) for v in row] for row in affine.tolist()],
+        }
+        if inspect_foreground:
+            data = np.asanyarray(img.dataobj)
+            finite = bool(np.isfinite(data).all())
+            foreground = int(np.count_nonzero(data > 0))
+            voxel_count = int(np.prod(shape)) if shape else 0
+            meta.update({
+                "finite": finite,
+                "foreground_voxels": foreground,
+                "voxel_count": voxel_count,
+                "foreground_voxel_ratio": (
+                    float(foreground / voxel_count) if voxel_count else None
+                ),
+            })
+        return meta, None
+    except Exception as exc:
+        return {}, f"read_error:{exc}"
+
+
+def _nifti_audit_meta(path: Path | None, inspect_foreground: bool = False) -> tuple[dict[str, Any], str | None]:
+    if path is None:
+        return {}, "missing_path"
+    return _nifti_audit_meta_cached(str(path.resolve()), bool(inspect_foreground))
+
+
+def _alignment_fail_reasons(
+    image_meta: dict[str, Any],
+    mask_meta: dict[str, Any],
+    row: dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    if image_meta.get("shape") and mask_meta.get("shape") and image_meta["shape"] != mask_meta["shape"]:
+        reasons.append("ct_mask_shape_mismatch")
+    if image_meta.get("spacing") and mask_meta.get("spacing") and image_meta["spacing"] != mask_meta["spacing"]:
+        reasons.append("ct_mask_spacing_mismatch")
+    if image_meta.get("orientation") and mask_meta.get("orientation") and image_meta["orientation"] != mask_meta["orientation"]:
+        reasons.append("ct_mask_orientation_mismatch")
+    if image_meta.get("affine") and mask_meta.get("affine"):
+        try:
+            if not np.allclose(np.asarray(image_meta["affine"]), np.asarray(mask_meta["affine"]), atol=1e-3):
+                reasons.append("ct_mask_affine_mismatch")
+        except Exception:
+            reasons.append("ct_mask_affine_unreadable")
+    target_type = str(row.get("target_type") or "").lower()
+    supervision_type = str(row.get("supervision_type") or "positive").lower()
+    if "foreground_voxels" in mask_meta:
+        foreground = int(mask_meta.get("foreground_voxels") or 0)
+        if supervision_type == "positive" and target_type not in {"negative_absent", "absent_negative"} and foreground <= 0:
+            reasons.append("positive_mask_empty")
+        if target_type in {"negative_absent", "absent_negative"} and foreground > 0:
+            reasons.append("negative_absent_mask_nonzero")
+    if supervision_type == "negative":
+        source = str(row.get("negative_source") or "")
+        role = str(row.get("zero_mask_role") or "")
+        if source not in SAFE_NEGATIVE_SOURCES:
+            reasons.append("negative_source_not_safe")
+        if role not in SAFE_ZERO_MASK_ROLES:
+            reasons.append("zero_mask_role_not_safe")
+    if not row.get("organ") or not (row.get("prompt") or row.get("prompt_text")):
+        reasons.append("prompt_organ_mapping_missing")
+    return reasons
+
+
+def build_prompt_mask_ct_alignment_audit(rows: list[dict[str, Any]], manifest_path: Path) -> dict[str, Any]:
+    """Audit CT/mask/prompt contracts for rows that can enter training."""
+    strict_scan = os.getenv("MEDAI_ALIGNMENT_AUDIT_STRICT_SCAN", "1").lower() not in {"0", "false", "no"}
+    alignment_rows: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    foreground_ratios: list[float] = []
+    positive_empty = 0
+    negative_nonzero = 0
+    for idx, row in enumerate(rows):
+        image_path = _manifest_image_path(row)
+        mask_path = _manifest_mask_path(row)
+        image_meta, image_error = _nifti_audit_meta(image_path, inspect_foreground=False)
+        mask_meta, mask_error = _nifti_audit_meta(mask_path, inspect_foreground=strict_scan)
+        reasons: list[str] = []
+        if image_error:
+            reasons.append(f"image_{image_error}")
+        if mask_error:
+            reasons.append(f"mask_{mask_error}")
+        if not image_error and not mask_error:
+            reasons.extend(_alignment_fail_reasons(image_meta, mask_meta, row))
+        if "positive_mask_empty" in reasons:
+            positive_empty += 1
+        if "negative_absent_mask_nonzero" in reasons:
+            negative_nonzero += 1
+        if mask_meta.get("foreground_voxel_ratio") is not None:
+            foreground_ratios.append(float(mask_meta["foreground_voxel_ratio"]))
+        audit_row = {
+            "row_index": idx,
+            "case_id": row.get("case_id"),
+            "organ": row.get("organ"),
+            "supervision_type": row.get("supervision_type", "positive"),
+            "target_type": row.get("target_type"),
+            "image_path": str(image_path) if image_path else "",
+            "mask_path": str(mask_path) if mask_path else "",
+            "image_shape": image_meta.get("shape"),
+            "mask_shape": mask_meta.get("shape"),
+            "image_spacing": image_meta.get("spacing"),
+            "mask_spacing": mask_meta.get("spacing"),
+            "image_orientation": image_meta.get("orientation"),
+            "mask_orientation": mask_meta.get("orientation"),
+            "mask_foreground_voxels": mask_meta.get("foreground_voxels"),
+            "mask_foreground_voxel_ratio": mask_meta.get("foreground_voxel_ratio"),
+            "status": "failed" if reasons else "passed",
+            "reasons": reasons,
+        }
+        alignment_rows.append(audit_row)
+        if reasons:
+            failures.append(audit_row)
+    positive = [r for r in rows if str(r.get("supervision_type") or "positive") == "positive"]
+    negative = [r for r in rows if str(r.get("supervision_type") or "") == "negative"]
+    return {
+        "stage": "prompt_mask_ct_alignment_audit",
+        "status": "passed" if not failures else "failed",
+        "manifest": str(manifest_path),
+        "strict_mask_foreground_scan": strict_scan,
+        "policy": "CT is the real input image; masks are project-generated selected pseudo labels used as student supervision.",
+        "items": len(rows),
+        "positive_items": len(positive),
+        "negative_absent_items": len(negative),
+        "num_alignment_failures": len(failures),
+        "alignment_failure_examples": failures[:20],
+        "positive_empty_masks": positive_empty,
+        "negative_absent_nonzero_masks": negative_nonzero,
+        "mean_mask_foreground_voxel_ratio": (
+            float(sum(foreground_ratios) / len(foreground_ratios))
+            if foreground_ratios else None
+        ),
+        "positive_negative_ratio": (len(positive) / max(1, len(negative))) if negative else None,
+        "rows_csv": "prompt_mask_ct_alignment_audit.csv",
+        "_rows": alignment_rows,
+    }
+
+
+def build_prompt_organ_mapping_audit(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    mapping_rows: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for idx, row in enumerate(rows):
+        prompt = row.get("prompt") or row.get("prompt_text")
+        organ = row.get("organ") or row.get("canonical_organ")
+        mask_path = row.get("mask_path") or row.get("mask")
+        status = "passed" if organ and prompt and mask_path else "failed"
+        audit_row = {
+            "row_index": idx,
+            "case_id": row.get("case_id"),
+            "organ": organ,
+            "canonical_organ_name": row.get("canonical_organ_name") or organ,
+            "student_target_id": row.get("student_target_id"),
+            "prompt": prompt,
+            "prompt_type": row.get("prompt_type"),
+            "supervision_type": row.get("supervision_type", "positive"),
+            "target_type": row.get("target_type"),
+            "label_role": row.get("label_role"),
+            "supervision_role": row.get("supervision_role"),
+            "mask_path": mask_path,
+            "training_weight": row.get("training_weight"),
+            "status": status,
+        }
+        mapping_rows.append(audit_row)
+        if status == "failed":
+            failures.append(audit_row)
+    audit = {
+        "stage": "prompt_organ_mapping_audit",
+        "status": "passed" if not failures else "failed",
+        "items": len(mapping_rows),
+        "unique_organs": len({str(r.get("organ")) for r in mapping_rows if r.get("organ")}),
+        "unique_prompts": len({str(r.get("prompt")) for r in mapping_rows if r.get("prompt")}),
+        "missing_mapping_examples": failures[:20],
+    }
+    return audit, mapping_rows
+
+
+def _is_finite_number(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except Exception:
+        return False
+
+
+def _positive_organs_from_history_row(row: dict[str, Any]) -> list[str]:
+    organs = row.get("positive_foreground_organs") or row.get("positive_organs")
+    if isinstance(organs, list):
+        return [str(x) for x in organs if str(x)]
+    organ = str(row.get("organ") or "")
+    if organ and str(row.get("sample_kind") or "") != "negative":
+        return [organ]
+    return []
+
+
+def _negative_organs_from_history_row(row: dict[str, Any]) -> list[str]:
+    organ = row.get("negative_organ")
+    if organ:
+        return [str(organ)]
+    if str(row.get("sample_kind") or "") == "negative" and row.get("organ"):
+        return [str(row["organ"])]
+    return []
+
+
+def build_sampling_gradient_audits(
+    *,
+    training_rows: list[dict[str, Any]],
+    loss_history: list[dict[str, Any]],
+    positive_organ_sample_counts: dict[str, int] | None = None,
+    negative_organ_sample_counts: dict[str, int] | None = None,
+    positive_organ_finite_gradient_mass: dict[str, float] | None = None,
+    positive_organ_nonfinite_gradient_steps: dict[str, int] | None = None,
+    legacy_organ_sample_counts: dict[str, int] | None = None,
+    legacy_gradient_shares: dict[str, float] | None = None,
+    min_positive_exposure_count: int | None = None,
+    nonfinite_gradient_step_rate_threshold: float | None = None,
+) -> dict[str, Any]:
+    """Build robust M-step sampling and gradient audits.
+
+    Exposure is counted independently from finite gradient mass so a single NaN
+    gradient norm cannot make all organs appear underrepresented.
+    """
+    positive_organ_sample_counts = dict(positive_organ_sample_counts or {})
+    negative_organ_sample_counts = dict(negative_organ_sample_counts or {})
+    positive_organ_finite_gradient_mass = dict(positive_organ_finite_gradient_mass or {})
+    positive_organ_nonfinite_gradient_steps = dict(positive_organ_nonfinite_gradient_steps or {})
+    legacy_organ_sample_counts = dict(legacy_organ_sample_counts or {})
+    legacy_gradient_shares = dict(legacy_gradient_shares or {})
+    min_positive_exposure_count = (
+        int(os.getenv("MEDAI_MIN_POSITIVE_ORGAN_EXPOSURE", "1"))
+        if min_positive_exposure_count is None else int(min_positive_exposure_count)
+    )
+    nonfinite_gradient_step_rate_threshold = (
+        float(os.getenv("MEDAI_NONFINITE_GRADIENT_STEP_RATE_FAIL", "0.01"))
+        if nonfinite_gradient_step_rate_threshold is None
+        else float(nonfinite_gradient_step_rate_threshold)
+    )
+
+    # Offline recompute path: reconstruct exposure from new loss history fields.
+    if not positive_organ_sample_counts and loss_history:
+        for row in loss_history:
+            for organ in set(_positive_organs_from_history_row(row)):
+                positive_organ_sample_counts[organ] = positive_organ_sample_counts.get(organ, 0) + 1
+                if _is_finite_number(row.get("grad_norm_before_clip")):
+                    positive_organ_finite_gradient_mass[organ] = (
+                        positive_organ_finite_gradient_mass.get(organ, 0.0)
+                        + float(row.get("grad_norm_before_clip") or 0.0)
+                        / max(1, len(set(_positive_organs_from_history_row(row))))
+                    )
+                else:
+                    positive_organ_nonfinite_gradient_steps[organ] = (
+                        positive_organ_nonfinite_gradient_steps.get(organ, 0) + 1
+                    )
+            for organ in set(_negative_organs_from_history_row(row)):
+                negative_organ_sample_counts[organ] = negative_organ_sample_counts.get(organ, 0) + 1
+
+    all_positive_organs = sorted(
+        {
+            str(row.get("organ") or "")
+            for row in training_rows
+            if row.get("supervision_type", "positive") == "positive"
+            and str(row.get("organ") or "")
+        }
+    )
+    positive_exposure_total = sum(positive_organ_sample_counts.values())
+    expected_gradient_organs = (
+        all_positive_organs
+        if positive_exposure_total >= len(all_positive_organs)
+        else all_positive_organs
+    )
+    finite_gradient_mass_total = sum(
+        float(value)
+        for value in positive_organ_finite_gradient_mass.values()
+        if _is_finite_number(value)
+    )
+    nonfinite_gradient_steps = sum(
+        1 for row in loss_history
+        if not _is_finite_number(row.get("grad_norm_before_clip"))
+    )
+    optimizer_steps_skipped_nonfinite_grad = sum(
+        1 for row in loss_history
+        if bool(row.get("optimizer_step_skipped_nonfinite_grad"))
+    )
+    nonfinite_gradient_step_rate = (
+        float(nonfinite_gradient_steps / len(loss_history)) if loss_history else 0.0
+    )
+    minimum_gradient_share = (
+        0.1 / len(expected_gradient_organs)
+        if expected_gradient_organs else 0.0
+    )
+    gradient_shares = {
+        organ: (
+            float(positive_organ_finite_gradient_mass.get(organ, 0.0))
+            / finite_gradient_mass_total
+            if finite_gradient_mass_total > 0 else None
+        )
+        for organ in all_positive_organs
+    }
+    exposure_rows: list[dict[str, Any]] = []
+    underexposed_organs: list[str] = []
+    underrepresented_organs: list[str] = []
+    issue_counts: Counter[str] = Counter()
+    for organ in all_positive_organs:
+        exposure_count = int(positive_organ_sample_counts.get(organ, 0))
+        legacy_count = int(legacy_organ_sample_counts.get(organ, 0))
+        nonfinite_count = int(positive_organ_nonfinite_gradient_steps.get(organ, 0))
+        finite_mass = float(positive_organ_finite_gradient_mass.get(organ, 0.0))
+        share = gradient_shares.get(organ)
+        issues: list[str] = []
+        if exposure_count <= 0 and legacy_count > 0:
+            issues.append("paper_aligned_metadata_missing_organ_in_loss_history")
+        elif exposure_count <= 0:
+            issues.append("organ_never_sampled")
+            underexposed_organs.append(organ)
+        elif exposure_count < min_positive_exposure_count:
+            issues.append("organ_sampled_but_below_minimum_exposure")
+            underexposed_organs.append(organ)
+        if exposure_count > 0 and finite_mass <= 0 and nonfinite_count > 0:
+            issues.append("organ_sampled_but_gradient_nan")
+        if finite_gradient_mass_total > 0 and share is not None and share < minimum_gradient_share:
+            issues.append("organ_gradient_share_below_policy_minimum")
+            underrepresented_organs.append(organ)
+        if not issues:
+            issues.append("ok")
+        for issue in issues:
+            issue_counts[issue] += 1
+        exposure_rows.append({
+            "organ": organ,
+            "positive_sample_count": exposure_count,
+            "negative_sample_count": int(negative_organ_sample_counts.get(organ, 0)),
+            "legacy_sample_count": legacy_count,
+            "finite_gradient_mass": finite_mass,
+            "gradient_share": share,
+            "nonfinite_gradient_steps": nonfinite_count,
+            "issues": issues,
+        })
+
+    legacy_all_zero_shares = bool(
+        legacy_gradient_shares
+        and all(float(v or 0.0) == 0.0 for v in legacy_gradient_shares.values())
+        and any(int(v or 0) > 0 for k, v in legacy_organ_sample_counts.items() if k in all_positive_organs)
+    )
+    failure_reasons: list[str] = []
+    if underexposed_organs:
+        failure_reasons.append("organ_exposure_below_policy_minimum")
+    if finite_gradient_mass_total <= 0:
+        failure_reasons.append("gradient_mass_nonfinite_or_insufficient")
+    if nonfinite_gradient_step_rate > nonfinite_gradient_step_rate_threshold:
+        failure_reasons.append("nonfinite_gradient_step_rate_above_policy")
+    if underrepresented_organs:
+        failure_reasons.append("organ_gradient_share_below_policy_minimum")
+    if legacy_all_zero_shares:
+        issue_counts["all_gradient_shares_zero_due_to_nan_total"] += 1
+
+    organ_exposure_audit = {
+        "status": "passed" if not underexposed_organs else "failed",
+        "expected_organs": expected_gradient_organs,
+        "min_positive_exposure_count": min_positive_exposure_count,
+        "underexposed_organs": underexposed_organs,
+        "positive_organ_sample_counts": positive_organ_sample_counts,
+        "negative_organ_sample_counts": negative_organ_sample_counts,
+    }
+    nonfinite_gradient_audit = {
+        "status": (
+            "passed"
+            if nonfinite_gradient_step_rate <= nonfinite_gradient_step_rate_threshold
+            and finite_gradient_mass_total > 0
+            else "failed"
+        ),
+        "nonfinite_gradient_steps": nonfinite_gradient_steps,
+        "optimizer_steps_skipped_nonfinite_grad": optimizer_steps_skipped_nonfinite_grad,
+        "total_steps": len(loss_history),
+        "nonfinite_gradient_step_rate": nonfinite_gradient_step_rate,
+        "fail_threshold": nonfinite_gradient_step_rate_threshold,
+        "finite_gradient_mass_total": finite_gradient_mass_total,
+        "positive_organ_nonfinite_gradient_steps": positive_organ_nonfinite_gradient_steps,
+    }
+    organ_gradient_audit = {
+        "status": "passed" if not failure_reasons else "failed",
+        "failure_reasons": failure_reasons,
+        "positive_steps": positive_exposure_total,
+        "expected_organs": expected_gradient_organs,
+        "minimum_gradient_share": minimum_gradient_share,
+        "underrepresented_organs": underrepresented_organs,
+        "sample_counts": positive_organ_sample_counts,
+        "negative_sample_counts": negative_organ_sample_counts,
+        "gradient_shares": gradient_shares,
+        "positive_organ_finite_gradient_mass": positive_organ_finite_gradient_mass,
+        "positive_organ_nonfinite_gradient_steps": positive_organ_nonfinite_gradient_steps,
+        "finite_gradient_mass_total": finite_gradient_mass_total,
+        "nonfinite_gradient_step_rate": nonfinite_gradient_step_rate,
+        "legacy_all_zero_gradient_share_bug_detected": legacy_all_zero_shares,
+    }
+    diagnosis = {
+        "stage": "student_sampling_gradient_diagnosis",
+        "status": "passed" if not failure_reasons else "failed",
+        "failure_reasons": failure_reasons,
+        "issue_counts": dict(issue_counts),
+        "all_gradient_shares_zero_due_to_nan_total": legacy_all_zero_shares,
+        "paper_aligned_metadata_missing_organ_in_loss_history": any(
+            "paper_aligned_metadata_missing_organ_in_loss_history" in row["issues"]
+            for row in exposure_rows
+        ),
+        "organ_rows": exposure_rows,
+    }
+    return {
+        "organ_gradient_audit": organ_gradient_audit,
+        "organ_exposure_audit": organ_exposure_audit,
+        "nonfinite_gradient_audit": nonfinite_gradient_audit,
+        "student_sampling_gradient_diagnosis": diagnosis,
+        "organ_rows": exposure_rows,
+    }
+
+
+def build_training_stability_diagnosis(
+    loss_history: list[dict[str, Any]],
+    *,
+    nonfinite_gradient_step_rate_threshold: float | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    threshold = (
+        float(os.getenv("MEDAI_NONFINITE_GRADIENT_STEP_RATE_FAIL", "0.01"))
+        if nonfinite_gradient_step_rate_threshold is None
+        else float(nonfinite_gradient_step_rate_threshold)
+    )
+    total = len(loss_history)
+    nonfinite_gradient_rows = [
+        row for row in loss_history
+        if not _is_finite_number(row.get("grad_norm_before_clip"))
+        or bool(row.get("optimizer_step_skipped_nonfinite_grad"))
+    ]
+    nonfinite_component_rows = [
+        row for row in loss_history
+        if not bool(row.get("loss_component_finite", True))
+    ]
+    finite_component_count = total - len(nonfinite_component_rows)
+    nonfinite_rate = float(len(nonfinite_gradient_rows) / total) if total else 0.0
+    component_finite_rate = float(finite_component_count / total) if total else 0.0
+    failure_reasons: list[str] = []
+    if nonfinite_rate > threshold:
+        failure_reasons.append("nonfinite_gradient_step_rate_above_policy")
+    if nonfinite_component_rows:
+        failure_reasons.append("loss_component_nonfinite")
+    diagnostic_rows = []
+    for row in loss_history:
+        reasons: list[str] = []
+        if not _is_finite_number(row.get("grad_norm_before_clip")):
+            reasons.append("nonfinite_grad_norm")
+        if bool(row.get("optimizer_step_skipped_nonfinite_grad")):
+            reasons.append("optimizer_step_skipped_nonfinite_grad")
+        if not bool(row.get("loss_component_finite", True)):
+            reasons.append("loss_component_nonfinite")
+        if reasons:
+            diagnostic_rows.append({
+                "step": row.get("step"),
+                "case_id": row.get("case_id"),
+                "organ": row.get("organ"),
+                "positive_organs": row.get("positive_organs"),
+                "negative_organ": row.get("negative_organ"),
+                "loss": row.get("loss"),
+                "task_loss": row.get("task_loss"),
+                "bce_component": row.get("bce_component"),
+                "dice_component": row.get("dice_component"),
+                "grad_norm_before_clip": row.get("grad_norm_before_clip"),
+                "amp_enabled": row.get("amp_enabled"),
+                "grad_scaler_scale_before": row.get("grad_scaler_scale_before"),
+                "grad_scaler_scale_after": row.get("grad_scaler_scale_after"),
+                "nonfinite_param_count": row.get("nonfinite_param_count"),
+                "nonfinite_param_names": row.get("nonfinite_param_names"),
+                "logit_min": row.get("logit_min"),
+                "logit_max": row.get("logit_max"),
+                "target_min": row.get("target_min"),
+                "target_max": row.get("target_max"),
+                "reasons": reasons,
+            })
+    return {
+        "stage": "training_stability_diagnosis",
+        "status": "passed" if not failure_reasons else "failed",
+        "failure_reasons": failure_reasons,
+        "total_steps": total,
+        "nonfinite_gradient_steps": len(nonfinite_gradient_rows),
+        "nonfinite_gradient_step_rate": nonfinite_rate,
+        "nonfinite_gradient_step_rate_threshold": threshold,
+        "loss_component_finite_steps": finite_component_count,
+        "loss_component_finite_rate": component_finite_rate,
+        "loss_component_finite_rate_required": 1.0,
+        "optimizer_steps_performed": sum(1 for row in loss_history if bool(row.get("optimizer_step_performed"))),
+        "optimizer_steps_skipped_nonfinite_grad": sum(
+            1 for row in loss_history
+            if bool(row.get("optimizer_step_skipped_nonfinite_grad"))
+        ),
+        "diagnostic_row_count": len(diagnostic_rows),
+        "diagnostic_examples": diagnostic_rows[:20],
+    }, diagnostic_rows
+
+
+def diagnose_loss_curve(loss_history: list[dict[str, Any]]) -> dict[str, Any]:
+    finite_losses = [
+        float(row["loss"]) for row in loss_history
+        if _is_finite_number(row.get("loss"))
+    ]
+    if not finite_losses:
+        status = "insufficient_steps"
+        recommendation = "No finite training loss was recorded; inspect trainer invocation and input contracts before advancing EM."
+        first_mean = last_mean = None
+    else:
+        window = max(1, len(finite_losses) // 5)
+        first_mean = float(np.mean(finite_losses[:window]))
+        last_mean = float(np.mean(finite_losses[-window:]))
+        if len(finite_losses) < 5:
+            status = "insufficient_steps"
+            recommendation = "Run more M-step iterations before judging convergence."
+        elif last_mean <= first_mean * 0.98:
+            status = "decreasing"
+            recommendation = "Loss is decreasing; keep this setting if stability, alignment, and trainset pseudo-consistency also pass."
+        elif last_mean <= first_mean * 1.02:
+            status = "stable"
+            recommendation = "Loss is stable but not clearly improving; inspect pseudo-consistency and consider scheduler or LR sweep."
+        else:
+            status = "increasing"
+            recommendation = "Loss increased; first check prompt/mask/CT alignment, then retry a lower learning rate."
+    return {
+        "stage": "loss_curve_diagnosis",
+        "status": status,
+        "num_finite_losses": len(finite_losses),
+        "first_loss_window_mean": first_mean,
+        "last_loss_window_mean": last_mean,
+        "negative_loss_interpretation": "Allowed when nnU-Net Dice component is negative; BCE/Dice component finiteness is audited separately.",
+        "recommendation": recommendation,
+    }
+
+
+def write_loss_curve_artifacts(output_dir: Path, loss_history: list[dict[str, Any]]) -> None:
+    fields = [
+        "step", "loss", "task_loss", "bce_component", "dice_component",
+        "retention_loss", "learning_rate", "grad_norm_before_clip",
+        "finite_grad_norm", "loss_component_finite", "optimizer_step_performed",
+        "optimizer_step_skipped_nonfinite_grad", "amp_enabled",
+        "grad_scaler_scale_before", "grad_scaler_scale_after",
+        "logit_min", "logit_max", "target_min", "target_max",
+        "case_id", "organ", "prompt", "sample_kind", "positive_organs",
+        "negative_organ", "target_type", "negative_source",
+        "negative_source_class", "fov_status", "foreground_voxel_ratio",
+        "all_zero_target", "batch_unit_count",
+    ]
+    path = output_dir / "student_training_loss_curve.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for row in loss_history:
+            writer.writerow({
+                key: json.dumps(value, ensure_ascii=False)
+                if isinstance(value, (list, dict)) else value
+                for key, value in row.items()
+            })
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        steps = [int(row.get("step") or i + 1) for i, row in enumerate(loss_history)]
+        values = [
+            float(row.get("loss")) if _is_finite_number(row.get("loss")) else float("nan")
+            for row in loss_history
+        ]
+        bce_values = [
+            float(row.get("bce_component")) if _is_finite_number(row.get("bce_component")) else float("nan")
+            for row in loss_history
+        ]
+        dice_values = [
+            float(row.get("dice_component")) if _is_finite_number(row.get("dice_component")) else float("nan")
+            for row in loss_history
+        ]
+        plt.figure(figsize=(9, 4))
+        plt.plot(steps, values, linewidth=1.2, label="total")
+        plt.plot(steps, bce_values, linewidth=0.9, label="bce")
+        plt.plot(steps, dice_values, linewidth=0.9, label="dice")
+        plt.xlabel("step")
+        plt.ylabel("training loss")
+        plt.legend(loc="best")
+        plt.tight_layout()
+        plt.savefig(output_dir / "student_training_loss_curve.png", dpi=160)
+        plt.close()
+    except Exception as exc:
+        write_json(output_dir / "student_training_loss_curve_plot_status.json", {
+            "status": "skipped_plot_error",
+            "error": str(exc),
+        })
+
+
+def build_training_sample_distribution_audit(
+    *,
+    loss_history: list[dict[str, Any]],
+    sampling_history: list[dict[str, Any]],
+    pos_neg_ratio: tuple[int, int],
+) -> dict[str, Any]:
+    window_positive = sum(int(row.get("batch_positive_count") or 0) for row in sampling_history)
+    window_negative = sum(int(row.get("batch_negative_count") or 0) for row in sampling_history)
+    positive_units = window_positive or sum(len(row.get("positive_organs") or []) for row in loss_history)
+    negative_units = window_negative or sum(1 for row in loss_history if row.get("negative_organ"))
+    bad_negative_sources = [
+        row for row in loss_history
+        if row.get("negative_organ")
+        and str(row.get("negative_source") or row.get("negative_source_class") or "") in {"", "teacher_missing", "missing_teacher_output"}
+    ]
+    positive_organ_counts: Counter[str] = Counter()
+    negative_organ_counts: Counter[str] = Counter()
+    for row in loss_history:
+        positive_organ_counts.update(str(x) for x in (row.get("positive_organs") or []) if str(x))
+        if row.get("negative_organ"):
+            negative_organ_counts.update([str(row["negative_organ"])])
+    return {
+        "stage": "training_sample_distribution_audit",
+        "status": "passed" if loss_history and not bad_negative_sources and positive_units > 0 else "failed",
+        "configured_pos_neg_ratio": f"{pos_neg_ratio[0]}:{pos_neg_ratio[1]}",
+        "sampled_positive_prompt_units": positive_units,
+        "sampled_negative_prompt_units": negative_units,
+        "actual_pos_neg_ratio": (float(positive_units) / float(negative_units)) if negative_units else None,
+        "positive_organ_exposure": dict(positive_organ_counts),
+        "negative_organ_exposure": dict(negative_organ_counts),
+        "sampling_history_windows": len(sampling_history),
+        "all_zero_target_count": sum(int(row.get("all_zero_target") or 0) for row in loss_history),
+        "mean_runtime_foreground_voxel_ratio": (
+            float(sum(float(row.get("foreground_voxel_ratio") or 0.0) for row in loss_history) / len(loss_history))
+            if loss_history else None
+        ),
+        "negative_source_policy": "Negatives must be confirmed absent/out-of-FOV zero masks or legal derived empty-crop negatives, not teacher-missing positives.",
+        "bad_negative_source_examples": bad_negative_sources[:20],
+    }
+
+
+def _nonfinite_gradient_param_names(module: nn.Module, limit: int = 20) -> tuple[int, list[str]]:
+    names: list[str] = []
+    count = 0
+    for name, param in module.named_parameters():
+        grad = param.grad
+        if grad is None:
+            continue
+        try:
+            if not bool(torch.isfinite(grad).all().item()):
+                count += 1
+                if len(names) < limit:
+                    names.append(name)
+        except Exception:
+            count += 1
+            if len(names) < limit:
+                names.append(name)
+    return count, names
 
 
 TEXT_ENCODER_POLICY = {
@@ -477,6 +1185,81 @@ def build_paper_case_pools(rows: list[dict[str, Any]]) -> dict[str, dict[str, An
     return {
         key: case for key, case in cases.items()
         if case.get("image") and len(case["positive"]) >= 2 and len(case["negative"]) >= 1
+    }
+
+
+def build_paper_sampler_contract_audit(
+    training_rows: list[dict[str, Any]],
+    paper_case_pools: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Verify every trainable positive organ can enter a paper-aligned unit."""
+    positive_by_case: dict[str, set[str]] = {}
+    negative_by_case: dict[str, int] = {}
+    for row in training_rows:
+        case_id = str(row.get("case_id") or "")
+        organ = str(row.get("organ") or "")
+        if not case_id or not organ:
+            continue
+        if row.get("supervision_type", "positive") == "positive":
+            positive_by_case.setdefault(case_id, set()).add(organ)
+        elif row.get("supervision_type") == "negative":
+            negative_by_case[case_id] = negative_by_case.get(case_id, 0) + 1
+
+    trainable_positive_organs = sorted(
+        {organ for organs in positive_by_case.values() for organ in organs}
+    )
+    sampleable_positive_organs = sorted(
+        {
+            str(row.get("organ") or "")
+            for case in paper_case_pools.values()
+            for row in case.get("positive", [])
+            if str(row.get("organ") or "")
+        }
+    )
+    unsampleable_organs = sorted(
+        set(trainable_positive_organs) - set(sampleable_positive_organs)
+    )
+    case_rows = []
+    for case_id in sorted(set(positive_by_case) | set(negative_by_case)):
+        pos_organs = sorted(positive_by_case.get(case_id, set()))
+        neg_count = int(negative_by_case.get(case_id, 0))
+        eligible = case_id in paper_case_pools
+        reasons = []
+        if len(pos_organs) < 2:
+            reasons.append("fewer_than_two_trainable_positive_organs")
+        if neg_count < 1:
+            reasons.append("missing_manifest_absent_negative")
+        if not reasons:
+            reasons.append("ok")
+        case_rows.append({
+            "case_id": case_id,
+            "trainable_positive_organ_count": len(pos_organs),
+            "trainable_positive_organs": pos_organs,
+            "manifest_negative_count": neg_count,
+            "paper_aligned_eligible": eligible,
+            "issues": reasons,
+        })
+
+    failures = []
+    if not paper_case_pools and trainable_positive_organs:
+        failures.append("no_paper_aligned_eligible_cases")
+    if unsampleable_organs:
+        failures.append("trainable_positive_organs_not_sampleable_by_paper_profile")
+    return {
+        "stage": "paper_aligned_sampler_contract_audit",
+        "status": "passed" if not failures else "failed",
+        "failure_reasons": failures,
+        "policy": (
+            "Paper-aligned M-step samples 2 positive prompts and 1 manifest "
+            "absent-negative prompt from the same CT. Every trainable positive "
+            "organ must appear in at least one eligible training case, otherwise "
+            "the training audit would fail only after a long run."
+        ),
+        "trainable_positive_organs": trainable_positive_organs,
+        "sampleable_positive_organs": sampleable_positive_organs,
+        "unsampleable_positive_organs": unsampleable_organs,
+        "eligible_case_count": len(paper_case_pools),
+        "case_rows": case_rows,
     }
 
 
@@ -850,15 +1633,23 @@ def load_paper_training_unit(
         else:
             start = choose_patch_start(masks[0], patch_size, 0.0)
         ps = patch_slices(start, patch_size)
-        if float(masks[0][ps].sum()) > 0 and float(masks[1][ps].sum()) > 0:
+        # The preferred positive prompt must contribute foreground.  Requiring
+        # both positives in the same 192^3 patch over-penalizes distant organ
+        # pairs and starves the organ-balanced sampler.
+        if float(masks[0][ps].sum()) > 0:
             chosen = ps
             break
     if chosen is None:
-        raise ValueError("Could not find one 192^3 patch containing both positive targets")
+        raise ValueError("Could not find one 192^3 patch containing the preferred positive target")
     if float(negative_mask.sum()) != 0:
         raise ValueError("Volume-absent negative mask is not all-zero")
     prompt_pairs = [select_family_prompt(x) for x in positives] + [select_family_prompt(negative)]
     targets = np.stack([masks[0][chosen], masks[1][chosen], negative_mask[chosen]], axis=0)
+    foreground_positive_organs = [
+        organ
+        for organ, mask in zip([x["organ"] for x in positives], targets[:2], strict=False)
+        if float(mask.sum()) > 0.0
+    ]
     return (
         torch.from_numpy(np.ascontiguousarray(image[(slice(None), *chosen)])).float(),
         torch.from_numpy(np.ascontiguousarray(targets)).float(),
@@ -867,6 +1658,7 @@ def load_paper_training_unit(
             "case_id": case["case_id"],
             "sample_kind": "paper_aligned_2_positive_1_negative",
             "positive_organs": [x["organ"] for x in positives],
+            "positive_foreground_organs": foreground_positive_organs,
             "negative_organ": negative["organ"],
             "prompt_kinds": [x[1] for x in prompt_pairs],
             "foreground_oversample_selected": foreground_selected,
@@ -949,6 +1741,41 @@ def _resize_target_like(target: torch.Tensor, pred: torch.Tensor) -> torch.Tenso
     return F.interpolate(target.float(), size=pred.shape[2:], mode="nearest")
 
 
+def _prediction_tensors(outputs: Any) -> list[torch.Tensor]:
+    preds = list(outputs) if isinstance(outputs, (list, tuple)) else [outputs]
+    tensors: list[torch.Tensor] = []
+    for pred in preds:
+        if isinstance(pred, dict):
+            pred = pred.get("logits") or pred.get("seg") or pred.get("prediction")
+        if isinstance(pred, torch.Tensor):
+            tensors.append(pred)
+    if not tensors:
+        raise ValueError("VoxTell network returned no tensor outputs")
+    return tensors
+
+
+def _deep_supervision_weights(num_outputs: int) -> np.ndarray:
+    raw = np.asarray([1 / (2 ** i) for i in range(num_outputs)], dtype=np.float64)
+    return raw / raw.sum()
+
+
+def _tensor_range(value: Any) -> tuple[float | None, float | None]:
+    try:
+        tensors = _prediction_tensors(value) if not isinstance(value, torch.Tensor) else [value]
+        mins = [float(t.detach().float().min().cpu()) for t in tensors]
+        maxs = [float(t.detach().float().max().cpu()) for t in tensors]
+        return min(mins), max(maxs)
+    except Exception:
+        return None, None
+
+
+def _tensor_is_finite(value: torch.Tensor) -> bool:
+    try:
+        return bool(torch.isfinite(value.detach()).all().item())
+    except Exception:
+        return False
+
+
 def _foreground_balanced_bce(pred: torch.Tensor, target: torch.Tensor, pos_weight_cap: float) -> torch.Tensor:
     positive = target.sum()
     if positive <= 0 or pos_weight_cap <= 1:
@@ -964,26 +1791,40 @@ def voxtell_supervision_loss(
     training_weight: float,
     bce_pos_weight_cap: float = 100.0,
 ) -> torch.Tensor:
-    preds = list(outputs) if isinstance(outputs, (list, tuple)) else [outputs]
-    if not preds:
-        raise ValueError("VoxTell network returned no outputs")
+    return voxtell_supervision_loss_components(
+        outputs, target, training_weight, bce_pos_weight_cap
+    )["loss"]
+
+
+def voxtell_supervision_loss_components(
+    outputs: Any,
+    target: torch.Tensor,
+    training_weight: float,
+    bce_pos_weight_cap: float = 100.0,
+) -> dict[str, torch.Tensor]:
+    preds = _prediction_tensors(outputs)
     total = None
+    total_bce = None
+    total_dice = None
     total_w = 0.0
     for idx, pred in enumerate(preds):
-        if isinstance(pred, dict):
-            pred = pred.get("logits") or pred.get("seg") or pred.get("prediction")
-        if pred is None:
-            continue
         stage_target = _resize_target_like(target, pred)
         bce = _foreground_balanced_bce(pred, stage_target, bce_pos_weight_cap)
         dice = dice_loss_with_logits(pred, stage_target)
         stage_w = 0.5 ** idx
         loss = stage_w * (bce + dice)
         total = loss if total is None else total + loss
+        total_bce = stage_w * bce if total_bce is None else total_bce + stage_w * bce
+        total_dice = stage_w * dice if total_dice is None else total_dice + stage_w * dice
         total_w += stage_w
     if total is None or total_w <= 0:
         raise ValueError("VoxTell network outputs were not tensors")
-    return (total / total_w) * float(training_weight or 0.0)
+    weight = float(training_weight or 0.0)
+    return {
+        "loss": (total / total_w) * weight,
+        "bce_component": (total_bce / total_w) * weight,
+        "dice_component": (total_dice / total_w) * weight,
+    }
 
 
 def official_retention_loss(student_outputs: Any, official_outputs: Any) -> torch.Tensor:
@@ -1045,7 +1886,12 @@ def foreground_probability_dice(outputs: Any, target: torch.Tensor) -> float:
 
 def paper_aligned_supervision_loss(outputs: Any, target: torch.Tensor) -> torch.Tensor:
     """Paper A.3: Dice+BCE at all five decoder scales with normalized nnU-Net weights."""
-    preds = list(outputs) if isinstance(outputs, (list, tuple)) else [outputs]
+    return paper_aligned_supervision_loss_components(outputs, target)["loss"]
+
+
+def paper_aligned_supervision_loss_components(outputs: Any, target: torch.Tensor) -> dict[str, torch.Tensor]:
+    """Return total loss plus BCE and negative-Dice components for diagnostics."""
+    preds = _prediction_tensors(outputs)
     targets = [_resize_target_like(target, pred) for pred in preds]
     loss = DC_and_BCE_loss(
         {},
@@ -1054,9 +1900,25 @@ def paper_aligned_supervision_loss(outputs: Any, target: torch.Tensor) -> torch.
         weight_dice=1,
         dice_class=MemoryEfficientSoftDiceLoss,
     )
-    raw = np.asarray([1 / (2 ** i) for i in range(len(preds))], dtype=np.float64)
-    weights = raw / raw.sum()
-    return sum(float(weights[i]) * loss(pred, targets[i]) for i, pred in enumerate(preds))
+    weights = _deep_supervision_weights(len(preds))
+    total = None
+    total_bce = None
+    total_dice = None
+    for i, pred in enumerate(preds):
+        stage_target = targets[i].float()
+        bce = loss.ce(pred, stage_target)
+        dice = loss.dc(pred, stage_target)
+        stage_total = float(weights[i]) * (bce + dice)
+        total = stage_total if total is None else total + stage_total
+        total_bce = float(weights[i]) * bce if total_bce is None else total_bce + float(weights[i]) * bce
+        total_dice = float(weights[i]) * dice if total_dice is None else total_dice + float(weights[i]) * dice
+    if total is None or total_bce is None or total_dice is None:
+        raise ValueError("Paper-aligned loss received no tensor outputs")
+    return {
+        "loss": total,
+        "bce_component": total_bce,
+        "dice_component": total_dice,
+    }
 
 
 def build_optimizer(params, args: argparse.Namespace):
@@ -1176,6 +2038,16 @@ def main() -> int:
         sample_pools["negative"] = list(sample_pools["manifest_negative"])
         sample_pools["derived_crop_negative"] = []
     paper_case_pools = build_paper_case_pools(training_rows) if args.training_profile == PAPER_ALIGNED_PROFILE else {}
+    paper_sampler_contract_audit = (
+        build_paper_sampler_contract_audit(training_rows, paper_case_pools)
+        if args.training_profile == PAPER_ALIGNED_PROFILE
+        else {
+            "stage": "paper_aligned_sampler_contract_audit",
+            "status": "not_applicable",
+            "reason": f"training_profile={args.training_profile}",
+        }
+    )
+    write_json(output_dir / "paper_sampler_contract_audit.json", paper_sampler_contract_audit)
     try:
         pos_neg_ratio = parse_pos_neg_ratio(args.pos_neg_ratio)
         pos_neg_ratio_error = None
@@ -1202,6 +2074,12 @@ def main() -> int:
         validation_errors.append("No valid manifest items with existing image/mask/prompt paths")
     if args.training_profile == PAPER_ALIGNED_PROFILE and not paper_case_pools:
         validation_errors.append("No case can form strict 2-positive + 1 volume-absent-negative training units")
+    if args.training_profile == PAPER_ALIGNED_PROFILE and paper_sampler_contract_audit.get("status") != "passed":
+        missing = ",".join(paper_sampler_contract_audit.get("unsampleable_positive_organs", [])[:20])
+        validation_errors.append(
+            "Paper-aligned sampler cannot expose all trainable positive organs; "
+            f"unsampleable_positive_organs={missing}"
+        )
     if args.training_profile == PAPER_ALIGNED_PROFILE and not case_split["training"]:
         validation_errors.append("No training cases remain after deterministic held-out split")
     if args.training_profile == QUALITY_WEIGHTED_PROFILE and not training_rows:
@@ -1308,7 +2186,27 @@ def main() -> int:
         "official_voxtell_commit_required": OFFICIAL_VOXTELL_COMMIT,
         "outbound_write_audit": outbound_write_audit(),
         "official_embedding_bank": official_bank_audit,
+        "paper_sampler_contract_audit": str(output_dir / "paper_sampler_contract_audit.json"),
+        "amp_mode": args.amp_mode,
     }
+    prompt_mapping_audit, prompt_mapping_rows = build_prompt_organ_mapping_audit(rows)
+    prompt_mapping_audit["csv"] = str(output_dir / "prompt_organ_mapping_audit.csv")
+    write_json(output_dir / "prompt_organ_mapping_audit.json", prompt_mapping_audit)
+    write_csv(output_dir / "prompt_organ_mapping_audit.csv", prompt_mapping_rows)
+    alignment_audit = build_prompt_mask_ct_alignment_audit(rows, manifest_path)
+    alignment_rows = alignment_audit.pop("_rows")
+    write_json(output_dir / "prompt_mask_ct_alignment_audit.json", alignment_audit)
+    write_csv(output_dir / "prompt_mask_ct_alignment_audit.csv", alignment_rows)
+    if prompt_mapping_audit.get("status") != "passed":
+        validation_errors.append("Prompt/organ/mask mapping audit failed")
+    if alignment_audit.get("status") != "passed":
+        validation_errors.append("Prompt-mask-CT alignment audit failed")
+    plan.update({
+        "validation_status": "ok" if not validation_errors else "failed",
+        "validation_errors": validation_errors,
+        "prompt_mask_ct_alignment_audit": str(output_dir / "prompt_mask_ct_alignment_audit.json"),
+        "prompt_organ_mapping_audit": str(output_dir / "prompt_organ_mapping_audit.json"),
+    })
     if args.dry_run:
         write_json(output_dir / "case_split.json", case_split)
         plan["expected_inference_model_dir"] = str(output_dir / "voxtell_finetuned_model")
@@ -1355,7 +2253,11 @@ def main() -> int:
 
     trainable_parameters = [p for p in network.parameters() if p.requires_grad]
     optim = build_optimizer(trainable_parameters, args)
-    scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+    amp_enabled = device.type == "cuda" and args.amp_mode == "auto"
+    try:
+        scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    except Exception:
+        scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
 
     losses: list[float] = []
     task_losses: list[float] = []
@@ -1368,6 +2270,11 @@ def main() -> int:
     loss_history: list[dict[str, float | int]] = []
     organ_gradient_mass: dict[str, float] = {}
     organ_sample_counts: dict[str, int] = {}
+    positive_organ_sample_counts: dict[str, int] = {}
+    negative_organ_sample_counts: dict[str, int] = {}
+    positive_organ_finite_gradient_mass: dict[str, float] = {}
+    positive_organ_nonfinite_gradient_steps: dict[str, int] = {}
+    optimizer_steps_skipped_nonfinite_grad = 0
     total_steps = 0
     max_steps = args.max_steps if args.max_steps > 0 else args.epochs * max(1, len(training_rows))
     sampling_history: list[dict[str, Any]] = []
@@ -1474,17 +2381,20 @@ def main() -> int:
 
         optim.zero_grad(set_to_none=True)
         set_optimizer_lr(optim, poly_lr(total_steps, max_steps, args.learning_rate, args.poly_power))
-        with torch.autocast(device.type, enabled=device.type == "cuda"):
+        with torch.autocast(device.type, enabled=amp_enabled):
             logits = network(image, text_embedding)
             if args.training_profile == PAPER_ALIGNED_PROFILE:
-                task_loss = paper_aligned_supervision_loss(logits, target)
+                task_components = paper_aligned_supervision_loss_components(logits, target)
             else:
-                task_loss = voxtell_supervision_loss(
+                task_components = voxtell_supervision_loss_components(
                     logits,
                     target,
                     float(item.get("effective_loss_weight", item.get("training_weight", 1.0)) or 0.0),
                     args.bce_pos_weight_cap,
                 )
+            task_loss = task_components["loss"]
+            bce_component = task_components["bce_component"]
+            dice_component = task_components["dice_component"]
             if official_network is not None:
                 # Retention uses an independent, organ-balanced positive anchor
                 # rather than merely reusing the current task patch.
@@ -1610,39 +2520,86 @@ def main() -> int:
             task_foreground_dices.append(
                 foreground_probability_dice(logits, target)
             )
-        scaler.scale(loss).backward()
-        scaler.unscale_(optim)
-        if args.grad_clip_norm > 0:
-            grad_norm = float(torch.nn.utils.clip_grad_norm_(
-                (p for p in network.parameters() if p.requires_grad),
-                max_norm=float(args.grad_clip_norm),
-            ))
+        logit_min, logit_max = _tensor_range(logits)
+        target_min, target_max = _tensor_range(target)
+        scale_before = float(scaler.get_scale()) if hasattr(scaler, "get_scale") else None
+        loss_component_finite = all(
+            _tensor_is_finite(component)
+            for component in (loss, task_loss, bce_component, dice_component, retention_loss)
+        )
+        scaled_backward = False
+        nonfinite_param_count = 0
+        nonfinite_param_names: list[str] = []
+        if loss_component_finite:
+            scaler.scale(loss).backward()
+            scaled_backward = True
+            scaler.unscale_(optim)
+            nonfinite_param_count, nonfinite_param_names = _nonfinite_gradient_param_names(network)
+            if args.grad_clip_norm > 0:
+                grad_norm = float(torch.nn.utils.clip_grad_norm_(
+                    (p for p in network.parameters() if p.requires_grad),
+                    max_norm=float(args.grad_clip_norm),
+                ))
+            else:
+                grad_norm = 0.0
         else:
-            grad_norm = 0.0
-        sampled_organs: list[str] = []
+            grad_norm = float("nan")
+        positive_sampled_organs: list[str] = []
+        negative_sampled_organs: list[str] = []
         if sample_meta.get("batch_units"):
             for unit in sample_meta["batch_units"]:
-                sampled_organs.extend(
+                positive_sampled_organs.extend(
                     str(organ)
-                    for organ in unit.get("positive_organs", [])
+                    for organ in (
+                        unit.get("positive_foreground_organs")
+                        or unit.get("positive_organs", [])
+                    )
                     if str(organ)
                 )
                 if unit.get("negative_organ"):
-                    sampled_organs.append(str(unit["negative_organ"]))
+                    negative_sampled_organs.append(str(unit["negative_organ"]))
         elif sample_meta.get("organ"):
-            sampled_organs = [str(sample_meta["organ"])]
-        for organ in set(sampled_organs):
-            fraction = 1.0 / max(1, len(set(sampled_organs)))
-            organ_gradient_mass[organ] = (
-                organ_gradient_mass.get(organ, 0.0) + grad_norm * fraction
-            )
+            if sample_meta.get("sample_kind") == "negative":
+                negative_sampled_organs = [str(sample_meta["organ"])]
+            else:
+                positive_sampled_organs = [str(sample_meta["organ"])]
+        unique_positive_organs = set(positive_sampled_organs)
+        unique_negative_organs = set(negative_sampled_organs)
+        finite_grad_norm = _is_finite_number(grad_norm) and nonfinite_param_count == 0
+        for organ in unique_positive_organs:
+            fraction = 1.0 / max(1, len(unique_positive_organs))
+            positive_organ_sample_counts[organ] = positive_organ_sample_counts.get(organ, 0) + 1
             organ_sample_counts[organ] = organ_sample_counts.get(organ, 0) + 1
-        scaler.step(optim)
-        scaler.update()
+            if finite_grad_norm:
+                positive_organ_finite_gradient_mass[organ] = (
+                    positive_organ_finite_gradient_mass.get(organ, 0.0)
+                    + float(grad_norm) * fraction
+                )
+                organ_gradient_mass[organ] = (
+                    organ_gradient_mass.get(organ, 0.0) + float(grad_norm) * fraction
+                )
+            else:
+                positive_organ_nonfinite_gradient_steps[organ] = (
+                    positive_organ_nonfinite_gradient_steps.get(organ, 0) + 1
+                )
+        for organ in unique_negative_organs:
+            negative_organ_sample_counts[organ] = negative_organ_sample_counts.get(organ, 0) + 1
+            organ_sample_counts[organ] = organ_sample_counts.get(organ, 0) + 1
+        optimizer_step_performed = bool(loss_component_finite and finite_grad_norm)
+        if optimizer_step_performed:
+            scaler.step(optim)
+        else:
+            optimizer_steps_skipped_nonfinite_grad += 1
+            optim.zero_grad(set_to_none=True)
+        if scaled_backward:
+            scaler.update()
+        scale_after = float(scaler.get_scale()) if hasattr(scaler, "get_scale") else None
 
         total_steps += 1
         loss_value = float(loss.detach().cpu())
         task_loss_value = float(task_loss.detach().cpu())
+        bce_component_value = float(bce_component.detach().cpu())
+        dice_component_value = float(dice_component.detach().cpu())
         retention_loss_value = float(retention_loss.detach().cpu())
         retention_contribution = (
             effective_retention_weight * retention_loss_value
@@ -1658,9 +2615,23 @@ def main() -> int:
             "step": total_steps,
             "loss": loss_value,
             "task_loss": task_loss_value,
+            "bce_component": bce_component_value,
+            "dice_component": dice_component_value,
             "retention_loss": retention_loss_value,
             "grad_norm_before_clip": grad_norm,
             "learning_rate": float(optim.param_groups[0]["lr"]),
+            "amp_mode": args.amp_mode,
+            "amp_enabled": amp_enabled,
+            "amp_scale": scale_before,
+            "grad_scaler_scale_before": scale_before,
+            "grad_scaler_scale_after": scale_after,
+            "loss_component_finite": bool(loss_component_finite),
+            "nonfinite_param_count": int(nonfinite_param_count),
+            "nonfinite_param_names": nonfinite_param_names,
+            "logit_min": logit_min,
+            "logit_max": logit_max,
+            "target_min": target_min,
+            "target_max": target_max,
             "case_id": str(sample_meta.get("case_id") or ""),
             "organ": str(sample_meta.get("organ") or ""),
             "prompt": str(sample_meta.get("prompt") or ""),
@@ -1672,6 +2643,13 @@ def main() -> int:
             "fov_evidence": sample_meta.get("fov_evidence", []),
             "foreground_voxel_ratio": float(sample_meta["foreground_voxel_ratio"]),
             "all_zero_target": int(bool(sample_meta["all_zero_target"])),
+            "positive_organs": sorted(unique_positive_organs),
+            "positive_foreground_organs": sorted(unique_positive_organs),
+            "negative_organ": sorted(unique_negative_organs)[0] if unique_negative_organs else None,
+            "batch_unit_count": len(sample_meta.get("batch_units", [])),
+            "finite_grad_norm": bool(finite_grad_norm),
+            "optimizer_step_performed": optimizer_step_performed,
+            "optimizer_step_skipped_nonfinite_grad": not optimizer_step_performed,
         })
         log_interval = max(1, int(args.sampling_log_interval))
         if total_steps % log_interval == 0 or total_steps == max_steps:
@@ -1694,6 +2672,19 @@ def main() -> int:
                 source = m.get("negative_source_class")
                 if source:
                     source_counts[str(source)] = source_counts.get(str(source), 0) + 1
+            positive_organ_window_counts: Counter[str] = Counter()
+            for m in sampling_window:
+                for unit in m.get("batch_units", []) or []:
+                    positive_organ_window_counts.update(
+                        str(organ)
+                        for organ in (
+                            unit.get("positive_foreground_organs")
+                            or unit.get("positive_organs", [])
+                        )
+                        if str(organ)
+                    )
+                if m.get("organ") and m.get("sample_kind") != "negative":
+                    positive_organ_window_counts.update([str(m["organ"])])
             stat = {
                 "step": total_steps,
                 "loss": float(np.mean(recent)) if recent else None,
@@ -1706,6 +2697,7 @@ def main() -> int:
                 "all_zero_target_count": sum(1 for m in sampling_window if m.get("all_zero_target")),
                 "negative_reason_counts": reason_counts,
                 "negative_source_class_counts": source_counts,
+                "positive_organ_window_counts": dict(positive_organ_window_counts),
                 "mean_task_loss": float(np.mean(task_losses[-log_interval:])),
                 "mean_retention_loss": float(np.mean(retention_losses[-log_interval:])),
             }
@@ -1795,6 +2787,24 @@ def main() -> int:
     best_checkpoint.unlink(missing_ok=True)
     finite_losses = [x for x in losses if np.isfinite(x)]
     write_json(output_dir / "loss_history.json", {"steps": total_steps, "history": loss_history, "sampling_history": sampling_history, "skipped_sampling_attempts": skipped_attempts})
+    write_loss_curve_artifacts(output_dir, loss_history)
+    loss_curve_diagnosis = diagnose_loss_curve(loss_history)
+    loss_curve_diagnosis.update({
+        "learning_rate": args.learning_rate,
+        "scheduler": "poly",
+        "optimizer": args.optimizer,
+        "amp_mode": args.amp_mode,
+    })
+    write_json(output_dir / "loss_curve_diagnosis.json", loss_curve_diagnosis)
+    training_stability_diagnosis, training_stability_rows = build_training_stability_diagnosis(loss_history)
+    write_json(output_dir / "training_stability_diagnosis.json", training_stability_diagnosis)
+    write_csv(output_dir / "training_stability_diagnosis.csv", training_stability_rows)
+    sample_distribution_audit = build_training_sample_distribution_audit(
+        loss_history=loss_history,
+        sampling_history=sampling_history,
+        pos_neg_ratio=pos_neg_ratio,
+    )
+    write_json(output_dir / "training_sample_distribution_audit.json", sample_distribution_audit)
     provenance = {
         "statement": "Official VoxTell v1.1 full-model fine-tuning with a paper-aligned prompt-conditioned M-step, integrated into a project-specific quality-gated EM framework.",
         "training_profile": args.training_profile,
@@ -1838,62 +2848,36 @@ def main() -> int:
             "project-specific quality-gated EM outer loop",
         ],
     }
-    positive_steps = sum(
-        1 for row in loss_history
-        if row.get("sample_kind") != "negative"
+    audit_bundle = build_sampling_gradient_audits(
+        training_rows=training_rows,
+        loss_history=loss_history,
+        positive_organ_sample_counts=positive_organ_sample_counts,
+        negative_organ_sample_counts=negative_organ_sample_counts,
+        positive_organ_finite_gradient_mass=positive_organ_finite_gradient_mass,
+        positive_organ_nonfinite_gradient_steps=positive_organ_nonfinite_gradient_steps,
     )
-    all_positive_organs = sorted(
-        {
-            str(row.get("organ") or "")
-            for row in training_rows
-            if row.get("supervision_type", "positive") == "positive"
-            and str(row.get("organ") or "")
-        }
-    )
-    priority_organs = sorted(
-        set(sample_pools.get("protected_organs") or [])
-        | set(sample_pools.get("novelty_organs") or [])
-    )
-    expected_gradient_organs = (
-        all_positive_organs
-        if positive_steps >= len(all_positive_organs)
-        else priority_organs
-    )
-    total_gradient_mass = sum(organ_gradient_mass.values())
-    organ_gradient_shares = {
-        organ: (
-            organ_gradient_mass.get(organ, 0.0) / total_gradient_mass
-            if total_gradient_mass > 0 else 0.0
-        )
-        for organ in all_positive_organs
-    }
-    minimum_share = (
-        0.1 / len(expected_gradient_organs)
-        if expected_gradient_organs else 0.0
-    )
-    underrepresented_organs = [
-        organ
-        for organ in expected_gradient_organs
-        if organ_gradient_shares.get(organ, 0.0) < minimum_share
-    ]
-    organ_gradient_audit = {
-        "status": "passed" if not underrepresented_organs else "failed",
-        "positive_steps": positive_steps,
-        "expected_organs": expected_gradient_organs,
-        "minimum_gradient_share": minimum_share,
-        "underrepresented_organs": underrepresented_organs,
-        "sample_counts": organ_sample_counts,
-        "gradient_shares": organ_gradient_shares,
-    }
+    organ_gradient_audit = audit_bundle["organ_gradient_audit"]
+    organ_exposure_audit = audit_bundle["organ_exposure_audit"]
+    nonfinite_gradient_audit = audit_bundle["nonfinite_gradient_audit"]
+    student_sampling_gradient_diagnosis = audit_bundle["student_sampling_gradient_diagnosis"]
     write_json(output_dir / "training_provenance.json", provenance)
     write_json(output_dir / "sampling_audit.json", {
         "training_profile": args.training_profile,
         "eligible_image_centered_cases": len(paper_case_pools),
         "sampling_history": sampling_history,
         "skipped_sampling_attempts": skipped_attempts,
+        "optimizer_steps_skipped_nonfinite_grad": optimizer_steps_skipped_nonfinite_grad,
         "derived_crop_negatives_allowed": args.training_profile == QUALITY_WEIGHTED_PROFILE,
         "organ_gradient_audit": organ_gradient_audit,
+        "organ_exposure_audit": organ_exposure_audit,
+        "nonfinite_gradient_audit": nonfinite_gradient_audit,
+        "student_sampling_gradient_diagnosis": student_sampling_gradient_diagnosis,
     })
+    write_json(output_dir / "organ_exposure_audit.json", organ_exposure_audit)
+    write_json(output_dir / "nonfinite_gradient_audit.json", nonfinite_gradient_audit)
+    write_json(output_dir / "student_sampling_gradient_diagnosis.json", student_sampling_gradient_diagnosis)
+    write_csv(output_dir / "organ_exposure_audit.csv", audit_bundle["organ_rows"])
+    write_csv(output_dir / "student_sampling_gradient_diagnosis.csv", audit_bundle["organ_rows"])
     result = {
         **plan,
         "status": "success",
@@ -1921,6 +2905,7 @@ def main() -> int:
         },
         "sampling_history": sampling_history,
         "skipped_sampling_attempts": skipped_attempts,
+        "optimizer_steps_skipped_nonfinite_grad": optimizer_steps_skipped_nonfinite_grad,
         "mean_loss": float(np.mean(finite_losses)) if finite_losses else None,
         "mean_task_loss": float(np.mean(task_losses)) if task_losses else None,
         "mean_retention_loss": float(np.mean(retention_losses)) if retention_losses else None,
@@ -1946,6 +2931,13 @@ def main() -> int:
         ),
         "best_retention_anchor_foreground_dice": best_anchor_score,
         "organ_gradient_audit": organ_gradient_audit,
+        "organ_exposure_audit": organ_exposure_audit,
+        "nonfinite_gradient_audit": nonfinite_gradient_audit,
+        "student_sampling_gradient_diagnosis": str(output_dir / "student_sampling_gradient_diagnosis.json"),
+        "training_stability_diagnosis": str(output_dir / "training_stability_diagnosis.json"),
+        "loss_curve_diagnosis": str(output_dir / "loss_curve_diagnosis.json"),
+        "training_sample_distribution_audit": str(output_dir / "training_sample_distribution_audit.json"),
+        "student_training_loss_curve": str(output_dir / "student_training_loss_curve.csv"),
         "last_loss": finite_losses[-1] if finite_losses else None,
         "finetuned_checkpoint": str(final_ckpt),
         "inference_model_dir": str(inference_model_dir),
