@@ -1,0 +1,22 @@
+{
+  "schema_version": "hpc-migration-1.0",
+  "hf_repo_id": "Xiang-mira/MedIA-Agentic-AI-Private-HPC",
+  "policy": {
+    "no_pants_data": true,
+    "no_raw_medical_images": true,
+    "no_vista3d_ucsf_csv": true,
+    "qwen2_vl_public_download_only": true,
+    "qwen25_vl_public_download_only": true
+  },
+  "counts": {
+    "github_files": 1161,
+    "hf_private_files": 39141,
+    "excluded_rows": 139518,
+    "hf_private_bytes": 31666317476
+  },
+  "restore_roots": [
+    "checkpoints",
+    "student_models",
+    "outputs"
+  ]
+}

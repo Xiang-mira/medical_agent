@@ -20,6 +20,12 @@ PanTSMini_Label/
 *.zip
 *.tar
 
+# ── Institution/patient metadata snapshots (do not migrate via Git/HF) ───────
+third_party/VISTA3D-Inference-Pipeline-master/UCSF*.csv
+third_party/ePAI-main/**/input_csv/*.csv
+third_party/ePAI-main/**/input_csv_*/*.csv
+third_party/ePAI-main/reader_study/*.csv
+
 # ── Runtime outputs ───────────────────────────────────────────────────────────
 outputs/
 results/
@@ -52,6 +58,7 @@ env/
 _inspect_*/
 .pytest_tmp*/
 .pytest_cache/
+.cache/
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log

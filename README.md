@@ -191,6 +191,100 @@ python examples/download_from_hf.py \
 
 See [Hugging Face model release guide](docs/HUGGINGFACE_MODEL_RELEASE.md) and [HF model manifest](configs/hf_model_manifest.yaml) for the full model list, supported organs, input/output formats, CLI commands, expected GPU memory, and HPC examples.
 
+## DISCOVERY / OnDemand HPC migration
+
+DISCOVERY does not currently provide the project workflow with a direct personal
+SSH/SCP entry point. Use the OnDemand Web Portal, then either OnDemand Shell or
+OnDemand VS Code Server. Do not assume `ssh discovery`, `scp`, VS Code
+Remote-SSH, or Codex SSH remote projects are available.
+
+Migration is intentionally split by asset type:
+
+```text
+GitHub                                      source code, configs, docs, manifests
+Xiang-mira/MedIA-Agentic-AI-Private-HPC     private restore checkpoints and selected formal state
+HPC/project storage                         new CT datasets and any local PHI-bearing data
+not migrated                                PanTS tarballs/data, caches, bad/smoke outputs
+```
+
+Create the software environment on the HPC instead of copying an old conda
+folder:
+
+```bash
+git clone https://github.com/Xiang-mira/medical_agent.git
+cd medical_agent
+
+python -m venv .venv
+source .venv/bin/activate
+pip install -r agent-harness/requirements.txt
+```
+
+Download the private migration assets directly on the HPC:
+
+```bash
+huggingface-cli login
+huggingface-cli download Xiang-mira/MedIA-Agentic-AI-Private-HPC \
+  --local-dir checkpoints \
+  --resume-download
+```
+
+The private repo is laid out so that teacher assets land under `checkpoints/`
+with the same local paths expected by `configs/model_registry.yaml`. It also
+contains `student_models/em_round1_25case_full_mstep_lr3e-5_20260711/` and
+filtered lightweight formal state under `outputs/` inside the download root
+(`checkpoints/student_models/...` and `checkpoints/outputs/...` when using the
+command above). Copy or symlink those optional state folders into the project
+root only when a continuation run needs them.
+
+Qwen2-VL and Qwen2.5-VL are public upstream models and are not mirrored in the
+private migration repo. Download them only if a LabelCritic/VLM workflow needs
+them:
+
+```bash
+huggingface-cli download Qwen/Qwen2-VL-7B-Instruct \
+  --local-dir checkpoints/Qwen/Qwen2-VL-7B-Instruct \
+  --resume-download
+
+huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
+  --local-dir checkpoints/Qwen/Qwen2.5-VL-7B-Instruct \
+  --resume-download
+```
+
+Verify the restored private assets and code state:
+
+```bash
+python scripts/verify_hf_asset_manifest.py \
+  --manifest docs/migration/hf_asset_manifest.tsv \
+  --root checkpoints
+
+python scripts/check_gpu_resources.py
+python scripts/audit_teacher_readiness.py
+pytest agent-harness/tests/test_imports.py \
+       agent-harness/tests/test_student_trainset_pseudo_consistency.py
+```
+
+PanTS data and tarballs are not migrated. On the HPC, regenerate or rewrite
+`data_manifest/*.csv` so `ct_path` and `annotation_folder` point to the new
+available dataset paths. Do not rely on old absolute paths such as
+`/home/teacher1/JHU-project1/medical_agent/data/PanTS`.
+
+Migration audit files live under `docs/migration/`:
+
+```text
+HPC_MIGRATION_AUDIT.md
+asset_manifest.json
+github_file_manifest.tsv
+hf_asset_manifest.tsv
+hf_upload_plan.tsv
+excluded_manifest.tsv
+```
+
+Regenerate them after changing restore assets:
+
+```bash
+python scripts/build_hpc_migration_manifests.py
+```
+
 ## Data and checkpoints
 
 The default formal case manifest is:
