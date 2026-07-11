@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from huggingface_hub import CommitOperationAdd, HfApi, create_repo
+from huggingface_hub.errors import HfHubHTTPError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +63,8 @@ def upload_manifest_files(api: HfApi, repo_id: str, migration_dir: Path) -> None
     ]:
         path = migration_dir / name
         if path.exists():
-            api.upload_file(
+            retry_hf_call(
+                api.upload_file,
                 repo_id=repo_id,
                 repo_type="model",
                 path_or_fileobj=str(path),
@@ -70,8 +72,34 @@ def upload_manifest_files(api: HfApi, repo_id: str, migration_dir: Path) -> None
             )
 
 
+def retry_hf_call(fn, *args, retries: int = 5, **kwargs):
+    for attempt in range(1, retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            if attempt == retries:
+                raise
+            sleep_sec = min(60, 5 * attempt)
+            print(f"retrying Hugging Face API call after {sleep_sec}s")
+            time.sleep(sleep_sec)
+    raise RuntimeError("unreachable")
+
+
+def ensure_repo(repo_id: str) -> None:
+    retry_hf_call(create_repo, repo_id, repo_type="model", private=True, exist_ok=True)
+
+
 def remote_files(api: HfApi, repo_id: str) -> set[str]:
-    return set(api.list_repo_files(repo_id=repo_id, repo_type="model"))
+    for attempt in range(1, 6):
+        try:
+            return set(api.list_repo_files(repo_id=repo_id, repo_type="model"))
+        except Exception:
+            if attempt == 5:
+                raise
+            sleep_sec = min(60, 5 * attempt)
+            print(f"retrying remote file listing after {sleep_sec}s")
+            time.sleep(sleep_sec)
+    raise RuntimeError("unreachable")
 
 
 def manifest_rows(path: Path) -> list[dict[str, str]]:
@@ -85,6 +113,7 @@ def upload_output_manifest_rows(
     path_prefix: str,
     chunk_size: int,
     retries: int,
+    rate_limit_waits: int,
 ) -> None:
     existing = remote_files(api, repo_id)
     todo = [
@@ -102,6 +131,7 @@ def upload_output_manifest_rows(
         if not operations:
             continue
         attempt = 0
+        rate_waits = 0
         while True:
             try:
                 api.create_commit(
@@ -111,6 +141,25 @@ def upload_output_manifest_rows(
                     commit_message=f"Upload filtered formal outputs {path_prefix} {start + 1}-{start + len(chunk)}",
                 )
                 break
+            except HfHubHTTPError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status == 429 and "repository commits" in str(exc):
+                    rate_waits += 1
+                    if rate_waits > rate_limit_waits:
+                        raise
+                    sleep_sec = 3900
+                    print(
+                        "hit Hugging Face repository commit rate limit; "
+                        f"sleeping {sleep_sec}s before resuming"
+                    )
+                    time.sleep(sleep_sec)
+                    continue
+                attempt += 1
+                if attempt > retries:
+                    raise
+                sleep_sec = min(60, 5 * attempt)
+                print(f"retrying {path_prefix} chunk {start // chunk_size + 1} after {sleep_sec}s")
+                time.sleep(sleep_sec)
             except Exception:
                 attempt += 1
                 if attempt > retries:
@@ -126,8 +175,9 @@ def main() -> int:
     ap.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
     ap.add_argument("--migration-dir", type=Path, default=DEFAULT_MIGRATION_DIR)
     ap.add_argument("--asset-manifest", type=Path, default=DEFAULT_ASSET_MANIFEST)
-    ap.add_argument("--chunk-size", type=int, default=250)
+    ap.add_argument("--chunk-size", type=int, default=2000)
     ap.add_argument("--retries", type=int, default=3)
+    ap.add_argument("--rate-limit-waits", type=int, default=2)
     ap.add_argument("--outputs-only", action="store_true")
     ap.add_argument("--manifests-only", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
@@ -139,7 +189,7 @@ def main() -> int:
             print(f"{row['kind']}\t{row['local_path']}\t{row['path_in_repo']}")
         return 0
 
-    create_repo(args.repo_id, repo_type="model", private=True, exist_ok=True)
+    ensure_repo(args.repo_id)
     api = HfApi()
     asset_rows = manifest_rows(args.asset_manifest)
 
@@ -157,7 +207,8 @@ def main() -> int:
         if args.outputs_only and kind != "formal_outputs":
             continue
         if kind == "file":
-            api.upload_file(
+            retry_hf_call(
+                api.upload_file,
                 repo_id=args.repo_id,
                 repo_type="model",
                 path_or_fileobj=str(local),
@@ -171,9 +222,11 @@ def main() -> int:
                 path_prefix=path_in_repo,
                 chunk_size=args.chunk_size,
                 retries=args.retries,
+                rate_limit_waits=args.rate_limit_waits,
             )
         elif not args.outputs_only:
-            api.upload_folder(
+            retry_hf_call(
+                api.upload_folder,
                 repo_id=args.repo_id,
                 repo_type="model",
                 folder_path=str(local),
@@ -189,7 +242,8 @@ def main() -> int:
             "See `migration/HPC_MIGRATION_AUDIT.md` and the GitHub repository README.\n",
             encoding="utf-8",
         )
-        api.upload_file(
+        retry_hf_call(
+            api.upload_file,
             repo_id=args.repo_id,
             repo_type="model",
             path_or_fileobj=str(readme),
