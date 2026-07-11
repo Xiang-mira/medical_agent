@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import time
 import tempfile
 from pathlib import Path
 
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import CommitOperationAdd, HfApi, create_repo
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPO_ID = "Xiang-mira/MedIA-Agentic-AI-Private-HPC"
 DEFAULT_PLAN = ROOT / "docs/migration/hf_upload_plan.tsv"
 DEFAULT_MIGRATION_DIR = ROOT / "docs/migration"
+DEFAULT_ASSET_MANIFEST = ROOT / "docs/migration/hf_asset_manifest.tsv"
 
 OUTPUT_ALLOW_PATTERNS = ["*.json", "*.jsonl", "*.csv", "*.yaml", "*.yml", "*.txt", "*.log", "*.md"]
 OUTPUT_IGNORE_PATTERNS = [
@@ -68,11 +70,66 @@ def upload_manifest_files(api: HfApi, repo_id: str, migration_dir: Path) -> None
             )
 
 
+def remote_files(api: HfApi, repo_id: str) -> set[str]:
+    return set(api.list_repo_files(repo_id=repo_id, repo_type="model"))
+
+
+def manifest_rows(path: Path) -> list[dict[str, str]]:
+    return list(csv.DictReader(path.open(encoding="utf-8"), delimiter="\t"))
+
+
+def upload_output_manifest_rows(
+    api: HfApi,
+    repo_id: str,
+    rows: list[dict[str, str]],
+    path_prefix: str,
+    chunk_size: int,
+    retries: int,
+) -> None:
+    existing = remote_files(api, repo_id)
+    todo = [
+        row for row in rows
+        if row.get("repo_path", "").startswith(path_prefix.rstrip("/") + "/")
+        and row.get("repo_path") not in existing
+    ]
+    print(f"formal output upload: prefix={path_prefix} missing_files={len(todo)}")
+    for start in range(0, len(todo), chunk_size):
+        chunk = todo[start:start + chunk_size]
+        operations = [
+            CommitOperationAdd(path_in_repo=row["repo_path"], path_or_fileobj=str(ROOT / row["source_path"]))
+            for row in chunk
+        ]
+        if not operations:
+            continue
+        attempt = 0
+        while True:
+            try:
+                api.create_commit(
+                    repo_id=repo_id,
+                    repo_type="model",
+                    operations=operations,
+                    commit_message=f"Upload filtered formal outputs {path_prefix} {start + 1}-{start + len(chunk)}",
+                )
+                break
+            except Exception:
+                attempt += 1
+                if attempt > retries:
+                    raise
+                sleep_sec = min(60, 5 * attempt)
+                print(f"retrying {path_prefix} chunk {start // chunk_size + 1} after {sleep_sec}s")
+                time.sleep(sleep_sec)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--repo-id", default=DEFAULT_REPO_ID)
     ap.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
     ap.add_argument("--migration-dir", type=Path, default=DEFAULT_MIGRATION_DIR)
+    ap.add_argument("--asset-manifest", type=Path, default=DEFAULT_ASSET_MANIFEST)
+    ap.add_argument("--chunk-size", type=int, default=250)
+    ap.add_argument("--retries", type=int, default=3)
+    ap.add_argument("--outputs-only", action="store_true")
+    ap.add_argument("--manifests-only", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -84,6 +141,11 @@ def main() -> int:
 
     create_repo(args.repo_id, repo_type="model", private=True, exist_ok=True)
     api = HfApi()
+    asset_rows = manifest_rows(args.asset_manifest)
+
+    if args.manifests_only:
+        upload_manifest_files(api, args.repo_id, args.migration_dir)
+        return 0
 
     for row in rows:
         kind = row["kind"]
@@ -91,6 +153,8 @@ def main() -> int:
         path_in_repo = row["path_in_repo"]
         if not local.exists():
             print(f"SKIP missing: {local}")
+            continue
+        if args.outputs_only and kind != "formal_outputs":
             continue
         if kind == "file":
             api.upload_file(
@@ -100,15 +164,15 @@ def main() -> int:
                 path_in_repo=path_in_repo,
             )
         elif kind == "formal_outputs":
-            api.upload_folder(
+            upload_output_manifest_rows(
+                api=api,
                 repo_id=args.repo_id,
-                repo_type="model",
-                folder_path=str(local),
-                path_in_repo=path_in_repo,
-                allow_patterns=OUTPUT_ALLOW_PATTERNS,
-                ignore_patterns=OUTPUT_IGNORE_PATTERNS,
+                rows=asset_rows,
+                path_prefix=path_in_repo,
+                chunk_size=args.chunk_size,
+                retries=args.retries,
             )
-        else:
+        elif not args.outputs_only:
             api.upload_folder(
                 repo_id=args.repo_id,
                 repo_type="model",
