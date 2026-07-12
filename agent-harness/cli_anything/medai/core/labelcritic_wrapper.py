@@ -499,7 +499,11 @@ def _normalize_labelcritic_base_url(base_url: str, port: int) -> tuple[str, int]
 
 
 def _resolve_vlm_model(base_url: str, port: int, model: str | None) -> str | None:
-    """Return the VLM model id to call: explicit override, else first id served."""
+    """Return explicit VLM model id, else the first model served by the endpoint.
+
+    For formal LabelCritic runs, configure the endpoint to serve the preferred
+    70B/72B-class VLM (for example Qwen/Qwen2.5-VL-72B-Instruct) first.
+    """
     if model:
         return model
     host, p = _normalize_labelcritic_base_url(base_url, port)

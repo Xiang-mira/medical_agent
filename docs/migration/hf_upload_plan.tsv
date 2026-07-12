@@ -7,9 +7,12 @@ folder	checkpoints/UNEST	UNEST	UNEST teacher checkpoint
 folder	checkpoints/ATLAS-Net	ATLAS-Net	ATLAS-Net checkpoint and postprocess utilities
 folder	checkpoints/VoxTell/voxtell_v1.1	VoxTell/voxtell_v1.1	official VoxTell v1.1 assets
 folder	checkpoints/VoxTell/embeddings/voxtell_v1.1	VoxTell/embeddings/voxtell_v1.1	official VoxTell text embeddings
+folder	checkpoints/VoxTell/voxtell_v1.0	VoxTell/voxtell_v1.0	legacy VoxTell v1.0 lightweight metadata
 folder	checkpoints/LabelCritic-main	LabelCritic-main	LabelCritic assets mirrored with checkpoints
 folder	checkpoints/Qwen/Qwen3-Embedding-4B	Qwen/Qwen3-Embedding-4B	Qwen3 embedding model for prompt encoding
 file	checkpoints/class_checkpoint_map.xlsx	class_checkpoint_map.xlsx	teacher checkpoint workbook
+file	checkpoints/TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/modality_classifiers_2024_10_04.pkl	TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/modality_classifiers_2024_10_04.pkl	local TotalSegmentator runtime classifier
+file	checkpoints/TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/contrast_phase_classifiers_2024_07_19.pkl	TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/contrast_phase_classifiers_2024_07_19.pkl	local TotalSegmentator runtime classifier
 folder	checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master/models	VISTA3D-Inference-Pipeline-master/models	VISTA3D required runtime subset
 folder	checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master/label_mappings	VISTA3D-Inference-Pipeline-master/label_mappings	VISTA3D required runtime subset
 folder	checkpoints/VISTA3D-Inference-Pipeline-master/VISTA3D-Inference-Pipeline-master/configs	VISTA3D-Inference-Pipeline-master/configs	VISTA3D required runtime subset

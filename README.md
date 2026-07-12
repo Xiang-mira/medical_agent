@@ -238,7 +238,10 @@ root only when a continuation run needs them.
 
 Qwen2-VL and Qwen2.5-VL are public upstream models and are not mirrored in the
 private migration repo. Download them only if a LabelCritic/VLM workflow needs
-them:
+them. For formal LabelCritic/VLM judging, prefer the public 70B/72B-class model
+`Qwen/Qwen2.5-VL-72B-Instruct` served through the OpenAI-compatible endpoint
+used by LabelCritic. The local 7B downloads below are resource-limited fallback
+or debugging options:
 
 ```bash
 huggingface-cli download Qwen/Qwen2-VL-7B-Instruct \
@@ -249,6 +252,23 @@ huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
   --local-dir checkpoints/Qwen/Qwen2.5-VL-7B-Instruct \
   --resume-download
 ```
+
+On the HPC, serve the preferred LabelCritic model from public storage/cache
+instead of this private migration repo, for example:
+
+```bash
+huggingface-cli download Qwen/Qwen2.5-VL-72B-Instruct \
+  --local-dir /path/to/public_or_project_models/Qwen2.5-VL-72B-Instruct \
+  --resume-download
+```
+
+`medai-cli critic` and the multi-model loop use the LabelCritic/vLLM
+OpenAI-compatible endpoint selected by `--base-url/--port` or
+`--critic-base-url/--critic-port`. For `medai-cli run-loop`, pass
+`--critic-vlm-model Qwen/Qwen2.5-VL-72B-Instruct` when the served endpoint uses
+that public model id. If no explicit VLM model is passed through the call, the
+wrapper asks the endpoint for `/v1/models` and uses the first served model id;
+therefore serve the 72B model first for formal LabelCritic runs.
 
 Verify the restored private assets and code state:
 

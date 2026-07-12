@@ -751,6 +751,7 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--critic-backend", default="labelcritic", type=click.Choice(["stub", "labelcritic"]), show_default=True)
 @click.option("--critic-base-url", default="http://localhost", show_default=True, help="LabelCritic/vLLM host WITHOUT /v1; port is supplied by --critic-port.")
 @click.option("--critic-port", default=8000, type=int, show_default=True)
+@click.option("--critic-vlm-model", default=None, help="Explicit LabelCritic VLM id. Formal runs should use a 70B/72B-class public model such as Qwen/Qwen2.5-VL-72B-Instruct; if omitted, the first model from /v1/models is used.")
 @click.option("--labelcritic-no-dice-check", is_flag=True, default=False, help="Diagnostic only: force VLM comparison even when projections are similar.")
 @click.option("--labelcritic-no-dual-confirmation", is_flag=True, default=False, help="Diagnostic only: disable dual confirmation prompt.")
 @click.option("--labelcritic-simple-prompt-ablation", is_flag=True, default=False, help="Diagnostic only: use simpler prompt wording.")
@@ -765,7 +766,7 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--teacher-inference-mode", type=click.Choice(["full_volume", "hierarchical_roi"]), default="hierarchical_roi", show_default=True)
 @click.option("--roi-margin-mm", type=float, default=20.0, show_default=True)
 @click.option("--dry-run", is_flag=True, default=False)
-def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run):
+def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
     if not enable_shapekit and not dry_run and not debug_allow_no_shapekit:
         fail({
@@ -795,6 +796,7 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
         },
         teacher_inference_mode=teacher_inference_mode,
         roi_margin_mm=roi_margin_mm,
+        vlm_model=critic_vlm_model,
     ))
 
 

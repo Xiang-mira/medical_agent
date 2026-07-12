@@ -6,9 +6,9 @@ blind copy of the local 231G workspace.
 
 ## Destinations
 
-- GitHub: 1161 tracked source/config/doc files.
-- Hugging Face private repo: `Xiang-mira/MedIA-Agentic-AI-Private-HPC` with 39141 files, 29.49 GiB.
-- Excluded: 139518 rows covering PanTS data, caches, public duplicate Qwen VL models, temporary files, and bad/smoke output categories.
+- GitHub: 1163 tracked source/config/doc files.
+- Hugging Face private repo: `Xiang-mira/MedIA-Agentic-AI-Private-HPC` with 39144 files, 29.49 GiB.
+- Excluded: 139517 rows covering PanTS data, caches, public duplicate Qwen VL models, temporary files, and bad/smoke output categories.
 
 ## Required HF restore roots
 

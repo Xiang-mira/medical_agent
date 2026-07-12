@@ -36,12 +36,23 @@ HF_DIRS = [
         "VoxTell/embeddings/voxtell_v1.1",
         "official VoxTell text embeddings",
     ),
+    ("checkpoints/VoxTell/voxtell_v1.0", "VoxTell/voxtell_v1.0", "legacy VoxTell v1.0 lightweight metadata"),
     ("checkpoints/LabelCritic-main", "LabelCritic-main", "LabelCritic assets mirrored with checkpoints"),
     ("checkpoints/Qwen/Qwen3-Embedding-4B", "Qwen/Qwen3-Embedding-4B", "Qwen3 embedding model for prompt encoding"),
 ]
 
 HF_FILES = [
     ("checkpoints/class_checkpoint_map.xlsx", "class_checkpoint_map.xlsx", "teacher checkpoint workbook"),
+    (
+        "checkpoints/TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/modality_classifiers_2024_10_04.pkl",
+        "TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/modality_classifiers_2024_10_04.pkl",
+        "local TotalSegmentator runtime classifier",
+    ),
+    (
+        "checkpoints/TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/contrast_phase_classifiers_2024_07_19.pkl",
+        "TotalSegmentator-master/TotalSegmentator-master/totalsegmentator/resources/contrast_phase_classifiers_2024_07_19.pkl",
+        "local TotalSegmentator runtime classifier",
+    ),
 ]
 
 VISTA3D_REQUIRED = [
@@ -139,7 +150,7 @@ def iter_files(path: Path) -> Iterable[Path]:
     if not path.exists():
         return
     for root, dirs, files in os.walk(path):
-        dirs[:] = sorted(d for d in dirs if d != "__pycache__" and d != ".cache")
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__" and d != ".cache" and not d.startswith(".corrupt"))
         for name in sorted(files):
             if "__pycache__" in name:
                 continue
