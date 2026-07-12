@@ -30,6 +30,7 @@ third_party/ePAI-main/reader_study/*.csv
 outputs/
 results/
 comparison_results/
+.hf_hpc_upload_staging/
 /rows
 /cid
 /label_dir

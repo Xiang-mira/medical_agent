@@ -285,6 +285,47 @@ Regenerate them after changing restore assets:
 python scripts/build_hpc_migration_manifests.py
 ```
 
+Maintain the private HF repo with the large-folder staging uploader. Do not use
+small `create_commit` batches for the filtered `outputs/` tree; the formal
+state contains tens of thousands of small files and will hit Hugging Face's
+repository commit rate limit. The staging directory uses hardlinks by default,
+so it does not duplicate the 29+ GiB checkpoint payload on disk:
+
+```bash
+python scripts/stage_hf_private_assets.py \
+  --manifest docs/migration/hf_asset_manifest.tsv \
+  --stage-dir .hf_hpc_upload_staging \
+  --prune-stage \
+  --hardlink
+
+python scripts/stage_hf_private_assets.py \
+  --manifest docs/migration/hf_asset_manifest.tsv \
+  --stage-dir .hf_hpc_upload_staging \
+  --verify-only
+
+python scripts/stage_hf_private_assets.py \
+  --stage-dir .hf_hpc_upload_staging \
+  --upload-large-folder \
+  --repo-id Xiang-mira/MedIA-Agentic-AI-Private-HPC \
+  --num-workers 2
+```
+
+If the upload is interrupted or the network returns an SSL EOF, rerun the final
+command without deleting `.hf_hpc_upload_staging/.cache/`; the Hugging Face
+large-folder uploader resumes from that cache. Use `--copy-fallback` only when
+hardlinking fails and there is enough disk space to copy the restore payload.
+
+After upload, check the remote repo against the manifest:
+
+```bash
+python scripts/check_hf_remote_manifest.py \
+  --repo-id Xiang-mira/MedIA-Agentic-AI-Private-HPC \
+  --manifest docs/migration/hf_asset_manifest.tsv
+```
+
+The older `scripts/upload_hf_private_assets.py --outputs-only` path is kept only
+for debugging small subsets; it is not the recommended migration upload path.
+
 ## Data and checkpoints
 
 The default formal case manifest is:
