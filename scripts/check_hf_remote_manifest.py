@@ -21,6 +21,7 @@ REQUIRED_MIGRATION_FILES = {
     "migration/HPC_MIGRATION_AUDIT.md",
     "README.md",
 }
+ALLOWED_REMOTE_EXTRAS = {".gitattributes"}
 
 
 def expected_paths(manifest: Path) -> set[str]:
@@ -79,23 +80,27 @@ def main() -> int:
 
     expected = expected_paths(args.manifest)
     remote = list_remote_files(args.repo_id, retries=args.retries)
+    expected_all = expected | REQUIRED_MIGRATION_FILES | ALLOWED_REMOTE_EXTRAS
     missing = sorted(expected - remote)
     migration_missing = sorted(REQUIRED_MIGRATION_FILES - remote)
+    extra = sorted(remote - expected_all)
     forbidden = [
         {"repo_path": path, "reason": reason}
         for path in sorted(remote)
         if (reason := is_forbidden_remote_path(path))
     ]
     payload = {
-        "status": "passed" if not missing and not migration_missing and not forbidden else "failed",
+        "status": "passed" if not missing and not migration_missing and not extra and not forbidden else "failed",
         "repo_id": args.repo_id,
         "manifest_files": len(expected),
         "remote_files": len(remote),
         "missing_count": len(missing),
         "migration_missing_count": len(migration_missing),
+        "extra_count": len(extra),
         "forbidden_count": len(forbidden),
         "missing": missing[:200],
         "migration_missing": migration_missing,
+        "extra": extra[:200],
         "forbidden": forbidden[:200],
     }
     if args.json_out:
