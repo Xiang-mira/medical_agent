@@ -253,8 +253,8 @@ huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
   --resume-download
 ```
 
-On the HPC, serve the preferred LabelCritic model from public storage/cache
-instead of this private migration repo, for example:
+On the HPC, serve the preferred LabelCritic model from Xingpu/public
+storage/cache instead of this private migration repo, for example:
 
 ```bash
 huggingface-cli download Qwen/Qwen2.5-VL-72B-Instruct \
