@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 import click
@@ -667,7 +668,7 @@ def projection_build_cmd(ct_image, annotation_a, annotation_b, organ, output_fol
 @click.option("--dsc-replace-threshold", default=0.0, type=float, show_default=True)
 @click.option("--dsc-vlm-threshold", default=0.5, type=float, show_default=True)
 @click.option("--strict-alignment/--no-strict-alignment", default=False, show_default=True, help="Fail if mask/CT affine or shape mismatch detected.")
-@click.option("--vllm-base-url", default="http://localhost:8000/v1", show_default=True, help="OpenAI-compatible VLM endpoint for --vlm-backend vllm.")
+@click.option("--vllm-base-url", default=os.getenv("LABELCRITIC_API_BASE", "http://localhost:8000/v1"), show_default=True, help="OpenAI-compatible VLM endpoint for --vlm-backend vllm.")
 def vlm_label_expert_cmd(ct_image, annotation_a, annotation_b, organ, output_folder,
                           vlm_backend, vlm_model, case_id, dsc_replace_threshold, dsc_vlm_threshold,
                           strict_alignment, vllm_base_url):
@@ -749,9 +750,9 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--debug-allow-no-shapekit", is_flag=True, default=False, help="Allow disabling ShapeKit for smoke/debug runs only.")
 @click.option("--enable-critic/--no-enable-critic", default=True, show_default=True)
 @click.option("--critic-backend", default="labelcritic", type=click.Choice(["stub", "labelcritic"]), show_default=True)
-@click.option("--critic-base-url", default="http://localhost", show_default=True, help="LabelCritic/vLLM host WITHOUT /v1; port is supplied by --critic-port.")
-@click.option("--critic-port", default=8000, type=int, show_default=True)
-@click.option("--critic-vlm-model", default=None, help="Explicit LabelCritic VLM id. Formal runs should use a 70B/72B-class public model such as Qwen/Qwen2.5-VL-72B-Instruct; if omitted, the first model from /v1/models is used.")
+@click.option("--critic-base-url", default=os.getenv("LABELCRITIC_BASE_URL", "http://localhost"), show_default=True, help="LabelCritic/vLLM host WITHOUT /v1; port is supplied by --critic-port.")
+@click.option("--critic-port", default=int(os.getenv("LABELCRITIC_PORT", "8000")), type=int, show_default=True)
+@click.option("--critic-vlm-model", default=os.getenv("LABELCRITIC_MODEL_ID"), help="Explicit LabelCritic VLM id. Formal runs use Qwen/Qwen2-VL-72B-Instruct-AWQ; if omitted, the first model from /v1/models is used.")
 @click.option("--labelcritic-no-dice-check", is_flag=True, default=False, help="Diagnostic only: force VLM comparison even when projections are similar.")
 @click.option("--labelcritic-no-dual-confirmation", is_flag=True, default=False, help="Diagnostic only: disable dual confirmation prompt.")
 @click.option("--labelcritic-simple-prompt-ablation", is_flag=True, default=False, help="Diagnostic only: use simpler prompt wording.")

@@ -239,7 +239,7 @@ root only when a continuation run needs them.
 Qwen2-VL and Qwen2.5-VL are public upstream models and are not mirrored in the
 private migration repo. Download them only if a LabelCritic/VLM workflow needs
 them. For formal LabelCritic/VLM judging, prefer the public 70B/72B-class model
-`Qwen/Qwen2.5-VL-72B-Instruct` served through the OpenAI-compatible endpoint
+`Qwen/Qwen2-VL-72B-Instruct-AWQ` served through the OpenAI-compatible endpoint
 used by LabelCritic. The local 7B downloads below are resource-limited fallback
 or debugging options:
 
@@ -253,22 +253,23 @@ huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct \
   --resume-download
 ```
 
-On the HPC, serve the preferred LabelCritic model from Xingpu/public
-storage/cache instead of this private migration repo, for example:
+On DISCOVERY HPC, keep the preferred LabelCritic model under the shared
+bodymaps model root (exposed to the code tree through `checkpoints`) instead of
+committing it to this private migration repository, for example:
 
 ```bash
-huggingface-cli download Qwen/Qwen2.5-VL-72B-Instruct \
-  --local-dir /path/to/public_or_project_models/Qwen2.5-VL-72B-Instruct \
-  --resume-download
+hf download Qwen/Qwen2-VL-72B-Instruct-AWQ \
+  --revision 712d5a5a210e7f0af603d2a949b577c68de2c6ef \
+  --local-dir checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
 ```
 
 `medai-cli critic` and the multi-model loop use the LabelCritic/vLLM
 OpenAI-compatible endpoint selected by `--base-url/--port` or
 `--critic-base-url/--critic-port`. For `medai-cli run-loop`, pass
-`--critic-vlm-model Qwen/Qwen2.5-VL-72B-Instruct` when the served endpoint uses
-that public model id. If no explicit VLM model is passed through the call, the
-wrapper asks the endpoint for `/v1/models` and uses the first served model id;
-therefore serve the 72B model first for formal LabelCritic runs.
+`--critic-vlm-model Qwen/Qwen2-VL-72B-Instruct-AWQ` when the served endpoint uses
+that public model id. If neither an explicit VLM model nor `LABELCRITIC_MODEL_ID` is configured, the
+wrapper asks the endpoint for `/v1/models` and uses the first served model id.
+Formal runs should configure the explicit 72B AWQ model id.
 
 Verify the restored private assets and code state:
 
@@ -442,8 +443,9 @@ python run_medai_cli.py --json run-loop \
   --enable-shapekit \
   --enable-critic \
   --critic-backend labelcritic \
-  --critic-base-url http://localhost \
-  --critic-port 8000
+  --critic-base-url http://127.0.0.1 \
+  --critic-port 8000 \
+  --critic-vlm-model Qwen/Qwen2-VL-72B-Instruct-AWQ
 ```
 
 For each case, major organs are inferred first. Child tasks use parent ROIs and

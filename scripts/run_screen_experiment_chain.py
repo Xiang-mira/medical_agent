@@ -38,7 +38,11 @@ DEFAULT_BASELINE_RUN_ROOT = ROOT / "outputs" / "em_round_pure_cached_10case_form
 DEFAULT_CASE_PLAN_DIR = ROOT / "outputs" / "round2_plus10_case_plan_20260705"
 DEFAULT_OUTPUT_ROOT = ROOT / "outputs" / "em_round2_plus10_20260705"
 DEFAULT_CHAIN_ROOT = ROOT / "outputs" / "screen_experiment_chains" / "round2_plus10_20260705"
-DEFAULT_QWEN_VLM_MODEL = ROOT / "checkpoints" / "Qwen" / "Qwen2-VL-7B-Instruct"
+DEFAULT_QWEN_VLM_MODEL = Path(os.getenv("MEDAI_QWEN_VLM_MODEL", str(ROOT / "checkpoints" / "Qwen" / "Qwen2-VL-72B-Instruct-AWQ")))
+if not DEFAULT_QWEN_VLM_MODEL.is_absolute():
+    DEFAULT_QWEN_VLM_MODEL = ROOT / DEFAULT_QWEN_VLM_MODEL
+VLLM_BASE_URL = os.getenv("MEDAI_VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+MANAGE_OWN_VLLM = os.getenv("MEDAI_MANAGE_OWN_VLLM", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def utc_stamp() -> str:
@@ -68,9 +72,10 @@ def tail_text(path: Path, max_chars: int = 12000) -> str:
     return data[-max_chars:]
 
 
-def is_vllm_online(base_url: str = "http://localhost:8000") -> bool:
+def is_vllm_online(base_url: str | None = None) -> bool:
+    base_url = (base_url or VLLM_BASE_URL).rstrip("/")
     try:
-        urllib.request.urlopen(f"{base_url.rstrip('/')}/v1/models", timeout=3)
+        urllib.request.urlopen(f"{base_url}/v1/models", timeout=3)
         return True
     except Exception:
         return False
@@ -79,6 +84,10 @@ def is_vllm_online(base_url: str = "http://localhost:8000") -> bool:
 def restart_vllm(screen_name: str = "vllm_server", *, model: Path = DEFAULT_QWEN_VLM_MODEL) -> dict[str, Any]:
     if is_vllm_online():
         return {"status": "already_online", "screen_name": screen_name}
+    if not MANAGE_OWN_VLLM:
+        return {"status": "blocked", "reason": "External vLLM service required", "endpoint": VLLM_BASE_URL}
+    if "72b" in model.name.lower():
+        return {"status": "blocked", "reason": "72B AWQ requires external multi-GPU SLURM", "model": str(model)}
     cmd = (
         "cd {root} && "
         "{python} -m vllm.entrypoints.openai.api_server "
