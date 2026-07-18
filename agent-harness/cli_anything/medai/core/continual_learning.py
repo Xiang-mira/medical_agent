@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+UTC = timezone.utc
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
