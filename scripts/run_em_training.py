@@ -9,7 +9,7 @@ legacy/reference backend，不能再作为默认目标类别空间。
 修复：
 - E-step/M-step 直接调用 Python 函数，无 subprocess timeout 问题
 - 断点续跑：检测已完成 case，跳过重跑
-- vLLM LabelCritic 接入（Qwen2-VL-7B @ localhost:8000）
+- vLLM LabelCritic 接入（Qwen2-VL-72B-Instruct-AWQ，经外部多 GPU vLLM endpoint）
 - ShapeKit 开启提升 mask 质量
 - save_round_predictions 直接调用，无 timeout
 """
@@ -132,7 +132,7 @@ def resolve_voxtell_mstep_mode() -> dict:
 
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path("/home/teacher1/JHU-project1/medical_agent")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CASE_LIST    = Path(os.getenv("MEDAI_CASE_LIST", PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"))
 if not CASE_LIST.is_absolute():
     CASE_LIST = PROJECT_ROOT / CASE_LIST
@@ -156,10 +156,13 @@ DEFAULT_VOXTELL_TRAIN_CMD = f'"{sys.executable}" "{PROJECT_ROOT / "scripts/train
 VOXTELL_TRAIN_CMD = os.getenv("MEDAI_VOXTELL_TRAIN_CMD", DEFAULT_VOXTELL_TRAIN_CMD).strip()
 ENABLE_VOXTELL_TRAINING = env_bool("MEDAI_ENABLE_VOXTELL_TRAINING", default=True)
 
-QWEN_MODEL    = Path(os.getenv("MEDAI_QWEN_VLM_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"))
+QWEN_MODEL = Path(os.getenv("MEDAI_QWEN_VLM_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ"))
 if not QWEN_MODEL.is_absolute():
     QWEN_MODEL = PROJECT_ROOT / QWEN_MODEL
-VLLM_BASE_URL = "http://localhost:8000"
+VLLM_BASE_URL = os.getenv("MEDAI_VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+LABELCRITIC_BASE_URL = os.getenv("LABELCRITIC_BASE_URL", "http://localhost").rstrip("/")
+LABELCRITIC_PORT = int(os.getenv("LABELCRITIC_PORT", "8000"))
+LABELCRITIC_MODEL_ID = os.getenv("LABELCRITIC_MODEL_ID", "Qwen/Qwen2-VL-72B-Instruct-AWQ")
 MANAGE_OWN_VLLM = env_bool("MEDAI_MANAGE_OWN_VLLM", default=False)
 
 # Current formal teacher pool: 21 Drive-aligned models plus the separate
@@ -574,6 +577,9 @@ def restart_vllm_after_mstep():
     if not MANAGE_OWN_VLLM:
         log("  跳过 vLLM 重启：MEDAI_MANAGE_OWN_VLLM 未开启，保持共享 GPU 状态不变")
         return False
+    if "72b" in QWEN_MODEL.name.lower():
+        log("  跳过 vLLM 重启：72B AWQ 必须由外部 SLURM 多 GPU 服务管理")
+        return False
     try:
         import subprocess
         screen_name = os.getenv("MEDAI_VLLM_SCREEN", "vllm_server")
@@ -582,7 +588,8 @@ def restart_vllm_after_mstep():
             f"cd {PROJECT_ROOT} && "
             f"python -m vllm.entrypoints.openai.api_server "
             f"--model {QWEN_MODEL} "
-            f"--port 8000 "
+            f"--served-model-name {LABELCRITIC_MODEL_ID} "
+            f"--port {LABELCRITIC_PORT} "
             f"--max-model-len 4096 "
             f"--gpu-memory-utilization 0.4"
             f"'"
@@ -2765,8 +2772,9 @@ def run_estep(round_idx: int) -> dict:
         shapekit_root=PROJECT_ROOT / "third_party/ShapeKit-main",
         enable_critic=enable_critic,
         critic_backend=CRITIC_BACKEND,
-        critic_base_url=VLLM_BASE_URL,
-        critic_port=8000,
+        critic_base_url=LABELCRITIC_BASE_URL,
+        critic_port=LABELCRITIC_PORT,
+        vlm_model=LABELCRITIC_MODEL_ID,
         dry_run=False,
         timeout_sec=INFER_TIMEOUT_SEC,
         device="cuda",

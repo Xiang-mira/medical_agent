@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/teacher1/JHU-project1/medical_agent
+PROJECT_ROOT="${CODE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+cd "${PROJECT_ROOT}"
+export PROJECT_ROOT
 
 SOURCE_ESTEP="${SOURCE_ESTEP:-outputs/formal_round1_final_20260627/round1/estep}"
 EXP_ROOT="${EXP_ROOT:-outputs/voxtell_updated_chain_20260702}"
@@ -34,8 +36,12 @@ export MEDAI_CANONICAL_TRAINING_BACKEND="project_voxtell_prompt_distillation_stu
 export MEDAI_EXPERIMENT_PROFILE="advisor_aligned_default"
 export MEDAI_VOXTELL_TRAINING_PROFILE="quality_weighted_ablation"
 export MEDAI_ENABLE_VOXTELL_TRAINING="1"
-export MEDAI_VOXTELL_MODEL_DIR="/home/teacher1/JHU-project1/medical_agent/checkpoints/VoxTell/voxtell_v1.1"
-export MEDAI_TEXT_ENCODING_MODEL="/home/teacher1/JHU-project1/medical_agent/checkpoints/Qwen/Qwen3-Embedding-4B"
+export MEDAI_VOXTELL_MODEL_DIR="${MEDAI_VOXTELL_MODEL_DIR:-${PROJECT_ROOT}/checkpoints/VoxTell/voxtell_v1.1}"
+export MEDAI_TEXT_ENCODING_MODEL="${MEDAI_TEXT_ENCODING_MODEL:-${PROJECT_ROOT}/checkpoints/Qwen/Qwen3-Embedding-4B}"
+export MEDAI_QWEN_VLM_MODEL="${MEDAI_QWEN_VLM_MODEL:-${PROJECT_ROOT}/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ}"
+export LABELCRITIC_MODEL_ID="${LABELCRITIC_MODEL_ID:-Qwen/Qwen2-VL-72B-Instruct-AWQ}"
+export MEDAI_VLLM_BASE_URL="${MEDAI_VLLM_BASE_URL:-http://127.0.0.1:8000}"
+export MEDAI_MANAGE_OWN_VLLM="${MEDAI_MANAGE_OWN_VLLM:-0}"
 export MEDAI_TRAINABLE_SCOPE="prompt_path"
 export MEDAI_BCE_POS_WEIGHT_CAP="20"
 export MEDAI_MSTEP_BATCH_SIZE="${MEDAI_MSTEP_BATCH_SIZE:-2}"
@@ -149,46 +155,20 @@ if not ok:
 PY
 
 echo
-echo "---- Step 3/5: ensure vLLM/LabelCritic is online for Round2 competition ----"
+echo "---- Step 3/5: verify external vLLM/LabelCritic service for Round2 competition ----"
 python - <<'PY'
-import os
-import subprocess
-import time
-import urllib.request
-from pathlib import Path
-
-root = Path("/home/teacher1/JHU-project1/medical_agent")
-model = root / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"
-screen_name = os.environ.get("VLLM_SCREEN", "vllm_voxtell_updated_chain")
-
-def online() -> bool:
-    try:
-        urllib.request.urlopen("http://localhost:8000/v1/models", timeout=5)
-        return True
-    except Exception:
-        return False
-
-if online():
-    print("vLLM already online at http://localhost:8000")
-else:
-    cmd = [
-        "screen", "-dmS", screen_name, "bash", "-lc",
-        (
-            f"cd {root} && "
-            "python -m vllm.entrypoints.openai.api_server "
-            f"--model {model} "
-            "--port 8000 --max-model-len 4096 --gpu-memory-utilization 0.4"
-        ),
-    ]
-    subprocess.run(cmd, check=True)
-    print(f"Started vLLM screen: {screen_name}")
-    for idx in range(60):
-        time.sleep(5)
-        if online():
-            print(f"vLLM online after {(idx + 1) * 5}s")
-            break
-    else:
-        raise SystemExit("vLLM did not become ready within 300s")
+import json, os, urllib.request
+base=os.environ.get("MEDAI_VLLM_BASE_URL","http://127.0.0.1:8000").rstrip("/")
+expected=os.environ.get("LABELCRITIC_MODEL_ID","Qwen/Qwen2-VL-72B-Instruct-AWQ")
+url=f"{base}/v1/models"
+try:
+    with urllib.request.urlopen(url,timeout=10) as r: body=json.loads(r.read().decode())
+except Exception as e:
+    raise SystemExit(f"External vLLM not ready at {url}: {e!r}")
+served=[str(x.get("id")) for x in body.get("data",[]) if x.get("id")]
+if expected not in served:
+    raise SystemExit(f"Expected {expected!r}; served={served!r}")
+print(f"External vLLM ready: {url}, model={expected}")
 PY
 
 echo

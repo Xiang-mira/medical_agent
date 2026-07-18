@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -189,12 +190,12 @@ def target_coverage_audit() -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output-dir", type=Path, required=True)
-    ap.add_argument("--base-url", default="http://localhost")
-    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--base-url", default=os.getenv("LABELCRITIC_BASE_URL", "http://localhost"))
+    ap.add_argument("--port", type=int, default=int(os.getenv("LABELCRITIC_PORT", "8000")))
     ap.add_argument("--max-wait-sec", type=int, default=240)
-    ap.add_argument("--start-vllm-if-offline", action="store_true")
+    ap.add_argument("--start-vllm-if-offline", action="store_true", help="Legacy debug only; formal 72B AWQ must be started by an external multi-GPU SLURM job.")
     ap.add_argument("--vllm-screen", default="vllm_labelcritic_25case")
-    ap.add_argument("--vllm-model", type=Path, default=ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct")
+    ap.add_argument("--vllm-model", type=Path, default=Path(os.getenv("MEDAI_QWEN_VLM_MODEL", str(ROOT / "checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ"))))
     ap.add_argument("--timeout-sec", type=int, default=180)
     ap.add_argument("--skip-real-compare", action="store_true", help="Only audit files/endpoint/target coverage.")
     return ap.parse_args()
@@ -219,9 +220,14 @@ def main() -> int:
     vllm_start = None
     wait = {"online": service.get("online"), "status": service, "waited_sec": 0}
     if not service.get("online") and args.start_vllm_if_offline:
-        vllm_start = start_vllm_screen(args.vllm_screen, args.vllm_model, args.port)
-        wait = wait_for_vllm(args.base_url, args.port, max(0, min(args.max_wait_sec, 240)))
-        service = wait.get("status") or service
+        manage_own = os.getenv("MEDAI_MANAGE_OWN_VLLM", "0").strip().lower() in {"1", "true", "yes", "on"}
+        is_72b = "72b" in args.vllm_model.name.lower()
+        if not manage_own or is_72b:
+            vllm_start = {"status": "blocked", "reason": "Formal 72B AWQ requires an external multi-GPU SLURM vLLM service."}
+        else:
+            vllm_start = start_vllm_screen(args.vllm_screen, args.vllm_model, args.port)
+            wait = wait_for_vllm(args.base_url, args.port, max(0, min(args.max_wait_sec, 240)))
+            service = wait.get("status") or service
     if not service.get("online"):
         failures.append("vllm_offline")
 

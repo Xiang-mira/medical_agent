@@ -502,10 +502,11 @@ def _resolve_vlm_model(base_url: str, port: int, model: str | None) -> str | Non
     """Return explicit VLM model id, else the first model served by the endpoint.
 
     For formal LabelCritic runs, configure the endpoint to serve the preferred
-    70B/72B-class VLM (for example Qwen/Qwen2.5-VL-72B-Instruct) first.
+    70B/72B-class VLM (for example Qwen/Qwen2-VL-72B-Instruct-AWQ) first.
     """
-    if model:
-        return model
+    explicit_model = model or os.getenv("LABELCRITIC_MODEL_ID")
+    if explicit_model:
+        return explicit_model
     host, p = _normalize_labelcritic_base_url(base_url, port)
     try:
         import requests as req_lib

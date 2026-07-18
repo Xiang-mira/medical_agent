@@ -22,13 +22,19 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-harness"))
 
-PROJECT_ROOT = Path("/home/teacher1/JHU-project1/medical_agent")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_ROOT = PROJECT_ROOT / "outputs"
 CASE_LIST = PROJECT_ROOT / "data_manifest/case_list_50_tumor.csv"
 TARGET_CONFIG = PROJECT_ROOT / "configs/student_3d_prompt_target_organs.json"
 VOXTELL_MODEL_DIR = Path(os.getenv("MEDAI_VOXTELL_MODEL_DIR", PROJECT_ROOT / "checkpoints/VoxTell/voxtell_v1.1"))
 TEXT_ENCODING_MODEL = Path(os.getenv("MEDAI_TEXT_ENCODING_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen3-Embedding-4B"))
-QWEN_VLM_MODEL = PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-7B-Instruct"
+QWEN_VLM_MODEL = Path(os.getenv("MEDAI_QWEN_VLM_MODEL", PROJECT_ROOT / "checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ"))
+if not QWEN_VLM_MODEL.is_absolute():
+    QWEN_VLM_MODEL = PROJECT_ROOT / QWEN_VLM_MODEL
+VLLM_BASE_URL = os.getenv("MEDAI_VLLM_BASE_URL", "http://localhost:8000").rstrip("/")
+LABELCRITIC_PORT = int(os.getenv("LABELCRITIC_PORT", "8000"))
+LABELCRITIC_MODEL_ID = os.getenv("LABELCRITIC_MODEL_ID", "Qwen/Qwen2-VL-72B-Instruct-AWQ")
+MANAGE_OWN_VLLM = os.getenv("MEDAI_MANAGE_OWN_VLLM", "0").strip().lower() in {"1", "true", "yes", "on"}
 LOG_FILE = OUTPUT_ROOT / "training.log"
 
 
@@ -57,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--cascaded-output-root", default="", help="Default: outputs/roundN/student_predictions_cascaded")
     ap.add_argument("--postprocessed-output-root", default="", help="Default: outputs/roundN/student_predictions_postprocessed")
     ap.add_argument("--postprocess-overwrite", action="store_true")
-    ap.add_argument("--restart-vllm", action="store_true", help="Restart LabelCritic VLM server after student inference.")
+    ap.add_argument("--restart-vllm", action="store_true", help="Legacy debug only; formal 72B AWQ requires external multi-GPU SLURM vLLM.")
     return ap.parse_args()
 
 
@@ -99,12 +105,19 @@ def default_round_model_dir(output_root: Path, round_idx: int) -> Path:
 
 
 def restart_vllm() -> bool:
+    if not MANAGE_OWN_VLLM:
+        log("拒绝重启 vLLM：请使用外部 SLURM vLLM 服务")
+        return False
+    if "72b" in QWEN_VLM_MODEL.name.lower():
+        log("拒绝重启 vLLM：72B AWQ 必须由外部多 GPU SLURM 作业启动")
+        return False
     cmd = (
         "screen -dmS vllm_server bash -c '"
         f"cd {PROJECT_ROOT} && "
         "python -m vllm.entrypoints.openai.api_server "
         f"--model {QWEN_VLM_MODEL} "
-        "--port 8000 "
+        f"--served-model-name {LABELCRITIC_MODEL_ID} "
+        f"--port {LABELCRITIC_PORT} "
         "--max-model-len 4096 "
         "--gpu-memory-utilization 0.4"
         "'"
@@ -115,7 +128,7 @@ def restart_vllm() -> bool:
     for i in range(30):
         time.sleep(5)
         try:
-            urllib.request.urlopen("http://localhost:8000/v1/models", timeout=3)
+            urllib.request.urlopen(f"{VLLM_BASE_URL}/v1/models", timeout=3)
             log(f"vLLM 在线 ({(i + 1) * 5}s)")
             return True
         except Exception:
