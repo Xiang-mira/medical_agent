@@ -1,0 +1,4425 @@
+{
+  "version": "abdomenatlaspro_target_mapping_373_bootstrap_v1",
+  "source_target_config": "configs/student_3d_prompt_target_organs.json",
+  "full_target_count": 373,
+  "pilot_target_count": 338,
+  "unresolved_target_count": 35,
+  "terminology": "target_anatomical_structures",
+  "policy": {
+    "pilot338_is_subset_not_final_space": true,
+    "unverified_targets_are_skipped_not_negative": true,
+    "do_not_materialize_missing_targets_as_zero_masks": true,
+    "leading_underscore_normalization": "strip leading underscores from mask file stems for matching audits"
+  },
+  "generation_note": "Bootstrap mapping generated from the 373 target config. Replace/confirm per-target statuses with AbdomenAtlasPro mask audit evidence before claiming complete 373 mapping.",
+  "targets": [
+    {
+      "target_name": "abdominal_cavity",
+      "target_index": 0,
+      "mapping_status": "direct",
+      "source_masks": [
+        "abdominal_cavity"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "adrenal_gland_left",
+      "target_index": 1,
+      "mapping_status": "direct",
+      "source_masks": [
+        "adrenal_gland_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "adrenal_gland_right",
+      "target_index": 2,
+      "mapping_status": "direct",
+      "source_masks": [
+        "adrenal_gland_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "airway",
+      "target_index": 3,
+      "mapping_status": "direct",
+      "source_masks": [
+        "airway"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "airway_tree",
+      "target_index": 4,
+      "mapping_status": "direct",
+      "source_masks": [
+        "airway_tree"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication; airway_tree must not be automatically equated with airway"
+    },
+    {
+      "target_name": "airway_wall",
+      "target_index": 5,
+      "mapping_status": "direct",
+      "source_masks": [
+        "airway_wall"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "anterior_eyeball_segment_left",
+      "target_index": 6,
+      "mapping_status": "direct",
+      "source_masks": [
+        "anterior_eyeball_segment_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "anterior_eyeball_segment_right",
+      "target_index": 7,
+      "mapping_status": "direct",
+      "source_masks": [
+        "anterior_eyeball_segment_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "anterior_scalene_left",
+      "target_index": 8,
+      "mapping_status": "direct",
+      "source_masks": [
+        "anterior_scalene_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "anterior_scalene_right",
+      "target_index": 9,
+      "mapping_status": "direct",
+      "source_masks": [
+        "anterior_scalene_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "aorta",
+      "target_index": 10,
+      "mapping_status": "direct",
+      "source_masks": [
+        "aorta"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_brachiocephalic",
+      "target_index": 11,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_brachiocephalic"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_common_carotid_left",
+      "target_index": 12,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_common_carotid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_common_carotid_right",
+      "target_index": 13,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_common_carotid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_internal_carotid_left",
+      "target_index": 14,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_internal_carotid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_internal_carotid_right",
+      "target_index": 15,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_internal_carotid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_subclavian_left",
+      "target_index": 16,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_subclavian_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "artery_subclavian_right",
+      "target_index": 17,
+      "mapping_status": "direct",
+      "source_masks": [
+        "artery_subclavian_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "arytenoid_cartilage",
+      "target_index": 18,
+      "mapping_status": "direct",
+      "source_masks": [
+        "arytenoid_cartilage"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "atrial_appendage_left",
+      "target_index": 19,
+      "mapping_status": "direct",
+      "source_masks": [
+        "atrial_appendage_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "auditory_canal_left",
+      "target_index": 20,
+      "mapping_status": "direct",
+      "source_masks": [
+        "auditory_canal_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "auditory_canal_right",
+      "target_index": 21,
+      "mapping_status": "direct",
+      "source_masks": [
+        "auditory_canal_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "autochthon_left",
+      "target_index": 22,
+      "mapping_status": "direct",
+      "source_masks": [
+        "autochthon_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "autochthon_right",
+      "target_index": 23,
+      "mapping_status": "direct",
+      "source_masks": [
+        "autochthon_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "bladder",
+      "target_index": 24,
+      "mapping_status": "direct",
+      "source_masks": [
+        "bladder"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "blood",
+      "target_index": 25,
+      "mapping_status": "direct",
+      "source_masks": [
+        "blood"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "body",
+      "target_index": 26,
+      "mapping_status": "direct",
+      "source_masks": [
+        "body"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "body_extremities",
+      "target_index": 27,
+      "mapping_status": "direct",
+      "source_masks": [
+        "body_extremities"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "body_trunc",
+      "target_index": 28,
+      "mapping_status": "direct",
+      "source_masks": [
+        "body_trunc"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "bones",
+      "target_index": 29,
+      "mapping_status": "direct",
+      "source_masks": [
+        "bones"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "both_lips",
+      "target_index": 30,
+      "mapping_status": "direct",
+      "source_masks": [
+        "both_lips"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "brachiocephalic_trunk",
+      "target_index": 31,
+      "mapping_status": "direct",
+      "source_masks": [
+        "brachiocephalic_trunk"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "brachiocephalic_vein_left",
+      "target_index": 32,
+      "mapping_status": "direct",
+      "source_masks": [
+        "brachiocephalic_vein_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "brachiocephalic_vein_right",
+      "target_index": 33,
+      "mapping_status": "direct",
+      "source_masks": [
+        "brachiocephalic_vein_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "brain",
+      "target_index": 34,
+      "mapping_status": "direct",
+      "source_masks": [
+        "brain"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "brain_ventricle",
+      "target_index": 35,
+      "mapping_status": "direct",
+      "source_masks": [
+        "brain_ventricle"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "brainstem",
+      "target_index": 36,
+      "mapping_status": "direct",
+      "source_masks": [
+        "brainstem"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "breast_left",
+      "target_index": 37,
+      "mapping_status": "direct",
+      "source_masks": [
+        "breast_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "breast_right",
+      "target_index": 38,
+      "mapping_status": "direct",
+      "source_masks": [
+        "breast_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "bronchus",
+      "target_index": 39,
+      "mapping_status": "direct",
+      "source_masks": [
+        "bronchus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "buccal_mucosa",
+      "target_index": 40,
+      "mapping_status": "direct",
+      "source_masks": [
+        "buccal_mucosa"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "carotid_artery_left",
+      "target_index": 41,
+      "mapping_status": "direct",
+      "source_masks": [
+        "carotid_artery_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "carotid_artery_right",
+      "target_index": 42,
+      "mapping_status": "direct",
+      "source_masks": [
+        "carotid_artery_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "carpal",
+      "target_index": 43,
+      "mapping_status": "direct",
+      "source_masks": [
+        "carpal"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "carpal_left",
+      "target_index": 44,
+      "mapping_status": "direct",
+      "source_masks": [
+        "carpal_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "carpal_right",
+      "target_index": 45,
+      "mapping_status": "direct",
+      "source_masks": [
+        "carpal_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "caudate_nucleus",
+      "target_index": 46,
+      "mapping_status": "direct",
+      "source_masks": [
+        "caudate_nucleus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cbd_stent",
+      "target_index": 47,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cbd_stent"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "celiac_aa (celiac_artery)",
+      "target_index": 48,
+      "mapping_status": "direct",
+      "source_masks": [
+        "celiac_aa (celiac_artery)"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "celiac_trunk",
+      "target_index": 49,
+      "mapping_status": "direct",
+      "source_masks": [
+        "celiac_trunk"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "central_sulcus",
+      "target_index": 50,
+      "mapping_status": "direct",
+      "source_masks": [
+        "central_sulcus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cerebellum",
+      "target_index": 51,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cerebellum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cerebrospinal_fluid",
+      "target_index": 52,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cerebrospinal_fluid"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cervical_esophagus",
+      "target_index": 53,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cervical_esophagus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cheek_left",
+      "target_index": 54,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cheek_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cheek_right",
+      "target_index": 55,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cheek_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "clavicula_left",
+      "target_index": 56,
+      "mapping_status": "direct",
+      "source_masks": [
+        "clavicula_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "clavicula_right",
+      "target_index": 57,
+      "mapping_status": "direct",
+      "source_masks": [
+        "clavicula_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cochlear_left",
+      "target_index": 58,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cochlear_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cochlear_right",
+      "target_index": 59,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cochlear_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "colon",
+      "target_index": 60,
+      "mapping_status": "direct",
+      "source_masks": [
+        "colon"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "colostomy_bag",
+      "target_index": 61,
+      "mapping_status": "direct",
+      "source_masks": [
+        "colostomy_bag"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_bile_duct",
+      "target_index": 62,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_bile_duct"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_carotid_artery_left",
+      "target_index": 63,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_carotid_artery_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_carotid_artery_right",
+      "target_index": 64,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_carotid_artery_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_iliac_artery_left",
+      "target_index": 65,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_iliac_artery_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_iliac_artery_right",
+      "target_index": 66,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_iliac_artery_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_iliac_vein_left",
+      "target_index": 67,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_iliac_vein_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "common_iliac_vein_right",
+      "target_index": 68,
+      "mapping_status": "direct",
+      "source_masks": [
+        "common_iliac_vein_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "compact_bone",
+      "target_index": 69,
+      "mapping_status": "direct",
+      "source_masks": [
+        "compact_bone"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "coronary_artery",
+      "target_index": 70,
+      "mapping_status": "direct",
+      "source_masks": [
+        "coronary_artery"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "costal_cartilages",
+      "target_index": 71,
+      "mapping_status": "direct",
+      "source_masks": [
+        "costal_cartilages"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cricoid_cartilage",
+      "target_index": 72,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cricoid_cartilage"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "cricopharyngeus",
+      "target_index": 73,
+      "mapping_status": "direct",
+      "source_masks": [
+        "cricopharyngeus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "digastric_left",
+      "target_index": 74,
+      "mapping_status": "direct",
+      "source_masks": [
+        "digastric_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "digastric_right",
+      "target_index": 75,
+      "mapping_status": "direct",
+      "source_masks": [
+        "digastric_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "duodenum",
+      "target_index": 76,
+      "mapping_status": "direct",
+      "source_masks": [
+        "duodenum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "esophagus",
+      "target_index": 77,
+      "mapping_status": "direct",
+      "source_masks": [
+        "esophagus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "eye_lens_left",
+      "target_index": 78,
+      "mapping_status": "direct",
+      "source_masks": [
+        "eye_lens_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "eye_lens_right",
+      "target_index": 79,
+      "mapping_status": "direct",
+      "source_masks": [
+        "eye_lens_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "eyeball",
+      "target_index": 80,
+      "mapping_status": "direct",
+      "source_masks": [
+        "eyeball"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "eyeball_left",
+      "target_index": 81,
+      "mapping_status": "direct",
+      "source_masks": [
+        "eyeball_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "eyeball_right",
+      "target_index": 82,
+      "mapping_status": "direct",
+      "source_masks": [
+        "eyeball_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "face",
+      "target_index": 83,
+      "mapping_status": "direct",
+      "source_masks": [
+        "face"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "fat",
+      "target_index": 84,
+      "mapping_status": "direct",
+      "source_masks": [
+        "fat"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "femur_left",
+      "target_index": 85,
+      "mapping_status": "direct",
+      "source_masks": [
+        "femur_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "femur_right",
+      "target_index": 86,
+      "mapping_status": "direct",
+      "source_masks": [
+        "femur_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "fibula",
+      "target_index": 87,
+      "mapping_status": "direct",
+      "source_masks": [
+        "fibula"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "fibula_left",
+      "target_index": 88,
+      "mapping_status": "direct",
+      "source_masks": [
+        "fibula_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "fibula_right",
+      "target_index": 89,
+      "mapping_status": "direct",
+      "source_masks": [
+        "fibula_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "fingers_left",
+      "target_index": 90,
+      "mapping_status": "direct",
+      "source_masks": [
+        "fingers_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "fingers_right",
+      "target_index": 91,
+      "mapping_status": "direct",
+      "source_masks": [
+        "fingers_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "frontal_lobe",
+      "target_index": 92,
+      "mapping_status": "direct",
+      "source_masks": [
+        "frontal_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gall_bladder",
+      "target_index": 93,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gall_bladder"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gland_structure",
+      "target_index": 94,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gland_structure"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "glottis",
+      "target_index": 95,
+      "mapping_status": "direct",
+      "source_masks": [
+        "glottis"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gluteus_maximus_left",
+      "target_index": 96,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gluteus_maximus_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gluteus_maximus_right",
+      "target_index": 97,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gluteus_maximus_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gluteus_medius_left",
+      "target_index": 98,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gluteus_medius_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gluteus_medius_right",
+      "target_index": 99,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gluteus_medius_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gluteus_minimus_left",
+      "target_index": 100,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gluteus_minimus_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gluteus_minimus_right",
+      "target_index": 101,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gluteus_minimus_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gonads",
+      "target_index": 102,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gonads"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "gray_matter",
+      "target_index": 103,
+      "mapping_status": "direct",
+      "source_masks": [
+        "gray_matter"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "hard_palate",
+      "target_index": 104,
+      "mapping_status": "direct",
+      "source_masks": [
+        "hard_palate"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart",
+      "target_index": 105,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart_atrium_left",
+      "target_index": 106,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart_atrium_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart_atrium_right",
+      "target_index": 107,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart_atrium_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart_myocardium",
+      "target_index": 108,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart_myocardium"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart_tissue",
+      "target_index": 109,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart_tissue"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart_ventricle_left",
+      "target_index": 110,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart_ventricle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "heart_ventricle_right",
+      "target_index": 111,
+      "mapping_status": "direct",
+      "source_masks": [
+        "heart_ventricle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "hepatic_vessel",
+      "target_index": 112,
+      "mapping_status": "direct",
+      "source_masks": [
+        "hepatic_vessel"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "hip_left",
+      "target_index": 113,
+      "mapping_status": "direct",
+      "source_masks": [
+        "hip_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "hip_right",
+      "target_index": 114,
+      "mapping_status": "direct",
+      "source_masks": [
+        "hip_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "humerus_left",
+      "target_index": 115,
+      "mapping_status": "direct",
+      "source_masks": [
+        "humerus_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "humerus_right",
+      "target_index": 116,
+      "mapping_status": "direct",
+      "source_masks": [
+        "humerus_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "hyoid",
+      "target_index": 117,
+      "mapping_status": "direct",
+      "source_masks": [
+        "hyoid"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "hypopharynx",
+      "target_index": 118,
+      "mapping_status": "direct",
+      "source_masks": [
+        "hypopharynx"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "iliac_artery_left",
+      "target_index": 119,
+      "mapping_status": "direct",
+      "source_masks": [
+        "iliac_artery_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "iliac_artery_right",
+      "target_index": 120,
+      "mapping_status": "direct",
+      "source_masks": [
+        "iliac_artery_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "iliac_vena_left",
+      "target_index": 121,
+      "mapping_status": "direct",
+      "source_masks": [
+        "iliac_vena_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "iliac_vena_right",
+      "target_index": 122,
+      "mapping_status": "direct",
+      "source_masks": [
+        "iliac_vena_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "iliopsoas_left",
+      "target_index": 123,
+      "mapping_status": "direct",
+      "source_masks": [
+        "iliopsoas_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "iliopsoas_right",
+      "target_index": 124,
+      "mapping_status": "direct",
+      "source_masks": [
+        "iliopsoas_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "inferior_oblique_muscle_left",
+      "target_index": 125,
+      "mapping_status": "direct",
+      "source_masks": [
+        "inferior_oblique_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "inferior_oblique_muscle_right",
+      "target_index": 126,
+      "mapping_status": "direct",
+      "source_masks": [
+        "inferior_oblique_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "inferior_pharyngeal_constrictor",
+      "target_index": 127,
+      "mapping_status": "direct",
+      "source_masks": [
+        "inferior_pharyngeal_constrictor"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "inferior_rectus_muscle_left",
+      "target_index": 128,
+      "mapping_status": "direct",
+      "source_masks": [
+        "inferior_rectus_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "inferior_rectus_muscle_right",
+      "target_index": 129,
+      "mapping_status": "direct",
+      "source_masks": [
+        "inferior_rectus_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "inferior_vena_cava",
+      "target_index": 130,
+      "mapping_status": "alias",
+      "source_masks": [
+        "postcava"
+      ],
+      "mapping_rule": "read postcava mask as inferior_vena_cava only after alias verification",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "known alias candidate from project notes; keep auditable and do not silently remap elsewhere"
+    },
+    {
+      "target_name": "insular_cortex",
+      "target_index": 131,
+      "mapping_status": "direct",
+      "source_masks": [
+        "insular_cortex"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "internal_capsule",
+      "target_index": 132,
+      "mapping_status": "direct",
+      "source_masks": [
+        "internal_capsule"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "internal_carotid_artery_left",
+      "target_index": 133,
+      "mapping_status": "direct",
+      "source_masks": [
+        "internal_carotid_artery_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "internal_carotid_artery_right",
+      "target_index": 134,
+      "mapping_status": "direct",
+      "source_masks": [
+        "internal_carotid_artery_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "internal_jugular_vein_left",
+      "target_index": 135,
+      "mapping_status": "direct",
+      "source_masks": [
+        "internal_jugular_vein_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "internal_jugular_vein_right",
+      "target_index": 136,
+      "mapping_status": "direct",
+      "source_masks": [
+        "internal_jugular_vein_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "intestine",
+      "target_index": 137,
+      "mapping_status": "direct",
+      "source_masks": [
+        "intestine"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "kidney",
+      "target_index": 138,
+      "mapping_status": "union",
+      "source_masks": [
+        "kidney_left",
+        "kidney_right"
+      ],
+      "mapping_rule": "binary union of left and right kidney masks",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "kidney_cortex",
+      "target_index": 139,
+      "mapping_status": "direct",
+      "source_masks": [
+        "kidney_cortex"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "kidney_left",
+      "target_index": 140,
+      "mapping_status": "direct",
+      "source_masks": [
+        "kidney_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "kidney_medulla",
+      "target_index": 141,
+      "mapping_status": "direct",
+      "source_masks": [
+        "kidney_medulla"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "kidney_pelvicalyceal_system",
+      "target_index": 142,
+      "mapping_status": "direct",
+      "source_masks": [
+        "kidney_pelvicalyceal_system"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "kidney_right",
+      "target_index": 143,
+      "mapping_status": "direct",
+      "source_masks": [
+        "kidney_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lacrimal_gland_left",
+      "target_index": 144,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lacrimal_gland_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lacrimal_gland_right",
+      "target_index": 145,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lacrimal_gland_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "larynx",
+      "target_index": 146,
+      "mapping_status": "direct",
+      "source_masks": [
+        "larynx"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lateral_pterygoid_left",
+      "target_index": 147,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lateral_pterygoid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lateral_pterygoid_right",
+      "target_index": 148,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lateral_pterygoid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lateral_rectus_muscle_left",
+      "target_index": 149,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lateral_rectus_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lateral_rectus_muscle_right",
+      "target_index": 150,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lateral_rectus_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lentiform_nucleus",
+      "target_index": 151,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lentiform_nucleus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "levator_palpebrae_superioris_left",
+      "target_index": 152,
+      "mapping_status": "direct",
+      "source_masks": [
+        "levator_palpebrae_superioris_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "levator_palpebrae_superioris_right",
+      "target_index": 153,
+      "mapping_status": "direct",
+      "source_masks": [
+        "levator_palpebrae_superioris_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "levator_scapulae_left",
+      "target_index": 154,
+      "mapping_status": "direct",
+      "source_masks": [
+        "levator_scapulae_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "levator_scapulae_right",
+      "target_index": 155,
+      "mapping_status": "direct",
+      "source_masks": [
+        "levator_scapulae_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver",
+      "target_index": 156,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_hepatic_vein",
+      "target_index": 157,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_hepatic_vein"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_portal_vein",
+      "target_index": 158,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_portal_vein"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_1",
+      "target_index": 159,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_1"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_2",
+      "target_index": 160,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_2"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_3",
+      "target_index": 161,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_3"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_4",
+      "target_index": 162,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_4"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_5",
+      "target_index": 163,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_5"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_6",
+      "target_index": 164,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_6"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_7",
+      "target_index": 165,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_7"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "liver_segment_8",
+      "target_index": 166,
+      "mapping_status": "direct",
+      "source_masks": [
+        "liver_segment_8"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung",
+      "target_index": 167,
+      "mapping_status": "union",
+      "source_masks": [
+        "lung_left",
+        "lung_right"
+      ],
+      "mapping_rule": "binary union of left and right lung masks",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_left",
+      "target_index": 168,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_lower_left_lobe",
+      "target_index": 169,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_lower_left_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_lower_right_lobe",
+      "target_index": 170,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_lower_right_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_middle_right_lobe",
+      "target_index": 171,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_middle_right_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_pulmonary_arteries",
+      "target_index": 172,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_pulmonary_arteries"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_pulmonary_veins",
+      "target_index": 173,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_pulmonary_veins"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_right",
+      "target_index": 174,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_trachea_bronchia",
+      "target_index": 175,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_trachea_bronchia"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_upper_left_lobe",
+      "target_index": 176,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_upper_left_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_upper_right_lobe",
+      "target_index": 177,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_upper_right_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "lung_vessels",
+      "target_index": 178,
+      "mapping_status": "direct",
+      "source_masks": [
+        "lung_vessels"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "mammary_gland_left",
+      "target_index": 179,
+      "mapping_status": "direct",
+      "source_masks": [
+        "mammary_gland_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "mammary_gland_right",
+      "target_index": 180,
+      "mapping_status": "direct",
+      "source_masks": [
+        "mammary_gland_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "mandible",
+      "target_index": 181,
+      "mapping_status": "direct",
+      "source_masks": [
+        "mandible"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "masseter_left",
+      "target_index": 182,
+      "mapping_status": "direct",
+      "source_masks": [
+        "masseter_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "masseter_right",
+      "target_index": 183,
+      "mapping_status": "direct",
+      "source_masks": [
+        "masseter_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "medial_pterygoid_left",
+      "target_index": 184,
+      "mapping_status": "direct",
+      "source_masks": [
+        "medial_pterygoid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "medial_pterygoid_right",
+      "target_index": 185,
+      "mapping_status": "direct",
+      "source_masks": [
+        "medial_pterygoid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "medial_rectus_muscle_left",
+      "target_index": 186,
+      "mapping_status": "direct",
+      "source_masks": [
+        "medial_rectus_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "medial_rectus_muscle_right",
+      "target_index": 187,
+      "mapping_status": "direct",
+      "source_masks": [
+        "medial_rectus_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "mediastinal_tissue",
+      "target_index": 188,
+      "mapping_status": "direct",
+      "source_masks": [
+        "mediastinal_tissue"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "mediastinum",
+      "target_index": 189,
+      "mapping_status": "direct",
+      "source_masks": [
+        "mediastinum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "metacarpal",
+      "target_index": 190,
+      "mapping_status": "direct",
+      "source_masks": [
+        "metacarpal"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "metacarpal_left",
+      "target_index": 191,
+      "mapping_status": "direct",
+      "source_masks": [
+        "metacarpal_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "metacarpal_right",
+      "target_index": 192,
+      "mapping_status": "direct",
+      "source_masks": [
+        "metacarpal_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "metatarsal",
+      "target_index": 193,
+      "mapping_status": "direct",
+      "source_masks": [
+        "metatarsal"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "metatarsal_left",
+      "target_index": 194,
+      "mapping_status": "direct",
+      "source_masks": [
+        "metatarsal_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "metatarsal_right",
+      "target_index": 195,
+      "mapping_status": "direct",
+      "source_masks": [
+        "metatarsal_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "middle_pharyngeal_constrictor",
+      "target_index": 196,
+      "mapping_status": "direct",
+      "source_masks": [
+        "middle_pharyngeal_constrictor"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "middle_scalene_left",
+      "target_index": 197,
+      "mapping_status": "direct",
+      "source_masks": [
+        "middle_scalene_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "middle_scalene_right",
+      "target_index": 198,
+      "mapping_status": "direct",
+      "source_masks": [
+        "middle_scalene_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "muscle",
+      "target_index": 199,
+      "mapping_status": "direct",
+      "source_masks": [
+        "muscle"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "muscle_of_head",
+      "target_index": 200,
+      "mapping_status": "direct",
+      "source_masks": [
+        "muscle_of_head"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "nasal_cavity_left",
+      "target_index": 201,
+      "mapping_status": "direct",
+      "source_masks": [
+        "nasal_cavity_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "nasal_cavity_right",
+      "target_index": 202,
+      "mapping_status": "direct",
+      "source_masks": [
+        "nasal_cavity_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "nasopharynx",
+      "target_index": 203,
+      "mapping_status": "direct",
+      "source_masks": [
+        "nasopharynx"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "occipital_lobe",
+      "target_index": 204,
+      "mapping_status": "direct",
+      "source_masks": [
+        "occipital_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "optic_chiasm",
+      "target_index": 205,
+      "mapping_status": "direct",
+      "source_masks": [
+        "optic_chiasm"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "optic_nerve_left",
+      "target_index": 206,
+      "mapping_status": "direct",
+      "source_masks": [
+        "optic_nerve_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "optic_nerve_right",
+      "target_index": 207,
+      "mapping_status": "direct",
+      "source_masks": [
+        "optic_nerve_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "oral_cavity",
+      "target_index": 208,
+      "mapping_status": "direct",
+      "source_masks": [
+        "oral_cavity"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "oropharynx",
+      "target_index": 209,
+      "mapping_status": "direct",
+      "source_masks": [
+        "oropharynx"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pancreas",
+      "target_index": 210,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pancreas"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pancreas_body",
+      "target_index": 211,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pancreas_body"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pancreas_head",
+      "target_index": 212,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pancreas_head"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pancreas_tail",
+      "target_index": 213,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pancreas_tail"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pancreatic_duct",
+      "target_index": 214,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pancreatic_duct"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "parietal_lobe",
+      "target_index": 215,
+      "mapping_status": "direct",
+      "source_masks": [
+        "parietal_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "parotid_gland_left",
+      "target_index": 216,
+      "mapping_status": "direct",
+      "source_masks": [
+        "parotid_gland_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "parotid_gland_right",
+      "target_index": 217,
+      "mapping_status": "direct",
+      "source_masks": [
+        "parotid_gland_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "parotid_glands",
+      "target_index": 218,
+      "mapping_status": "direct",
+      "source_masks": [
+        "parotid_glands"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "patella",
+      "target_index": 219,
+      "mapping_status": "direct",
+      "source_masks": [
+        "patella"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "patella_left",
+      "target_index": 220,
+      "mapping_status": "direct",
+      "source_masks": [
+        "patella_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "patella_right",
+      "target_index": 221,
+      "mapping_status": "direct",
+      "source_masks": [
+        "patella_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pericardium",
+      "target_index": 222,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pericardium"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "phalanges_feet",
+      "target_index": 223,
+      "mapping_status": "direct",
+      "source_masks": [
+        "phalanges_feet"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "phalanges_hand",
+      "target_index": 224,
+      "mapping_status": "direct",
+      "source_masks": [
+        "phalanges_hand"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pituitary_gland",
+      "target_index": 225,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pituitary_gland"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "platysma_left",
+      "target_index": 226,
+      "mapping_status": "direct",
+      "source_masks": [
+        "platysma_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "platysma_right",
+      "target_index": 227,
+      "mapping_status": "direct",
+      "source_masks": [
+        "platysma_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "portal_vein_and_splenic_vein",
+      "target_index": 228,
+      "mapping_status": "direct",
+      "source_masks": [
+        "portal_vein_and_splenic_vein"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "postcava",
+      "target_index": 229,
+      "mapping_status": "direct",
+      "source_masks": [
+        "postcava"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "posterior_eyeball_segment_left",
+      "target_index": 230,
+      "mapping_status": "direct",
+      "source_masks": [
+        "posterior_eyeball_segment_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "posterior_eyeball_segment_right",
+      "target_index": 231,
+      "mapping_status": "direct",
+      "source_masks": [
+        "posterior_eyeball_segment_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "posterior_scalene_left",
+      "target_index": 232,
+      "mapping_status": "direct",
+      "source_masks": [
+        "posterior_scalene_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "posterior_scalene_right",
+      "target_index": 233,
+      "mapping_status": "direct",
+      "source_masks": [
+        "posterior_scalene_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "prevertebral_left",
+      "target_index": 234,
+      "mapping_status": "direct",
+      "source_masks": [
+        "prevertebral_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "prevertebral_right",
+      "target_index": 235,
+      "mapping_status": "direct",
+      "source_masks": [
+        "prevertebral_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "prostate",
+      "target_index": 236,
+      "mapping_status": "direct",
+      "source_masks": [
+        "prostate"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "prosthetic_breast_implant",
+      "target_index": 237,
+      "mapping_status": "direct",
+      "source_masks": [
+        "prosthetic_breast_implant"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "psoas_major_muscle_left",
+      "target_index": 238,
+      "mapping_status": "direct",
+      "source_masks": [
+        "psoas_major_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "psoas_major_muscle_right",
+      "target_index": 239,
+      "mapping_status": "direct",
+      "source_masks": [
+        "psoas_major_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pulmonary_artery",
+      "target_index": 240,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pulmonary_artery"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "pulmonary_vein",
+      "target_index": 241,
+      "mapping_status": "direct",
+      "source_masks": [
+        "pulmonary_vein"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "radius",
+      "target_index": 242,
+      "mapping_status": "direct",
+      "source_masks": [
+        "radius"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "radius_left",
+      "target_index": 243,
+      "mapping_status": "direct",
+      "source_masks": [
+        "radius_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "radius_right",
+      "target_index": 244,
+      "mapping_status": "direct",
+      "source_masks": [
+        "radius_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rectum",
+      "target_index": 245,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rectum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rectus_abdominis_muscle_left",
+      "target_index": 246,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rectus_abdominis_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rectus_abdominis_muscle_right",
+      "target_index": 247,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rectus_abdominis_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "renal_vein_left",
+      "target_index": 248,
+      "mapping_status": "direct",
+      "source_masks": [
+        "renal_vein_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "renal_vein_right",
+      "target_index": 249,
+      "mapping_status": "direct",
+      "source_masks": [
+        "renal_vein_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_cartilage",
+      "target_index": 250,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_cartilage"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_1",
+      "target_index": 251,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_1"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_10",
+      "target_index": 252,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_10"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_11",
+      "target_index": 253,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_11"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_12",
+      "target_index": 254,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_12"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_2",
+      "target_index": 255,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_2"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_3",
+      "target_index": 256,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_3"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_4",
+      "target_index": 257,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_4"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_5",
+      "target_index": 258,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_5"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_6",
+      "target_index": 259,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_6"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_7",
+      "target_index": 260,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_7"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_8",
+      "target_index": 261,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_8"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_left_9",
+      "target_index": 262,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_left_9"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_1",
+      "target_index": 263,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_1"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_10",
+      "target_index": 264,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_10"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_11",
+      "target_index": 265,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_11"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_12",
+      "target_index": 266,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_12"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_2",
+      "target_index": 267,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_2"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_3",
+      "target_index": 268,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_3"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_4",
+      "target_index": 269,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_4"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_5",
+      "target_index": 270,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_5"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_6",
+      "target_index": 271,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_6"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_7",
+      "target_index": 272,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_7"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_8",
+      "target_index": 273,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_8"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "rib_right_9",
+      "target_index": 274,
+      "mapping_status": "direct",
+      "source_masks": [
+        "rib_right_9"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sacrum",
+      "target_index": 275,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sacrum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "scalp",
+      "target_index": 276,
+      "mapping_status": "direct",
+      "source_masks": [
+        "scalp"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "scapula_left",
+      "target_index": 277,
+      "mapping_status": "direct",
+      "source_masks": [
+        "scapula_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "scapula_right",
+      "target_index": 278,
+      "mapping_status": "direct",
+      "source_masks": [
+        "scapula_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "seminal_vesicle",
+      "target_index": 279,
+      "mapping_status": "direct",
+      "source_masks": [
+        "seminal_vesicle"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "septum_pellucidum",
+      "target_index": 280,
+      "mapping_status": "direct",
+      "source_masks": [
+        "septum_pellucidum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sigmoid_colon",
+      "target_index": 281,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sigmoid_colon"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "skin",
+      "target_index": 282,
+      "mapping_status": "direct",
+      "source_masks": [
+        "skin"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "skull",
+      "target_index": 283,
+      "mapping_status": "direct",
+      "source_masks": [
+        "skull"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "small_bowel",
+      "target_index": 284,
+      "mapping_status": "direct",
+      "source_masks": [
+        "small_bowel"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "soft_palate",
+      "target_index": 285,
+      "mapping_status": "direct",
+      "source_masks": [
+        "soft_palate"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "spinal_canal",
+      "target_index": 286,
+      "mapping_status": "direct",
+      "source_masks": [
+        "spinal_canal"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "spinal_cord",
+      "target_index": 287,
+      "mapping_status": "direct",
+      "source_masks": [
+        "spinal_cord"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "spleen",
+      "target_index": 288,
+      "mapping_status": "direct",
+      "source_masks": [
+        "spleen"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "spongy_bone",
+      "target_index": 289,
+      "mapping_status": "direct",
+      "source_masks": [
+        "spongy_bone"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sterno_thyroid_left",
+      "target_index": 290,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sterno_thyroid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sterno_thyroid_right",
+      "target_index": 291,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sterno_thyroid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sternocleidomastoid_left",
+      "target_index": 292,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sternocleidomastoid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sternocleidomastoid_right",
+      "target_index": 293,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sternocleidomastoid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sternum",
+      "target_index": 294,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sternum"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sternum_corpus",
+      "target_index": 295,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sternum_corpus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "sternum_manubrium",
+      "target_index": 296,
+      "mapping_status": "direct",
+      "source_masks": [
+        "sternum_manubrium"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "stomach",
+      "target_index": 297,
+      "mapping_status": "direct",
+      "source_masks": [
+        "stomach"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "styloid_process_left",
+      "target_index": 298,
+      "mapping_status": "direct",
+      "source_masks": [
+        "styloid_process_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "styloid_process_right",
+      "target_index": 299,
+      "mapping_status": "direct",
+      "source_masks": [
+        "styloid_process_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "subarachnoid_space",
+      "target_index": 300,
+      "mapping_status": "direct",
+      "source_masks": [
+        "subarachnoid_space"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "subclavian_artery_left",
+      "target_index": 301,
+      "mapping_status": "direct",
+      "source_masks": [
+        "subclavian_artery_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "subclavian_artery_right",
+      "target_index": 302,
+      "mapping_status": "direct",
+      "source_masks": [
+        "subclavian_artery_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "subcutaneous_adipose_tissue",
+      "target_index": 303,
+      "mapping_status": "direct",
+      "source_masks": [
+        "subcutaneous_adipose_tissue"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "submandibular_gland_left",
+      "target_index": 304,
+      "mapping_status": "direct",
+      "source_masks": [
+        "submandibular_gland_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "submandibular_gland_right",
+      "target_index": 305,
+      "mapping_status": "direct",
+      "source_masks": [
+        "submandibular_gland_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "submandibular_glands",
+      "target_index": 306,
+      "mapping_status": "direct",
+      "source_masks": [
+        "submandibular_glands"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "superior_mesenteric_artery",
+      "target_index": 307,
+      "mapping_status": "direct",
+      "source_masks": [
+        "superior_mesenteric_artery"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "superior_oblique_muscle_left",
+      "target_index": 308,
+      "mapping_status": "direct",
+      "source_masks": [
+        "superior_oblique_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "superior_oblique_muscle_right",
+      "target_index": 309,
+      "mapping_status": "direct",
+      "source_masks": [
+        "superior_oblique_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "superior_rectus_muscle_left",
+      "target_index": 310,
+      "mapping_status": "direct",
+      "source_masks": [
+        "superior_rectus_muscle_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "superior_rectus_muscle_right",
+      "target_index": 311,
+      "mapping_status": "direct",
+      "source_masks": [
+        "superior_rectus_muscle_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "superior_vena_cava",
+      "target_index": 312,
+      "mapping_status": "direct",
+      "source_masks": [
+        "superior_vena_cava"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "supraglottis",
+      "target_index": 313,
+      "mapping_status": "direct",
+      "source_masks": [
+        "supraglottis"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tarsal",
+      "target_index": 314,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tarsal"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tarsal_left",
+      "target_index": 315,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tarsal_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tarsal_right",
+      "target_index": 316,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tarsal_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "temporal_lobe",
+      "target_index": 317,
+      "mapping_status": "direct",
+      "source_masks": [
+        "temporal_lobe"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "temporalis_left",
+      "target_index": 318,
+      "mapping_status": "direct",
+      "source_masks": [
+        "temporalis_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "temporalis_right",
+      "target_index": 319,
+      "mapping_status": "direct",
+      "source_masks": [
+        "temporalis_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thalamus",
+      "target_index": 320,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thalamus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thoracic_cavity",
+      "target_index": 321,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thoracic_cavity"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thymus",
+      "target_index": 322,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thymus"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thyrohyoid_left",
+      "target_index": 323,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thyrohyoid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thyrohyoid_right",
+      "target_index": 324,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thyrohyoid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thyroid_cartilage",
+      "target_index": 325,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thyroid_cartilage"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thyroid_gland",
+      "target_index": 326,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thyroid_gland"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thyroid_left",
+      "target_index": 327,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thyroid_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "thyroid_right",
+      "target_index": 328,
+      "mapping_status": "direct",
+      "source_masks": [
+        "thyroid_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tibia",
+      "target_index": 329,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tibia"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tibia_left",
+      "target_index": 330,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tibia_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tibia_right",
+      "target_index": 331,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tibia_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "toes_left",
+      "target_index": 332,
+      "mapping_status": "direct",
+      "source_masks": [
+        "toes_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "toes_right",
+      "target_index": 333,
+      "mapping_status": "direct",
+      "source_masks": [
+        "toes_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "tongue",
+      "target_index": 334,
+      "mapping_status": "direct",
+      "source_masks": [
+        "tongue"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "trachea",
+      "target_index": 335,
+      "mapping_status": "direct",
+      "source_masks": [
+        "trachea"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "trapezius_left",
+      "target_index": 336,
+      "mapping_status": "direct",
+      "source_masks": [
+        "trapezius_left"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "trapezius_right",
+      "target_index": 337,
+      "mapping_status": "direct",
+      "source_masks": [
+        "trapezius_right"
+      ],
+      "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
+      "participates_in_pilot338": true,
+      "requires_manual_review": false,
+      "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
+    },
+    {
+      "target_name": "ulna",
+      "target_index": 338,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "ulna_left",
+      "target_index": 339,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "ulna_right",
+      "target_index": 340,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "uterocervix",
+      "target_index": 341,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "uterus",
+      "target_index": 342,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "veins",
+      "target_index": 343,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "venous_sinuses",
+      "target_index": 344,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C1",
+      "target_index": 345,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C2",
+      "target_index": 346,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C3",
+      "target_index": 347,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C4",
+      "target_index": 348,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C5",
+      "target_index": 349,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C6",
+      "target_index": 350,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_C7",
+      "target_index": 351,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_L1",
+      "target_index": 352,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_L2",
+      "target_index": 353,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_L3",
+      "target_index": 354,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_L4",
+      "target_index": 355,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_L5",
+      "target_index": 356,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_S1",
+      "target_index": 357,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T1",
+      "target_index": 358,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T10",
+      "target_index": 359,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T11",
+      "target_index": 360,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T12",
+      "target_index": 361,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T2",
+      "target_index": 362,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T3",
+      "target_index": 363,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T4",
+      "target_index": 364,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T5",
+      "target_index": 365,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T6",
+      "target_index": 366,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T7",
+      "target_index": 367,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T8",
+      "target_index": 368,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "vertebrae_T9",
+      "target_index": 369,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "white_matter",
+      "target_index": 370,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "zygomatic_arch_left",
+      "target_index": 371,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    },
+    {
+      "target_name": "zygomatic_arch_right",
+      "target_index": 372,
+      "mapping_status": "unverified_skip",
+      "source_masks": [],
+      "mapping_rule": "skip_until_abdomenatlaspro_mapping_is_verified",
+      "participates_in_pilot338": false,
+      "requires_manual_review": true,
+      "notes": "excluded from pilot338; do not treat as negative or all-zero mask"
+    }
+  ]
+}

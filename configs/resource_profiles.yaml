@@ -1,0 +1,88 @@
+resource_profiles:
+  cpu_small:
+    tier: cpu
+    partition: interactive
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 4
+    memory_gb: 16
+    walltime: "01:00:00"
+    gpu_count: 0
+
+  cpu_large:
+    tier: cpu
+    partition: interactive
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 16
+    memory_gb: 64
+    walltime: "04:00:00"
+    gpu_count: 0
+
+  t4_single_gpu:
+    tier: sufficient_if_smoke_passed
+    partition: gpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 8
+    memory_gb: 48
+    walltime: "04:00:00"
+    gpu_count: 1
+
+  a100_single_gpu:
+    tier: fallback_if_lower_tier_failed
+    partition: gpua100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 12
+    memory_gb: 96
+    walltime: "06:00:00"
+    gpu_count: 1
+
+  labelcritic_72b_4h100_formal:
+    tier: official_formal_preferred_but_scarce
+    partition: gpuh100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 24
+    memory_gb: 256
+    walltime: "08:00:00"
+    gpu_count: 4
+    tensor_parallel_size: 4
+    container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+    model_id: Qwen/Qwen2-VL-72B-Instruct-AWQ
+    model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
+    model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
+    port: 8000
+
+  labelcritic_72b_validated_alternative:
+    tier: validated_alternative_must_be_labeled
+    partition: gpua100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 24
+    memory_gb: 256
+    walltime: "08:00:00"
+    gpu_count: 4
+    tensor_parallel_size: 4
+    container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+    model_id: Qwen/Qwen2-VL-72B-Instruct-AWQ
+    model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
+    model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
+    port: 8000
+
+  labelcritic_smaller_vlm_triage:
+    tier: debug_or_triage_only_not_formal
+    partition: gpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 8
+    memory_gb: 64
+    walltime: "02:00:00"
+    gpu_count: 1
+    tensor_parallel_size: 1
+    container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+    model_id: Qwen/Qwen2-VL-7B-Instruct
+    model_revision:
+    model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-7B-Instruct
+    port: 8000

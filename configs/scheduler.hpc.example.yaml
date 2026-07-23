@@ -1,0 +1,63 @@
+project:
+  name: abdomenatlaspro_pilot338
+  full_target_count: 373
+  pilot_target_count: 338
+  target_terminology: target_anatomical_structures
+  seed: 20260719
+
+paths:
+  project_root: /projects/bodymaps
+  code_root: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent
+  work_root: /projects/bodymaps/users/xhan74/medical_agent
+  model_root: /projects/bodymaps/users/xhan74/medical_agent/models
+  output_root: /projects/bodymaps/users/xhan74/medical_agent/outputs
+  report_root: /projects/bodymaps/users/xhan74/medical_agent/reports
+  run_root: /projects/bodymaps/users/xhan74/medical_agent/runs
+  script_root: /projects/bodymaps/users/xhan74/medical_agent/scripts
+  slurm_script_root: /projects/bodymaps/users/xhan74/medical_agent/scripts/slurm
+  cache_root: /projects/bodymaps/users/xhan74/medical_agent/cache
+  tmp_root: /projects/bodymaps/users/xhan74/medical_agent/tmp
+  image_root: /projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro
+  mask_root: /projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro
+  target_config: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/configs/student_3d_prompt_target_organs.json
+  target_mapping: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/configs/abdomenatlaspro_target_mapping_373.json
+  pilot_target_config: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/configs/abdomenatlaspro_pilot_338_target_config.json
+  pilot_target_allowlist: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/configs/abdomenatlaspro_pilot_338_target_allowlist.json
+  pilot_train_input_case_list: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/data_manifest/abdomenatlaspro_pilot_seed20260719_train20_input_strict_no_gt.csv
+  pilot_train_eval_case_list: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/data_manifest/abdomenatlaspro_pilot_seed20260719_train20_eval_reference.csv
+  pilot_test_input_case_list: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/data_manifest/abdomenatlaspro_pilot_seed20260719_test20_input_strict_no_gt.csv
+  pilot_test_eval_case_list: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/data_manifest/abdomenatlaspro_pilot_seed20260719_test20_eval_reference.csv
+  pilot_reserve_case_list: /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent/data_manifest/abdomenatlaspro_pilot_seed20260719_reserve10.csv
+
+environments:
+  base_env_prefix: /home/xhan74/envs/medical_agent
+  train_env_prefix: /home/xhan74/envs/medical_agent_train
+  hf_home: /home/xhan74/.cache/huggingface
+  hf_hub_cache: /projects/bodymaps/users/xhan74/medical_agent/cache/huggingface/hub
+  vllm_sif: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+
+resource_profiles: configs/resource_profiles.yaml
+
+resource_policy:
+  teacher_train_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  teacher_test_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  student_train_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+    hard_constraints:
+      multi_gpu: forbidden_unless_ddp_validated
+  student_test_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  labelcritic_resource_selection:
+    preferred_order: [labelcritic_72b_4h100_formal, labelcritic_72b_validated_alternative, labelcritic_smaller_vlm_triage]
+    smoke_required: true
+
+slurm_defaults:
+  account:
+  qos:
+  constraint:

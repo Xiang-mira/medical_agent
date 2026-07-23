@@ -1,0 +1,158 @@
+name: abdomenatlaspro_pilot338
+description: Adaptive local/HPC DAG for the AbdomenAtlasPro 338-target pilot over the fixed 20/20/10 split.
+
+tasks:
+  pilot_preflight_cpu:
+    task_type: preflight
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: []
+
+  teacher_train_resource_selection:
+    task_type: resource_selection
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [pilot_preflight_cpu]
+
+  teacher_train_array:
+    task_type: teacher_inference
+    entrypoint: python_script
+    script: run_medai_cli.py
+    arguments: ["--json", "run-loop", "--case-list", "${PILOT_TRAIN_INPUT_CASE_LIST}", "--organs", "student_373", "--target-config", "${PILOT_338_TARGET_CONFIG}", "--output", "${RUN_OUTPUT_DIR}/teacher_train"]
+    resource_profile: t4_single_gpu
+    launcher: python
+    gt_access_policy: none
+    array: "0-19%4"
+    dependencies: [teacher_train_resource_selection]
+
+  teacher_train_audit:
+    task_type: audit
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [teacher_train_array]
+
+  labelcritic_candidate_manifest:
+    task_type: manifest
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [teacher_train_audit]
+
+  labelcritic_resource_selection:
+    task_type: resource_selection
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [labelcritic_candidate_manifest]
+
+  labelcritic_batch:
+    task_type: labelcritic
+    entrypoint: scheduler_builtin
+    resource_profile: labelcritic_72b_4h100_formal
+    launcher: vllm_same_job
+    gt_access_policy: none
+    dependencies: [labelcritic_resource_selection]
+
+  pseudo_label_manifest_audit:
+    task_type: audit
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [labelcritic_batch]
+
+  student_train_resource_selection:
+    task_type: resource_selection
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [pseudo_label_manifest_audit]
+
+  student_train:
+    task_type: student_train
+    entrypoint: python_script
+    script: scripts/train_voxtell_prompt_student.py
+    arguments: ["--manifest", "${PSEUDO_LABEL_STUDENT_MANIFEST}", "--output-dir", "${RUN_CHECKPOINT_DIR}/student"]
+    resource_profile: t4_single_gpu
+    launcher: python
+    gt_access_policy: pseudo_label_only
+    dependencies: [student_train_resource_selection]
+
+  student_checkpoint_audit:
+    task_type: audit
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [student_train]
+
+  student_test_resource_selection:
+    task_type: resource_selection
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [student_checkpoint_audit]
+
+  student_test_array:
+    task_type: student_inference
+    entrypoint: python_script
+    script: scripts/student_auto_segmentation_cli.py
+    arguments: ["--model-dir", "${STUDENT_MODEL_DIR}", "--image", "${ARRAY_CT_PATH}", "--output-dir", "${ARRAY_OUTPUT_DIR}", "--target-config", "${PILOT_338_TARGET_CONFIG}"]
+    resource_profile: t4_single_gpu
+    launcher: python
+    gt_access_policy: none
+    array: "0-19%4"
+    dependencies: [student_test_resource_selection]
+
+  teacher_test_resource_selection:
+    task_type: resource_selection
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [pilot_preflight_cpu]
+
+  teacher_test_array:
+    task_type: teacher_inference
+    entrypoint: python_script
+    script: run_medai_cli.py
+    arguments: ["--json", "run-loop", "--case-list", "${PILOT_TEST_INPUT_CASE_LIST}", "--organs", "student_373", "--target-config", "${PILOT_338_TARGET_CONFIG}", "--output", "${RUN_OUTPUT_DIR}/teacher_test"]
+    resource_profile: t4_single_gpu
+    launcher: python
+    gt_access_policy: none
+    array: "0-19%4"
+    dependencies: [teacher_test_resource_selection]
+
+  test_prediction_audit:
+    task_type: audit
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [teacher_test_array, student_test_array]
+
+  metrics_cpu:
+    task_type: metrics
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_large
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [test_prediction_audit]
+
+  final_report_cpu:
+    task_type: report
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_small
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [metrics_cpu]
