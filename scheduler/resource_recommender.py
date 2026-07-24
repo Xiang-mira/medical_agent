@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from .queue_estimator import heuristic_wait
+from .resource_discovery import validate_snapshot_invariants
 from .utils import SchedulerError
 
 
@@ -57,6 +58,9 @@ def _stage(stage: str, profile: str, partition: str, gpu_type: str, gpu_count: i
 
 
 def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_cases: int, *, gpu_budget: dict[str, int] | None = None) -> dict[str, Any]:
+    invariants = validate_snapshot_invariants(snapshot)
+    if invariants["status"] != "success":
+        raise SchedulerError("Resource snapshot invariant check failed: " + "; ".join(invariants["errors"]))
     budget = {"max_t4_gpus": 32, "max_a100_gpus": 2, "max_h100_gpus": 8, "max_labelcritic_replicas": 2}
     if gpu_budget:
         budget.update({k: int(v) for k, v in gpu_budget.items() if v is not None})
@@ -69,7 +73,7 @@ def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_ca
         "conservative": ("t4_single_gpu", "gpu", "T4", max(1, min(4, t4_conc)), "keeps to validated single-GPU profiles and modest concurrency", "longer execution time"),
     }
     for plan_id, (profile, partition, gpu_type, conc, reason, risk) in templates.items():
-        label_replicas = max(1, min(2, budget["max_labelcritic_replicas"], budget["max_h100_gpus"] // 4))
+        label_replicas = max(1, min(2, budget["max_labelcritic_replicas"], max(1, budget["max_h100_gpus"] // 4)))
         stages = [
             _stage("teacher_train_inference", profile, partition, gpu_type, 1, train_cases, conc, snapshot, reason, risk),
             _stage("teacher_test_inference", profile, partition, gpu_type, 1, test_cases, conc, snapshot, reason, risk),
@@ -89,7 +93,7 @@ def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_ca
                 "potential_peak_h100_use": sum(s["gpu_count_per_job"] * s["max_concurrent"] for s in stages if s["gpu_type"] == "H100"),
             }
         )
-    return {"snapshot_time": snapshot.get("snapshot_time"), "plans": plans, "limitations": ["Estimates do not reserve resources; all jobs must still enter Slurm."]}
+    return {"snapshot_time": snapshot.get("snapshot_time"), "plans": plans, "snapshot_invariants": invariants, "limitations": ["Estimates do not reserve resources; all jobs must still enter Slurm.", "Runtime estimates remain low confidence until throughput history is available."]}
 
 
 def validate_user_plan(plan: dict[str, Any], *, ddp_validated: bool = False, h100_ddp_allowed: bool = False) -> dict[str, Any]:
@@ -107,3 +111,22 @@ def validate_user_plan(plan: dict[str, Any], *, ddp_validated: bool = False, h10
     if errors:
         raise SchedulerError("; ".join(errors))
     return {"status": "success", "plan_id": plan.get("plan_id")}
+
+
+def labelcritic_replica_shards(task_count: int, replicas: int, output_root: str) -> list[dict[str, Any]]:
+    replicas = max(1, min(int(replicas), 2))
+    shards = []
+    for replica in range(replicas):
+        shards.append(
+            {
+                "replica_index": replica,
+                "gpu_type": "H100",
+                "gpu_count": 4,
+                "tensor_parallel_size": 4,
+                "task_start": (task_count * replica) // replicas,
+                "task_end": (task_count * (replica + 1)) // replicas,
+                "output_dir": f"{output_root}/replica_{replica:02d}",
+                "formal": True,
+            }
+        )
+    return shards

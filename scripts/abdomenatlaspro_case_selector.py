@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scheduler.case_selection import (
     clean_cache,
@@ -43,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend", choices=["local", "slurm"], default="local")
     p.add_argument("--output-dir")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--reuse-cache", action="store_true", default=True)
+    p.add_argument("--no-reuse-cache", action="store_false", dest="reuse_cache")
+    p.add_argument("--force-inventory", action="store_true")
+    p.add_argument("--force-header-scan", action="store_true")
+    p.add_argument("--force-deep-audit", action="store_true")
     sub.add_parser("wizard")
     p = sub.add_parser("status")
     p.add_argument("--selection-dir", required=True)
@@ -87,7 +97,12 @@ def main(argv: list[str] | None = None) -> int:
             emit({"status": "success", "headers": [scan_ct_header(Path(r["ct_path"])) for r in rows]})
             return 0
         out = Path(args.output_dir) if args.output_dir else _default_output(args.train_cases, args.test_cases, args.seed)
-        emit(run_case_selection(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run))
+        emit(run_case_selection(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run, cache_options={
+            "reuse_cache": getattr(args, "reuse_cache", True),
+            "force_inventory": getattr(args, "force_inventory", False),
+            "force_header_scan": getattr(args, "force_header_scan", False),
+            "force_deep_audit": getattr(args, "force_deep_audit", False),
+        }))
     except SchedulerError as exc:
         emit({"status": "failed", "error": str(exc)})
         return 2

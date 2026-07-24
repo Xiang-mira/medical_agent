@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import nibabel as nib
@@ -76,3 +78,9 @@ def test_run_case_selection_writes_no_gt_manifests(tmp_path):
     assert assert_strict_no_gt_manifest(train)["rows"] == 2
     assert assert_strict_no_gt_manifest(test)["rows"] == 2
     assert (out / "SUCCESS").exists()
+
+
+def test_direct_script_help_runs_without_pythonpath():
+    proc = subprocess.run([sys.executable, "scripts/abdomenatlaspro_case_selector.py", "--help"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    assert proc.returncode == 0
+    assert "run" in proc.stdout

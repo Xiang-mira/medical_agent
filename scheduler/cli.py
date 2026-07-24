@@ -12,6 +12,7 @@ from .preflight import run_preflight
 from .state import read_statuses, write_status
 from .utils import SchedulerError, read_json, write_json_atomic
 from .executor import execute_task
+from .doctor import run_doctor
 from .experiment_wizard import experiment_wizard, launch_experiment, prepare_experiment
 from .resource_discovery import discover_resource_snapshot
 from .resource_recommender import recommend_resource_plans, workload_estimates
@@ -82,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("resource-snapshot")
     p.add_argument("--config", required=True)
+    p.add_argument("--output-dir", default=None)
+    p.add_argument("--include-raw", action="store_true")
 
     p = sub.add_parser("recommend-resources")
     p.add_argument("--config", required=True)
@@ -101,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--yes", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--run-id", default=None)
+
+    p = sub.add_parser("doctor")
+    p.add_argument("--config", required=True)
+    p.add_argument("--pipeline", required=True)
+    p.add_argument("--output-dir", default=None)
 
     args = parser.parse_args(argv)
     try:
@@ -175,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             emit(execute_task(Path(args.run_dir), args.task, array_index=args.array_index))
         elif args.cmd == "resource-snapshot":
             cfg = load_config(args.config)
-            emit(discover_resource_snapshot(cfg.path, account=cfg.slurm_defaults.get("account"), qos=cfg.slurm_defaults.get("qos")))
+            emit(discover_resource_snapshot(cfg.path, account=cfg.slurm_defaults.get("account"), qos=cfg.slurm_defaults.get("qos"), output_dir=args.output_dir, include_raw=args.include_raw))
         elif args.cmd == "recommend-resources":
             cfg = load_config(args.config)
             if args.train_cases is None or args.test_cases is None:
@@ -197,6 +205,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "launch":
             cfg = load_config(args.config)
             emit(launch_experiment(cfg, args.pipeline, resource_plan=args.resource_plan, yes=args.yes, dry_run=args.dry_run, run_id=args.run_id))
+        elif args.cmd == "doctor":
+            cfg = load_config(args.config)
+            emit(run_doctor(cfg, args.pipeline, output_dir=args.output_dir))
     except SchedulerError as exc:
         emit({"status": "failed", "error": str(exc)})
         return 2

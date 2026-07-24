@@ -370,7 +370,41 @@ def write_selection_outputs(out_dir: Path, cfg: CaseSelectionConfig, train: list
     return {"status": validation["status"], "selection_dir": str(out_dir), "validation": validation}
 
 
-def run_case_selection(train_cases: int, test_cases: int, seed: int, output_dir: Path, *, config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml", dry_run: bool = False) -> dict[str, Any]:
+def _fingerprint_payload(cfg: CaseSelectionConfig, train_cases: int, test_cases: int, seed: int) -> dict[str, Any]:
+    return {
+        "config": cfg.data,
+        "train_cases": train_cases,
+        "test_cases": test_cases,
+        "seed": seed,
+        "version": 1,
+    }
+
+
+def _state_path(output_dir: Path) -> Path:
+    return output_dir / "state.json"
+
+
+def read_selection_state(output_dir: Path) -> dict[str, Any]:
+    path = _state_path(output_dir)
+    if not path.exists():
+        return {"stages": {}}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_selection_state(output_dir: Path, state: dict[str, Any]) -> None:
+    write_json_atomic(_state_path(output_dir), state)
+
+
+def run_case_selection(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    dry_run: bool = False,
+    cache_options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     cfg = load_case_selection_config(config_path)
     image_root = resolve_path(cfg.paths.get("image_root"))
     mask_root = resolve_path(cfg.paths.get("mask_root"))
@@ -378,23 +412,61 @@ def run_case_selection(train_cases: int, test_cases: int, seed: int, output_dir:
     if image_root is None or mask_root is None or mapping_path is None:
         raise SchedulerError("Case selection config must define image_root, mask_root and target_mapping")
     ensure_not_raw_data_write_path(output_dir, image_root, mask_root)
+    cache_options = cache_options or {}
+    state = read_selection_state(output_dir)
+    fingerprint = hashlib.sha256(json.dumps(_fingerprint_payload(cfg, train_cases, test_cases, seed), sort_keys=True).encode("utf-8")).hexdigest()
+    if state.get("fingerprint") not in {None, fingerprint}:
+        state = {"stages": {}, "fingerprint": fingerprint}
     if dry_run:
-        return {"status": "dry_run", "train_cases": train_cases, "test_cases": test_cases, "seed": seed, "output_dir": str(output_dir)}
-    inventory = discover_inventory(image_root, mask_root)
-    header_rows = [{**r, **scan_ct_header(Path(str(r["ct_path"])))} for r in inventory]
+        return {"status": "dry_run", "train_cases": train_cases, "test_cases": test_cases, "seed": seed, "output_dir": str(output_dir), "cache_options": cache_options}
+    output_dir.mkdir(parents=True, exist_ok=True)
+    state.update({"fingerprint": fingerprint, "updated_at": utc_now()})
+    stages = state.setdefault("stages", {})
+    inv_cache = output_dir / "cache" / "inventory.json"
+    header_cache = output_dir / "cache" / "headers.json"
+    audit_cache = output_dir / "cache" / "deep_audit.json"
+    reuse = bool(cache_options.get("reuse_cache", True))
+    if reuse and not cache_options.get("force_inventory") and inv_cache.exists():
+        inventory = json.loads(inv_cache.read_text(encoding="utf-8"))
+    else:
+        inventory = discover_inventory(image_root, mask_root)
+        write_json_atomic(inv_cache, inventory)
+    stages["inventory"] = {"status": "success", "rows": len(inventory)}
+    if reuse and not cache_options.get("force_header_scan") and header_cache.exists():
+        header_rows = json.loads(header_cache.read_text(encoding="utf-8"))
+    else:
+        header_rows = [{**r, **scan_ct_header(Path(str(r["ct_path"])))} for r in inventory]
+        write_json_atomic(header_cache, header_rows)
+    stages["header_scan"] = {"status": "success", "rows": len(header_rows)}
     candidates = prefilter_candidates(header_rows, train_cases + test_cases, cfg)
     mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-    audited = []
-    excluded = []
-    for row in candidates:
-        try:
-            audited.append(deep_mask_audit(row, list(mapping.get("targets") or [])))
-        except Exception as exc:
-            bad = dict(row)
-            bad.update({"quality_pass": False, "exclusion_reason": str(exc)})
-            excluded.append(bad)
+    if reuse and not cache_options.get("force_deep_audit") and audit_cache.exists():
+        cached = json.loads(audit_cache.read_text(encoding="utf-8"))
+        audited = cached.get("audited", [])
+        excluded = cached.get("excluded", [])
+    else:
+        audited = []
+        excluded = []
+        for row in candidates:
+            try:
+                audited.append(deep_mask_audit(row, list(mapping.get("targets") or [])))
+            except Exception as exc:
+                bad = dict(row)
+                bad.update({"quality_pass": False, "exclusion_reason": str(exc)})
+                excluded.append(bad)
+        write_json_atomic(audit_cache, {"audited": audited, "excluded": excluded})
+    stages["deep_audit"] = {"status": "success", "rows": len(audited), "excluded": len(excluded)}
+    write_selection_state(output_dir, state)
     train, test, backups = select_and_split(audited, train_cases, test_cases, seed, cfg)
-    return write_selection_outputs(output_dir, cfg, train, test, backups, excluded, seed=seed)
+    result = write_selection_outputs(output_dir, cfg, train, test, backups, excluded, seed=seed)
+    stages["select_and_split"] = {"status": result["status"]}
+    write_selection_state(output_dir, state)
+    return result
+
+
+def resume_case_selection(output_dir: Path, *, config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml") -> dict[str, Any]:
+    state = read_selection_state(output_dir)
+    return {"status": "resumable", "selection_dir": str(output_dir), "state": state, "strategy": "skip completed successful cached stages and rerun missing or failed stages"}
 
 
 def selection_status(selection_dir: Path) -> dict[str, Any]:

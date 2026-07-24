@@ -34,6 +34,8 @@ def _write_launch_artifacts(run_dir: Path, snapshot: dict[str, Any], workloads: 
 def prepare_experiment(config: SchedulerConfig, pipeline: str, *, resource_plan: str = "balanced", run_id: str | None = None, dry_run: bool = True) -> dict[str, Any]:
     train_cases, test_cases = _case_counts(config)
     snapshot = discover_resource_snapshot(config.path, account=config.slurm_defaults.get("account"), qos=config.slurm_defaults.get("qos"))
+    if not dry_run and config.data.get("require_slurm_account") and not snapshot.get("account"):
+        raise SchedulerError("Formal submission requires a resolved Slurm account; set slurm_defaults.account or SLURM_ACCOUNT.")
     workloads = workload_estimates(train_cases, test_cases)
     candidates = recommend_resource_plans(snapshot, train_cases, test_cases, gpu_budget=(config.data.get("gpu_budget") or {}))
     selected = next((p for p in candidates["plans"] if p["plan_id"] == resource_plan), None)
@@ -43,7 +45,7 @@ def prepare_experiment(config: SchedulerConfig, pipeline: str, *, resource_plan:
     plan = build_plan(config, pipeline, backend="slurm", run_id=run_id)
     run_dir = Path(plan["run_dir"])
     _write_launch_artifacts(run_dir, snapshot, workloads, candidates, selected)
-    return {"status": "planned", "dry_run": dry_run, "run_id": plan["run_id"], "run_dir": str(run_dir), "resource_plan": selected, "scheduler_plan": plan}
+    return {"status": "planned", "dry_run": dry_run, "run_id": plan["run_id"], "run_dir": str(run_dir), "resource_snapshot": snapshot, "resource_plan": selected, "scheduler_plan": plan}
 
 
 def launch_experiment(config: SchedulerConfig, pipeline: str, *, resource_plan: str = "balanced", yes: bool = False, dry_run: bool = False, run_id: str | None = None) -> dict[str, Any]:
@@ -51,6 +53,8 @@ def launch_experiment(config: SchedulerConfig, pipeline: str, *, resource_plan: 
     if dry_run or not yes:
         prepared["submission"] = {"status": "not_submitted", "reason": "--yes is required for non-interactive submission"}
         return prepared
+    if config.data.get("require_slurm_account") and not prepared.get("resource_snapshot", {}).get("account"):
+        raise SchedulerError("Formal submission requires a resolved Slurm account; set slurm_defaults.account or SLURM_ACCOUNT.")
     submission = submit_plan(prepared["scheduler_plan"], dry_run=False)
     write_json_atomic(Path(prepared["run_dir"]) / "submission_receipt.json", submission)
     prepared["submission"] = submission
