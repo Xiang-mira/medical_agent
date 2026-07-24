@@ -1,0 +1,51 @@
+project:
+  name: abdomenatlaspro_373
+  full_target_count: 373
+  pilot_target_count: 338
+  completed_target_count_after_mapping_audit: 373
+  target_terminology: target_anatomical_structures
+  seed: 20260719
+
+paths:
+  code_root: .
+  work_root: .
+  run_root: runs
+  output_root: outputs
+  report_root: reports
+  image_root: /projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro
+  mask_root: /projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro
+  target_config: configs/student_3d_prompt_target_organs.json
+  target_mapping: configs/abdomenatlaspro_target_mapping_373.json
+  pilot_target_config: configs/abdomenatlaspro_pilot_338_target_config.json
+  pilot_target_allowlist: configs/abdomenatlaspro_pilot_338_target_allowlist.json
+  pilot_train_input_case_list: data_manifest/abdomenatlaspro_pilot_seed20260719_train20_input_strict_no_gt.csv
+  pilot_train_eval_case_list: data_manifest/abdomenatlaspro_pilot_seed20260719_train20_eval_reference.csv
+  pilot_test_input_case_list: data_manifest/abdomenatlaspro_pilot_seed20260719_test20_input_strict_no_gt.csv
+  pilot_test_eval_case_list: data_manifest/abdomenatlaspro_pilot_seed20260719_test20_eval_reference.csv
+  pilot_reserve_case_list: data_manifest/abdomenatlaspro_pilot_seed20260719_reserve10.csv
+
+resource_profiles: configs/resource_profiles.yaml
+
+resource_policy:
+  teacher_train_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  teacher_test_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  student_train_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+    hard_constraints:
+      multi_gpu: forbidden_unless_ddp_validated
+  student_test_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  labelcritic_resource_selection:
+    preferred_order: [labelcritic_72b_4h100_formal, labelcritic_72b_validated_alternative, labelcritic_smaller_vlm_triage]
+    smoke_required: true
+
+slurm_defaults:
+  account:
+  qos:
+  constraint:

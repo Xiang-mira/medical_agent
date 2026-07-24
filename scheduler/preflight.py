@@ -51,7 +51,7 @@ def run_preflight(config: SchedulerConfig, *, require_hpc_paths: bool = False) -
     assert target_config is not None
     target = validate_target_config(target_config, expected_count=373)
     assert mapping_path is not None
-    mapping = validate_target_mapping(mapping_path, target["targets"], pilot_target_count=338)
+    mapping = validate_target_mapping(mapping_path, target["targets"], pilot_target_count=int(config.project.get("pilot_target_count", 338)))
     assert pilot_target_config is not None
     pilot_target = validate_target_config(pilot_target_config, expected_count=338)
     report["checks"]["target_config"] = {k: v for k, v in target.items() if k != "targets"}

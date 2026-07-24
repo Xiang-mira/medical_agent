@@ -29,6 +29,7 @@ def make_run_id(pipeline: str) -> str:
 def _expand_arg(arg: str, config: SchedulerConfig, run_dir: Path) -> str:
     paths = config.paths
     replacements = {
+        "${TARGET_CONFIG}": str(resolve_path(paths.get("target_config")) or ""),
         "${PILOT_TRAIN_INPUT_CASE_LIST}": str(resolve_path(paths.get("pilot_train_input_case_list")) or ""),
         "${PILOT_TEST_INPUT_CASE_LIST}": str(resolve_path(paths.get("pilot_test_input_case_list")) or ""),
         "${PILOT_338_TARGET_CONFIG}": str(resolve_path(paths.get("pilot_target_config") or paths.get("target_config")) or ""),

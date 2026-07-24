@@ -16,6 +16,10 @@
 | File | Purpose |
 | --- | --- |
 | `student_3d_prompt_target_organs.json` | 373-target student label space |
+| `abdomenatlaspro_target_mapping_373.json` | AbdomenAtlasPro mapping over the 373-target space; unresolved entries must not be treated as negative masks |
+| `abdomenatlaspro_pilot_338_target_config.json` | Direct-match pilot subset only; not the full target space |
+| `pipelines/abdomenatlaspro_373.yaml` | Full 373-target AbdomenAtlasPro pipeline using `student_3d_prompt_target_organs.json` |
+| `pipelines/abdomenatlaspro_pilot338.yaml` | 338-target pilot pipeline for direct-match smoke/formal pilot runs |
 | `organ_taxonomy.json` | canonical organ hierarchy |
 | `global_label_space.json` | consolidated label space |
 | `all_organs.json` | teacher coverage list |

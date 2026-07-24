@@ -61,8 +61,12 @@ def validate_config_dict(data: dict[str, Any], *, source: Path | None = None) ->
     project = data.get("project") or {}
     if project.get("full_target_count") != 373:
         raise SchedulerError("project.full_target_count must be 373")
-    if project.get("pilot_target_count") != 338:
+    project_name = str(project.get("name") or "")
+    pilot_target_count = project.get("pilot_target_count")
+    if project_name == "abdomenatlaspro_pilot338" and pilot_target_count != 338:
         raise SchedulerError("project.pilot_target_count must be 338 for abdomenatlaspro_pilot338")
+    if project_name != "abdomenatlaspro_pilot338" and pilot_target_count not in {338, 373}:
+        raise SchedulerError("project.pilot_target_count must be 338 for pilot subset mapping or 373 for completed mapping")
     if str(project.get("target_terminology")) != "target_anatomical_structures":
         raise SchedulerError("project.target_terminology must be target_anatomical_structures")
 
