@@ -20,6 +20,7 @@ from scheduler.case_selection import (
     run_deep_audit_shard,
     run_header_scan_shard,
     run_prefilter_stage,
+    run_report_stage,
     run_case_selection,
     run_select_stage,
     scan_ct_header,
@@ -43,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python scripts/abdomenatlaspro_case_selector.py")
     parser.add_argument("--config", default="configs/abdomenatlaspro_case_selection.yaml")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("inventory", "scan-headers", "merge-header-metrics", "prefilter", "deep-audit", "merge-deep-metrics", "select", "validate", "resume"):
+    for name in ("inventory", "scan-headers", "merge-header-metrics", "prefilter", "deep-audit", "merge-deep-metrics", "select", "validate", "report", "resume"):
         p = sub.add_parser(name)
         p.add_argument("--train-cases", type=int, default=2)
         p.add_argument("--test-cases", type=int, default=2)
@@ -136,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "validate":
             emit(selection_status(out))
+            return 0
+        if args.cmd == "report":
+            emit(run_report_stage(out))
             return 0
         if args.cmd == "run" and args.backend == "slurm":
             plan = build_case_selection_slurm_plan(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run, max_inventory_cases=args.max_inventory_cases)

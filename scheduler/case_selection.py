@@ -42,7 +42,7 @@ CASE_SELECTION_STAGE_COMMANDS = {
     "merge_deep_metrics": "merge-deep-metrics",
     "select_and_split": "select",
     "validate_manifests": "validate",
-    "final_selection_report": "validate",
+    "final_selection_report": "report",
 }
 CPU_PARALLEL_DEFAULTS = {
     "inventory_cpu": {"cpus_per_task": 8, "memory_gb": 32, "walltime": "06:00:00"},
@@ -763,6 +763,30 @@ def run_select_stage(
     inventory_payload = json.loads(_inventory_json(output_dir).read_text(encoding="utf-8"))
     scope = {k: inventory_payload.get(k) for k in ("inventory_scope", "max_inventory_cases", "ordering", "available_common_cases_before_limit", "selected_inventory_cases_after_limit")}
     return write_selection_outputs(output_dir, cfg, train, test, backups, [dict(r) for r in payload.get("excluded") or []], seed=seed, inventory_scope=scope)
+
+
+def run_report_stage(output_dir: Path) -> dict[str, Any]:
+    validation = selection_status(output_dir)
+    if validation.get("status") != "success":
+        raise SchedulerError(f"Cannot write final selection report before successful validation: {validation}")
+    state = read_selection_state(output_dir)
+    report = {
+        "status": "success",
+        "stage": "final_selection_report",
+        "selection_dir": str(output_dir),
+        "validation": validation,
+        "fingerprint": state.get("fingerprint"),
+        "generated_at": utc_now(),
+    }
+    write_json_atomic(output_dir / "final_selection_report.json", report)
+    (output_dir / "final_selection_report.md").write_text(
+        "# AbdomenAtlasPro Final Selection Report\n\n"
+        f"- Status: {validation.get('status')}\n"
+        f"- Train cases: {validation.get('TRAIN_COUNT')}\n"
+        f"- Test cases: {validation.get('TEST_COUNT')}\n",
+        encoding="utf-8",
+    )
+    return report
 
 
 def _case_selector_command(

@@ -16,6 +16,7 @@ from .doctor import run_doctor
 from .experiment_wizard import experiment_wizard, launch_experiment, prepare_experiment
 from .resource_discovery import discover_resource_snapshot
 from .resource_recommender import recommend_resource_plans, workload_estimates
+from .em_pipeline import em_run, em_status, execute_em_stage
 
 
 def emit(data: Any) -> None:
@@ -109,6 +110,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", required=True)
     p.add_argument("--pipeline", required=True)
     p.add_argument("--output-dir", default=None)
+
+    p = sub.add_parser("em-run")
+    p.add_argument("--config", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--submit", action="store_true")
+    p.add_argument("--resume", action="store_true")
+    p.add_argument("--retry-failed", action="store_true")
+    p.add_argument("--from-stage", default=None)
+    p.add_argument("--stop-after-stage", default=None)
+
+    p = sub.add_parser("em-status")
+    p.add_argument("--output-dir", required=True)
+
+    p = sub.add_parser("em-stage")
+    p.add_argument("--config", required=True)
+    p.add_argument("--run-dir", required=True)
+    p.add_argument("--stage", required=True)
+    p.add_argument("--array-index", type=int, default=-1)
 
     args = parser.parse_args(argv)
     try:
@@ -210,6 +230,23 @@ def main(argv: list[str] | None = None) -> int:
             report = run_doctor(cfg, args.pipeline, output_dir=args.output_dir)
             emit(report)
             return 1 if report.get("status") == "failed" and report.get("formal_blockers") else 0
+        elif args.cmd == "em-run":
+            emit(
+                em_run(
+                    args.config,
+                    args.output_dir,
+                    dry_run=args.dry_run,
+                    submit=args.submit,
+                    resume=args.resume,
+                    retry_failed=args.retry_failed,
+                    from_stage=args.from_stage,
+                    stop_after_stage=args.stop_after_stage,
+                )
+            )
+        elif args.cmd == "em-status":
+            emit(em_status(args.output_dir))
+        elif args.cmd == "em-stage":
+            emit(execute_em_stage(args.config, args.run_dir, args.stage, array_index=args.array_index))
     except SchedulerError as exc:
         emit({"status": "failed", "error": str(exc)})
         return 2

@@ -1,0 +1,65 @@
+experiment:
+  name: em_train30_test20_round1_round2
+  seed: 20260724
+  train_cases: 30
+  test_cases: 20
+  max_inventory_cases: 10000
+  ordering: sorted_case_id
+
+paths:
+  work_root: ${WORK_ROOT:-.}
+  run_root: ${RUN_ROOT:-runs}
+  cache_root: ${CACHE_ROOT:-runs/cache}
+  tmpdir: ${TMPDIR:-/tmp}
+  case_selection_config: configs/abdomenatlaspro_case_selection.yaml
+  image_root: ${IMAGE_ROOT:-/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro}
+  mask_root: ${MASK_ROOT:-/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro}
+  target_config: configs/student_3d_prompt_target_organs.json
+  target_mapping: configs/abdomenatlaspro_target_mapping_373.json
+
+cpu_parallel:
+  inventory:
+    cpus_per_task: 8
+    memory: 32G
+  header_scan:
+    num_shards: 20
+    max_concurrent: 5
+  deep_audit:
+    num_shards: 10
+    max_concurrent: 4
+
+gpu_parallel:
+  teacher_train:
+    gpu_type: t4
+    max_concurrent: 10
+  teacher_test:
+    gpu_type: t4
+    max_concurrent: 6
+  student_inference_train:
+    gpu_type: t4
+    max_concurrent: 10
+  student_inference_test:
+    gpu_type: t4
+    max_concurrent: 6
+  student_training:
+    gpu_type: a100
+    gpus: 1
+  labelcritic:
+    model: Qwen2-VL-72B-Instruct-AWQ
+    replicas: 2
+    gpus_per_replica: 4
+    tensor_parallel_size: 4
+    gpu_type: h100
+
+resource_limits:
+  max_t4_gpus: 16
+  max_a100_gpus: 1
+  max_h100_gpus: 8
+
+round_policy:
+  fixed_split: true
+  round2_reuses_teacher_train30: true
+  round2_reruns_teacher: false
+  smoke_rounds: [1]
+  test20_training: forbidden
+  test20_labelcritic: forbidden
