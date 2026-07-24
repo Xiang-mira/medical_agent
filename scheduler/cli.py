@@ -12,6 +12,9 @@ from .preflight import run_preflight
 from .state import read_statuses, write_status
 from .utils import SchedulerError, read_json, write_json_atomic
 from .executor import execute_task
+from .experiment_wizard import experiment_wizard, launch_experiment, prepare_experiment
+from .resource_discovery import discover_resource_snapshot
+from .resource_recommender import recommend_resource_plans, workload_estimates
 
 
 def emit(data: Any) -> None:
@@ -76,6 +79,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--task", required=True)
     p.add_argument("--run-dir", required=True)
     p.add_argument("--array-index", type=int, default=None)
+
+    p = sub.add_parser("resource-snapshot")
+    p.add_argument("--config", required=True)
+
+    p = sub.add_parser("recommend-resources")
+    p.add_argument("--config", required=True)
+    p.add_argument("--pipeline", required=True)
+    p.add_argument("--train-cases", type=int, default=None)
+    p.add_argument("--test-cases", type=int, default=None)
+
+    p = sub.add_parser("experiment-wizard")
+    p.add_argument("--config", required=True)
+    p.add_argument("--pipeline", required=True)
+    p.add_argument("--dry-run", action="store_true")
+
+    p = sub.add_parser("launch")
+    p.add_argument("--config", required=True)
+    p.add_argument("--pipeline", required=True)
+    p.add_argument("--resource-plan", choices=["fastest-start", "fastest-completion", "balanced", "conservative", "manual"], default="balanced")
+    p.add_argument("--yes", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--run-id", default=None)
 
     args = parser.parse_args(argv)
     try:
@@ -148,6 +173,30 @@ def main(argv: list[str] | None = None) -> int:
             emit({"status": "planned", "from_smoke": args.from_smoke, "policy": "select first successful lower-scarcity tier, else fallback upward; preserve tier labels in final reports"})
         elif args.cmd == "run-task":
             emit(execute_task(Path(args.run_dir), args.task, array_index=args.array_index))
+        elif args.cmd == "resource-snapshot":
+            cfg = load_config(args.config)
+            emit(discover_resource_snapshot(cfg.path, account=cfg.slurm_defaults.get("account"), qos=cfg.slurm_defaults.get("qos")))
+        elif args.cmd == "recommend-resources":
+            cfg = load_config(args.config)
+            if args.train_cases is None or args.test_cases is None:
+                train_path = resolve_path(cfg.paths.get("train_input_case_list") or cfg.paths.get("pilot_train_input_case_list"))
+                test_path = resolve_path(cfg.paths.get("test_input_case_list") or cfg.paths.get("pilot_test_input_case_list"))
+                if train_path is None or test_path is None:
+                    raise SchedulerError("train/test case counts or manifests are required")
+                from .manifest import assert_strict_no_gt_manifest
+
+                train_cases = assert_strict_no_gt_manifest(train_path)["rows"]
+                test_cases = assert_strict_no_gt_manifest(test_path)["rows"]
+            else:
+                train_cases, test_cases = args.train_cases, args.test_cases
+            snapshot = discover_resource_snapshot(cfg.path, account=cfg.slurm_defaults.get("account"), qos=cfg.slurm_defaults.get("qos"))
+            emit({"resource_snapshot": snapshot, "workloads": workload_estimates(train_cases, test_cases), "candidate_resource_plans": recommend_resource_plans(snapshot, train_cases, test_cases, gpu_budget=cfg.data.get("gpu_budget") or {})})
+        elif args.cmd == "experiment-wizard":
+            cfg = load_config(args.config)
+            emit(experiment_wizard(cfg, args.pipeline, dry_run=args.dry_run))
+        elif args.cmd == "launch":
+            cfg = load_config(args.config)
+            emit(launch_experiment(cfg, args.pipeline, resource_plan=args.resource_plan, yes=args.yes, dry_run=args.dry_run, run_id=args.run_id))
     except SchedulerError as exc:
         emit({"status": "failed", "error": str(exc)})
         return 2

@@ -78,6 +78,10 @@ def shell_join(args: list[str]) -> str:
 
 def render_task_script(task: dict[str, Any], profile: dict[str, Any], command: list[str], *, run_dir: Path) -> str:
     directives = profile_to_directives(task, profile, run_dir=run_dir)
+    rendered_command = command
+    if profile.get("launcher") == "torchrun" or task.get("launcher") == "torchrun":
+        nproc = int(profile.get("gpu_count") or 1)
+        rendered_command = ["torchrun", "--standalone", f"--nproc_per_node={nproc}", *command]
     body = [
         "#!/bin/bash",
         *directives,
@@ -88,7 +92,7 @@ def render_task_script(task: dict[str, Any], profile: dict[str, Any], command: l
         'echo "[scheduler] CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"',
         "command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi || true",
         f"mkdir -p {shlex.quote(str(run_dir / 'logs'))} {shlex.quote(str(run_dir / 'status'))}",
-        shell_join(command),
+        shell_join(rendered_command),
         "",
     ]
     return "\n".join(body)

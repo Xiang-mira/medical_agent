@@ -118,9 +118,9 @@ def _replace_option(command: list[str], option: str, value: str) -> list[str]:
 def _manifest_for_array_task(task_name: str, cfg: SchedulerConfig) -> Path:
     paths = cfg.paths
     if task_name == "teacher_train_array":
-        key = "pilot_train_input_case_list"
+        key = "train_input_case_list" if paths.get("train_input_case_list") else "pilot_train_input_case_list"
     elif task_name in {"teacher_test_array", "student_test_array"}:
-        key = "pilot_test_input_case_list"
+        key = "test_input_case_list" if paths.get("test_input_case_list") else "pilot_test_input_case_list"
     else:
         raise SchedulerError(f"No manifest mapping for array task {task_name}")
     path = resolve_path(paths.get(key))
@@ -130,7 +130,10 @@ def _manifest_for_array_task(task_name: str, cfg: SchedulerConfig) -> Path:
 
 
 def _stage_cases(cfg: SchedulerConfig, split: str) -> list[dict[str, str]]:
-    key = "pilot_train_input_case_list" if split == "train" else "pilot_test_input_case_list"
+    if split == "train":
+        key = "train_input_case_list" if cfg.paths.get("train_input_case_list") else "pilot_train_input_case_list"
+    else:
+        key = "test_input_case_list" if cfg.paths.get("test_input_case_list") else "pilot_test_input_case_list"
     path = resolve_path(cfg.paths.get(key))
     if path is None:
         raise SchedulerError(f"Missing case list path: {key}")
