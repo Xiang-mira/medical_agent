@@ -12,13 +12,20 @@ if str(ROOT) not in sys.path:
 
 from scheduler.case_selection import (
     build_case_selection_slurm_plan,
+    case_selection_fingerprint,
     clean_cache,
     discover_inventory,
     load_case_selection_config,
+    merge_metric_shards,
+    run_deep_audit_shard,
+    run_header_scan_shard,
+    run_prefilter_stage,
     run_case_selection,
+    run_select_stage,
     scan_ct_header,
     selection_status,
     submit_case_selection_slurm_plan,
+    write_inventory_stage,
 )
 from scheduler.config import resolve_path
 from scheduler.utils import SchedulerError
@@ -36,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python scripts/abdomenatlaspro_case_selector.py")
     parser.add_argument("--config", default="configs/abdomenatlaspro_case_selection.yaml")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("inventory", "scan-headers", "prefilter", "deep-audit", "select", "validate", "resume"):
+    for name in ("inventory", "scan-headers", "merge-header-metrics", "prefilter", "deep-audit", "merge-deep-metrics", "select", "validate", "resume"):
         p = sub.add_parser(name)
         p.add_argument("--train-cases", type=int, default=2)
         p.add_argument("--test-cases", type=int, default=2)
@@ -44,6 +51,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--output-dir")
         p.add_argument("--dry-run", action="store_true")
         p.add_argument("--max-inventory-cases", type=int, default=None)
+        p.add_argument("--shard-index", type=int, default=None)
+        p.add_argument("--num-shards", type=int, default=None)
     p = sub.add_parser("run")
     p.add_argument("--train-cases", type=int, required=True)
     p.add_argument("--test-cases", type=int, required=True)
@@ -93,9 +102,15 @@ def main(argv: list[str] | None = None) -> int:
             image_root = resolve_path(cfg.paths.get("image_root"))
             mask_root = resolve_path(cfg.paths.get("mask_root"))
             assert image_root is not None and mask_root is not None
+            if args.output_dir:
+                emit(write_inventory_stage(args.train_cases, args.test_cases, args.seed, Path(args.output_dir), config_path=args.config, max_inventory_cases=args.max_inventory_cases))
+                return 0
             emit({"status": "success", "cases": discover_inventory(image_root, mask_root, max_inventory_cases=args.max_inventory_cases)[:20]})
             return 0
         if args.cmd == "scan-headers":
+            if args.output_dir and args.shard_index is not None and args.num_shards is not None:
+                emit(run_header_scan_shard(args.train_cases, args.test_cases, args.seed, Path(args.output_dir), config_path=args.config, shard_index=args.shard_index, num_shards=args.num_shards, max_inventory_cases=args.max_inventory_cases))
+                return 0
             image_root = resolve_path(cfg.paths.get("image_root"))
             mask_root = resolve_path(cfg.paths.get("mask_root"))
             assert image_root is not None and mask_root is not None
@@ -103,6 +118,25 @@ def main(argv: list[str] | None = None) -> int:
             emit({"status": "success", "headers": [scan_ct_header(Path(r["ct_path"])) for r in rows]})
             return 0
         out = Path(args.output_dir) if args.output_dir else _default_output(args.train_cases, args.test_cases, args.seed)
+        fingerprint = case_selection_fingerprint(cfg, args.train_cases, args.test_cases, args.seed, args.max_inventory_cases)
+        if args.cmd == "merge-header-metrics":
+            emit(merge_metric_shards("header", out, expected_shards=args.num_shards or 20, expected_fingerprint=fingerprint))
+            return 0
+        if args.cmd == "prefilter":
+            emit(run_prefilter_stage(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, max_inventory_cases=args.max_inventory_cases))
+            return 0
+        if args.cmd == "deep-audit" and args.shard_index is not None and args.num_shards is not None:
+            emit(run_deep_audit_shard(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, shard_index=args.shard_index, num_shards=args.num_shards, max_inventory_cases=args.max_inventory_cases))
+            return 0
+        if args.cmd == "merge-deep-metrics":
+            emit(merge_metric_shards("deep_audit", out, expected_shards=args.num_shards or 10, expected_fingerprint=fingerprint))
+            return 0
+        if args.cmd == "select":
+            emit(run_select_stage(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, max_inventory_cases=args.max_inventory_cases))
+            return 0
+        if args.cmd == "validate":
+            emit(selection_status(out))
+            return 0
         if args.cmd == "run" and args.backend == "slurm":
             plan = build_case_selection_slurm_plan(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run, max_inventory_cases=args.max_inventory_cases)
             if args.dry_run:

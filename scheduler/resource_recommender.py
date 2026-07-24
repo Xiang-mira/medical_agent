@@ -61,10 +61,10 @@ def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_ca
     invariants = validate_snapshot_invariants(snapshot)
     if invariants["status"] != "success":
         raise SchedulerError("Resource snapshot invariant check failed: " + "; ".join(invariants["errors"]))
-    budget = {"max_t4_gpus": 32, "max_a100_gpus": 2, "max_h100_gpus": 8, "max_labelcritic_replicas": 2}
+    budget = {"max_t4_gpus": 8, "max_a100_gpus": 2, "max_h100_gpus": 8, "labelcritic_replicas": 1, "max_labelcritic_replicas": 2}
     if gpu_budget:
         budget.update({k: int(v) for k, v in gpu_budget.items() if v is not None})
-    t4_conc = max(1, min(budget["max_t4_gpus"] // 2 or 1, train_cases, 16))
+    t4_conc = max(1, min(budget["max_t4_gpus"], train_cases, 8))
     plans = []
     templates = {
         "fastest-start": ("t4_single_gpu", "gpu", "T4", t4_conc, "uses the least scarce currently allocatable inference tier", "T4 throughput may be lower than A100/H100"),
@@ -73,7 +73,7 @@ def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_ca
         "conservative": ("t4_single_gpu", "gpu", "T4", max(1, min(4, t4_conc)), "keeps to validated single-GPU profiles and modest concurrency", "longer execution time"),
     }
     for plan_id, (profile, partition, gpu_type, conc, reason, risk) in templates.items():
-        label_replicas = max(1, min(2, budget["max_labelcritic_replicas"], max(1, budget["max_h100_gpus"] // 4)))
+        label_replicas = max(1, min(2, budget["max_labelcritic_replicas"], budget["labelcritic_replicas"], max(1, budget["max_h100_gpus"] // 4)))
         stages = [
             _stage("teacher_train_inference", profile, partition, gpu_type, 1, train_cases, conc, snapshot, reason, risk),
             _stage("teacher_test_inference", profile, partition, gpu_type, 1, test_cases, conc, snapshot, reason, risk),
@@ -88,9 +88,9 @@ def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_ca
                 "resource_binding_mode": "static_at_launch",
                 "requested_gpu_budget": budget,
                 "stages": stages,
-                "potential_peak_t4_use": sum(s["max_concurrent"] for s in stages if s["gpu_type"] == "T4"),
-                "potential_peak_a100_use": sum(s["gpu_count_per_job"] * s["max_concurrent"] for s in stages if s["gpu_type"] == "A100"),
-                "potential_peak_h100_use": sum(s["gpu_count_per_job"] * s["max_concurrent"] for s in stages if s["gpu_type"] == "H100"),
+                "potential_peak_t4_use": max([s["max_concurrent"] for s in stages if s["gpu_type"] == "T4"] or [0]),
+                "potential_peak_a100_use": max([s["gpu_count_per_job"] * s["max_concurrent"] for s in stages if s["gpu_type"] == "A100"] or [0]),
+                "potential_peak_h100_use": max([s["gpu_count_per_job"] * s["max_concurrent"] for s in stages if s["gpu_type"] == "H100"] or [0]),
             }
         )
     return {"snapshot_time": snapshot.get("snapshot_time"), "plans": plans, "snapshot_invariants": invariants, "limitations": ["Estimates do not reserve resources; all jobs must still enter Slurm.", "Runtime estimates remain low confidence until throughput history is available."]}

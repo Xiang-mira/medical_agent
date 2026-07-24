@@ -11,7 +11,7 @@ from .manifest import assert_strict_no_gt_manifest
 from .planner import build_plan, submit_plan
 from .resource_discovery import discover_resource_snapshot, snapshot_markdown
 from .resource_recommender import recommend_resource_plans, validate_user_plan, workload_estimates
-from .utils import SchedulerError, write_json_atomic
+from .utils import SchedulerError, sha256_file, sha256_text, write_json_atomic
 
 
 def _case_counts(cfg: SchedulerConfig) -> tuple[int, int]:
@@ -22,12 +22,96 @@ def _case_counts(cfg: SchedulerConfig) -> tuple[int, int]:
     return assert_strict_no_gt_manifest(train)["rows"], assert_strict_no_gt_manifest(test)["rows"]
 
 
-def _write_launch_artifacts(run_dir: Path, snapshot: dict[str, Any], workloads: dict[str, Any], plans: dict[str, Any], selected: dict[str, Any]) -> None:
+def _array_count(array: str | None) -> int:
+    if not array:
+        return 1
+    span = str(array).split("%", 1)[0]
+    if "-" not in span:
+        return 1
+    start, end = span.split("-", 1)
+    return max(0, int(end) - int(start) + 1)
+
+
+def _array_concurrency(array: str | None) -> int:
+    if not array:
+        return 1
+    if "%" in str(array):
+        return int(str(array).split("%", 1)[1])
+    return _array_count(array)
+
+
+def _plan_artifacts(config: SchedulerConfig, scheduler_plan: dict[str, Any], selected: dict[str, Any]) -> dict[str, Any]:
+    tasks = scheduler_plan.get("tasks") or []
+    run_dir = Path(str(scheduler_plan.get("run_dir")))
+    t4_concurrency = [
+        _array_concurrency(t.get("array"))
+        for t in tasks
+        if (t.get("requested_resources") or {}).get("partition") == "gpu" and int((t.get("requested_resources") or {}).get("gpu_count") or 0) == 1
+    ]
+    h100 = [
+        int((t.get("requested_resources") or {}).get("gpu_count") or 0) * _array_concurrency(t.get("array"))
+        for t in tasks
+        if (t.get("requested_resources") or {}).get("partition") == "gpuh100"
+    ]
+    a100 = [
+        int((t.get("requested_resources") or {}).get("gpu_count") or 0) * _array_concurrency(t.get("array"))
+        for t in tasks
+        if (t.get("requested_resources") or {}).get("partition") == "gpua100"
+    ]
+    path_keys = ("train_input_case_list", "test_input_case_list", "train_eval_case_list", "test_eval_case_list")
+    manifest_sha = {}
+    for key in path_keys:
+        path = resolve_path(config.paths.get(key))
+        if path and path.exists():
+            manifest_sha[key] = sha256_file(path)
+    mapping_path = resolve_path(config.paths.get("target_mapping"))
+    config_text = yaml.safe_dump(config.data, sort_keys=True)
+    dependency_graph = {
+        "nodes": [t["task_name"] for t in tasks],
+        "edges": [{"from": dep, "to": t["task_name"]} for t in tasks for dep in t.get("dependencies", [])],
+    }
+    resource_plan = {
+        "selected_plan_id": selected.get("plan_id"),
+        "resource_profile": selected,
+        "max_t4_concurrent": max(t4_concurrency or [0]),
+        "max_a100_training_gpus": max(a100 or [0]),
+        "max_h100_gpus": max(h100 or [0]),
+        "task_counts": {t["task_name"]: _array_count(t.get("array")) for t in tasks},
+        "arrays": {t["task_name"]: t.get("array") for t in tasks if t.get("array")},
+    }
+    run_plan = {
+        "run_id": scheduler_plan.get("run_id"),
+        "run_dir": scheduler_plan.get("run_dir"),
+        "pipeline": scheduler_plan.get("pipeline"),
+        "backend": scheduler_plan.get("backend"),
+        "git": scheduler_plan.get("git"),
+        "config_sha": sha256_text(config_text),
+        "manifest_sha": manifest_sha,
+        "mapping_sha": sha256_file(mapping_path) if mapping_path and mapping_path.exists() else None,
+        "fingerprint": sha256_text(json.dumps({"config_sha": sha256_text(config_text), "manifest_sha": manifest_sha, "mapping_sha": sha256_file(mapping_path) if mapping_path and mapping_path.exists() else None, "pipeline": scheduler_plan.get("pipeline")}, sort_keys=True)),
+        "output_root": str(run_dir),
+        "submitted": False,
+        "slurm_job_ids": {},
+    }
+    return {
+        "run_plan": run_plan,
+        "resource_plan": resource_plan,
+        "task_manifest": {"tasks": tasks},
+        "dependency_graph": dependency_graph,
+    }
+
+
+def _write_launch_artifacts(run_dir: Path, config: SchedulerConfig, snapshot: dict[str, Any], workloads: dict[str, Any], plans: dict[str, Any], selected: dict[str, Any], scheduler_plan: dict[str, Any]) -> None:
     write_json_atomic(run_dir / "resource_snapshot.json", snapshot)
     (run_dir / "resource_snapshot.md").write_text(snapshot_markdown(snapshot), encoding="utf-8")
     write_json_atomic(run_dir / "workload_estimates.json", workloads)
     (run_dir / "candidate_resource_plans.yaml").write_text(yaml.safe_dump(plans, sort_keys=False), encoding="utf-8")
     (run_dir / "selected_resource_plan.yaml").write_text(yaml.safe_dump(selected, sort_keys=False), encoding="utf-8")
+    artifacts = _plan_artifacts(config, scheduler_plan, selected)
+    write_json_atomic(run_dir / "run_plan.json", artifacts["run_plan"])
+    write_json_atomic(run_dir / "resource_plan.json", artifacts["resource_plan"])
+    write_json_atomic(run_dir / "task_manifest.json", artifacts["task_manifest"])
+    write_json_atomic(run_dir / "dependency_graph.json", artifacts["dependency_graph"])
     write_json_atomic(run_dir / "user_choices.json", {"plan_id": selected.get("plan_id"), "submitted": False})
 
 
@@ -44,7 +128,7 @@ def prepare_experiment(config: SchedulerConfig, pipeline: str, *, resource_plan:
     validate_user_plan(selected, ddp_validated=bool(config.data.get("ddp_validated", False)), h100_ddp_allowed=bool(config.data.get("h100_ddp_allowed", False)))
     plan = build_plan(config, pipeline, backend="slurm", run_id=run_id)
     run_dir = Path(plan["run_dir"])
-    _write_launch_artifacts(run_dir, snapshot, workloads, candidates, selected)
+    _write_launch_artifacts(run_dir, config, snapshot, workloads, candidates, selected, plan)
     return {"status": "planned", "dry_run": dry_run, "run_id": plan["run_id"], "run_dir": str(run_dir), "resource_snapshot": snapshot, "resource_plan": selected, "scheduler_plan": plan}
 
 

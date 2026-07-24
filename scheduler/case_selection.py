@@ -36,13 +36,19 @@ CASE_SELECTION_STAGES = [
 CASE_SELECTION_STAGE_COMMANDS = {
     "inventory_cpu": "inventory",
     "header_scan_array": "scan-headers",
-    "merge_header_metrics": "prefilter",
+    "merge_header_metrics": "merge-header-metrics",
     "candidate_prefilter": "prefilter",
     "deep_mask_audit_array": "deep-audit",
-    "merge_deep_metrics": "select",
+    "merge_deep_metrics": "merge-deep-metrics",
     "select_and_split": "select",
     "validate_manifests": "validate",
     "final_selection_report": "validate",
+}
+CPU_PARALLEL_DEFAULTS = {
+    "inventory_cpu": {"cpus_per_task": 8, "memory_gb": 32, "walltime": "06:00:00"},
+    "header_scan_array": {"num_shards": 20, "max_concurrent": 5, "cpus_per_task": 4, "memory_gb": 16, "walltime": "06:00:00"},
+    "deep_mask_audit_array": {"num_shards": 10, "max_concurrent": 4, "cpus_per_task": 4, "memory_gb": 16, "walltime": "08:00:00"},
+    "single_cpu": {"cpus_per_task": 4, "memory_gb": 16, "walltime": "04:00:00"},
 }
 
 
@@ -423,6 +429,10 @@ def _fingerprint_payload(cfg: CaseSelectionConfig, train_cases: int, test_cases:
     }
 
 
+def case_selection_fingerprint(cfg: CaseSelectionConfig, train_cases: int, test_cases: int, seed: int, max_inventory_cases: int | None) -> str:
+    return hashlib.sha256(json.dumps(_fingerprint_payload(cfg, train_cases, test_cases, seed, max_inventory_cases), sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def _state_path(output_dir: Path) -> Path:
     return output_dir / "state.json"
 
@@ -458,7 +468,7 @@ def run_case_selection(
     ensure_not_raw_data_write_path(output_dir, image_root, mask_root)
     cache_options = cache_options or {}
     state = read_selection_state(output_dir)
-    fingerprint = hashlib.sha256(json.dumps(_fingerprint_payload(cfg, train_cases, test_cases, seed, max_inventory_cases), sort_keys=True).encode("utf-8")).hexdigest()
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
     if state.get("fingerprint") not in {None, fingerprint}:
         state = {"stages": {}, "fingerprint": fingerprint}
     if dry_run:
@@ -532,7 +542,241 @@ def clean_cache(selection_dir: Path) -> dict[str, Any]:
     return {"status": "success", "removed": str(cache)}
 
 
-def _case_selector_command(config_path: str | Path, stage: str, train_cases: int, test_cases: int, seed: int, output_dir: Path, max_inventory_cases: int | None) -> list[str]:
+def _inventory_json(output_dir: Path) -> Path:
+    return output_dir / "inventory.json"
+
+
+def _header_merged_json(output_dir: Path) -> Path:
+    return output_dir / "merged_header_metrics.json"
+
+
+def _candidate_json(output_dir: Path) -> Path:
+    return output_dir / "candidate_prefilter.json"
+
+
+def _deep_merged_json(output_dir: Path) -> Path:
+    return output_dir / "merged_deep_metrics.json"
+
+
+def write_inventory_stage(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    max_inventory_cases: int | None = None,
+) -> dict[str, Any]:
+    cfg = load_case_selection_config(config_path)
+    image_root = resolve_path(cfg.paths.get("image_root"))
+    mask_root = resolve_path(cfg.paths.get("mask_root"))
+    if image_root is None or mask_root is None:
+        raise SchedulerError("Case selection config must define image_root and mask_root")
+    ensure_not_raw_data_write_path(output_dir, image_root, mask_root)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = discover_inventory(image_root, mask_root, max_inventory_cases=max_inventory_cases)
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
+    payload = {
+        "status": "success",
+        "stage": "inventory",
+        "fingerprint": fingerprint,
+        "rows": rows,
+        "row_count": len(rows),
+        **inventory_scope_metadata(
+            int(rows[0].get("available_common_cases_before_limit", len(rows))) if rows else 0,
+            len(rows),
+            max_inventory_cases,
+        ),
+    }
+    write_json_atomic(_inventory_json(output_dir), payload)
+    _csv_write(output_dir / "inventory.csv", rows)
+    return payload
+
+
+def _load_stage_rows(path: Path, expected_fingerprint: str) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise SchedulerError(f"Required stage artifact is missing: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("fingerprint") != expected_fingerprint:
+        raise SchedulerError(f"Stage artifact fingerprint mismatch: {path}")
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        raise SchedulerError(f"Stage artifact rows must be a list: {path}")
+    return [dict(r) for r in rows]
+
+
+def deterministic_shard(rows: list[dict[str, Any]], shard_index: int, num_shards: int) -> list[dict[str, Any]]:
+    if num_shards <= 0:
+        raise SchedulerError("num_shards must be positive")
+    if shard_index < 0 or shard_index >= num_shards:
+        raise SchedulerError(f"shard_index must be in [0, {num_shards - 1}], got {shard_index}")
+    ordered = sorted(rows, key=lambda r: str(r.get("case_id") or ""))
+    return [row for idx, row in enumerate(ordered) if idx % num_shards == shard_index]
+
+
+def _write_shard_artifact(output_dir: Path, kind: str, shard_index: int, num_shards: int, fingerprint: str, rows: list[dict[str, Any]], *, excluded: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    shard_dir = output_dir / "shards" / kind
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    prefix = "header" if kind == "header" else "deep_audit"
+    payload = {
+        "status": "success",
+        "kind": kind,
+        "fingerprint": fingerprint,
+        "shard_index": shard_index,
+        "num_shards": num_shards,
+        "row_count": len(rows),
+        "rows": rows,
+    }
+    if excluded is not None:
+        payload["excluded"] = excluded
+        payload["excluded_count"] = len(excluded)
+    write_json_atomic(shard_dir / f"{prefix}_{shard_index}.json", payload)
+    _csv_write(shard_dir / f"{prefix}_{shard_index}.csv", rows)
+    return payload
+
+
+def run_header_scan_shard(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    shard_index: int,
+    num_shards: int,
+    max_inventory_cases: int | None = None,
+) -> dict[str, Any]:
+    cfg = load_case_selection_config(config_path)
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
+    inventory = _load_stage_rows(_inventory_json(output_dir), fingerprint)
+    rows = [{**r, **scan_ct_header(Path(str(r["ct_path"])))} for r in deterministic_shard(inventory, shard_index, num_shards)]
+    return _write_shard_artifact(output_dir, "header", shard_index, num_shards, fingerprint, rows)
+
+
+def merge_metric_shards(
+    kind: str,
+    output_dir: Path,
+    *,
+    expected_shards: int,
+    expected_fingerprint: str,
+) -> dict[str, Any]:
+    if kind not in {"header", "deep_audit"}:
+        raise SchedulerError(f"Unknown shard kind: {kind}")
+    prefix = "header" if kind == "header" else "deep_audit"
+    shard_dir = output_dir / "shards" / kind
+    rows: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx in range(expected_shards):
+        path = shard_dir / f"{prefix}_{idx}.json"
+        if not path.exists():
+            raise SchedulerError(f"Missing {kind} shard {idx}: {path}")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("fingerprint") != expected_fingerprint:
+            raise SchedulerError(f"{kind} shard {idx} fingerprint mismatch")
+        if int(payload.get("shard_index")) != idx or int(payload.get("num_shards")) != expected_shards:
+            raise SchedulerError(f"{kind} shard {idx} metadata mismatch")
+        for row in payload.get("rows") or []:
+            case_id = str(row.get("case_id") or "")
+            if not case_id:
+                raise SchedulerError(f"{kind} shard {idx} contains a row without case_id")
+            if case_id in seen:
+                raise SchedulerError(f"Duplicate case_id across {kind} shards: {case_id}")
+            seen.add(case_id)
+            rows.append(dict(row))
+        excluded.extend(dict(r) for r in (payload.get("excluded") or []))
+    rows.sort(key=lambda r: str(r.get("case_id") or ""))
+    out_path = _header_merged_json(output_dir) if kind == "header" else _deep_merged_json(output_dir)
+    payload = {"status": "success", "stage": f"merge_{kind}", "fingerprint": expected_fingerprint, "expected_shards": expected_shards, "row_count": len(rows), "rows": rows}
+    if kind == "deep_audit":
+        payload["excluded"] = excluded
+        payload["excluded_count"] = len(excluded)
+    write_json_atomic(out_path, payload)
+    _csv_write(output_dir / ("merged_header_metrics.csv" if kind == "header" else "merged_deep_metrics.csv"), rows)
+    return payload
+
+
+def run_prefilter_stage(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    max_inventory_cases: int | None = None,
+) -> dict[str, Any]:
+    cfg = load_case_selection_config(config_path)
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
+    header_rows = _load_stage_rows(_header_merged_json(output_dir), fingerprint)
+    rows = prefilter_candidates(header_rows, train_cases + test_cases, cfg)
+    payload = {"status": "success", "stage": "candidate_prefilter", "fingerprint": fingerprint, "row_count": len(rows), "rows": rows}
+    write_json_atomic(_candidate_json(output_dir), payload)
+    _csv_write(output_dir / "candidate_prefilter.csv", rows)
+    return payload
+
+
+def run_deep_audit_shard(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    shard_index: int,
+    num_shards: int,
+    max_inventory_cases: int | None = None,
+) -> dict[str, Any]:
+    cfg = load_case_selection_config(config_path)
+    mapping_path = resolve_path(cfg.paths.get("target_mapping"))
+    if mapping_path is None:
+        raise SchedulerError("Case selection config must define target_mapping")
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
+    candidates = _load_stage_rows(_candidate_json(output_dir), fingerprint)
+    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+    rows: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    for row in deterministic_shard(candidates, shard_index, num_shards):
+        try:
+            rows.append(deep_mask_audit(row, list(mapping.get("targets") or [])))
+        except Exception as exc:
+            bad = dict(row)
+            bad.update({"quality_pass": False, "exclusion_reason": str(exc)})
+            excluded.append(bad)
+    return _write_shard_artifact(output_dir, "deep_audit", shard_index, num_shards, fingerprint, rows, excluded=excluded)
+
+
+def run_select_stage(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    max_inventory_cases: int | None = None,
+) -> dict[str, Any]:
+    cfg = load_case_selection_config(config_path)
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
+    payload = json.loads(_deep_merged_json(output_dir).read_text(encoding="utf-8"))
+    if payload.get("fingerprint") != fingerprint:
+        raise SchedulerError("Deep metrics fingerprint mismatch")
+    train, test, backups = select_and_split([dict(r) for r in payload.get("rows") or []], train_cases, test_cases, seed, cfg)
+    inventory_payload = json.loads(_inventory_json(output_dir).read_text(encoding="utf-8"))
+    scope = {k: inventory_payload.get(k) for k in ("inventory_scope", "max_inventory_cases", "ordering", "available_common_cases_before_limit", "selected_inventory_cases_after_limit")}
+    return write_selection_outputs(output_dir, cfg, train, test, backups, [dict(r) for r in payload.get("excluded") or []], seed=seed, inventory_scope=scope)
+
+
+def _case_selector_command(
+    config_path: str | Path,
+    stage: str,
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    max_inventory_cases: int | None,
+    *,
+    shard_index: str | None = None,
+    num_shards: int | None = None,
+) -> list[str]:
     command = [
         "python",
         str(ROOT / "scripts" / "abdomenatlaspro_case_selector.py"),
@@ -550,17 +794,37 @@ def _case_selector_command(config_path: str | Path, stage: str, train_cases: int
     ]
     if max_inventory_cases is not None:
         command.extend(["--max-inventory-cases", str(max_inventory_cases)])
+    if shard_index is not None:
+        command.extend(["--shard-index", shard_index])
+    if num_shards is not None:
+        command.extend(["--num-shards", str(num_shards)])
     return command
 
 
 def _shell_join(args: list[str]) -> str:
     import shlex
 
-    return " ".join(shlex.quote(str(x)) for x in args)
+    rendered = []
+    for arg in args:
+        text = str(arg)
+        if text in {"${SLURM_ARRAY_TASK_ID}", "$SLURM_ARRAY_TASK_ID"}:
+            rendered.append(text)
+        else:
+            rendered.append(shlex.quote(text))
+    return " ".join(rendered)
 
 
-def _render_case_selection_sbatch(stage: str, deps: list[str], command: list[str], output_dir: Path) -> str:
+def _stage_resources(stage: str) -> dict[str, Any]:
+    if stage in CPU_PARALLEL_DEFAULTS:
+        return dict(CPU_PARALLEL_DEFAULTS[stage])
+    return dict(CPU_PARALLEL_DEFAULTS["single_cpu"])
+
+
+def _render_case_selection_sbatch(stage: str, deps: list[str], command: list[str], output_dir: Path, resources: dict[str, Any]) -> str:
     log_dir = output_dir / "logs"
+    array = resources.get("array")
+    array_line = [f"#SBATCH --array={array}"] if array else []
+    log_token = "%A_%a" if array else "%j"
     return "\n".join(
         [
             "#!/bin/bash",
@@ -568,15 +832,16 @@ def _render_case_selection_sbatch(stage: str, deps: list[str], command: list[str
             "#SBATCH --partition=cpu",
             "#SBATCH --nodes=1",
             "#SBATCH --ntasks=1",
-            "#SBATCH --cpus-per-task=8",
-            "#SBATCH --mem=32G",
-            "#SBATCH --time=12:00:00",
-            f"#SBATCH --output={log_dir}/{stage}_%j.out",
-            f"#SBATCH --error={log_dir}/{stage}_%j.err",
+            f"#SBATCH --cpus-per-task={resources['cpus_per_task']}",
+            f"#SBATCH --mem={resources['memory_gb']}G",
+            f"#SBATCH --time={resources['walltime']}",
+            *array_line,
+            f"#SBATCH --output={log_dir}/{stage}_{log_token}.out",
+            f"#SBATCH --error={log_dir}/{stage}_{log_token}.err",
             "",
             "set -euo pipefail",
             f"mkdir -p {log_dir}",
-            f"echo '[case-selection] stage={stage} job=${{SLURM_JOB_ID:-local}}'",
+            f"echo '[case-selection] stage={stage} job=${{SLURM_JOB_ID:-local}} array=${{SLURM_ARRAY_TASK_ID:-none}} partition=cpu gpu_count=0'",
             _shell_join(command),
             "",
         ]
@@ -602,10 +867,26 @@ def build_case_selection_slurm_plan(
     (output_dir / "logs").mkdir(parents=True, exist_ok=True)
     tasks = []
     scope = inventory_scope_metadata(0, 0, max_inventory_cases)
+    fingerprint = case_selection_fingerprint(cfg, train_cases, test_cases, seed, max_inventory_cases)
     for stage, deps in CASE_SELECTION_STAGES:
-        command = _case_selector_command(config_path, CASE_SELECTION_STAGE_COMMANDS[stage], train_cases, test_cases, seed, output_dir, max_inventory_cases)
+        resources = _stage_resources(stage)
+        shard_index = None
+        if stage in {"header_scan_array", "deep_mask_audit_array"}:
+            resources["array"] = f"0-{int(resources['num_shards']) - 1}%{int(resources['max_concurrent'])}"
+            shard_index = "${SLURM_ARRAY_TASK_ID}"
+        command = _case_selector_command(
+            config_path,
+            CASE_SELECTION_STAGE_COMMANDS[stage],
+            train_cases,
+            test_cases,
+            seed,
+            output_dir,
+            max_inventory_cases,
+            shard_index=shard_index,
+            num_shards=int(resources["num_shards"]) if "num_shards" in resources else None,
+        )
         script_path = output_dir / "generated_slurm" / f"{stage}.sbatch"
-        script_path.write_text(_render_case_selection_sbatch(stage, deps, command, output_dir), encoding="utf-8")
+        script_path.write_text(_render_case_selection_sbatch(stage, deps, command, output_dir, resources), encoding="utf-8")
         tasks.append(
             {
                 "stage": stage,
@@ -613,14 +894,31 @@ def build_case_selection_slurm_plan(
                 "partition": "cpu",
                 "script": str(script_path),
                 "command": command,
+                "array": resources.get("array"),
+                "cpus_per_task": resources["cpus_per_task"],
+                "memory_gb": resources["memory_gb"],
+                "walltime": resources["walltime"],
+                "num_shards": resources.get("num_shards"),
+                "max_concurrent": resources.get("max_concurrent", 1),
+                "gpu_count": 0,
                 "submitted": False,
             }
         )
+    dependency_graph = {"nodes": [t["stage"] for t in tasks], "edges": [{"from": dep, "to": t["stage"]} for t in tasks for dep in t["dependencies"]]}
+    resource_plan = {
+        "backend": "slurm",
+        "partition": "cpu",
+        "max_cpu_array_concurrent": max(int(t.get("max_concurrent") or 1) for t in tasks),
+        "header_scan": CPU_PARALLEL_DEFAULTS["header_scan_array"],
+        "deep_mask_audit": CPU_PARALLEL_DEFAULTS["deep_mask_audit_array"],
+        "gpu_count": 0,
+    }
     plan = {
         "status": "dry_run" if dry_run else "planned",
         "backend": "slurm",
         "submitted": False,
         "partition": "cpu",
+        "fingerprint": fingerprint,
         "train_cases": train_cases,
         "test_cases": test_cases,
         "seed": seed,
@@ -628,6 +926,8 @@ def build_case_selection_slurm_plan(
         "created_at": utc_now(),
         **scope,
         "dag": [{"stage": stage, "dependencies": deps} for stage, deps in CASE_SELECTION_STAGES],
+        "dependency_graph": dependency_graph,
+        "resource_plan": resource_plan,
         "tasks": tasks,
         "policy": {
             "dry_run_reads_raw_data": False,
@@ -637,6 +937,10 @@ def build_case_selection_slurm_plan(
         },
     }
     write_json_atomic(output_dir / "dry_run_plan.json", plan)
+    write_json_atomic(output_dir / "run_plan.json", plan)
+    write_json_atomic(output_dir / "resource_plan.json", resource_plan)
+    write_json_atomic(output_dir / "task_manifest.json", {"tasks": tasks})
+    write_json_atomic(output_dir / "dependency_graph.json", dependency_graph)
     write_selection_state(
         output_dir,
         {
@@ -644,9 +948,10 @@ def build_case_selection_slurm_plan(
             "backend": "slurm",
             "submitted": False,
             "partition": "cpu",
+            "fingerprint": fingerprint,
             "updated_at": utc_now(),
             **scope,
-            "stages": {task["stage"]: {"status": "planned", "partition": "cpu", "script": task["script"]} for task in tasks},
+            "stages": {task["stage"]: {"status": "planned", "partition": "cpu", "script": task["script"], "array": task.get("array"), "max_concurrent": task.get("max_concurrent")} for task in tasks},
         },
     )
     return plan

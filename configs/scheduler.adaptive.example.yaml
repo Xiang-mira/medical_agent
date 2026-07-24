@@ -25,11 +25,73 @@ paths:
 resource_profiles: configs/resource_profiles.yaml
 
 gpu_budget:
-  max_t4_gpus: 32
+  max_t4_gpus: 8
   max_a100_gpus: 2
   max_h100_gpus: 8
+  labelcritic_replicas: 1
   max_labelcritic_replicas: 2
   reserve_h100_for_labelcritic: true
+
+resource_limits:
+  max_cpu_array_concurrent: 5
+  max_t4_concurrent: 8
+  max_a100_training_gpus: 2
+  max_h100_gpus: 8
+  max_labelcritic_replicas: 2
+
+cpu_parallel:
+  inventory:
+    partition: cpu
+    cpus_per_task: 8
+    memory: 32G
+    time: "06:00:00"
+  header_scan:
+    partition: cpu
+    num_shards: 20
+    max_concurrent: 5
+    cpus_per_task: 4
+    memory: 16G
+    time: "06:00:00"
+  deep_mask_audit:
+    partition: cpu
+    num_shards: 10
+    max_concurrent: 4
+    cpus_per_task: 4
+    memory: 16G
+    time: "08:00:00"
+
+gpu_parallel:
+  teacher_inference:
+    partition: gpu
+    preferred_gpu: T4
+    gpus_per_task: 1
+    cpus_per_task: 4
+    memory: 32G
+    time: "08:00:00"
+    max_concurrent: 8
+    max_configurable: 16
+  student_inference:
+    partition: gpu
+    preferred_gpu: T4
+    gpus_per_task: 1
+    cpus_per_task: 4
+    memory: 32G
+    time: "08:00:00"
+    max_concurrent: 8
+    max_configurable: 16
+
+student_training:
+  default_profile: student_train_a100_1gpu
+  ddp_validated: false
+  cross_node_ddp: false
+
+labelcritic:
+  model: Qwen/Qwen2-VL-72B-Instruct-AWQ
+  partition: gpuh100
+  gpus_per_replica: 4
+  tensor_parallel_size: 4
+  default_replicas: 1
+  max_replicas: 2
 
 resource_policy:
   teacher_train_resource_selection:
