@@ -207,7 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             emit(launch_experiment(cfg, args.pipeline, resource_plan=args.resource_plan, yes=args.yes, dry_run=args.dry_run, run_id=args.run_id))
         elif args.cmd == "doctor":
             cfg = load_config(args.config)
-            emit(run_doctor(cfg, args.pipeline, output_dir=args.output_dir))
+            report = run_doctor(cfg, args.pipeline, output_dir=args.output_dir)
+            emit(report)
+            return 1 if report.get("status") == "failed" and report.get("formal_blockers") else 0
     except SchedulerError as exc:
         emit({"status": "failed", "error": str(exc)})
         return 2

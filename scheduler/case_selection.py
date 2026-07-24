@@ -6,6 +6,7 @@ import json
 import math
 import random
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,28 @@ from .utils import ROOT, SchedulerError, ensure_not_raw_data_write_path, normali
 
 STRICT_INPUT_COLUMNS = ("case_id", "ct_path")
 EVAL_COLUMNS = ("case_id", "ct_path", "mask_dir")
+CASE_SELECTION_STAGES = [
+    ("inventory_cpu", []),
+    ("header_scan_array", ["inventory_cpu"]),
+    ("merge_header_metrics", ["header_scan_array"]),
+    ("candidate_prefilter", ["merge_header_metrics"]),
+    ("deep_mask_audit_array", ["candidate_prefilter"]),
+    ("merge_deep_metrics", ["deep_mask_audit_array"]),
+    ("select_and_split", ["merge_deep_metrics"]),
+    ("validate_manifests", ["select_and_split"]),
+    ("final_selection_report", ["validate_manifests"]),
+]
+CASE_SELECTION_STAGE_COMMANDS = {
+    "inventory_cpu": "inventory",
+    "header_scan_array": "scan-headers",
+    "merge_header_metrics": "prefilter",
+    "candidate_prefilter": "prefilter",
+    "deep_mask_audit_array": "deep-audit",
+    "merge_deep_metrics": "select",
+    "select_and_split": "select",
+    "validate_manifests": "validate",
+    "final_selection_report": "validate",
+}
 
 
 @dataclass(frozen=True)
@@ -479,3 +502,145 @@ def clean_cache(selection_dir: Path) -> dict[str, Any]:
     if cache.exists():
         shutil.rmtree(cache)
     return {"status": "success", "removed": str(cache)}
+
+
+def _case_selector_command(config_path: str | Path, stage: str, train_cases: int, test_cases: int, seed: int, output_dir: Path) -> list[str]:
+    return [
+        "python",
+        str(ROOT / "scripts" / "abdomenatlaspro_case_selector.py"),
+        "--config",
+        str(config_path),
+        stage,
+        "--train-cases",
+        str(train_cases),
+        "--test-cases",
+        str(test_cases),
+        "--seed",
+        str(seed),
+        "--output-dir",
+        str(output_dir),
+    ]
+
+
+def _shell_join(args: list[str]) -> str:
+    import shlex
+
+    return " ".join(shlex.quote(str(x)) for x in args)
+
+
+def _render_case_selection_sbatch(stage: str, deps: list[str], command: list[str], output_dir: Path) -> str:
+    log_dir = output_dir / "logs"
+    return "\n".join(
+        [
+            "#!/bin/bash",
+            f"#SBATCH --job-name={stage}",
+            "#SBATCH --partition=cpu",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks=1",
+            "#SBATCH --cpus-per-task=8",
+            "#SBATCH --mem=32G",
+            "#SBATCH --time=12:00:00",
+            f"#SBATCH --output={log_dir}/{stage}_%j.out",
+            f"#SBATCH --error={log_dir}/{stage}_%j.err",
+            "",
+            "set -euo pipefail",
+            f"mkdir -p {log_dir}",
+            f"echo '[case-selection] stage={stage} job=${{SLURM_JOB_ID:-local}}'",
+            _shell_join(command),
+            "",
+        ]
+    )
+
+
+def build_case_selection_slurm_plan(
+    train_cases: int,
+    test_cases: int,
+    seed: int,
+    output_dir: Path,
+    *,
+    config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
+    dry_run: bool,
+) -> dict[str, Any]:
+    cfg = load_case_selection_config(config_path)
+    image_root = resolve_path(cfg.paths.get("image_root"))
+    mask_root = resolve_path(cfg.paths.get("mask_root"))
+    ensure_not_raw_data_write_path(output_dir, image_root, mask_root)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "generated_slurm").mkdir(parents=True, exist_ok=True)
+    (output_dir / "logs").mkdir(parents=True, exist_ok=True)
+    tasks = []
+    for stage, deps in CASE_SELECTION_STAGES:
+        command = _case_selector_command(config_path, CASE_SELECTION_STAGE_COMMANDS[stage], train_cases, test_cases, seed, output_dir)
+        script_path = output_dir / "generated_slurm" / f"{stage}.sbatch"
+        script_path.write_text(_render_case_selection_sbatch(stage, deps, command, output_dir), encoding="utf-8")
+        tasks.append(
+            {
+                "stage": stage,
+                "dependencies": deps,
+                "partition": "cpu",
+                "script": str(script_path),
+                "command": command,
+                "submitted": False,
+            }
+        )
+    plan = {
+        "status": "dry_run" if dry_run else "planned",
+        "backend": "slurm",
+        "submitted": False,
+        "partition": "cpu",
+        "train_cases": train_cases,
+        "test_cases": test_cases,
+        "seed": seed,
+        "output_dir": str(output_dir),
+        "created_at": utc_now(),
+        "dag": [{"stage": stage, "dependencies": deps} for stage, deps in CASE_SELECTION_STAGES],
+        "tasks": tasks,
+        "policy": {
+            "dry_run_reads_raw_data": False,
+            "dry_run_calls_sbatch": False,
+            "dry_run_calls_srun": False,
+            "formal_scan_runs_under_slurm": True,
+        },
+    }
+    write_json_atomic(output_dir / "dry_run_plan.json", plan)
+    write_selection_state(
+        output_dir,
+        {
+            "status": plan["status"],
+            "backend": "slurm",
+            "submitted": False,
+            "partition": "cpu",
+            "updated_at": utc_now(),
+            "stages": {task["stage"]: {"status": "planned", "partition": "cpu", "script": task["script"]} for task in tasks},
+        },
+    )
+    return plan
+
+
+def submit_case_selection_slurm_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    submitted: dict[str, Any] = {}
+    for task in plan.get("tasks", []):
+        cmd = ["sbatch"]
+        dep_ids = [submitted[d]["job_id"] for d in task.get("dependencies", []) if submitted.get(d, {}).get("job_id")]
+        if dep_ids:
+            cmd.append("--dependency=afterok:" + ":".join(dep_ids))
+        cmd.append(str(task["script"]))
+        proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if proc.returncode != 0:
+            raise SchedulerError(f"sbatch failed for {task['stage']}: {proc.stderr}")
+        job_id = proc.stdout.strip().split()[-1]
+        submitted[task["stage"]] = {"status": "submitted", "job_id": job_id, "command": cmd, "stdout": proc.stdout.strip()}
+    receipt = {
+        "status": "submitted",
+        "backend": "slurm",
+        "submitted": True,
+        "partition": "cpu",
+        "jobs": submitted,
+        "submitted_at": utc_now(),
+    }
+    output_dir = Path(str(plan["output_dir"]))
+    write_json_atomic(output_dir / "submission_receipt.json", receipt)
+    state = read_selection_state(output_dir)
+    state.update({"status": "submitted", "submitted": True, "updated_at": utc_now()})
+    write_selection_state(output_dir, state)
+    return receipt

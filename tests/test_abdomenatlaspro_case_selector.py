@@ -84,3 +84,75 @@ def test_direct_script_help_runs_without_pythonpath():
     proc = subprocess.run([sys.executable, "scripts/abdomenatlaspro_case_selector.py", "--help"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     assert proc.returncode == 0
     assert "run" in proc.stdout
+
+
+def test_slurm_dry_run_writes_cpu_plan_without_sbatch_or_scan(monkeypatch, tmp_path):
+    import scripts.abdomenatlaspro_case_selector as selector
+    import scheduler.case_selection as case_selection
+
+    out = tmp_path / "slurm_dry_run"
+    called = {"sbatch": False, "scan": False}
+    monkeypatch.setattr(case_selection, "discover_inventory", lambda *a, **k: called.update(scan=True))
+
+    def fake_run(*args, **kwargs):
+        called["sbatch"] = True
+        raise AssertionError("dry-run must not call subprocess.run/sbatch")
+
+    monkeypatch.setattr(case_selection.subprocess, "run", fake_run)
+    rc = selector.main([
+        "run",
+        "--train-cases",
+        "2",
+        "--test-cases",
+        "2",
+        "--seed",
+        "20260724",
+        "--backend",
+        "slurm",
+        "--output-dir",
+        str(out),
+        "--dry-run",
+    ])
+    assert rc == 0
+    assert out.is_dir()
+    assert (out / "dry_run_plan.json").exists()
+    assert (out / "state.json").exists()
+    scripts = sorted((out / "generated_slurm").glob("*.sbatch"))
+    assert scripts
+    text = "\n".join(p.read_text(encoding="utf-8") for p in scripts)
+    assert "#SBATCH --partition=cpu" in text
+    assert "--gres=gpu" not in text
+    assert "srun" not in text
+    assert called == {"sbatch": False, "scan": False}
+
+
+def test_slurm_backend_submits_cpu_dag_without_local_full_scan(monkeypatch, tmp_path):
+    import scripts.abdomenatlaspro_case_selector as selector
+    import scheduler.case_selection as case_selection
+
+    out = tmp_path / "slurm_submit"
+    monkeypatch.setattr(case_selection, "discover_inventory", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not scan locally")))
+    submitted = []
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "sbatch"
+        submitted.append(cmd)
+        return type("Proc", (), {"returncode": 0, "stdout": f"Submitted batch job {1000 + len(submitted)}\n", "stderr": ""})()
+
+    monkeypatch.setattr(case_selection.subprocess, "run", fake_run)
+    rc = selector.main([
+        "run",
+        "--train-cases",
+        "2",
+        "--test-cases",
+        "2",
+        "--seed",
+        "20260724",
+        "--backend",
+        "slurm",
+        "--output-dir",
+        str(out),
+    ])
+    assert rc == 0
+    assert submitted
+    assert (out / "submission_receipt.json").exists()

@@ -11,12 +11,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scheduler.case_selection import (
+    build_case_selection_slurm_plan,
     clean_cache,
     discover_inventory,
     load_case_selection_config,
     run_case_selection,
     scan_ct_header,
     selection_status,
+    submit_case_selection_slurm_plan,
 )
 from scheduler.config import resolve_path
 from scheduler.utils import SchedulerError
@@ -97,6 +99,13 @@ def main(argv: list[str] | None = None) -> int:
             emit({"status": "success", "headers": [scan_ct_header(Path(r["ct_path"])) for r in rows]})
             return 0
         out = Path(args.output_dir) if args.output_dir else _default_output(args.train_cases, args.test_cases, args.seed)
+        if args.cmd == "run" and args.backend == "slurm":
+            plan = build_case_selection_slurm_plan(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run)
+            if args.dry_run:
+                emit(plan)
+                return 0
+            emit(submit_case_selection_slurm_plan(plan))
+            return 0
         emit(run_case_selection(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run, cache_options={
             "reuse_cache": getattr(args, "reuse_cache", True),
             "force_inventory": getattr(args, "force_inventory", False),

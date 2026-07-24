@@ -26,3 +26,15 @@ def test_doctor_writes_reports_and_does_not_submit(monkeypatch, tmp_path):
     assert main(["doctor", "--config", str(path), "--pipeline", "configs/pipelines/abdomenatlaspro_373_adaptive.yaml", "--output-dir", str(out)]) == 0
     assert (out / "doctor_report.json").exists()
     assert (out / "doctor_report.md").exists()
+
+
+def test_doctor_failed_report_returns_one(monkeypatch):
+    monkeypatch.setattr("scheduler.cli.load_config", lambda _: object())
+    monkeypatch.setattr("scheduler.cli.run_doctor", lambda *a, **k: {"status": "failed", "formal_blockers": ["missing manifest"]})
+    assert main(["doctor", "--config", "cfg.yaml", "--pipeline", "pipe.yaml"]) == 1
+
+
+def test_doctor_success_report_returns_zero(monkeypatch):
+    monkeypatch.setattr("scheduler.cli.load_config", lambda _: object())
+    monkeypatch.setattr("scheduler.cli.run_doctor", lambda *a, **k: {"status": "success", "formal_blockers": []})
+    assert main(["doctor", "--config", "cfg.yaml", "--pipeline", "pipe.yaml"]) == 0
