@@ -140,16 +140,30 @@ def scan_ct_header(ct_path: Path) -> dict[str, Any]:
     return row
 
 
-def discover_inventory(image_root: Path, mask_root: Path) -> list[dict[str, Any]]:
+def inventory_scope_metadata(available_common_cases: int, selected_inventory_cases: int, max_inventory_cases: int | None) -> dict[str, Any]:
+    return {
+        "inventory_scope": "limited" if max_inventory_cases is not None else "full",
+        "max_inventory_cases": max_inventory_cases,
+        "ordering": "sorted_case_id",
+        "available_common_cases_before_limit": available_common_cases,
+        "selected_inventory_cases_after_limit": selected_inventory_cases,
+    }
+
+
+def discover_inventory(image_root: Path, mask_root: Path, *, max_inventory_cases: int | None = None) -> list[dict[str, Any]]:
     if not image_root.exists() or not mask_root.exists():
         raise SchedulerError(f"Raw roots must exist: image_root={image_root} mask_root={mask_root}")
     rows = []
-    for case_dir in sorted(p for p in image_root.iterdir() if p.is_dir()):
-        case_id = case_dir.name
-        ct = case_dir / "ct.nii.gz"
+    common_case_ids = []
+    for case_id in sorted(p.name for p in image_root.iterdir() if p.is_dir()):
+        ct = image_root / case_id / "ct.nii.gz"
         seg = mask_root / case_id / "segmentations"
-        if not ct.is_file() or not seg.is_dir():
-            continue
+        if ct.is_file() and seg.is_dir():
+            common_case_ids.append(case_id)
+    selected_case_ids = common_case_ids[:max_inventory_cases] if max_inventory_cases is not None else common_case_ids
+    for case_id in selected_case_ids:
+        ct = image_root / case_id / "ct.nii.gz"
+        seg = mask_root / case_id / "segmentations"
         masks = sorted(p for p in seg.iterdir() if p.is_file() and p.name.endswith(".nii.gz"))
         rows.append(
             {
@@ -160,6 +174,9 @@ def discover_inventory(image_root: Path, mask_root: Path) -> list[dict[str, Any]
                 "mask_file_count": len(masks),
             }
         )
+    meta = inventory_scope_metadata(len(common_case_ids), len(rows), max_inventory_cases)
+    for row in rows:
+        row.update(meta)
     return rows
 
 
@@ -343,7 +360,7 @@ def validate_selection(train: list[dict[str, Any]], test: list[dict[str, Any]], 
     }
 
 
-def write_selection_outputs(out_dir: Path, cfg: CaseSelectionConfig, train: list[dict[str, Any]], test: list[dict[str, Any]], backups: list[dict[str, Any]], excluded: list[dict[str, Any]], *, seed: int) -> dict[str, Any]:
+def write_selection_outputs(out_dir: Path, cfg: CaseSelectionConfig, train: list[dict[str, Any]], test: list[dict[str, Any]], backups: list[dict[str, Any]], excluded: list[dict[str, Any]], *, seed: int, inventory_scope: dict[str, Any] | None = None) -> dict[str, Any]:
     image_root = resolve_path(cfg.paths.get("image_root"))
     mask_root = resolve_path(cfg.paths.get("mask_root"))
     ensure_not_raw_data_write_path(out_dir, image_root, mask_root)
@@ -375,6 +392,7 @@ def write_selection_outputs(out_dir: Path, cfg: CaseSelectionConfig, train: list
         "test_cases": len(test),
         "selected_case_count": len(all_selected),
         "strategy": "coverage-enriched selection strategy",
+        **(inventory_scope or {}),
     }
     write_json_atomic(out_dir / "dataset_fingerprint.json", fingerprint)
     _csv_write(out_dir / "train_test_distribution.csv", [{"split": "train", "cases": len(train)}, {"split": "test", "cases": len(test)}])
@@ -393,12 +411,14 @@ def write_selection_outputs(out_dir: Path, cfg: CaseSelectionConfig, train: list
     return {"status": validation["status"], "selection_dir": str(out_dir), "validation": validation}
 
 
-def _fingerprint_payload(cfg: CaseSelectionConfig, train_cases: int, test_cases: int, seed: int) -> dict[str, Any]:
+def _fingerprint_payload(cfg: CaseSelectionConfig, train_cases: int, test_cases: int, seed: int, max_inventory_cases: int | None) -> dict[str, Any]:
     return {
         "config": cfg.data,
         "train_cases": train_cases,
         "test_cases": test_cases,
         "seed": seed,
+        "max_inventory_cases": max_inventory_cases,
+        "ordering": "sorted_case_id",
         "version": 1,
     }
 
@@ -427,6 +447,7 @@ def run_case_selection(
     config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
     dry_run: bool = False,
     cache_options: dict[str, Any] | None = None,
+    max_inventory_cases: int | None = None,
 ) -> dict[str, Any]:
     cfg = load_case_selection_config(config_path)
     image_root = resolve_path(cfg.paths.get("image_root"))
@@ -437,24 +458,31 @@ def run_case_selection(
     ensure_not_raw_data_write_path(output_dir, image_root, mask_root)
     cache_options = cache_options or {}
     state = read_selection_state(output_dir)
-    fingerprint = hashlib.sha256(json.dumps(_fingerprint_payload(cfg, train_cases, test_cases, seed), sort_keys=True).encode("utf-8")).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(_fingerprint_payload(cfg, train_cases, test_cases, seed, max_inventory_cases), sort_keys=True).encode("utf-8")).hexdigest()
     if state.get("fingerprint") not in {None, fingerprint}:
         state = {"stages": {}, "fingerprint": fingerprint}
     if dry_run:
-        return {"status": "dry_run", "train_cases": train_cases, "test_cases": test_cases, "seed": seed, "output_dir": str(output_dir), "cache_options": cache_options}
+        return {"status": "dry_run", "train_cases": train_cases, "test_cases": test_cases, "seed": seed, "output_dir": str(output_dir), "cache_options": cache_options, "max_inventory_cases": max_inventory_cases, "ordering": "sorted_case_id"}
     output_dir.mkdir(parents=True, exist_ok=True)
-    state.update({"fingerprint": fingerprint, "updated_at": utc_now()})
+    state.update({"fingerprint": fingerprint, "updated_at": utc_now(), "max_inventory_cases": max_inventory_cases, "ordering": "sorted_case_id"})
     stages = state.setdefault("stages", {})
-    inv_cache = output_dir / "cache" / "inventory.json"
-    header_cache = output_dir / "cache" / "headers.json"
-    audit_cache = output_dir / "cache" / "deep_audit.json"
+    scoped_cache = output_dir / "cache" / fingerprint
+    inv_cache = scoped_cache / "inventory.json"
+    header_cache = scoped_cache / "headers.json"
+    audit_cache = scoped_cache / "deep_audit.json"
     reuse = bool(cache_options.get("reuse_cache", True))
     if reuse and not cache_options.get("force_inventory") and inv_cache.exists():
         inventory = json.loads(inv_cache.read_text(encoding="utf-8"))
     else:
-        inventory = discover_inventory(image_root, mask_root)
+        inventory = discover_inventory(image_root, mask_root, max_inventory_cases=max_inventory_cases)
         write_json_atomic(inv_cache, inventory)
-    stages["inventory"] = {"status": "success", "rows": len(inventory)}
+    inventory_scope = inventory_scope_metadata(
+        int(inventory[0].get("available_common_cases_before_limit", len(inventory))) if inventory else 0,
+        len(inventory),
+        max_inventory_cases,
+    )
+    state.update(inventory_scope)
+    stages["inventory"] = {"status": "success", "rows": len(inventory), **inventory_scope}
     if reuse and not cache_options.get("force_header_scan") and header_cache.exists():
         header_rows = json.loads(header_cache.read_text(encoding="utf-8"))
     else:
@@ -481,7 +509,7 @@ def run_case_selection(
     stages["deep_audit"] = {"status": "success", "rows": len(audited), "excluded": len(excluded)}
     write_selection_state(output_dir, state)
     train, test, backups = select_and_split(audited, train_cases, test_cases, seed, cfg)
-    result = write_selection_outputs(output_dir, cfg, train, test, backups, excluded, seed=seed)
+    result = write_selection_outputs(output_dir, cfg, train, test, backups, excluded, seed=seed, inventory_scope=inventory_scope)
     stages["select_and_split"] = {"status": result["status"]}
     write_selection_state(output_dir, state)
     return result
@@ -504,8 +532,8 @@ def clean_cache(selection_dir: Path) -> dict[str, Any]:
     return {"status": "success", "removed": str(cache)}
 
 
-def _case_selector_command(config_path: str | Path, stage: str, train_cases: int, test_cases: int, seed: int, output_dir: Path) -> list[str]:
-    return [
+def _case_selector_command(config_path: str | Path, stage: str, train_cases: int, test_cases: int, seed: int, output_dir: Path, max_inventory_cases: int | None) -> list[str]:
+    command = [
         "python",
         str(ROOT / "scripts" / "abdomenatlaspro_case_selector.py"),
         "--config",
@@ -520,6 +548,9 @@ def _case_selector_command(config_path: str | Path, stage: str, train_cases: int
         "--output-dir",
         str(output_dir),
     ]
+    if max_inventory_cases is not None:
+        command.extend(["--max-inventory-cases", str(max_inventory_cases)])
+    return command
 
 
 def _shell_join(args: list[str]) -> str:
@@ -560,6 +591,7 @@ def build_case_selection_slurm_plan(
     *,
     config_path: str | Path = "configs/abdomenatlaspro_case_selection.yaml",
     dry_run: bool,
+    max_inventory_cases: int | None = None,
 ) -> dict[str, Any]:
     cfg = load_case_selection_config(config_path)
     image_root = resolve_path(cfg.paths.get("image_root"))
@@ -569,8 +601,9 @@ def build_case_selection_slurm_plan(
     (output_dir / "generated_slurm").mkdir(parents=True, exist_ok=True)
     (output_dir / "logs").mkdir(parents=True, exist_ok=True)
     tasks = []
+    scope = inventory_scope_metadata(0, 0, max_inventory_cases)
     for stage, deps in CASE_SELECTION_STAGES:
-        command = _case_selector_command(config_path, CASE_SELECTION_STAGE_COMMANDS[stage], train_cases, test_cases, seed, output_dir)
+        command = _case_selector_command(config_path, CASE_SELECTION_STAGE_COMMANDS[stage], train_cases, test_cases, seed, output_dir, max_inventory_cases)
         script_path = output_dir / "generated_slurm" / f"{stage}.sbatch"
         script_path.write_text(_render_case_selection_sbatch(stage, deps, command, output_dir), encoding="utf-8")
         tasks.append(
@@ -593,6 +626,7 @@ def build_case_selection_slurm_plan(
         "seed": seed,
         "output_dir": str(output_dir),
         "created_at": utc_now(),
+        **scope,
         "dag": [{"stage": stage, "dependencies": deps} for stage, deps in CASE_SELECTION_STAGES],
         "tasks": tasks,
         "policy": {
@@ -611,6 +645,7 @@ def build_case_selection_slurm_plan(
             "submitted": False,
             "partition": "cpu",
             "updated_at": utc_now(),
+            **scope,
             "stages": {task["stage"]: {"status": "planned", "partition": "cpu", "script": task["script"]} for task in tasks},
         },
     )

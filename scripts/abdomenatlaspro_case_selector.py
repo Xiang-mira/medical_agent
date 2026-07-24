@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--seed", type=int, default=20260724)
         p.add_argument("--output-dir")
         p.add_argument("--dry-run", action="store_true")
+        p.add_argument("--max-inventory-cases", type=int, default=None)
     p = sub.add_parser("run")
     p.add_argument("--train-cases", type=int, required=True)
     p.add_argument("--test-cases", type=int, required=True)
@@ -55,7 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force-inventory", action="store_true")
     p.add_argument("--force-header-scan", action="store_true")
     p.add_argument("--force-deep-audit", action="store_true")
-    sub.add_parser("wizard")
+    p.add_argument("--max-inventory-cases", type=int, default=None)
+    p = sub.add_parser("wizard")
+    p.add_argument("--max-inventory-cases", type=int, default=None)
     p = sub.add_parser("status")
     p.add_argument("--selection-dir", required=True)
     p = sub.add_parser("clean-cache")
@@ -72,12 +75,13 @@ def main(argv: list[str] | None = None) -> int:
             train = int(input("Train cases: ").strip())
             test = int(input("Test cases: ").strip())
             seed = int(input("Seed [20260724]: ").strip() or "20260724")
+            max_inventory_cases = args.max_inventory_cases
             out = _default_output(train, test, seed)
             confirm = input(f"Freeze split in {out}? Type yes to continue: ").strip().lower()
             if confirm != "yes":
                 emit({"status": "cancelled"})
                 return 0
-            emit(run_case_selection(train, test, seed, out, config_path=args.config))
+            emit(run_case_selection(train, test, seed, out, config_path=args.config, max_inventory_cases=max_inventory_cases))
             return 0
         if args.cmd == "status":
             emit(selection_status(Path(args.selection_dir)))
@@ -89,18 +93,18 @@ def main(argv: list[str] | None = None) -> int:
             image_root = resolve_path(cfg.paths.get("image_root"))
             mask_root = resolve_path(cfg.paths.get("mask_root"))
             assert image_root is not None and mask_root is not None
-            emit({"status": "success", "cases": discover_inventory(image_root, mask_root)[:20]})
+            emit({"status": "success", "cases": discover_inventory(image_root, mask_root, max_inventory_cases=args.max_inventory_cases)[:20]})
             return 0
         if args.cmd == "scan-headers":
             image_root = resolve_path(cfg.paths.get("image_root"))
             mask_root = resolve_path(cfg.paths.get("mask_root"))
             assert image_root is not None and mask_root is not None
-            rows = discover_inventory(image_root, mask_root)[: int(args.train_cases) + int(args.test_cases)]
+            rows = discover_inventory(image_root, mask_root, max_inventory_cases=args.max_inventory_cases)[: int(args.train_cases) + int(args.test_cases)]
             emit({"status": "success", "headers": [scan_ct_header(Path(r["ct_path"])) for r in rows]})
             return 0
         out = Path(args.output_dir) if args.output_dir else _default_output(args.train_cases, args.test_cases, args.seed)
         if args.cmd == "run" and args.backend == "slurm":
-            plan = build_case_selection_slurm_plan(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run)
+            plan = build_case_selection_slurm_plan(args.train_cases, args.test_cases, args.seed, out, config_path=args.config, dry_run=args.dry_run, max_inventory_cases=args.max_inventory_cases)
             if args.dry_run:
                 emit(plan)
                 return 0
@@ -111,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             "force_inventory": getattr(args, "force_inventory", False),
             "force_header_scan": getattr(args, "force_header_scan", False),
             "force_deep_audit": getattr(args, "force_deep_audit", False),
-        }))
+        }, max_inventory_cases=args.max_inventory_cases))
     except SchedulerError as exc:
         emit({"status": "failed", "error": str(exc)})
         return 2
