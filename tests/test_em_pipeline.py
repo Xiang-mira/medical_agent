@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,54 @@ def _plan(tmp_path: Path) -> tuple[Path, dict]:
     out = tmp_path / "runs" / "em"
     plan = build_em_plan(cfg, out, dry_run=True)
     return out, plan
+
+
+def _train10_cfg(tmp_path: Path) -> Path:
+    image = tmp_path / "raw" / "images"
+    mask = tmp_path / "raw" / "masks"
+    image.mkdir(parents=True, exist_ok=True)
+    mask.mkdir(parents=True, exist_ok=True)
+    mapping = tmp_path / "mapping_373.json"
+    mapping.write_text(json.dumps({"targets": [{"target_name": "liver"}]}), encoding="utf-8")
+    target_config = tmp_path / "student_3d_prompt_target_organs.json"
+    target_config.write_text(json.dumps({"target_organs": [f"organ_{idx:03d}" for idx in range(373)]}), encoding="utf-8")
+    case_list = tmp_path / "train10.csv"
+    case_list.parent.mkdir(parents=True, exist_ok=True)
+    with case_list.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["case_id", "ct_path"])
+        writer.writeheader()
+        for idx in range(10):
+            case_id = f"BDMAP_{idx:08d}"
+            writer.writerow({"case_id": case_id, "ct_path": f"/images/{case_id}/ct.nii.gz"})
+    cfg = {
+        "experiment": {"name": "em_train10_round1_round2", "seed": 20260726, "train_cases": 10, "test_cases": 0, "max_inventory_cases": 10, "ordering": "sorted_case_id"},
+        "paths": {
+            "work_root": str(tmp_path),
+            "code_root": str(tmp_path),
+            "case_list": str(case_list),
+            "target_config": str(target_config),
+            "target_mapping": str(mapping),
+            "python_bin": sys.executable,
+            "vllm_container": "/containers/vllm.sif",
+            "labelcritic_model_dir": "/models/qwen72b",
+            "labelcritic_served_model_name": "Qwen/Qwen2-VL-72B-Instruct-AWQ",
+            "labelcritic_port": 8000,
+            "voxtell_model_dir": "/models/voxtell",
+            "qwen_embedding_model": "/models/qwen3-embedding",
+            "image_root": str(image),
+            "mask_root": str(mask),
+        },
+        "teachers": {"models": ["epai_20250421", "vsmtrans"]},
+        "runtime": {"student_backend": "voxtell_style_3d_prompt", "mstep_backend": "project_voxtell_prompt_distillation_student", "candidate_mode_round2": "em_student_vs_previous", "amp_mode": "off", "batch_size": 1, "max_steps": 2000},
+        "gpu_parallel": {
+            "teacher_train": {"partition": "gpu", "gpu_type": "t4", "gpus": 1, "cpus_per_task": 4, "memory": "32G", "time": "08:00:00", "smoke_time": "00:45:00", "max_concurrent": 8},
+            "student_inference_train": {"partition": "gpu", "gpu_type": "t4", "gpus": 1, "cpus_per_task": 4, "memory": "32G", "time": "08:00:00", "max_concurrent": 8},
+        },
+        "resource_limits": {"max_t4_gpus": 8, "max_a100_gpus": 1, "max_h100_gpus": 4},
+    }
+    path = tmp_path / "em_train10.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return path
 
 
 def test_em_fixed_split_and_no_gt_manifests(tmp_path):
@@ -184,3 +233,56 @@ def test_em_cli_and_mapping_file_not_modified(tmp_path):
     assert main(["em-run", "--config", str(cfg), "--output-dir", str(out), "--dry-run"]) == 0
     assert main(["em-status", "--output-dir", str(out)]) == 0
     assert mapping.read_bytes() == before
+
+
+def test_train10_dag_matches_required_formal_sequence(tmp_path):
+    cfg = _train10_cfg(tmp_path)
+    out = tmp_path / "runs" / "em_train10"
+    plan = build_em_plan(cfg, out, dry_run=True)
+    stages = [stage["stage"] for stage in plan["stages"]]
+    assert stages == [
+        "teacher_train10_smoke",
+        "teacher_train10_array",
+        "teacher_train10_merge_and_audit",
+        "labelcritic_r1",
+        "build_round1_manifest",
+        "student_r1_train_smoke",
+        "student_r1_train",
+        "student_r1_inference",
+        "prepare_round2_em_student_vs_previous",
+        "labelcritic_r2",
+        "round2_material_update_gate",
+        "student_r2_train",
+        "student_r2_inference",
+        "final_train10_audit",
+    ]
+
+
+def test_train10_resources_arrays_and_round2_dependency(tmp_path):
+    cfg = _train10_cfg(tmp_path)
+    out = tmp_path / "runs" / "em_train10"
+    plan = build_em_plan(cfg, out, dry_run=True)
+    stages = {s["stage"]: s for s in plan["stages"]}
+    assert stages["teacher_train10_array"]["array"] == "0-9%8"
+    assert stages["student_r1_inference"]["array"] == "0-9%8"
+    assert stages["student_r2_inference"]["array"] == "0-9%8"
+    assert stages["labelcritic_r1"]["partition"] == "gpuh100"
+    assert stages["labelcritic_r1"]["gpu_count"] == 4
+    assert stages["labelcritic_r2"]["partition"] == "gpuh100"
+    assert stages["labelcritic_r2"]["gpu_count"] == 4
+    assert stages["labelcritic_r2"]["dependencies"] == ["prepare_round2_em_student_vs_previous"]
+    assert stages["prepare_round2_em_student_vs_previous"]["dependencies"] == ["student_r1_inference"]
+    assert not any(stage.get("eval_reference") for stage in plan["stages"])
+    assert plan["split_metadata"]["train_case_ids"] == [f"BDMAP_{idx:08d}" for idx in range(10)]
+
+
+def test_train10_dry_run_writes_formal_slurm_scripts(tmp_path):
+    cfg = _train10_cfg(tmp_path)
+    out = tmp_path / "runs" / "em_train10"
+    plan = build_em_plan(cfg, out, dry_run=True)
+    labelcritic_script = (out / "generated_slurm" / "labelcritic_r1.sbatch").read_text(encoding="utf-8")
+    assert "curl --noproxy '*'" in labelcritic_script
+    assert "/v1/models" in labelcritic_script
+    assert "--dependency=afterok" not in labelcritic_script
+    assert (out / "generated_slurm" / "teacher_train10_array.sbatch").exists()
+    assert plan["policies"]["no_test_or_eval_reference"] is True
