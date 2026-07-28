@@ -1,0 +1,4 @@
+source_name,target_name,status,reason,notes
+iliac_vena_left,iliac_vein_left,pending_review,candidate_only,Confirm anatomy and laterality before changing to confirmed.
+left_common_carotid_artery,artery_common_carotid_left,pending_review,candidate_only,Confirm against audit output before changing to confirmed.
+

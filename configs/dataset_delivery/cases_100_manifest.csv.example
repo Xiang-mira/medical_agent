@@ -1,0 +1,3 @@
+index,case_id,image_path,reference_mask_dir
+0,BDMAP_EXAMPLE0000001,/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_EXAMPLE0000001/ct.nii.gz,/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_EXAMPLE0000001/segmentations
+

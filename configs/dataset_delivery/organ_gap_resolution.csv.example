@@ -1,0 +1,3 @@
+target_name,dataset_name,resolution,status,reason,notes
+vertebrae_L1,spine,manual_review,pending_review,example_only,Do not run Teacher until this row is manually confirmed as generate.
+
