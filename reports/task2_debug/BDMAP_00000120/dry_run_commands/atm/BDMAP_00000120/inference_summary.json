@@ -1,0 +1,26 @@
+{
+  "stage": "infer",
+  "backend": "registered",
+  "model_key": "atm",
+  "model_name": "ATM airway nnUNet Dataset1370",
+  "status": "dry_run",
+  "case_id": "BDMAP_00000120",
+  "image": "/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz",
+  "segmentation_output": "/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/atm/BDMAP_00000120/segmentations",
+  "per_model_dir": "/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/atm/BDMAP_00000120/per_model/atm",
+  "command": "\"/home/xhan74/envs/medical_agent/bin/python\" scripts/nnunetv2_predict_and_split.py --image \"/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz\" --output \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/atm/BDMAP_00000120\" --dataset-id 1370 --nnunet-results \"/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private\" --dataset-json \"/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json\" --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth --predict-executable \"/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict\" --sitecustomize-path \"/home/xhan74/nnunet_torch22_compat/sitecustomize.py\" --per-model-dir \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/atm/BDMAP_00000120/per_model/atm\"",
+  "registry_path": "/home/teacher1/JHU-project1/medical_agent/configs/model_registry.yaml",
+  "private_checkpoint": true,
+  "expected_outputs": [
+    "airway_tree.nii.gz"
+  ],
+  "expected_organs": [
+    "airway_tree"
+  ],
+  "resolved_python": "/home/xhan74/envs/medical_agent/bin/python",
+  "resolved_predict_executable": "/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict",
+  "resolved_sitecustomize_path": "/home/xhan74/nnunet_torch22_compat/sitecustomize.py",
+  "notes": "ATM airway tree model (Dataset1370).",
+  "num_masks": 0,
+  "sample_masks": []
+}

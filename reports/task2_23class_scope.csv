@@ -1,0 +1,24 @@
+organ,canonical_name,teacher_model,model_group,current_status,checkpoint_status,execution_status,blocked_reason,expected_case_count,expected_mask_count
+cerebrospinal_fluid,cerebrospinal_fluid,cads557,CADS,completed,exists,completed_existing_cads_100,,100,100
+eyeball,eyeball,cads557,CADS,completed,exists,completed_existing_cads_100,,100,100
+face,face,cads553,CADS,completed,exists,completed_existing_cads_100,,100,100
+gray_matter,gray_matter,cads557,CADS,completed,exists,completed_existing_cads_100,,100,100
+muscle_of_head,muscle_of_head,cads557,CADS,completed,exists,completed_existing_cads_100,,100,100
+scalp,scalp,cads557,CADS,completed,exists,completed_existing_cads_100,,100,100
+white_matter,white_matter,cads557,CADS,completed,exists,completed_existing_cads_100,,100,100
+brain,brain,cads553,CADS,pending,exists,pending,,100,100
+trachea,trachea,cads553,CADS,pending,exists,pending,,100,100
+brainstem,brainstem,cads558,CADS,pending,exists,pending,,100,100
+oral_cavity,oral_cavity,cads558,CADS,pending,exists,pending,,100,100
+compact_bone,compact_bone,cads557,CADS,pending,exists,pending,,100,100
+spongy_bone,spongy_bone,cads557,CADS,pending,exists,pending,,100,100
+blood,blood,cads557,CADS,pending,exists,pending,,100,100
+larynx,larynx,cads556,CADS,pending,exists,pending,,100,100
+airway_tree,airway_tree,atm,ATM,pending,exists,pending,,100,100
+airway_wall,airway_wall,airrc,AirRC,pending,exists,pending,,100,100
+lung_pulmonary_arteries,lung_pulmonary_arteries,airrc,AirRC,pending,exists,pending,,100,100
+lung_pulmonary_veins,lung_pulmonary_veins,airrc,AirRC,pending,exists,pending,,100,100
+kidney_cortex,kidney_cortex,unest,UNEST,pending,exists,pending,,100,100
+kidney_medulla,kidney_medulla,unest,UNEST,pending,exists,pending,,100,100
+kidney_pelvicalyceal_system,kidney_pelvicalyceal_system,unest,UNEST,pending,exists,pending,,100,100
+pulmonary_artery,pulmonary_artery,totalsegmentator,TotalSegmentator,blocked,missing_or_unmounted,blocked,TotalSegmentator target retained in 23-class scope but not runnable in current phase,100,100

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any
 import click
@@ -40,6 +42,20 @@ def emit(data: dict) -> None:
 
 def fail(data: dict, code: int = 1) -> None:
     emit(data); raise SystemExit(code)
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self.streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
 
 
 def parse_organ_option(organs: str, target_config: str = "configs/student_3d_prompt_target_organs.json") -> list[str]:
@@ -767,7 +783,9 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--teacher-inference-mode", type=click.Choice(["full_volume", "hierarchical_roi"]), default="hierarchical_roi", show_default=True)
 @click.option("--roi-margin-mm", type=float, default=20.0, show_default=True)
 @click.option("--dry-run", is_flag=True, default=False)
-def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run):
+@click.option("--strict-delivery-targets", is_flag=True, default=False, help="Fail strict delivery runs when requested teachers/outputs are not actually produced.")
+@click.option("--log-file", default=os.getenv("MEDAI_LOG_FILE"), help="Optional fixed log file; run-loop progress and final JSON are tee'd here.")
+def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run, strict_delivery_targets, log_file):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
     if not enable_shapekit and not dry_run and not debug_allow_no_shapekit:
         fail({
@@ -780,25 +798,39 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
         })
     model_list = [x.strip() for x in models.replace(";", ",").split(",") if x.strip()]
     organ_list = parse_organ_option(organs, target_config=target_config)
-    emit(run_multimodel_annotation_loop(
-        resolve_path(case_list), resolve_path(output_folder), model_list,
-        organ_list, resolve_path(registry_path), checkpoint_map_models,
-        resolve_path(shapekit_root), enable_shapekit, enable_critic,
-        critic_backend, critic_base_url, critic_port, vlm_threshold,
-        accept_threshold, dry_run, timeout_sec, device,
-        perf_tracker_path=resolve_path(perf_tracker_path) if perf_tracker_path else None,
-        labelcritic_options={
-            "no_dice_check": labelcritic_no_dice_check,
-            "no_dual_confirmation": labelcritic_no_dual_confirmation,
-            "simple_prompt_ablation": labelcritic_simple_prompt_ablation,
-            "conservative_dual": labelcritic_conservative_dual,
-            "skip_organ_presence_gate": labelcritic_skip_organ_presence_gate,
-            "strict_choice_prompt": labelcritic_strict_choice_prompt,
-        },
-        teacher_inference_mode=teacher_inference_mode,
-        roi_margin_mm=roi_margin_mm,
-        vlm_model=critic_vlm_model,
-    ))
+    def _run() -> dict[str, Any]:
+        return run_multimodel_annotation_loop(
+            resolve_path(case_list), resolve_path(output_folder), model_list,
+            organ_list, resolve_path(registry_path), checkpoint_map_models,
+            resolve_path(shapekit_root), enable_shapekit, enable_critic,
+            critic_backend, critic_base_url, critic_port, vlm_threshold,
+            accept_threshold, dry_run, timeout_sec, device,
+            perf_tracker_path=resolve_path(perf_tracker_path) if perf_tracker_path else None,
+            labelcritic_options={
+                "no_dice_check": labelcritic_no_dice_check,
+                "no_dual_confirmation": labelcritic_no_dual_confirmation,
+                "simple_prompt_ablation": labelcritic_simple_prompt_ablation,
+                "conservative_dual": labelcritic_conservative_dual,
+                "skip_organ_presence_gate": labelcritic_skip_organ_presence_gate,
+                "strict_choice_prompt": labelcritic_strict_choice_prompt,
+            },
+            teacher_inference_mode=teacher_inference_mode,
+            roi_margin_mm=roi_margin_mm,
+            vlm_model=critic_vlm_model,
+            strict_delivery_targets=strict_delivery_targets,
+        )
+
+    if log_file:
+        log_path = resolve_path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n[medai run-loop log start]\n")
+            with redirect_stdout(_Tee(sys.stdout, handle)), redirect_stderr(_Tee(sys.stderr, handle)):
+                result = _run()
+            handle.write(json.dumps(to_jsonable(result), indent=2, ensure_ascii=False) + "\n")
+        emit(result)
+    else:
+        emit(_run())
 
 
 @cli.command("mstep-train")

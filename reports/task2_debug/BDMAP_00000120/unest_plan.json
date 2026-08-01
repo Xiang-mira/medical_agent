@@ -1,0 +1,166 @@
+{
+  "case_id": "BDMAP_00000120",
+  "requested_organs": [
+    "kidney_cortex",
+    "kidney_medulla",
+    "kidney_pelvicalyceal_system"
+  ],
+  "fov_organs": [
+    "kidney_cortex",
+    "kidney_medulla",
+    "kidney_pelvicalyceal_system"
+  ],
+  "pruned_organs": [],
+  "prune_reasons": [],
+  "execution_organs": [
+    "kidney_cortex",
+    "kidney_medulla",
+    "kidney_pelvicalyceal_system",
+    "kidney"
+  ],
+  "requested_models": [
+    "unest"
+  ],
+  "teacher_run_list": [
+    "unest"
+  ],
+  "major_organs": [
+    "kidney"
+  ],
+  "child_organs": [
+    "kidney_cortex",
+    "kidney_medulla",
+    "kidney_pelvicalyceal_system"
+  ],
+  "hierarchical_tasks": [
+    {
+      "organ": "kidney_cortex",
+      "model": "unest",
+      "parent_ids": [
+        "kidney"
+      ],
+      "planned_scope": "parent_roi"
+    },
+    {
+      "organ": "kidney_medulla",
+      "model": "unest",
+      "parent_ids": [
+        "kidney"
+      ],
+      "planned_scope": "parent_roi"
+    },
+    {
+      "organ": "kidney_pelvicalyceal_system",
+      "model": "unest",
+      "parent_ids": [
+        "kidney"
+      ],
+      "planned_scope": "parent_roi"
+    }
+  ],
+  "blocked": [],
+  "parent_masks_found": {
+    "kidney": {
+      "reference_mask_dir": "/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/segmentations",
+      "candidate_names": [
+        "kidney.nii.gz",
+        "kidney_left.nii.gz",
+        "kidney_right.nii.gz",
+        "left_kidney.nii.gz",
+        "right_kidney.nii.gz"
+      ],
+      "found": [],
+      "exists": false,
+      "can_build_union": false
+    }
+  },
+  "resolved_model_command": {
+    "unest": "\"/home/xhan74/envs/medical_agent/bin/python\" scripts/unest_predict_and_split.py --image \"/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz\" --output \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/unest/BDMAP_00000120\" --unest-root \"/home/teacher1/JHU-project1/medical_agent/checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation\" --python-executable \"/home/xhan74/envs/medical_agent/bin/python\" --per-model-dir \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/unest/BDMAP_00000120/per_model/unest\""
+  },
+  "resolved_python": {
+    "unest": "/home/xhan74/envs/medical_agent/bin/python"
+  },
+  "resolved_checkpoint": {
+    "unest": "/home/teacher1/JHU-project1/medical_agent/checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation"
+  },
+  "expected_outputs": {
+    "unest": [
+      "kidney_cortex.nii.gz",
+      "kidney_medulla.nii.gz",
+      "kidney_pelvicalyceal_system.nii.gz"
+    ]
+  },
+  "case_execution_plan": {
+    "candidate_mode": "route_pruned_with_competition",
+    "organs": [
+      "kidney_cortex",
+      "kidney_medulla",
+      "kidney_pelvicalyceal_system",
+      "kidney"
+    ],
+    "teacher_run_list": [
+      "unest"
+    ],
+    "preseeded_models": [],
+    "per_organ": {
+      "kidney_cortex": {
+        "organ": "kidney_cortex",
+        "primary_teacher": "unest",
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [
+          "unest"
+        ],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "kidney_medulla": {
+        "organ": "kidney_medulla",
+        "primary_teacher": "unest",
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [
+          "unest"
+        ],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "kidney_pelvicalyceal_system": {
+        "organ": "kidney_pelvicalyceal_system",
+        "primary_teacher": "unest",
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [
+          "unest"
+        ],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "kidney": {
+        "organ": "kidney",
+        "primary_teacher": null,
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      }
+    }
+  }
+}

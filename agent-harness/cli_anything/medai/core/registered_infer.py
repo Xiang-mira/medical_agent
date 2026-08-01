@@ -23,6 +23,12 @@ _PREDICT_SCRIPTS = (
     "unest_predict_and_split.py",
 )
 
+_AUXILIARY_MASK_NAMES = {
+    "image.nii.gz",
+    "zero_mask.nii.gz",
+    "combined_labels.nii.gz",
+}
+
 _LICENSED_TOTALSEG_TASKS: frozenset[str] = frozenset({
     "heartchambers_highres", "appendicular_bones", "appendicular_bones_mr",
     "tissue_types", "tissue_types_mr", "tissue_4_types", "face", "face_mr",
@@ -43,6 +49,47 @@ def _q(path: str | Path) -> str:
 def _mask_summary(seg_out: Path) -> tuple[int, list[str]]:
     masks = sorted([p.name for p in seg_out.glob("*.nii.gz")]) if seg_out.exists() else []
     return len(masks), masks[:80]
+
+
+def _expected_output_organs(entry: dict[str, Any], extra_context: dict[str, Any]) -> list[str]:
+    requested = [
+        str(x).strip()
+        for x in (extra_context.get("requested_organs") or [])
+        if str(x).strip()
+    ]
+    if not requested:
+        return []
+    covered = {str(x).strip() for x in (entry.get("covered_organs") or []) if str(x).strip()}
+    if not covered:
+        return requested
+    return [organ for organ in requested if organ in covered]
+
+
+def _classify_mask_outputs(seg_out: Path, expected_organs: list[str]) -> dict[str, Any]:
+    names = sorted([p.name for p in seg_out.glob("*.nii.gz")]) if seg_out.exists() else []
+    expected_names = [f"{organ}.nii.gz" for organ in expected_organs]
+    expected_set = set(expected_names)
+    auxiliary = [name for name in names if name in _AUXILIARY_MASK_NAMES]
+    expected_present = [name for name in expected_names if name in names]
+    expected_missing = [name for name in expected_names if name not in names]
+    unexpected_formal = [
+        name for name in names
+        if name not in _AUXILIARY_MASK_NAMES and (not expected_set or name not in expected_set)
+    ]
+    formal_masks = expected_present if expected_names else [
+        name for name in names if name not in _AUXILIARY_MASK_NAMES
+    ]
+    return {
+        "num_masks": len(names),
+        "sample_masks": names[:80],
+        "expected_outputs": expected_names,
+        "expected_present": expected_present,
+        "missing_expected_outputs": expected_missing,
+        "auxiliary_outputs": auxiliary,
+        "unexpected_formal_outputs": unexpected_formal,
+        "formal_mask_count": len(formal_masks),
+        "formal_masks": formal_masks[:80],
+    }
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:
@@ -84,6 +131,20 @@ def _write_inference_summary(case_out: Path, result: dict[str, Any], seg_out: Pa
         )
     except Exception:
         pass
+
+
+def _resolve_registry_path(value: str | None, project_root: Path) -> Path | None:
+    if not value:
+        return None
+    path = Path(str(value))
+    return path if path.is_absolute() else (project_root / path).resolve()
+
+
+def _quote_command_value(value: str | Path) -> str:
+    text = str(value)
+    if "/" in text or "\\" in text:
+        return _q(text)
+    return text
 
 
 def _official_voxtell_model_dir(project_root: Path, extra_context: dict[str, Any]) -> Path:
@@ -313,7 +374,12 @@ def run_registered_model(
 
     checkpoint_path_value = entry.get("checkpoint_path", "")
     if checkpoint_path_value:
-        checkpoint_path = Path(str(checkpoint_path_value)).resolve()
+        checkpoint_path_raw = Path(str(checkpoint_path_value))
+        checkpoint_path = (
+            checkpoint_path_raw
+            if checkpoint_path_raw.is_absolute()
+            else (project_root / checkpoint_path_raw)
+        ).resolve()
         if _is_relative_to(case_out, checkpoint_path):
             return {
                 "stage": "infer", "backend": "registered", "model_key": model_key,
@@ -382,6 +448,25 @@ def run_registered_model(
             return pp
         return (project_root / pp).resolve()
 
+    python_executable = (
+        entry.get("python_executable")
+        or extra_context.get("python_executable")
+        or os.getenv("MEDAI_PYTHON_EXECUTABLE")
+        or sys.executable
+    )
+    predict_executable = (
+        entry.get("predict_executable")
+        or extra_context.get("predict_executable")
+        or os.getenv("MEDAI_NNUNETV2_PREDICT")
+        or "nnUNetv2_predict"
+    )
+    sitecustomize_path = (
+        entry.get("sitecustomize_path")
+        or extra_context.get("sitecustomize_path")
+        or os.getenv("MEDAI_NNUNET_COMPAT_SITECUSTOMIZE")
+        or ""
+    )
+
     context = {
         "image": _q(image),
         "output": _q(seg_out),
@@ -394,6 +479,9 @@ def run_registered_model(
         "model_key": model_key,
         "device": device or "",
         "subtask": extra_context.get("subtask") or "",
+        "python_executable": _quote_command_value(python_executable),
+        "predict_executable": _quote_command_value(predict_executable),
+        "sitecustomize_path": _quote_command_value(sitecustomize_path) if sitecustomize_path else "",
     }
     # Expose registry entry fields to command_template. Path-like fields are quoted and
     # resolved relative to the project working directory so templates can stay compact.
@@ -420,18 +508,29 @@ def run_registered_model(
             "template": template, "case_id": case_id,
         }
 
+    stripped = command.lstrip()
+    leading_ws = command[:len(command) - len(stripped)]
+    if stripped.startswith("python "):
+        command = f"{leading_ws}{context['python_executable']} {stripped[len('python '):]}"
+
     # Inject --per-model-dir for predict scripts that support it but whose templates
     # don't reference {per_model_dir} explicitly (keeps registry templates compact).
     if any(s in command for s in _PREDICT_SCRIPTS) and "--per-model-dir" not in command:
         command += f" --per-model-dir {_q(per_model_dir)}"
 
     if dry_run:
+        expected_organs = _expected_output_organs(entry, extra_context)
         result = {
             "stage": "infer", "backend": "registered", "model_key": model_key,
             "model_name": entry.get("name", model_key), "status": "dry_run",
             "case_id": case_id, "image": str(image), "segmentation_output": str(seg_out),
             "per_model_dir": str(per_model_dir),
             "command": command, "registry_path": str(registry_file), "private_checkpoint": entry.get("private_checkpoint"),
+            "expected_outputs": [f"{organ}.nii.gz" for organ in expected_organs],
+            "expected_organs": expected_organs,
+            "resolved_python": str(python_executable),
+            "resolved_predict_executable": str(predict_executable),
+            "resolved_sitecustomize_path": str(sitecustomize_path) if sitecustomize_path else None,
             "notes": entry.get("notes"),
         }
         _write_inference_summary(case_out, result, seg_out)
@@ -448,8 +547,13 @@ def run_registered_model(
             pass
 
     start = time.time()
+    env = os.environ.copy()
+    env_overrides = entry.get("environment_overrides") or {}
+    if isinstance(env_overrides, dict):
+        for key, value in env_overrides.items():
+            env[str(key)] = str(value)
     try:
-        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, shell=True, timeout=timeout_sec)
+        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, shell=True, timeout=timeout_sec, env=env)
         timed_out = False
     except subprocess.TimeoutExpired as exc:
         completed = subprocess.CompletedProcess(
@@ -460,8 +564,23 @@ def run_registered_model(
         )
         timed_out = True
     elapsed = time.time() - start
-    num_masks, sample_masks = _mask_summary(seg_out)
-    status = "timed_out" if timed_out else ("success" if completed.returncode == 0 and num_masks > 0 else "failed")
+    expected_organs = _expected_output_organs(entry, extra_context)
+    output_classification = _classify_mask_outputs(seg_out, expected_organs)
+    if timed_out:
+        status = "timed_out"
+        failure_reason = "registered_teacher_timed_out"
+    elif completed.returncode != 0:
+        status = "failed"
+        failure_reason = "registered_teacher_returned_nonzero"
+    elif expected_organs and output_classification["missing_expected_outputs"]:
+        status = "failed"
+        failure_reason = "expected_mask_missing"
+    elif output_classification["formal_mask_count"] <= 0:
+        status = "failed"
+        failure_reason = "teacher_executed_but_no_expected_masks"
+    else:
+        status = "success"
+        failure_reason = None
     result = {
         "stage": "infer", "backend": "registered", "model_key": model_key,
         "model_name": entry.get("name", model_key), "status": status,
@@ -469,7 +588,11 @@ def run_registered_model(
         "per_model_dir": str(per_model_dir),
         "command": command, "registry_path": str(registry_file), "return_code": completed.returncode,
         "timed_out": timed_out, "timeout_sec": timeout_sec, "runtime_sec": round(elapsed, 3),
-        "num_masks": num_masks, "sample_masks": sample_masks,
+        **output_classification,
+        "failure_reason": failure_reason,
+        "resolved_python": str(python_executable),
+        "resolved_predict_executable": str(predict_executable),
+        "resolved_sitecustomize_path": str(sitecustomize_path) if sitecustomize_path else None,
         "stdout_tail": (completed.stdout or "")[-4000:], "stderr_tail": (completed.stderr or "")[-4000:],
         "private_checkpoint": entry.get("private_checkpoint"),
     }

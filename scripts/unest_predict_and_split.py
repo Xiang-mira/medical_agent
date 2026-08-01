@@ -38,6 +38,7 @@ def main() -> int:
     ap.add_argument('--output', required=True)
     ap.add_argument('--unest-root',
                     default='checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation')
+    ap.add_argument('--python-executable', default=None, help='Stable Python executable for MONAI/UNEST subprocess. Defaults to MEDAI_UNEST_PYTHON or current interpreter.')
     ap.add_argument('--per-model-dir', default=None, help='Per-model contract output dir for combined_labels.nii.gz and local_labels.json')
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
@@ -46,6 +47,7 @@ def main() -> int:
     output = Path(args.output).resolve()
     seg_dir = output / 'segmentations'
     unest_root = Path(args.unest_root).resolve()
+    python_executable = args.python_executable or __import__('os').environ.get('MEDAI_UNEST_PYTHON') or sys.executable
     per_model_dir = Path(args.per_model_dir).resolve() if args.per_model_dir else output
     output.mkdir(parents=True, exist_ok=True)
     seg_dir.mkdir(parents=True, exist_ok=True)
@@ -56,6 +58,7 @@ def main() -> int:
         'image': str(image),
         'output': str(output),
         'unest_root': str(unest_root),
+        'python_executable': str(python_executable),
     }
 
     if args.dry_run:
@@ -86,7 +89,7 @@ def main() -> int:
         env = {**os.environ, **env_patch}
 
         command = [
-            sys.executable, '-m', 'monai.bundle', 'run', 'evaluating',
+            str(python_executable), '-m', 'monai.bundle', 'run', 'evaluating',
             '--meta_file', str(unest_root / 'configs' / 'metadata.json'),
             '--config_file', str(unest_root / 'configs' / 'inference.json'),
             '--logging_file', str(unest_root / 'configs' / 'logging.conf'),

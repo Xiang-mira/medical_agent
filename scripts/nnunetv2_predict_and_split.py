@@ -144,6 +144,9 @@ def main() -> int:
     ap.add_argument("--configuration", default="3d_fullres")
     ap.add_argument("--folds", default="all")
     ap.add_argument("--checkpoint-name", default="checkpoint_final.pth")
+    ap.add_argument("--predict-executable", default=os.getenv("MEDAI_NNUNETV2_PREDICT", "nnUNetv2_predict"), help="Stable nnUNetv2_predict executable path/name.")
+    ap.add_argument("--predict-from-modelfolder-executable", default=os.getenv("MEDAI_NNUNETV2_PREDICT_FROM_MODELFOLDER", "nnUNetv2_predict_from_modelfolder"), help="Stable nnUNetv2_predict_from_modelfolder executable path/name.")
+    ap.add_argument("--sitecustomize-path", default=os.getenv("MEDAI_NNUNET_COMPAT_SITECUSTOMIZE"), help="Optional compatibility sitecustomize.py injected only into the nnUNet subprocess.")
     ap.add_argument("--save-probabilities", action="store_true")
     ap.add_argument("--device", default=None, help="Optional CUDA_VISIBLE_DEVICES value or cpu")
     ap.add_argument("--organs", default=None, help="Optional comma-separated organ names to split")
@@ -171,13 +174,13 @@ def main() -> int:
     if args.dry_run:
         if model_folder:
             command = [
-                "nnUNetv2_predict_from_modelfolder", "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
+                args.predict_from_modelfolder_executable, "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
                 "-m", str(model_folder), "-f", str(args.folds), "--input_csv", "<input_csv>", "--output_csv", "<output_csv>",
                 "--continue_prediction", "-chk", args.checkpoint_name, "--output_label_mode", args.output_label_mode,
             ]
         else:
             command = [
-                "nnUNetv2_predict", "-d", str(args.dataset_id), "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
+                args.predict_executable, "-d", str(args.dataset_id), "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
                 "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "-chk", args.checkpoint_name, "--continue_prediction",
             ]
         print(json.dumps({"status": "dry_run", "command": command, "output": str(output), "seg_dir": str(seg_dir), "output_label_mode": args.output_label_mode}, indent=2))
@@ -222,13 +225,19 @@ def main() -> int:
             if (vsm_nnunet / "__init__.py").exists() or (vsm_nnunet / "nnunetv2").exists():
                 existing = env.get("PYTHONPATH", "")
                 env["PYTHONPATH"] = str(workdir) + (":" + existing if existing else "")
+        if args.sitecustomize_path:
+            sitecustomize = Path(args.sitecustomize_path).resolve()
+            if not sitecustomize.exists():
+                raise FileNotFoundError(sitecustomize)
+            existing = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = str(sitecustomize.parent) + (":" + existing if existing else "")
 
         if model_folder:
             input_csv = output / "epai_input.csv"
             output_csv = output / "epai_output.csv"
             input_csv.write_text(f"Original ID,BDMAP ID\n{case_id},{case_id}\n", encoding="utf-8")
             cmd = [
-                "nnUNetv2_predict_from_modelfolder", "-i", str(input_dir), "-o", str(combined_dir),
+                args.predict_from_modelfolder_executable, "-i", str(input_dir), "-o", str(combined_dir),
                 "-m", str(model_folder), "-f", str(args.folds), "--input_csv", str(input_csv), "--output_csv", str(output_csv),
                 "--continue_prediction", "-npp", "3", "-nps", "3", "-num_parts", "1", "-part_id", "0",
                 "-chk", args.checkpoint_name, "--output_label_mode", args.output_label_mode,
@@ -294,7 +303,7 @@ def main() -> int:
                 return _rc
         else:
             cmd = [
-                "nnUNetv2_predict", "-d", str(args.dataset_id), "-i", str(input_dir), "-o", str(combined_dir),
+                args.predict_executable, "-d", str(args.dataset_id), "-i", str(input_dir), "-o", str(combined_dir),
                 "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "-chk", args.checkpoint_name, "--continue_prediction",
             ]
             proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(workdir) if workdir else None, check=False)

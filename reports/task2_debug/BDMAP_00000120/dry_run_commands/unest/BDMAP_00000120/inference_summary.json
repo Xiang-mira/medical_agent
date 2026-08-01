@@ -1,0 +1,30 @@
+{
+  "stage": "infer",
+  "backend": "registered",
+  "model_key": "unest",
+  "model_name": "UNEST renalStructures segmentation",
+  "status": "dry_run",
+  "case_id": "BDMAP_00000120",
+  "image": "/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz",
+  "segmentation_output": "/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/unest/BDMAP_00000120/segmentations",
+  "per_model_dir": "/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/unest/BDMAP_00000120/per_model/unest",
+  "command": "\"/home/xhan74/envs/medical_agent/bin/python\" scripts/unest_predict_and_split.py --image \"/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz\" --output \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/unest/BDMAP_00000120\" --unest-root \"/home/teacher1/JHU-project1/medical_agent/checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation\" --python-executable \"/home/xhan74/envs/medical_agent/bin/python\" --per-model-dir \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/unest/BDMAP_00000120/per_model/unest\"",
+  "registry_path": "/home/teacher1/JHU-project1/medical_agent/configs/model_registry.yaml",
+  "private_checkpoint": true,
+  "expected_outputs": [
+    "kidney_cortex.nii.gz",
+    "kidney_medulla.nii.gz",
+    "kidney_pelvicalyceal_system.nii.gz"
+  ],
+  "expected_organs": [
+    "kidney_cortex",
+    "kidney_medulla",
+    "kidney_pelvicalyceal_system"
+  ],
+  "resolved_python": "/home/xhan74/envs/medical_agent/bin/python",
+  "resolved_predict_executable": "nnUNetv2_predict",
+  "resolved_sitecustomize_path": null,
+  "notes": "UNEST run_UNEST.sh and configs from the teacher Drive lightweight export are bundled. Real inference requires the actual UNEST model/checkpoint environment.",
+  "num_masks": 0,
+  "sample_masks": []
+}

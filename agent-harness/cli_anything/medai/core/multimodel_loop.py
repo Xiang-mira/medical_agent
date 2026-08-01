@@ -1058,6 +1058,79 @@ def _hierarchical_cache_keys_equivalent(left: dict[str, Any], right: dict[str, A
     return normalize(left or {}) == normalize(right or {})
 
 
+def _build_union_mask(mask_paths: list[Path], reference_ct: Path, output: Path) -> dict[str, Any]:
+    import nibabel as nib
+    import numpy as np
+    from nibabel.processing import resample_from_to
+
+    ref = nib.load(str(reference_ct))
+    union = np.zeros(ref.shape, dtype=np.uint8)
+    sources: list[str] = []
+    for mask_path in mask_paths:
+        if not mask_path.exists():
+            continue
+        img = nib.load(str(mask_path))
+        if img.shape != ref.shape or not np.allclose(img.affine, ref.affine, atol=1e-4):
+            img = resample_from_to(img, ref, order=0)
+        union |= (np.asanyarray(img.dataobj) > 0).astype(np.uint8)
+        sources.append(str(mask_path))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(nib.Nifti1Image(union, ref.affine, ref.header), str(output))
+    return {"path": str(output), "sources": sources, "positive_voxels": int(union.sum())}
+
+
+def _resolve_external_parent_masks(
+    *,
+    ref_dir: Path | None,
+    requested_organs: list[str],
+    taxonomy: dict[str, Any],
+    ct: Path,
+    case_out: Path,
+) -> tuple[dict[str, Path], list[dict[str, Any]]]:
+    if ref_dir is None or not ref_dir.exists():
+        return {}, []
+    parent_ids = sorted({
+        str(parent)
+        for organ in requested_organs
+        for parent in ((taxonomy_entry(taxonomy, organ) or {}).get("parent_ids", []) or [])
+        if parent
+    })
+    parent_masks: dict[str, Path] = {}
+    records: list[dict[str, Any]] = []
+    out_dir = case_out / "external_parent_rois"
+    for parent in parent_ids:
+        exact = ref_dir / f"{parent}.nii.gz"
+        if exact.exists() and parent not in {"kidney"}:
+            dst = out_dir / f"{parent}.nii.gz"
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(exact, dst)
+            parent_masks[parent] = dst
+            records.append({"parent": parent, "status": "copied_exact_parent", "sources": [str(exact)], "path": str(dst)})
+            continue
+        if parent == "kidney":
+            sources = [
+                path for path in [
+                    exact,
+                    ref_dir / "kidney_left.nii.gz",
+                    ref_dir / "kidney_right.nii.gz",
+                    ref_dir / "left_kidney.nii.gz",
+                    ref_dir / "right_kidney.nii.gz",
+                ]
+                if path.exists()
+            ]
+            if sources:
+                dst = out_dir / "kidney.nii.gz"
+                try:
+                    info = _build_union_mask(sources, ct, dst)
+                    parent_masks[parent] = dst
+                    records.append({"parent": parent, "status": "built_union_parent", **info})
+                except Exception as exc:
+                    records.append({"parent": parent, "status": "failed", "reason": f"union_failed:{exc}", "sources": [str(p) for p in sources]})
+            else:
+                records.append({"parent": parent, "status": "missing", "reason": "no_kidney_or_left_right_kidney_reference_mask"})
+    return parent_masks, records
+
+
 def _stable_json_sha256(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1080,6 +1153,8 @@ def _run_hierarchical_case_inference(
     dry_run: bool,
     margin_mm: float,
     preseeded_seg_dirs: dict[str, Path] | None = None,
+    external_parent_masks: dict[str, Path] | None = None,
+    external_parent_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     registry_file = Path(registry_path).resolve()
     registry_sha256 = hashlib.sha256(registry_file.read_bytes()).hexdigest() if registry_file.is_file() else None
@@ -1168,9 +1243,21 @@ def _run_hierarchical_case_inference(
     merged_dirs: dict[str, Path] = {}
     raw_results: list[dict[str, Any]] = []
     full_runs: dict[str, tuple[dict[str, Any], Path]] = {}
-    parent_masks: dict[str, Path] = {}
+    parent_masks: dict[str, Path] = dict(external_parent_masks or {})
     blocked: list[dict[str, Any]] = []
     major_resolution: list[dict[str, Any]] = []
+    for parent, mask in sorted(parent_masks.items()):
+        major_resolution.append({
+            "organ": parent,
+            "model": "external_reference_parent_roi",
+            "status": "resolved",
+            "mask": str(mask),
+            "inference_scope": "external_parent_roi",
+            "provenance": [
+                record for record in (external_parent_records or [])
+                if record.get("parent") == parent
+            ],
+        })
     hierarchy_qc_cache = _CaseMaskCache(max_arrays=48)
 
     def hard_qc_usable(mask: Path, organ: str) -> tuple[bool, dict[str, Any]]:
@@ -1279,6 +1366,8 @@ def _run_hierarchical_case_inference(
             if candidate_model:
                 model_major_targets.setdefault(str(candidate_model), set()).add(candidate_organ)
     for organ in major_organs:
+        if organ in parent_masks:
+            continue
         route = per_organ.get(organ, {}) or {}
         ordered = [
             route.get("primary_teacher"),
@@ -1330,7 +1419,9 @@ def _run_hierarchical_case_inference(
         if not resolved:
             blocked.append({"organ": organ, "status": "major_unresolved", "reason": "primary_and_backups_unusable"})
 
+    full_volume_child_models = {"atm", "airrc"}
     child_routes: list[dict[str, Any]] = []
+    direct_child_routes: list[dict[str, Any]] = []
     child_fallbacks: dict[str, list[str]] = {}
     for organ in child_organs:
         entry = taxonomy_entry(taxonomy, organ) or {}
@@ -1344,7 +1435,11 @@ def _run_hierarchical_case_inference(
         if not primary:
             blocked.append({"organ": organ, "status": "unresolved_route", "reason": "no_exact_primary_teacher"})
             continue
-        child_routes.append({"organ": organ, "parent_ids": entry.get("parent_ids", []), "model": str(primary)})
+        route_record = {"organ": organ, "parent_ids": entry.get("parent_ids", []), "model": str(primary)}
+        if str(primary) in full_volume_child_models:
+            direct_child_routes.append(route_record)
+        else:
+            child_routes.append(route_record)
         child_fallbacks[organ] = fallbacks
 
     roi_root = case_out / "hierarchical_roi"
@@ -1359,6 +1454,42 @@ def _run_hierarchical_case_inference(
         raw_results.append({"case_id": case_id, "inference_scope": "child_roi", "roi_task_id": task_id, **result})
         return result
 
+    attempted_child_pairs: set[tuple[str, str]] = set()
+    direct_child_results: list[dict[str, Any]] = []
+    direct_child_targets: dict[str, list[str]] = {}
+    for route in direct_child_routes:
+        direct_child_targets.setdefault(str(route["model"]), []).append(str(route["organ"]))
+    for model, target_organs in sorted(direct_child_targets.items()):
+        child_inference, seg_dir = run_full(model, sorted(set(target_organs)))
+        for organ in sorted(set(target_organs)):
+            source, match_mode = _candidate_mask_path(seg_dir, organ, model, alias_config)
+            contract = _candidate_identity_contract(
+                taxonomy=taxonomy,
+                alias_config=alias_config,
+                organ=organ,
+                model_key=model,
+                alias_match=match_mode,
+                seg_dir=seg_dir,
+            )
+            usable, hierarchy_qc = hard_qc_usable(source, organ)
+            record = {
+                "organ": organ,
+                "model": model,
+                "status": "resolved" if contract["identity_status"] == "valid" and usable else "unusable",
+                "mask": str(source),
+                "inference_scope": "child_full_volume",
+                "hierarchy_qc": hierarchy_qc,
+                **contract,
+            }
+            direct_child_results.append(record)
+            attempted_child_pairs.add((model, organ))
+            if record["status"] != "resolved":
+                continue
+            destination = merged_dir(model) / f"{organ}.nii.gz"
+            if source.resolve() != destination.resolve():
+                shutil.copy2(source, destination)
+            _write_identity_provenance(merged_dir(model), organ, contract)
+
     if dry_run:
         tasks = []
         parent_blocked = [{"organ": route["organ"], "status": "dry_run_pending_parent_mask"} for route in child_routes]
@@ -1368,7 +1499,7 @@ def _run_hierarchical_case_inference(
             allow_cross_parent_merge=True,
         )
     blocked.extend(parent_blocked)
-    attempted_child_pairs = {(str(task["model"]), str(organ)) for task in tasks for organ in task["organs"]}
+    attempted_child_pairs.update((str(task["model"]), str(organ)) for task in tasks for organ in task["organs"])
     for task in tasks:
         merged_dir(str(task["model"]))
     task_results = execute_roi_tasks(
@@ -1531,7 +1662,9 @@ def _run_hierarchical_case_inference(
         "major_organs": major_organs,
         "child_organs": child_organs,
         "major_resolution": major_resolution,
+        "external_parent_roi_records": external_parent_records or [],
         "child_resolution": child_resolution,
+        "direct_full_volume_child_resolution": direct_child_results,
         "roi_tasks": task_results,
         "candidate_fallback_tasks": proactive_results,
         "primary_parent_retry_tasks": primary_retry_results,
@@ -5120,6 +5253,7 @@ def run_multimodel_annotation_loop(
     reuse_preseeded_only: bool = False,
     strict_labelcritic_selection: bool = True,
     use_annotation_folder_reference: bool = True,
+    strict_delivery_targets: bool = False,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -5199,6 +5333,7 @@ def run_multimodel_annotation_loop(
     standard_dataset_cases: list[dict[str, Any]] = []
     review_queue = out / "review_queue.jsonl"
     timing_rows: list[dict[str, Any]] = []
+    strict_delivery_failures: list[dict[str, Any]] = []
     vlm_decisions = out / "vlm_decisions.jsonl"
     traces_jsonl = out / "patient_traces.jsonl"
     report_supervision_jsonl = out / "report_supervision.jsonl"
@@ -5262,6 +5397,28 @@ def run_multimodel_annotation_loop(
             preseeded_model_dirs=preseeded_model_dirs,
             candidate_mode=candidate_mode,
         )
+        if strict_delivery_targets:
+            pruned_organs = [organ for organ in organs if organ not in set(fov_organs)]
+            for organ in pruned_organs:
+                strict_delivery_failures.append({
+                    "case_id": case_id,
+                    "organ": organ,
+                    "reason": "requested_organs_pruned_by_fov",
+                    "status": "failed",
+                    "requested_models": list(models),
+                    "presence_context": presence_context,
+                })
+            if models and not list(case_execution_plan.get("teacher_run_list", []) or []):
+                strict_delivery_failures.append({
+                    "case_id": case_id,
+                    "organ": ",".join(fov_organs or organs),
+                    "reason": "requested_teacher_not_scheduled",
+                    "status": "failed",
+                    "requested_models": list(models),
+                    "teacher_run_list": [],
+                    "fov_organs": fov_organs,
+                    "execution_organs": execution_organs,
+                })
         hierarchy_plan_cache_key: dict[str, Any] | None = None
         hierarchy_plan_cache_key_sha256: str | None = None
         if teacher_inference_mode == "hierarchical_roi":
@@ -5372,6 +5529,16 @@ def run_multimodel_annotation_loop(
         resolved_preseeded_seg_dirs: dict[str, Path] = {}
         hierarchy_blocked: list[dict[str, Any]] = []
         hierarchy_models_used: list[str] = []
+        external_parent_masks: dict[str, Path] = {}
+        external_parent_records: list[dict[str, Any]] = []
+        if teacher_inference_mode == "hierarchical_roi" and strict_delivery_targets and not dry_run:
+            external_parent_masks, external_parent_records = _resolve_external_parent_masks(
+                ref_dir=ref_dir,
+                requested_organs=fov_organs,
+                taxonomy=taxonomy,
+                ct=ct,
+                case_out=case_out,
+            )
 
         # Inject preseeded predictions (e.g. student from previous round) directly
         # into model_seg_dirs without running inference.
@@ -5398,6 +5565,8 @@ def run_multimodel_annotation_loop(
                 requested_organs=fov_organs, taxonomy=taxonomy, alias_config=alias_config,
                 timeout_sec=timeout_sec, device=device, dry_run=dry_run, margin_mm=roi_margin_mm,
                 preseeded_seg_dirs=resolved_preseeded_seg_dirs,
+                external_parent_masks=external_parent_masks,
+                external_parent_records=external_parent_records,
             )
             model_seg_dirs.update(hierarchy_result["model_seg_dirs"])
             inference_results.extend(hierarchy_result["inference_results"])
@@ -5405,6 +5574,31 @@ def run_multimodel_annotation_loop(
             hierarchy_models_used = sorted({
                 str(item.get("model_key")) for item in hierarchy_result["inference_results"] if item.get("model_key")
             })
+            if strict_delivery_targets:
+                per_organ_plan = case_execution_plan.get("per_organ", {}) or {}
+                for organ in fov_organs:
+                    eligible = [
+                        str(model_key)
+                        for model_key in ((per_organ_plan.get(organ, {}) or {}).get("eligible_teachers", []) or [])
+                        if str(model_key) in set(models)
+                    ]
+                    if not eligible:
+                        continue
+                    if not any((model_seg_dirs.get(model_key) and (model_seg_dirs[model_key] / f"{organ}.nii.gz").exists()) for model_key in eligible):
+                        blocked_reasons = [
+                            item for item in hierarchy_result.get("blocked", [])
+                            if item.get("organ") in {organ, *(((taxonomy_entry(taxonomy, organ) or {}).get("parent_ids", []) or []))}
+                        ]
+                        strict_delivery_failures.append({
+                            "case_id": case_id,
+                            "organ": organ,
+                            "reason": "expected_mask_missing",
+                            "status": "failed",
+                            "requested_models": list(models),
+                            "eligible_teachers": eligible,
+                            "teacher_run_list": list(case_execution_plan.get("teacher_run_list", []) or []),
+                            "blocked": blocked_reasons,
+                        })
             for item in hierarchy_blocked:
                 _append_jsonl(review_queue, {"case_id": case_id, "ct_path": str(ct), **item})
             stage_timing["teacher_inference_sec"] += _time.time() - _teacher_t0
@@ -5453,6 +5647,29 @@ def run_multimodel_annotation_loop(
                 print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✓ ({actual_num_masks} masks)", flush=True)
             else:
                 print(f"[{_time.strftime('%H:%M:%S')}]   [{model_idx}/{len(case_models)}] {model_key} ✗ ({infer.get('status')})", flush=True)
+            if strict_delivery_targets and model_key in set(models):
+                for missing in infer.get("missing_expected_outputs", []) or []:
+                    strict_delivery_failures.append({
+                        "case_id": case_id,
+                        "organ": str(missing).removesuffix(".nii.gz"),
+                        "reason": infer.get("failure_reason") or "expected_mask_missing",
+                        "status": "failed",
+                        "requested_models": list(models),
+                        "model_key": model_key,
+                        "return_code": infer.get("return_code"),
+                        "segmentation_output": infer.get("segmentation_output"),
+                    })
+                if infer.get("status") == "failed" and not infer.get("missing_expected_outputs"):
+                    strict_delivery_failures.append({
+                        "case_id": case_id,
+                        "organ": ",".join((infer.get("expected_outputs") or [])),
+                        "reason": infer.get("failure_reason") or "registered_teacher_not_executed",
+                        "status": "failed",
+                        "requested_models": list(models),
+                        "model_key": model_key,
+                        "return_code": infer.get("return_code"),
+                        "segmentation_output": infer.get("segmentation_output"),
+                    })
             stage_timing["teacher_inference_sec"] += _time.time() - _teacher_t0
 
         if not dry_run:
@@ -6838,7 +7055,7 @@ def run_multimodel_annotation_loop(
     )
 
     summary = {
-        "stage": "run_loop", "status": "success", "case_list": str(case_csv), "output_folder": str(out),
+        "stage": "run_loop", "status": "failed" if strict_delivery_failures else "success", "case_list": str(case_csv), "output_folder": str(out),
         "num_cases": len(cases), "models_requested": models, "organs": organs,
         "target_space_policy": _load_target_space_policy(project_root, organs),
         "formal_373_target_validation": target_validation,
@@ -6853,6 +7070,9 @@ def run_multimodel_annotation_loop(
         "preseeded_parent_only": preseeded_parent_only,
         "reuse_preseeded_only": reuse_preseeded_only,
         "annotation_folder_reference_enabled": use_annotation_folder_reference,
+        "strict_delivery_targets": strict_delivery_targets,
+        "strict_delivery_failure_count": len(strict_delivery_failures),
+        "strict_delivery_failures": strict_delivery_failures,
         "round2_competition_audit": _summarize_preseeded_competition(
             preseeded_keys=[] if preseeded_parent_only else sorted((preseeded_model_dirs or {}).keys()),
             selection_rows=all_selection_rows,
@@ -6864,6 +7084,17 @@ def run_multimodel_annotation_loop(
         "total_updated": len(rebuilt_selected_metadata),
         "total_labelcritic_decisions": sum(int(r.get("vlm_reviewed", 0) or 0) for r in round_rows),
     }
+    if strict_delivery_targets:
+        write_json(out / "strict_delivery_failures.json", {
+            "stage": "strict_delivery_failures",
+            "status": "failed" if strict_delivery_failures else "success",
+            "rows": strict_delivery_failures,
+        })
+        _write_csv(
+            out / "strict_delivery_failures.csv",
+            strict_delivery_failures,
+            ["case_id", "organ", "reason", "status", "requested_models", "eligible_teachers", "teacher_run_list", "model_key", "return_code", "segmentation_output"],
+        )
     timing_rows = _merge_case_timing_rows(cases, updated_root, timing_rows)
     _write_csv(
         out / "case_timing_breakdown.csv",

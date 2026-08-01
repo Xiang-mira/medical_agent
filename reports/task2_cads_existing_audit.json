@@ -1,0 +1,17 @@
+{
+  "status": "missing",
+  "path": "/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/formal_teacher_22_full_volume_20260730/results/cads",
+  "formal_mask_count": 0,
+  "auxiliary_image_count": 0,
+  "auxiliary_zero_mask_count": 0,
+  "completed_organs": [
+    "cerebrospinal_fluid",
+    "eyeball",
+    "face",
+    "gray_matter",
+    "muscle_of_head",
+    "scalp",
+    "white_matter"
+  ],
+  "note": "CADS history is not mounted on this development machine; rerun on JHU HPC to verify the 700 masks."
+}

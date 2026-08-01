@@ -777,6 +777,9 @@ models:
     output_layout: case_id/segmentations/*.nii.gz
     notes: ATM airway tree model (Dataset1370).
     runner: command_template
+    python_executable: /home/xhan74/envs/medical_agent/bin/python
+    predict_executable: /home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict
+    sitecustomize_path: /home/xhan74/nnunet_torch22_compat/sitecustomize.py
     checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
     dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1370_ATM/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
     dataset_id: 1370
@@ -786,7 +789,8 @@ models:
     command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
       --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth --predict-executable
+      {predict_executable} --sitecustomize-path {sitecustomize_path}
     private_checkpoint: true
     evidence_family: atm
     architecture_lineage: type1
@@ -811,6 +815,9 @@ models:
     output_layout: case_id/segmentations/*.nii.gz
     notes: AirRC airway wall + pulmonary vessels (Dataset1380).
     runner: command_template
+    python_executable: /home/xhan74/envs/medical_agent/bin/python
+    predict_executable: /home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict
+    sitecustomize_path: /home/xhan74/nnunet_torch22_compat/sitecustomize.py
     checkpoint_path: checkpoints/nnUNet_private/nnUNet_private
     dataset_json_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json
     dataset_id: 1380
@@ -820,7 +827,8 @@ models:
     command_template: python scripts/nnunetv2_predict_and_split.py --image {image}
       --output {case_output} --dataset-id {dataset_id} --nnunet-results {checkpoint_path}
       --dataset-json {dataset_json_path} --trainer {trainer} --plans {plans} --configuration
-      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth
+      3d_fullres --folds {folds} --checkpoint-name {checkpoint_name}.pth --predict-executable
+      {predict_executable} --sitecustomize-path {sitecustomize_path}
     private_checkpoint: true
     evidence_family: airrc
     architecture_lineage: type1
@@ -1193,9 +1201,11 @@ models:
     notes: UNEST run_UNEST.sh and configs from the teacher Drive lightweight export
       are bundled. Real inference requires the actual UNEST model/checkpoint environment.
     runner: command_template
+    python_executable: /home/xhan74/envs/medical_agent/bin/python
+    unest_python_executable: /home/xhan74/envs/medical_agent/bin/python
     checkpoint_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
     command_template: python scripts/unest_predict_and_split.py --image {image} --output
-      {case_output} --unest-root {checkpoint_path}
+      {case_output} --unest-root {checkpoint_path} --python-executable {unest_python_executable}
     private_checkpoint: true
     source_code_path: checkpoints/UNEST/UNEST/renalStructures_UNEST_segmentation
     trainable: external_script_required

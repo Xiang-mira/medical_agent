@@ -1,0 +1,187 @@
+{
+  "case_id": "BDMAP_00000120",
+  "requested_organs": [
+    "airway_wall",
+    "lung_pulmonary_arteries",
+    "lung_pulmonary_veins"
+  ],
+  "fov_organs": [
+    "airway_wall",
+    "lung_pulmonary_arteries",
+    "lung_pulmonary_veins"
+  ],
+  "pruned_organs": [],
+  "prune_reasons": [],
+  "execution_organs": [
+    "airway_wall",
+    "lung_pulmonary_arteries",
+    "lung_pulmonary_veins",
+    "airway",
+    "lung"
+  ],
+  "requested_models": [
+    "airrc"
+  ],
+  "teacher_run_list": [
+    "airrc"
+  ],
+  "major_organs": [
+    "airway",
+    "lung"
+  ],
+  "child_organs": [
+    "airway_wall",
+    "lung_pulmonary_arteries",
+    "lung_pulmonary_veins"
+  ],
+  "hierarchical_tasks": [
+    {
+      "organ": "airway_wall",
+      "model": "airrc",
+      "parent_ids": [
+        "airway"
+      ],
+      "planned_scope": "full_volume_child"
+    },
+    {
+      "organ": "lung_pulmonary_arteries",
+      "model": "airrc",
+      "parent_ids": [
+        "lung"
+      ],
+      "planned_scope": "full_volume_child"
+    },
+    {
+      "organ": "lung_pulmonary_veins",
+      "model": "airrc",
+      "parent_ids": [
+        "lung"
+      ],
+      "planned_scope": "full_volume_child"
+    }
+  ],
+  "blocked": [],
+  "parent_masks_found": {
+    "airway": {
+      "reference_mask_dir": "/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/segmentations",
+      "candidate_names": [
+        "airway.nii.gz"
+      ],
+      "found": [],
+      "exists": false,
+      "can_build_union": false
+    },
+    "lung": {
+      "reference_mask_dir": "/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/segmentations",
+      "candidate_names": [
+        "lung.nii.gz"
+      ],
+      "found": [],
+      "exists": false,
+      "can_build_union": false
+    }
+  },
+  "resolved_model_command": {
+    "airrc": "\"/home/xhan74/envs/medical_agent/bin/python\" scripts/nnunetv2_predict_and_split.py --image \"/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz\" --output \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/airrc/BDMAP_00000120\" --dataset-id 1380 --nnunet-results \"/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private\" --dataset-json \"/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json\" --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth --predict-executable \"/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict\" --sitecustomize-path \"/home/xhan74/nnunet_torch22_compat/sitecustomize.py\" --per-model-dir \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/airrc/BDMAP_00000120/per_model/airrc\""
+  },
+  "resolved_python": {
+    "airrc": "/home/xhan74/envs/medical_agent/bin/python"
+  },
+  "resolved_checkpoint": {
+    "airrc": "/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private"
+  },
+  "expected_outputs": {
+    "airrc": [
+      "airway_wall.nii.gz",
+      "lung_pulmonary_arteries.nii.gz",
+      "lung_pulmonary_veins.nii.gz"
+    ]
+  },
+  "case_execution_plan": {
+    "candidate_mode": "route_pruned_with_competition",
+    "organs": [
+      "airway_wall",
+      "lung_pulmonary_arteries",
+      "lung_pulmonary_veins",
+      "airway",
+      "lung"
+    ],
+    "teacher_run_list": [
+      "airrc"
+    ],
+    "preseeded_models": [],
+    "per_organ": {
+      "airway_wall": {
+        "organ": "airway_wall",
+        "primary_teacher": "airrc",
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [
+          "airrc"
+        ],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "lung_pulmonary_arteries": {
+        "organ": "lung_pulmonary_arteries",
+        "primary_teacher": "airrc",
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [
+          "airrc"
+        ],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "lung_pulmonary_veins": {
+        "organ": "lung_pulmonary_veins",
+        "primary_teacher": "airrc",
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [
+          "airrc"
+        ],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "airway": {
+        "organ": "airway",
+        "primary_teacher": null,
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      },
+      "lung": {
+        "organ": "lung",
+        "primary_teacher": null,
+        "backup_teachers": [],
+        "competition_teachers": [],
+        "route_confidence": "high",
+        "production_policy": "route_primary_with_backups",
+        "critic_policy": "pairwise_compare_then_absolute_grade",
+        "eligible_teachers": [],
+        "grade_required_for_training": true,
+        "compare_required_when_conflict": true,
+        "compare_bypass_when_single_or_high_agreement": true
+      }
+    }
+  }
+}

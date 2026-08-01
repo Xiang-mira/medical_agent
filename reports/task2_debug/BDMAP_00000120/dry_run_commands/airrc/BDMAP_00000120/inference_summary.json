@@ -1,0 +1,30 @@
+{
+  "stage": "infer",
+  "backend": "registered",
+  "model_key": "airrc",
+  "model_name": "AirRC airway/vessel nnUNet Dataset1380",
+  "status": "dry_run",
+  "case_id": "BDMAP_00000120",
+  "image": "/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz",
+  "segmentation_output": "/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/airrc/BDMAP_00000120/segmentations",
+  "per_model_dir": "/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/airrc/BDMAP_00000120/per_model/airrc",
+  "command": "\"/home/xhan74/envs/medical_agent/bin/python\" scripts/nnunetv2_predict_and_split.py --image \"/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro/BDMAP_00000120/ct.nii.gz\" --output \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/airrc/BDMAP_00000120\" --dataset-id 1380 --nnunet-results \"/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private\" --dataset-json \"/home/teacher1/JHU-project1/medical_agent/checkpoints/nnUNet_private/nnUNet_private/Dataset1380_AirRC/nnUNetTrainer__nnUNetResEncUNetLPlans__3d_fullres/dataset.json\" --trainer nnUNetTrainer --plans nnUNetResEncUNetLPlans --configuration 3d_fullres --folds all --checkpoint-name checkpoint_final.pth --predict-executable \"/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict\" --sitecustomize-path \"/home/xhan74/nnunet_torch22_compat/sitecustomize.py\" --per-model-dir \"/home/teacher1/JHU-project1/medical_agent/reports/task2_debug/BDMAP_00000120/dry_run_commands/airrc/BDMAP_00000120/per_model/airrc\"",
+  "registry_path": "/home/teacher1/JHU-project1/medical_agent/configs/model_registry.yaml",
+  "private_checkpoint": true,
+  "expected_outputs": [
+    "airway_wall.nii.gz",
+    "lung_pulmonary_arteries.nii.gz",
+    "lung_pulmonary_veins.nii.gz"
+  ],
+  "expected_organs": [
+    "airway_wall",
+    "lung_pulmonary_arteries",
+    "lung_pulmonary_veins"
+  ],
+  "resolved_python": "/home/xhan74/envs/medical_agent/bin/python",
+  "resolved_predict_executable": "/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict",
+  "resolved_sitecustomize_path": "/home/xhan74/nnunet_torch22_compat/sitecustomize.py",
+  "notes": "AirRC airway wall + pulmonary vessels (Dataset1380).",
+  "num_masks": 0,
+  "sample_masks": []
+}
