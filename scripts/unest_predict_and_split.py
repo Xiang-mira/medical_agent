@@ -82,10 +82,11 @@ def main() -> int:
 
         # Override bundle_root, dataset_dir, output_dir via CLI flags.
         # PYTHONPATH must include the bundle's scripts/ so UNesT network can be imported.
-        env_patch = {
-            'PYTHONPATH': str(unest_root / 'scripts'),
-        }
         import os
+        existing_pythonpath = os.environ.get('PYTHONPATH', '')
+        env_patch = {
+            'PYTHONPATH': str(unest_root / 'scripts') + ((os.pathsep + existing_pythonpath) if existing_pythonpath else ''),
+        }
         env = {**os.environ, **env_patch}
 
         command = [

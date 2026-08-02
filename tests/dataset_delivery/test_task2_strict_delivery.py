@@ -75,6 +75,25 @@ def test_registered_infer_resolves_task2_nnunet_command(tmp_path: Path):
     assert "/home/xhan74/nnunet_torch22_compat/sitecustomize.py" in result["command"]
 
 
+def test_registered_infer_unest_python_env_overrides_registry(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import registered_infer as ri
+
+    monkeypatch.setenv("MEDAI_UNEST_PYTHON", "/opt/unest/bin/python")
+    image = _save(np.zeros((4, 4, 4), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    result = ri.run_registered_model(
+        image,
+        tmp_path / "out",
+        "unest",
+        registry_path=Path("configs/model_registry.yaml"),
+        case_id="case",
+        dry_run=True,
+        extra_context={"requested_organs": ["kidney_cortex"]},
+    )
+
+    assert result["status"] == "dry_run"
+    assert '--python-executable "/opt/unest/bin/python"' in result["command"]
+
+
 def test_registered_infer_fails_when_airrc_expected_output_is_missing(tmp_path: Path, monkeypatch):
     from cli_anything.medai.core import registered_infer as ri
 

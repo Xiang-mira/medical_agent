@@ -9,9 +9,10 @@ Date: 2026-08-01
   - failed: 0
 
 - `PYTHONPATH=agent-harness:. pytest -q tests/dataset_delivery`
-  - passed: 28
+  - passed: 29
   - failed: 0
   - skipped: 0
+  - additional coverage: UNEST command rendering honors `MEDAI_UNEST_PYTHON` for the MONAI bundle subprocess.
 
 - `PYTHONPATH=agent-harness:. pytest -q agent-harness/tests/test_hierarchical_identity.py::test_hierarchical_case_runs_major_then_child_roi agent-harness/tests/test_hierarchical_identity.py::test_roi_planner_blocks_child_when_parent_missing`
   - passed: 2

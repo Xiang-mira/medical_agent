@@ -498,6 +498,12 @@ def run_registered_model(
                 context[k] = _q(_resolve_from_registry(sv))
             else:
                 context[k] = sv
+    env_template_overrides = {
+        "unest_python_executable": os.getenv("MEDAI_UNEST_PYTHON"),
+    }
+    for key, value in env_template_overrides.items():
+        if value:
+            context[key] = _quote_command_value(value)
     context.update(extra_context)
     try:
         command = template.format(**context)
