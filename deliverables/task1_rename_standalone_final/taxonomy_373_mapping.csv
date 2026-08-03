@@ -1,0 +1,135 @@
+current_name,target_name,issue_type,action,status,notes
+left_atrial_appendage,atrial_appendage_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_autochthon,autochthon_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_brachiocephalic_vein,brachiocephalic_vein_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_clavicula,clavicula_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_gluteus_maximus,gluteus_maximus_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_gluteus_medius,gluteus_medius_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_gluteus_minimus,gluteus_minimus_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_hip,hip_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_humerus,humerus_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_iliac_artery,iliac_artery_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_iliac_vena,iliac_vena_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_iliopsoas,iliopsoas_left,word_order,rename,confirmed,"same anatomy, different token order"
+left_lung_lower_lobe,lung_lower_left_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+left_lung_upper_lobe,lung_upper_left_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+left_scapula,scapula_left,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lobe_lower_left,lung_lower_left_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lobe_lower_right,lung_lower_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lobe_middle_right,lung_middle_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lobe_upper_left,lung_upper_left_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lobe_upper_right,lung_upper_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lower_lobe_left,lung_lower_left_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_lower_lobe_right,lung_lower_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_middle_lobe_right,lung_middle_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_upper_lobe_left,lung_upper_left_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+lung_upper_lobe_right,lung_upper_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+right_autochthon,autochthon_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_brachiocephalic_vein,brachiocephalic_vein_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_clavicula,clavicula_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_gluteus_maximus,gluteus_maximus_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_gluteus_medius,gluteus_medius_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_gluteus_minimus,gluteus_minimus_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_hip,hip_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_humerus,humerus_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_iliac_artery,iliac_artery_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_iliac_vena,iliac_vena_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_iliopsoas,iliopsoas_right,word_order,rename,confirmed,"same anatomy, different token order"
+right_lung_lower_lobe,lung_lower_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+right_lung_middle_lobe,lung_middle_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+right_lung_upper_lobe,lung_upper_right_lobe,word_order,rename,confirmed,"same anatomy, different token order"
+right_scapula,scapula_right,word_order,rename,confirmed,"same anatomy, different token order"
+vein_brachiocephalic_left,brachiocephalic_vein_left,word_order,rename,confirmed,"same anatomy, different token order"
+vein_brachiocephalic_right,brachiocephalic_vein_right,word_order,rename,confirmed,"same anatomy, different token order"
+bone,bones,language_variant,rename,confirmed,singular/plural naming variant
+celiac_truck,celiac_trunk,spelling,rename,confirmed,spelling normalized
+coronary_arteries,coronary_artery,language_variant,rename,confirmed,singular/plural naming variant
+gallbladder,gall_bladder,language_variant,rename,confirmed,word separator normalized
+breast_implant,prosthetic_breast_implant,synonym,rename,confirmed,same anatomy naming variant
+costa_1_left,rib_left_1,synonym,rename,confirmed,terminology and token order normalized
+costa_2_left,rib_left_2,synonym,rename,confirmed,terminology and token order normalized
+costa_3_left,rib_left_3,synonym,rename,confirmed,terminology and token order normalized
+costa_4_left,rib_left_4,synonym,rename,confirmed,terminology and token order normalized
+costa_5_left,rib_left_5,synonym,rename,confirmed,terminology and token order normalized
+costa_6_left,rib_left_6,synonym,rename,confirmed,terminology and token order normalized
+costa_7_left,rib_left_7,synonym,rename,confirmed,terminology and token order normalized
+costa_8_left,rib_left_8,synonym,rename,confirmed,terminology and token order normalized
+costa_9_left,rib_left_9,synonym,rename,confirmed,terminology and token order normalized
+costa_10_left,rib_left_10,synonym,rename,confirmed,terminology and token order normalized
+costa_11_left,rib_left_11,synonym,rename,confirmed,terminology and token order normalized
+costa_12_left,rib_left_12,synonym,rename,confirmed,terminology and token order normalized
+costa_1_right,rib_right_1,synonym,rename,confirmed,terminology and token order normalized
+costa_2_right,rib_right_2,synonym,rename,confirmed,terminology and token order normalized
+costa_3_right,rib_right_3,synonym,rename,confirmed,terminology and token order normalized
+costa_4_right,rib_right_4,synonym,rename,confirmed,terminology and token order normalized
+costa_5_right,rib_right_5,synonym,rename,confirmed,terminology and token order normalized
+costa_6_right,rib_right_6,synonym,rename,confirmed,terminology and token order normalized
+costa_7_right,rib_right_7,synonym,rename,confirmed,terminology and token order normalized
+costa_8_right,rib_right_8,synonym,rename,confirmed,terminology and token order normalized
+costa_9_right,rib_right_9,synonym,rename,confirmed,terminology and token order normalized
+costa_10_right,rib_right_10,synonym,rename,confirmed,terminology and token order normalized
+costa_11_right,rib_right_11,synonym,rename,confirmed,terminology and token order normalized
+costa_12_right,rib_right_12,synonym,rename,confirmed,terminology and token order normalized
+vertebra_c1,vertebrae_c1,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_c2,vertebrae_c2,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_c3,vertebrae_c3,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_c4,vertebrae_c4,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_c5,vertebrae_c5,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_c6,vertebrae_c6,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_c7,vertebrae_c7,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_l1,vertebrae_l1,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_l2,vertebrae_l2,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_l3,vertebrae_l3,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_l4,vertebrae_l4,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_l5,vertebrae_l5,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t1,vertebrae_t1,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t2,vertebrae_t2,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t3,vertebrae_t3,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t4,vertebrae_t4,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t5,vertebrae_t5,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t6,vertebrae_t6,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t7,vertebrae_t7,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t8,vertebrae_t8,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t9,vertebrae_t9,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t10,vertebrae_t10,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t11,vertebrae_t11,language_variant,rename,confirmed,singular/plural naming variant
+vertebra_t12,vertebrae_t12,language_variant,rename,confirmed,singular/plural naming variant
+urinary_bladder,bladder,synonym,rename,confirmed,terminology synonym normalized
+kidney_left_renal_vein,renal_vein_left,word_order,rename,confirmed,"same anatomy, different token order"
+kidney_right_renal_vein,renal_vein_right,word_order,rename,confirmed,"same anatomy, different token order"
+portal_splenic_vein,portal_vein_and_splenic_vein,word_order,rename,confirmed,token order and conjunction normalized
+celiac_aa,celiac_aa_celiac_artery,abbreviation,rename,confirmed,abbreviation format normalized
+celiac_artery,celiac_aa_celiac_artery,abbreviation,rename,confirmed,abbreviation format normalized
+hepatic_vein,liver_hepatic_vein,synonym,rename,confirmed,anatomical prefix normalized
+portal_vein,liver_portal_vein,synonym,rename,confirmed,anatomical prefix normalized
+lungs,lung,language_variant,rename,confirmed,singular/plural naming variant
+sma,superior_mesenteric_artery,abbreviation,rename,confirmed,standard abbreviation expanded
+parotid_gland,parotid_glands,language_variant,rename,confirmed,singular/plural naming variant
+submandibular_gland,submandibular_glands,language_variant,rename,confirmed,singular/plural naming variant
+,airway_tree,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,airway_wall,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,blood,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,brain_ventricle,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,cerebrospinal_fluid,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,common_iliac_artery_left,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,common_iliac_artery_right,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,common_iliac_vein_left,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,common_iliac_vein_right,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,compact_bone,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,eyeball,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,face,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,gland_structure,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,gray_matter,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,kidney_cortex,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,kidney_medulla,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,kidney_pelvicalyceal_system,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,lung_pulmonary_arteries,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,lung_pulmonary_veins,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,muscle_of_head,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,scalp,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,spongy_bone,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+,white_matter,missing_label,generate,confirmed,listed unresolved; no confirmed source label
+left_common_carotid_artery,common_carotid_artery_left,synonym,manual_review,needs_review,ambiguous with independent taxonomy target
+right_common_carotid_artery,common_carotid_artery_right,synonym,manual_review,needs_review,ambiguous with independent taxonomy target
+left_subclavian_artery,subclavian_artery_left,synonym,manual_review,needs_review,ambiguous with independent taxonomy target
+right_subclavian_artery,subclavian_artery_right,synonym,manual_review,needs_review,ambiguous with independent taxonomy target
