@@ -14,13 +14,16 @@ from contextlib import redirect_stderr, redirect_stdout
 import datetime
 import json
 import os
+import signal
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
+from typing import Any
 
 
 ORGAN_ALIASES = {
@@ -44,6 +47,16 @@ def _worker_count(explicit: int | None, *, diagnostic: bool, default: int | None
     if diagnostic:
         return 1
     return default
+
+
+def _env_float(name: str, default: float | None) -> float | None:
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return float(raw)
+    except Exception:
+        return default
 
 
 def _tail_file(path: Path, limit: int = 4000) -> str:
@@ -92,10 +105,21 @@ def _write_log_header(path: Path, stream_name: str, metadata: dict) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _append_log_footer(path: Path, *, end_time: str, return_code: int) -> None:
+def _append_log_footer(
+    path: Path,
+    *,
+    end_time: str,
+    return_code: int,
+    raw_child_return_code: int | None = None,
+    effective_inference_status: str | None = None,
+) -> None:
     with path.open("a", encoding="utf-8", buffering=1) as handle:
         handle.write(f"\n[medai nnunet] end_time={end_time}\n")
         handle.write(f"[medai nnunet] return_code={return_code}\n")
+        if raw_child_return_code is not None:
+            handle.write(f"[medai nnunet] raw_child_return_code={raw_child_return_code}\n")
+        if effective_inference_status:
+            handle.write(f"[medai nnunet] effective_inference_status={effective_inference_status}\n")
         handle.flush()
 
 
@@ -114,12 +138,304 @@ def _stream_pipe_to_log(pipe, log_path: Path) -> None:
             pass
 
 
-def _run_streaming_subprocess(cmd: list[str], *, env: dict[str, str], cwd: Path | None, stdout_log: Path, stderr_log: Path, metadata: dict) -> dict:
-    """Run a subprocess while streaming stdout/stderr to durable logs."""
+def _label_value_ids(value: object) -> list[int]:
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().lstrip("-").isdigit()):
+        try:
+            return [int(value)]
+        except Exception:
+            try:
+                return [int(float(value))]
+            except Exception:
+                return []
+    if isinstance(value, (list, tuple)):
+        ids: list[int] = []
+        for item in value:
+            ids.extend(_label_value_ids(item))
+        return ids
+    return []
+
+
+def _requested_label_names(requested_organs: list[str] | None) -> set[str] | None:
+    if not requested_organs:
+        return None
+    names: set[str] = set()
+    reverse_aliases = {v: k for k, v in ORGAN_ALIASES.items()}
+    for organ in requested_organs:
+        name = str(organ).strip()
+        if not name:
+            continue
+        names.add(name)
+        names.add(ORGAN_ALIASES.get(name, name))
+        names.add(reverse_aliases.get(name, name))
+    return names
+
+
+def _dataset_label_sets(dataset_json: Path, requested_organs: list[str] | None) -> tuple[set[int], dict[str, list[int]]]:
+    data = json.loads(dataset_json.read_text(encoding="utf-8"))
+    raw_labels = data.get("labels") or {}
+    legal_ids = {0}
+    target_names = _requested_label_names(requested_organs)
+    target_ids: dict[str, list[int]] = {}
+    for raw_name, raw_value in raw_labels.items():
+        name = str(raw_name).strip()
+        ids = [int(v) for v in _label_value_ids(raw_value)]
+        legal_ids.update(ids)
+        if name.lower() == "background":
+            continue
+        nonzero_ids = [v for v in ids if v != 0]
+        if target_names is None or name in target_names:
+            target_ids[name] = nonzero_ids
+    return legal_ids, target_ids
+
+
+def _validate_combined_output(
+    label_map: Path,
+    input_image: Path,
+    dataset_json: Path,
+    requested_organs: list[str] | None,
+) -> dict[str, Any]:
+    validation: dict[str, Any] = {
+        "path": str(label_map),
+        "valid": False,
+        "reasons": [],
+        "checks": {},
+    }
+
+    if not label_map.exists():
+        validation["reasons"].append("combined_output_missing")
+        validation["checks"]["exists"] = False
+        return validation
+    validation["checks"]["exists"] = True
+
+    try:
+        stat = label_map.stat()
+    except Exception as exc:
+        validation["reasons"].append(f"combined_output_stat_failed: {exc}")
+        validation["checks"]["stat_readable"] = False
+        return validation
+    validation["size_bytes"] = int(stat.st_size)
+    validation["mtime_ns"] = int(stat.st_mtime_ns)
+    validation["checks"]["nonempty"] = stat.st_size > 0
+    if stat.st_size <= 0:
+        validation["reasons"].append("combined_output_empty_file")
+        return validation
+
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        pred_img = nib.load(str(label_map))
+        input_img = nib.load(str(input_image))
+        arr = np.asanyarray(pred_img.dataobj)
+        unique_values = np.unique(arr)
+
+        pred_shape = tuple(int(v) for v in pred_img.shape[:3])
+        input_shape = tuple(int(v) for v in input_img.shape[:3])
+        pred_spacing = tuple(float(v) for v in pred_img.header.get_zooms()[:3])
+        input_spacing = tuple(float(v) for v in input_img.header.get_zooms()[:3])
+        shape_matches = pred_shape == input_shape
+        affine_matches = bool(np.allclose(pred_img.affine, input_img.affine, rtol=0, atol=1e-5))
+        spacing_matches = bool(np.allclose(pred_spacing, input_spacing, rtol=0, atol=1e-5))
+
+        validation["checks"]["nifti_loadable"] = True
+        validation["shape"] = list(pred_shape)
+        validation["input_shape"] = list(input_shape)
+        validation["spacing"] = list(pred_spacing)
+        validation["input_spacing"] = list(input_spacing)
+        validation["checks"]["shape_matches_input"] = shape_matches
+        validation["checks"]["affine_matches_input"] = affine_matches
+        validation["checks"]["spacing_matches_input"] = spacing_matches
+        if not shape_matches:
+            validation["reasons"].append("shape_mismatch")
+        if not affine_matches:
+            validation["reasons"].append("affine_mismatch")
+        if not spacing_matches:
+            validation["reasons"].append("spacing_mismatch")
+
+        legal_ids, target_ids = _dataset_label_sets(dataset_json, requested_organs)
+        finite_integer_labels = bool(
+            np.all(np.isfinite(unique_values))
+            and np.all(np.equal(unique_values, np.round(unique_values)))
+        )
+        unique_ids = sorted({int(v) for v in unique_values}) if finite_integer_labels else []
+        illegal_ids = sorted(set(unique_ids) - set(legal_ids)) if finite_integer_labels else []
+        validation["labels_present"] = unique_ids if finite_integer_labels else [str(v) for v in unique_values.tolist()]
+        validation["legal_label_ids"] = sorted(legal_ids)
+        validation["checks"]["labels_are_integer"] = finite_integer_labels
+        validation["checks"]["labels_are_legal"] = finite_integer_labels and not illegal_ids
+        validation["illegal_label_ids"] = illegal_ids
+        if not finite_integer_labels:
+            validation["reasons"].append("labels_are_not_integer")
+        if illegal_ids:
+            validation["reasons"].append("labels_outside_dataset_json")
+
+        target_voxels: dict[str, int] = {}
+        for name, ids in sorted(target_ids.items()):
+            if not ids:
+                target_voxels[name] = 0
+            elif len(ids) == 1:
+                target_voxels[name] = int((arr == ids[0]).sum())
+            else:
+                target_voxels[name] = int(np.isin(arr, ids).sum())
+        expected_target_nonzero = bool(target_voxels) and any(v > 0 for v in target_voxels.values())
+        validation["expected_target_label_ids"] = {name: ids for name, ids in sorted(target_ids.items())}
+        validation["expected_target_voxels"] = target_voxels
+        validation["checks"]["expected_target_nonzero"] = expected_target_nonzero
+        if not expected_target_nonzero:
+            validation["reasons"].append("expected_target_missing_or_empty")
+
+        validation["valid"] = bool(
+            validation["checks"].get("exists")
+            and validation["checks"].get("nonempty")
+            and validation["checks"].get("nifti_loadable")
+            and shape_matches
+            and affine_matches
+            and spacing_matches
+            and validation["checks"].get("labels_are_legal")
+            and expected_target_nonzero
+        )
+        return validation
+    except Exception as exc:
+        validation["checks"]["nifti_loadable"] = False
+        validation["reasons"].append(f"nifti_load_failed: {exc}")
+        return validation
+
+
+def _combined_output_split_safe(validation: dict[str, Any] | None) -> bool:
+    if not validation:
+        return False
+    checks = validation.get("checks") or {}
+    required = (
+        "exists",
+        "nonempty",
+        "nifti_loadable",
+        "shape_matches_input",
+        "affine_matches_input",
+        "spacing_matches_input",
+        "labels_are_legal",
+    )
+    return all(bool(checks.get(name)) for name in required)
+
+
+def _validate_first_combined_output(
+    combined_dir: Path,
+    input_image: Path,
+    dataset_json: Path,
+    requested_organs: list[str] | None,
+) -> tuple[Path | None, dict[str, Any]]:
+    candidates = sorted(combined_dir.glob("*.nii.gz"))
+    if not candidates:
+        return None, {"valid": False, "reasons": ["combined_output_missing"], "checks": {"exists": False}}
+    fallback: tuple[Path, dict[str, Any]] | None = None
+    for candidate in candidates:
+        validation = _validate_combined_output(candidate, input_image, dataset_json, requested_organs)
+        if fallback is None:
+            fallback = (candidate, validation)
+        if validation.get("valid"):
+            return candidate, validation
+    assert fallback is not None
+    return fallback
+
+
+def _termination_signal(return_code: int | None) -> int | None:
+    if return_code is None or return_code >= 0:
+        return None
+    return -int(return_code)
+
+
+def _process_group_id(proc: subprocess.Popen) -> int | None:
+    try:
+        return os.getpgid(proc.pid)
+    except Exception:
+        return None
+
+
+def _append_optional_stage(stage_log: Path | None, status_path: Path | None, stage: str, **payload) -> None:
+    if stage_log is not None and status_path is not None:
+        _append_stage(stage_log, status_path, stage, **payload)
+
+
+def _terminate_process_group(
+    proc: subprocess.Popen,
+    *,
+    stage_log: Path | None,
+    status_path: Path | None,
+    reason: str,
+    termination_grace_sec: float,
+) -> dict[str, Any]:
+    pgid = _process_group_id(proc)
+    payload = {"reason": reason, "child_pid": proc.pid, "process_group_id": pgid}
+    _append_optional_stage(stage_log, status_path, "process_group_termination_started", **payload)
+
+    sent_sigterm = False
+    sent_sigkill = False
+    wait_error: str | None = None
+    try:
+        if proc.poll() is None:
+            try:
+                if pgid is not None and pgid != os.getpgrp():
+                    os.killpg(pgid, signal.SIGTERM)
+                else:
+                    proc.terminate()
+                sent_sigterm = True
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=max(0.1, float(termination_grace_sec)))
+            except subprocess.TimeoutExpired:
+                try:
+                    if pgid is not None and pgid != os.getpgrp():
+                        os.killpg(pgid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                    sent_sigkill = True
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=max(0.1, float(termination_grace_sec)))
+        else:
+            proc.wait(timeout=0)
+    except Exception as exc:
+        wait_error = str(exc)
+
+    raw_return_code = proc.returncode
+    result = {
+        **payload,
+        "sent_sigterm": sent_sigterm,
+        "sent_sigkill": sent_sigkill,
+        "raw_child_return_code": raw_return_code,
+        "termination_signal": _termination_signal(raw_return_code),
+        "wait_error": wait_error,
+    }
+    _append_optional_stage(stage_log, status_path, "process_group_terminated", **result)
+    return result
+
+
+def _run_streaming_subprocess(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    cwd: Path | None,
+    stdout_log: Path,
+    stderr_log: Path,
+    metadata: dict,
+    stage_log: Path | None = None,
+    status_path: Path | None = None,
+    combined_dir: Path | None = None,
+    input_image: Path | None = None,
+    dataset_json: Path | None = None,
+    requested_organs: list[str] | None = None,
+    combined_output_stable_sec: float = 30.0,
+    post_export_shutdown_grace_sec: float | None = 300.0,
+    process_termination_grace_sec: float = 30.0,
+    poll_interval_sec: float = 5.0,
+    prediction_timeout_sec: float | None = None,
+) -> dict:
+    """Run a subprocess while streaming logs and optionally recovering from nnUNet post-export hangs."""
     command_text = shlex.join([str(part) for part in cmd])
     run_meta = {**metadata, "command": [str(part) for part in cmd], "command_text": command_text}
     _write_log_header(stdout_log, "stdout", run_meta)
     _write_log_header(stderr_log, "stderr", run_meta)
+    proc: subprocess.Popen[str] | None = None
     proc = subprocess.Popen(
         [str(part) for part in cmd],
         stdout=subprocess.PIPE,
@@ -128,7 +444,10 @@ def _run_streaming_subprocess(cmd: list[str], *, env: dict[str, str], cwd: Path 
         bufsize=1,
         env=env,
         cwd=str(cwd) if cwd else None,
+        start_new_session=True,
     )
+    child_pid = proc.pid
+    process_group_id = _process_group_id(proc)
     threads: list[threading.Thread] = []
     assert proc.stdout is not None
     assert proc.stderr is not None
@@ -136,13 +455,231 @@ def _run_streaming_subprocess(cmd: list[str], *, env: dict[str, str], cwd: Path 
         thread = threading.Thread(target=_stream_pipe_to_log, args=(pipe, path), daemon=True)
         thread.start()
         threads.append(thread)
-    return_code = proc.wait()
-    for thread in threads:
-        thread.join(timeout=5)
+
+    start_monotonic = time.monotonic()
+    observed_stats: dict[Path, tuple[int, int, float]] = {}
+    validation_cache: dict[tuple[str, int, int], dict[str, Any]] = {}
+    detected_paths: set[Path] = set()
+    combined_validation: dict[str, Any] = {}
+    combined_valid = False
+    combined_path: Path | None = None
+    valid_output_at: float | None = None
+    forced_cleanup = False
+    forced_cleanup_reason: str | None = None
+    timeout_cleanup = False
+    cleanup_result: dict[str, Any] = {}
+    return_code: int | None = None
+    raw_child_return_code: int | None = None
+    effective_status = "subprocess_running"
+
+    try:
+        while True:
+            now = time.monotonic()
+            polled_return_code = proc.poll()
+
+            if (
+                polled_return_code is None
+                and combined_dir is not None
+                and input_image is not None
+                and dataset_json is not None
+                and not combined_valid
+            ):
+                for candidate in sorted(combined_dir.glob("*.nii.gz")):
+                    try:
+                        stat = candidate.stat()
+                    except Exception:
+                        continue
+                    if stat.st_size <= 0:
+                        continue
+                    if candidate not in detected_paths:
+                        detected_paths.add(candidate)
+                        _append_optional_stage(
+                            stage_log,
+                            status_path,
+                            "combined_output_detected",
+                            combined_label=str(candidate),
+                            size_bytes=int(stat.st_size),
+                            mtime_ns=int(stat.st_mtime_ns),
+                        )
+                    previous = observed_stats.get(candidate)
+                    if previous and previous[0] == stat.st_size and previous[1] == stat.st_mtime_ns:
+                        stable_since = previous[2]
+                    else:
+                        stable_since = now
+                        observed_stats[candidate] = (int(stat.st_size), int(stat.st_mtime_ns), stable_since)
+                    stable_for = now - stable_since
+                    if stable_for < max(0.0, float(combined_output_stable_sec)):
+                        continue
+                    cache_key = (str(candidate), int(stat.st_size), int(stat.st_mtime_ns))
+                    validation = validation_cache.get(cache_key)
+                    if validation is None:
+                        validation = _validate_combined_output(candidate, input_image, dataset_json, requested_organs)
+                        validation["stable_for_sec"] = round(stable_for, 3)
+                        validation["stable_size_bytes"] = int(stat.st_size)
+                        validation["stable_mtime_ns"] = int(stat.st_mtime_ns)
+                        validation_cache[cache_key] = validation
+                    combined_validation = validation
+                    combined_path = candidate
+                    if validation.get("valid"):
+                        combined_valid = True
+                        valid_output_at = now
+                        _append_optional_stage(
+                            stage_log,
+                            status_path,
+                            "combined_output_validated",
+                            combined_label=str(candidate),
+                            combined_output_validation=validation,
+                        )
+                        break
+
+            if polled_return_code is not None:
+                raw_child_return_code = int(polled_return_code)
+                return_code = raw_child_return_code
+                effective_status = "completed" if return_code == 0 else "failed"
+                break
+
+            if (
+                combined_valid
+                and valid_output_at is not None
+                and post_export_shutdown_grace_sec is not None
+                and now - valid_output_at >= max(0.0, float(post_export_shutdown_grace_sec))
+            ):
+                forced_cleanup = True
+                forced_cleanup_reason = "post_prediction_process_shutdown_hang"
+                _append_optional_stage(
+                    stage_log,
+                    status_path,
+                    "post_prediction_process_shutdown_hang",
+                    combined_label=str(combined_path) if combined_path else None,
+                )
+                _append_optional_stage(
+                    stage_log,
+                    status_path,
+                    "post_export_shutdown_hang_detected",
+                    reason=forced_cleanup_reason,
+                    combined_label=str(combined_path) if combined_path else None,
+                    grace_sec=float(post_export_shutdown_grace_sec),
+                )
+                cleanup_result = _terminate_process_group(
+                    proc,
+                    stage_log=stage_log,
+                    status_path=status_path,
+                    reason=forced_cleanup_reason,
+                    termination_grace_sec=process_termination_grace_sec,
+                )
+                raw_child_return_code = proc.returncode
+                return_code = 0
+                effective_status = "valid_output_completed_after_forced_process_cleanup"
+                break
+
+            if prediction_timeout_sec is not None and now - start_monotonic >= float(prediction_timeout_sec):
+                timeout_cleanup = True
+                forced_cleanup_reason = "prediction_timeout"
+                cleanup_result = _terminate_process_group(
+                    proc,
+                    stage_log=stage_log,
+                    status_path=status_path,
+                    reason=forced_cleanup_reason,
+                    termination_grace_sec=process_termination_grace_sec,
+                )
+                raw_child_return_code = proc.returncode
+                return_code = 124
+                effective_status = "timed_out"
+                break
+
+            time.sleep(max(0.05, float(poll_interval_sec)))
+
+        if (
+            combined_dir is not None
+            and input_image is not None
+            and dataset_json is not None
+            and return_code == 0
+            and not combined_validation
+        ):
+            combined_path, combined_validation = _validate_first_combined_output(
+                combined_dir,
+                input_image,
+                dataset_json,
+                requested_organs,
+            )
+            if combined_path is not None and combined_path not in detected_paths and combined_path.exists():
+                try:
+                    stat = combined_path.stat()
+                    _append_optional_stage(
+                        stage_log,
+                        status_path,
+                        "combined_output_detected",
+                        combined_label=str(combined_path),
+                        size_bytes=int(stat.st_size),
+                        mtime_ns=int(stat.st_mtime_ns),
+                    )
+                except Exception:
+                    _append_optional_stage(stage_log, status_path, "combined_output_detected", combined_label=str(combined_path))
+            if combined_validation.get("valid"):
+                combined_valid = True
+                _append_optional_stage(
+                    stage_log,
+                    status_path,
+                    "combined_output_validated",
+                    combined_label=str(combined_path) if combined_path else None,
+                    combined_output_validation=combined_validation,
+                )
+    finally:
+        if proc is not None and proc.poll() is None:
+            cleanup_result = _terminate_process_group(
+                proc,
+                stage_log=stage_log,
+                status_path=status_path,
+                reason="wrapper_cleanup_finally",
+                termination_grace_sec=process_termination_grace_sec,
+            )
+            raw_child_return_code = proc.returncode
+            return_code = return_code if return_code is not None else 124
+            effective_status = effective_status if effective_status != "subprocess_running" else "aborted_during_cleanup"
+        for pipe in (proc.stdout, proc.stderr) if proc is not None else ():
+            try:
+                if pipe is not None:
+                    pipe.close()
+            except Exception:
+                pass
+        for thread in threads:
+            thread.join(timeout=5)
+
+    assert return_code is not None
+    if raw_child_return_code is None:
+        raw_child_return_code = proc.returncode if proc is not None else return_code
     end_time = _utc_now()
-    _append_log_footer(stdout_log, end_time=end_time, return_code=return_code)
-    _append_log_footer(stderr_log, end_time=end_time, return_code=return_code)
-    return {"return_code": return_code, "child_pid": proc.pid, "end_time": end_time, "command_text": command_text}
+    _append_log_footer(
+        stdout_log,
+        end_time=end_time,
+        return_code=return_code,
+        raw_child_return_code=raw_child_return_code,
+        effective_inference_status=effective_status,
+    )
+    _append_log_footer(
+        stderr_log,
+        end_time=end_time,
+        return_code=return_code,
+        raw_child_return_code=raw_child_return_code,
+        effective_inference_status=effective_status,
+    )
+    return {
+        "return_code": return_code,
+        "raw_child_return_code": raw_child_return_code,
+        "termination_signal": _termination_signal(raw_child_return_code),
+        "child_pid": child_pid,
+        "process_group_id": process_group_id,
+        "end_time": end_time,
+        "command_text": command_text,
+        "effective_inference_status": effective_status,
+        "forced_process_cleanup": forced_cleanup,
+        "forced_cleanup_reason": forced_cleanup_reason,
+        "timed_out": timeout_cleanup,
+        "combined_output_valid": bool(combined_valid),
+        "combined_output_validation": combined_validation,
+        "combined_label": str(combined_path) if combined_path else None,
+        "cleanup": cleanup_result,
+    }
 
 
 def _start_gpu_monitor(path: Path, *, interval_sec: float, enabled: bool) -> tuple[threading.Event | None, threading.Thread | None]:
@@ -297,6 +834,62 @@ def split_labelmap(label_map: Path, dataset_json: Path, seg_dir: Path, requested
     return {"num_written": len(written), "written_masks": written, "labels_available": labels}
 
 
+def validate_target_masks(seg_dir: Path, image: Path, expected_organs: list[str]) -> dict[str, Any]:
+    try:
+        import nibabel as nib
+        import numpy as np
+    except Exception as exc:
+        return {"valid": False, "reason": f"nibabel_numpy_unavailable: {exc}", "masks": []}
+
+    input_img = nib.load(str(image))
+    input_shape = tuple(int(v) for v in input_img.shape[:3])
+    input_spacing = tuple(float(v) for v in input_img.header.get_zooms()[:3])
+    rows: list[dict[str, Any]] = []
+    for organ in expected_organs:
+        mask_path = seg_dir / f"{organ}.nii.gz"
+        row: dict[str, Any] = {"organ": organ, "path": str(mask_path), "exists": mask_path.exists()}
+        if not mask_path.exists():
+            row["valid"] = False
+            row["reason"] = "target_mask_missing"
+            rows.append(row)
+            continue
+        try:
+            mask_img = nib.load(str(mask_path))
+            arr = np.asanyarray(mask_img.dataobj)
+            unique_values = sorted({int(v) for v in np.unique(arr)})
+            nonzero = int((arr != 0).sum())
+            shape = tuple(int(v) for v in mask_img.shape[:3])
+            spacing = tuple(float(v) for v in mask_img.header.get_zooms()[:3])
+            row.update({
+                "shape": list(shape),
+                "input_shape": list(input_shape),
+                "spacing": list(spacing),
+                "input_spacing": list(input_spacing),
+                "labels": unique_values,
+                "nonzero": nonzero,
+                "binary": set(unique_values).issubset({0, 1}),
+                "shape_matches_input": shape == input_shape,
+                "spacing_matches_input": bool(np.allclose(spacing, input_spacing, rtol=0, atol=1e-5)),
+                "affine_matches_input": bool(np.allclose(mask_img.affine, input_img.affine, rtol=0, atol=1e-5)),
+            })
+            row["valid"] = bool(
+                row["binary"]
+                and nonzero > 0
+                and row["shape_matches_input"]
+                and row["spacing_matches_input"]
+                and row["affine_matches_input"]
+            )
+        except Exception as exc:
+            row["valid"] = False
+            row["reason"] = f"target_mask_load_failed: {exc}"
+        rows.append(row)
+    return {
+        "valid": all(bool(row.get("valid")) for row in rows) if rows else True,
+        "expected_organs": expected_organs,
+        "masks": rows,
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--image", required=True, help="Input CT .nii.gz")
@@ -327,6 +920,11 @@ def main() -> int:
     ap.add_argument("--export-workers", type=int, default=None, help="Optional nnUNet segmentation export worker count; diagnostic mode defaults this to 1.")
     ap.add_argument("--gpu-monitor", action="store_true", help="Diagnostic only: sample nvidia-smi to gpu_monitor.csv while prediction runs.")
     ap.add_argument("--gpu-monitor-interval-sec", type=float, default=60.0)
+    ap.add_argument("--combined-output-stable-sec", type=float, default=_env_float("MEDAI_NNUNET_COMBINED_OUTPUT_STABLE_SEC", 30.0), help="Seconds a combined nnUNet output must keep the same size/mtime before post-export hang recovery can use it.")
+    ap.add_argument("--post-export-shutdown-grace-sec", type=float, default=_env_float("MEDAI_NNUNET_POST_EXPORT_SHUTDOWN_GRACE_SEC", 300.0), help="Seconds to wait after a valid combined output before treating a still-running predictor as a post-export shutdown hang.")
+    ap.add_argument("--process-termination-grace-sec", type=float, default=_env_float("MEDAI_NNUNET_PROCESS_TERMINATION_GRACE_SEC", 30.0), help="Seconds to wait after SIGTERM before SIGKILL during predictor process-group cleanup.")
+    ap.add_argument("--post-export-poll-interval-sec", type=float, default=_env_float("MEDAI_NNUNET_POST_EXPORT_POLL_INTERVAL_SEC", 5.0), help="Polling interval for combined-output completion and child process state.")
+    ap.add_argument("--prediction-timeout-sec", type=float, default=_env_float("MEDAI_NNUNET_PREDICTION_TIMEOUT_SEC", None), help="Optional internal predictor timeout. On timeout the predictor process group is cleaned up and the wrapper fails with code 124.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -470,6 +1068,30 @@ def main() -> int:
         proc_end_time: str
         proc_end_time = ""
         proc_return_code = 1
+        proc_info: dict[str, Any] = {
+            "return_code": 1,
+            "raw_child_return_code": None,
+            "termination_signal": None,
+            "effective_inference_status": "not_started",
+            "forced_process_cleanup": False,
+            "forced_cleanup_reason": None,
+            "combined_output_valid": False,
+            "combined_output_validation": {},
+            "combined_label": None,
+        }
+        subprocess_monitor_kwargs = {
+            "stage_log": stage_log,
+            "status_path": status_path,
+            "combined_dir": combined_dir,
+            "input_image": image,
+            "dataset_json": dataset_json,
+            "requested_organs": requested_organs,
+            "combined_output_stable_sec": float(args.combined_output_stable_sec),
+            "post_export_shutdown_grace_sec": args.post_export_shutdown_grace_sec,
+            "process_termination_grace_sec": float(args.process_termination_grace_sec),
+            "poll_interval_sec": float(args.post_export_poll_interval_sec),
+            "prediction_timeout_sec": args.prediction_timeout_sec,
+        }
         if model_folder:
             input_csv = output / "epai_input.csv"
             output_csv = output / "epai_output.csv"
@@ -502,6 +1124,7 @@ def main() -> int:
                 stdout_log=stdout_log,
                 stderr_log=stderr_log,
                 metadata=metadata_doc,
+                **subprocess_monitor_kwargs,
             )
             proc_return_code = int(proc_info["return_code"])
             proc_end_time = str(proc_info["end_time"])
@@ -568,6 +1191,14 @@ def main() -> int:
                         print(_tb.format_exc(), file=sys.stderr, flush=True)
                         proc_return_code = 1
             proc_end_time = _utc_now()
+            proc_info = {
+                **proc_info,
+                "return_code": proc_return_code,
+                "raw_child_return_code": proc_return_code,
+                "termination_signal": None,
+                "end_time": proc_end_time,
+                "effective_inference_status": "completed" if proc_return_code == 0 else "failed",
+            }
             _append_log_footer(stdout_log, end_time=proc_end_time, return_code=proc_return_code)
             _append_log_footer(stderr_log, end_time=proc_end_time, return_code=proc_return_code)
         else:
@@ -599,24 +1230,50 @@ def main() -> int:
                 stdout_log=stdout_log,
                 stderr_log=stderr_log,
                 metadata=metadata_doc,
+                **subprocess_monitor_kwargs,
             )
             proc_return_code = int(proc_info["return_code"])
             proc_end_time = str(proc_info["end_time"])
         _stop_gpu_monitor(gpu_stop, gpu_thread)
 
-        _append_stage(stage_log, status_path, "prediction_completed", return_code=proc_return_code, end_time=proc_end_time)
-        metadata_doc.update({"status": "prediction_completed", "end_time": proc_end_time, "return_code": proc_return_code})
+        raw_child_return_code = proc_info.get("raw_child_return_code")
+        if raw_child_return_code is None:
+            raw_child_return_code = proc_return_code
+        prediction_status_fields = {
+            "raw_child_return_code": raw_child_return_code,
+            "termination_signal": proc_info.get("termination_signal"),
+            "effective_inference_status": proc_info.get("effective_inference_status"),
+            "forced_process_cleanup": bool(proc_info.get("forced_process_cleanup")),
+            "forced_cleanup_reason": proc_info.get("forced_cleanup_reason"),
+            "combined_output_valid": bool(proc_info.get("combined_output_valid")),
+            "combined_output_validation": proc_info.get("combined_output_validation") or {},
+        }
+        _append_stage(
+            stage_log,
+            status_path,
+            "predictor_completed",
+            return_code=proc_return_code,
+            end_time=proc_end_time,
+            **prediction_status_fields,
+        )
+        metadata_doc.update({
+            "status": "predictor_completed",
+            "end_time": proc_end_time,
+            "return_code": proc_return_code,
+            **prediction_status_fields,
+        })
         _write_json(metadata_path, metadata_doc)
         if proc_return_code != 0:
             failure = {
                 "status": "failed",
                 "return_code": proc_return_code,
+                **prediction_status_fields,
                 "stdout_log": str(stdout_log),
                 "stderr_log": str(stderr_log),
                 "stderr_tail": _tail_file(stderr_log),
                 "stage_log": str(stage_log),
                 "run_metadata": str(metadata_path),
-                "last_stage": "prediction_completed",
+                "last_stage": "predictor_completed",
                 "retained_workdir": retained_workdir,
             }
             _write_json(per_model_dir / "inference_summary.json", failure)
@@ -624,6 +1281,61 @@ def main() -> int:
                 _write_json(output / "inference_summary.json", failure)
             print(json.dumps(failure, indent=2))
             return proc_return_code
+
+        combined_validation_path: Path | None = Path(str(proc_info["combined_label"])) if proc_info.get("combined_label") else None
+        combined_output_validation = prediction_status_fields["combined_output_validation"]
+        if not _combined_output_split_safe(combined_output_validation):
+            combined_validation_path, combined_output_validation = _validate_first_combined_output(
+                combined_dir,
+                image,
+                dataset_json,
+                requested_organs,
+            )
+            prediction_status_fields["combined_output_validation"] = combined_output_validation
+            prediction_status_fields["combined_output_valid"] = bool(combined_output_validation.get("valid"))
+            if combined_validation_path is not None:
+                proc_info["combined_label"] = str(combined_validation_path)
+                try:
+                    stat = combined_validation_path.stat()
+                    _append_stage(
+                        stage_log,
+                        status_path,
+                        "combined_output_detected",
+                        combined_label=str(combined_validation_path),
+                        size_bytes=int(stat.st_size),
+                        mtime_ns=int(stat.st_mtime_ns),
+                    )
+                except Exception:
+                    _append_stage(stage_log, status_path, "combined_output_detected", combined_label=str(combined_validation_path))
+                if combined_output_validation.get("valid"):
+                    _append_stage(
+                        stage_log,
+                        status_path,
+                        "combined_output_validated",
+                        combined_label=str(combined_validation_path),
+                        combined_output_validation=combined_output_validation,
+                    )
+            metadata_doc.update(prediction_status_fields)
+            _write_json(metadata_path, metadata_doc)
+        if not _combined_output_split_safe(combined_output_validation):
+            failure = {
+                "status": "failed",
+                "return_code": 2,
+                "reason": "combined_output_invalid",
+                "combined_dir": str(combined_dir),
+                **prediction_status_fields,
+                "stdout_log": str(stdout_log),
+                "stderr_log": str(stderr_log),
+                "stage_log": str(stage_log),
+                "run_metadata": str(metadata_path),
+                "last_stage": "predictor_completed",
+                "retained_workdir": retained_workdir,
+            }
+            _write_json(per_model_dir / "inference_summary.json", failure)
+            if per_model_dir != output:
+                _write_json(output / "inference_summary.json", failure)
+            print(json.dumps(failure, indent=2))
+            return 2
 
         _append_stage(stage_log, status_path, "split_started", combined_output_dir=str(combined_dir), per_model_output_dir=str(per_model_dir))
         candidates = sorted(combined_dir.glob("*.nii.gz"))
@@ -633,6 +1345,7 @@ def main() -> int:
                 "return_code": 2,
                 "reason": "nnUNet produced no combined label map",
                 "combined_dir": str(combined_dir),
+                **prediction_status_fields,
                 "stdout_log": str(stdout_log),
                 "stderr_log": str(stderr_log),
                 "stage_log": str(stage_log),
@@ -648,7 +1361,7 @@ def main() -> int:
 
         # Python API outputs a combined label map named after the case (e.g. PanTS_00000002.nii.gz)
         # Standard subprocess outputs a combined label map too. Either way, take the first .nii.gz.
-        combined = candidates[0]
+        combined = combined_validation_path if combined_validation_path in candidates else candidates[0]
         combined_out = per_model_dir / "combined_labels.nii.gz"
         shutil.copy2(combined, combined_out)
         # Also keep a copy at --output for backward compatibility when per-model-dir
@@ -669,6 +1382,20 @@ def main() -> int:
             for mask_path in per_model_seg_dir.glob("*.nii.gz"):
                 shutil.copy2(mask_path, seg_dir / mask_path.name)
         _append_stage(stage_log, status_path, "split_completed", combined_label=str(combined_out), num_written=split.get("num_written"))
+        expected_mask_organs = requested_organs or [str(item.get("organ")) for item in split.get("written_masks", []) if item.get("organ")]
+        target_mask_validation = validate_target_masks(per_model_seg_dir, image, expected_mask_organs)
+        validation_status_fields = {
+            **prediction_status_fields,
+            "target_mask_validation": target_mask_validation,
+        }
+        _append_stage(
+            stage_log,
+            status_path,
+            "validation_completed",
+            combined_label=str(combined_out),
+            segmentation_output=str(per_model_seg_dir),
+            **validation_status_fields,
+        )
         summary = {
             "status": "success", "case_id": case_id,
             "combined_label": str(combined_out),
@@ -683,18 +1410,23 @@ def main() -> int:
             "gpu_monitor_csv": str(gpu_monitor_path) if gpu_monitor_path.exists() else None,
             "workdir": str(tmp),
             "retained_workdir": retained_workdir,
-            "last_stage": "split_completed",
+            "last_stage": "validation_completed",
             "return_code": 0,
+            **validation_status_fields,
             **split,
         }
         (per_model_dir / "inference_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         if per_model_dir != output:
             (output / "inference_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        metadata_doc.update({"status": "success", "last_stage": "split_completed", "return_code": 0})
+        metadata_doc.update({"status": "success", "last_stage": "validation_completed", "return_code": 0, **validation_status_fields})
         _write_json(metadata_path, metadata_doc)
         print(json.dumps(summary, indent=2))
         return 0
     finally:
+        try:
+            _stop_gpu_monitor(locals().get("gpu_stop"), locals().get("gpu_thread"))
+        except Exception:
+            pass
         if tmp_holder is not None:
             tmp_holder.cleanup()
 

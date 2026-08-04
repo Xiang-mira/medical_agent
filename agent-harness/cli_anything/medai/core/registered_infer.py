@@ -79,6 +79,18 @@ def _maybe_enable_nnunet_diagnostics(command: str) -> str:
     return command
 
 
+def _maybe_set_nnunet_prediction_timeout(command: str, timeout_sec: int) -> str:
+    if "nnunetv2_predict_and_split.py" not in command or "--prediction-timeout-sec" in command:
+        return command
+    explicit = os.getenv("MEDAI_NNUNET_PREDICTION_TIMEOUT_SEC")
+    if explicit and explicit.strip():
+        internal_timeout = explicit.strip()
+    else:
+        buffer_sec = int(os.getenv("MEDAI_NNUNET_TIMEOUT_BUFFER_SEC", "60") or "60")
+        internal_timeout = str(max(1, int(timeout_sec) - max(0, buffer_sec)))
+    return f"{command} --prediction-timeout-sec {internal_timeout}"
+
+
 def _start_gpu_monitor(path: Path, *, enabled: bool, interval_sec: float = 60.0) -> tuple[threading.Event | None, threading.Thread | None]:
     if not enabled:
         return None, None
@@ -734,6 +746,7 @@ def run_registered_model(
     if any(s in command for s in _PREDICT_SCRIPTS) and "--per-model-dir" not in command:
         command += f" --per-model-dir {_q(per_model_dir)}"
     command = _maybe_enable_nnunet_diagnostics(command)
+    command = _maybe_set_nnunet_prediction_timeout(command, timeout_sec)
 
     if dry_run:
         expected_organs = _expected_output_organs(entry, extra_context)
@@ -808,6 +821,20 @@ def run_registered_model(
         status = "success"
         failure_reason = None
     nnunet_status = _read_nnunet_status(case_out, per_model_dir)
+    nnunet_audit_fields = {
+        key: nnunet_status.get(key)
+        for key in (
+            "raw_child_return_code",
+            "effective_inference_status",
+            "forced_process_cleanup",
+            "forced_cleanup_reason",
+            "combined_output_valid",
+            "combined_output_validation",
+            "target_mask_validation",
+            "termination_signal",
+        )
+        if key in nnunet_status
+    }
     result = {
         "stage": "infer", "backend": "registered", "model_key": model_key,
         "model_name": entry.get("name", model_key), "status": status,
@@ -830,6 +857,7 @@ def run_registered_model(
         "stdout_tail": completed.get("stdout_tail") or "",
         "stderr_tail": completed.get("stderr_tail") or "",
         "private_checkpoint": entry.get("private_checkpoint"),
+        **nnunet_audit_fields,
     }
     _write_run_meta(per_model_dir, model_key, recipe, result)
     _write_inference_summary(case_out, result, seg_out)
