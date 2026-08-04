@@ -76,6 +76,20 @@ def parse_organ_option(organs: str, target_config: str = "configs/student_3d_pro
     return [x.strip() for x in token.replace(";", ",").split(",") if x.strip()]
 
 
+def strict_delivery_exit_code(result: dict[str, Any], *, strict_delivery_targets: bool) -> int:
+    if not strict_delivery_targets:
+        return 0
+    if int(result.get("strict_delivery_failure_count") or 0) > 0:
+        return 2
+    for row in result.get("strict_delivery_failures") or []:
+        if str(row.get("status") or "").lower() in {"failed", "missing", "error"}:
+            return 2
+    for row in result.get("inference_results") or []:
+        if row.get("missing_expected_outputs"):
+            return 2
+    return 0
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--json", "use_json", is_flag=True, default=False, help="Output machine-readable JSON. This CLI always emits JSON for agent compatibility.")
 def cli(use_json: bool):
@@ -830,7 +844,11 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
             handle.write(json.dumps(to_jsonable(result), indent=2, ensure_ascii=False) + "\n")
         emit(result)
     else:
-        emit(_run())
+        result = _run()
+        emit(result)
+    exit_code = strict_delivery_exit_code(result, strict_delivery_targets=strict_delivery_targets)
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 @cli.command("mstep-train")

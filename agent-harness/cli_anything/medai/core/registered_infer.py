@@ -3,16 +3,16 @@ from __future__ import annotations
 import datetime
 import json
 import os
-import shlex
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from .backend_capabilities import profile_runtime_policy
 from .model_registry import get_model_entry, load_registry
-from .subprocess_utils import subprocess_text
 from .totalseg_runner import run_totalseg_with_contract, run_totalsegmentator
 from .voxtell_official_predictor import OfficialVoxTellPretrainedAdapter
 
@@ -36,6 +36,216 @@ _LICENSED_TOTALSEG_TASKS: frozenset[str] = frozenset({
     "coronary_arteries", "coronary_arteries_LEGACY", "aortic_sinuses",
     "vertebrae_body",
 })
+
+
+def _truthy_env(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _tail_file(path: Path, limit: int = 4000) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - limit))
+            return handle.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _utc_now() -> str:
+    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def _append_flag(command: str, flag: str) -> str:
+    if flag in command.split():
+        return command
+    return f"{command} {flag}"
+
+
+def _maybe_enable_nnunet_diagnostics(command: str) -> str:
+    if not any(script in command for script in _PREDICT_SCRIPTS):
+        return command
+    if _truthy_env("MEDAI_NNUNET_DIAGNOSTIC"):
+        command = _append_flag(command, "--diagnostic")
+        command = _append_flag(command, "--keep-workdir")
+    if _truthy_env("MEDAI_NNUNET_KEEP_WORKDIR"):
+        command = _append_flag(command, "--keep-workdir")
+    if _truthy_env("MEDAI_NNUNET_GPU_MONITOR"):
+        command = _append_flag(command, "--gpu-monitor")
+    workdir_root = os.getenv("MEDAI_NNUNET_WORKDIR_ROOT")
+    if workdir_root and "--workdir-root" not in command:
+        command += f" --workdir-root {_q(workdir_root)}"
+    return command
+
+
+def _start_gpu_monitor(path: Path, *, enabled: bool, interval_sec: float = 60.0) -> tuple[threading.Event | None, threading.Thread | None]:
+    if not enabled:
+        return None, None
+    stop_event = threading.Event()
+
+    def monitor() -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text(
+                "timestamp,index,name,utilization_gpu_percent,memory_used_mib,memory_total_mib\n",
+                encoding="utf-8",
+            )
+        while not stop_event.is_set():
+            timestamp = _utc_now()
+            try:
+                proc = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=index,name,utilization.gpu,memory.used,memory.total",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                    timeout=20,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    with path.open("a", encoding="utf-8", buffering=1) as handle:
+                        for line in proc.stdout.strip().splitlines():
+                            handle.write(f"{timestamp},{line}\n")
+                            handle.flush()
+            except Exception:
+                pass
+            stop_event.wait(max(1.0, interval_sec))
+
+    thread = threading.Thread(target=monitor, name="medai-registered-gpu-monitor", daemon=True)
+    thread.start()
+    return stop_event, thread
+
+
+def _stop_gpu_monitor(stop_event: threading.Event | None, thread: threading.Thread | None) -> None:
+    if stop_event is None:
+        return
+    stop_event.set()
+    if thread is not None:
+        thread.join(timeout=5)
+
+
+def _write_registered_log_header(path: Path, *, stream_name: str, command: str, timeout_sec: int, env: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"[registered_infer] stream={stream_name}",
+        f"[registered_infer] start_time={_utc_now()}",
+        f"[registered_infer] timeout_sec={timeout_sec}",
+        f"[registered_infer] command={command}",
+        f"[registered_infer] CUDA_VISIBLE_DEVICES={env.get('CUDA_VISIBLE_DEVICES')}",
+        f"[registered_infer] python={env.get('MEDAI_PYTHON') or env.get('PYTHON') or sys.executable}",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _append_registered_log_footer(path: Path, *, return_code: int, timed_out: bool, child_pid: int | None, process_group_id: int | None) -> None:
+    with path.open("a", encoding="utf-8", buffering=1) as handle:
+        handle.write(f"\n[registered_infer] end_time={_utc_now()}\n")
+        handle.write(f"[registered_infer] return_code={return_code}\n")
+        handle.write(f"[registered_infer] timed_out={timed_out}\n")
+        handle.write(f"[registered_infer] child_pid={child_pid}\n")
+        handle.write(f"[registered_infer] process_group_id={process_group_id}\n")
+        handle.flush()
+
+
+def _run_shell_command_streaming(
+    command: str,
+    *,
+    env: dict[str, str],
+    timeout_sec: int,
+    stdout_log: Path,
+    stderr_log: Path,
+    kill_grace_sec: float = 30.0,
+) -> dict[str, Any]:
+    _write_registered_log_header(stdout_log, stream_name="stdout", command=command, timeout_sec=timeout_sec, env=env)
+    _write_registered_log_header(stderr_log, stream_name="stderr", command=command, timeout_sec=timeout_sec, env=env)
+    child_pid: int | None = None
+    process_group_id: int | None = None
+    timed_out = False
+    killed = False
+    return_code: int | None = None
+    with stdout_log.open("a", encoding="utf-8", buffering=1) as stdout_handle, stderr_log.open("a", encoding="utf-8", buffering=1) as stderr_handle:
+        proc = subprocess.Popen(
+            command,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            text=True,
+            shell=True,
+            env=env,
+            start_new_session=True,
+        )
+        child_pid = proc.pid
+        try:
+            process_group_id = os.getpgid(proc.pid)
+        except Exception:
+            process_group_id = None
+        try:
+            return_code = proc.wait(timeout=timeout_sec)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            stderr_handle.write(f"\n[registered_infer] Timeout after {timeout_sec}s. Sending SIGTERM to process group {process_group_id}.\n")
+            stderr_handle.flush()
+            try:
+                if process_group_id is not None:
+                    os.killpg(process_group_id, signal.SIGTERM)
+                else:
+                    proc.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=kill_grace_sec)
+            except subprocess.TimeoutExpired:
+                killed = True
+                stderr_handle.write(f"[registered_infer] Process group still alive after {kill_grace_sec}s. Sending SIGKILL.\n")
+                stderr_handle.flush()
+                try:
+                    if process_group_id is not None:
+                        os.killpg(process_group_id, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.wait(timeout=kill_grace_sec)
+                except subprocess.TimeoutExpired:
+                    pass
+            return_code = 124
+    assert return_code is not None
+    _append_registered_log_footer(stdout_log, return_code=return_code, timed_out=timed_out, child_pid=child_pid, process_group_id=process_group_id)
+    _append_registered_log_footer(stderr_log, return_code=return_code, timed_out=timed_out, child_pid=child_pid, process_group_id=process_group_id)
+    return {
+        "return_code": return_code,
+        "timed_out": timed_out,
+        "child_pid": child_pid,
+        "process_group_id": process_group_id,
+        "killed_after_grace": killed,
+        "stdout_log": str(stdout_log),
+        "stderr_log": str(stderr_log),
+        "stdout_tail": _tail_file(stdout_log),
+        "stderr_tail": _tail_file(stderr_log),
+    }
+
+
+def _read_nnunet_status(case_out: Path, per_model_dir: Path) -> dict[str, Any]:
+    for path in (
+        case_out / "nnunet_status.json",
+        per_model_dir / "nnunet_status.json",
+        case_out / "nnunet_run_metadata.json",
+        per_model_dir / "nnunet_run_metadata.json",
+    ):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
 
 
 def _q(path: str | Path) -> str:
@@ -523,6 +733,7 @@ def run_registered_model(
     # don't reference {per_model_dir} explicitly (keeps registry templates compact).
     if any(s in command for s in _PREDICT_SCRIPTS) and "--per-model-dir" not in command:
         command += f" --per-model-dir {_q(per_model_dir)}"
+    command = _maybe_enable_nnunet_diagnostics(command)
 
     if dry_run:
         expected_organs = _expected_output_organs(entry, extra_context)
@@ -558,24 +769,33 @@ def run_registered_model(
     if isinstance(env_overrides, dict):
         for key, value in env_overrides.items():
             env[str(key)] = str(value)
+    stdout_log = case_out / "registered_stdout.log"
+    stderr_log = case_out / "registered_stderr.log"
+    gpu_monitor_csv = case_out / "gpu_monitor.csv"
+    gpu_stop, gpu_thread = _start_gpu_monitor(
+        gpu_monitor_csv,
+        enabled=_truthy_env("MEDAI_GPU_MONITOR") or _truthy_env("MEDAI_REGISTERED_GPU_MONITOR"),
+        interval_sec=float(os.getenv("MEDAI_GPU_MONITOR_INTERVAL_SEC", "60") or "60"),
+    )
     try:
-        completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, shell=True, timeout=timeout_sec, env=env)
-        timed_out = False
-    except subprocess.TimeoutExpired as exc:
-        completed = subprocess.CompletedProcess(
-            shlex.split(command),
-            124,
-            stdout=subprocess_text(exc.stdout),
-            stderr=subprocess_text(exc.stderr) + f"\n[registered_infer] Timeout after {timeout_sec}s.",
+        completed = _run_shell_command_streaming(
+            command,
+            env=env,
+            timeout_sec=timeout_sec,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+            kill_grace_sec=float(os.getenv("MEDAI_TIMEOUT_KILL_GRACE_SEC", "30") or "30"),
         )
-        timed_out = True
+    finally:
+        _stop_gpu_monitor(gpu_stop, gpu_thread)
+    timed_out = bool(completed.get("timed_out"))
     elapsed = time.time() - start
     expected_organs = _expected_output_organs(entry, extra_context)
     output_classification = _classify_mask_outputs(seg_out, expected_organs)
     if timed_out:
         status = "timed_out"
         failure_reason = "registered_teacher_timed_out"
-    elif completed.returncode != 0:
+    elif int(completed.get("return_code", 1)) != 0:
         status = "failed"
         failure_reason = "registered_teacher_returned_nonzero"
     elif expected_organs and output_classification["missing_expected_outputs"]:
@@ -587,19 +807,28 @@ def run_registered_model(
     else:
         status = "success"
         failure_reason = None
+    nnunet_status = _read_nnunet_status(case_out, per_model_dir)
     result = {
         "stage": "infer", "backend": "registered", "model_key": model_key,
         "model_name": entry.get("name", model_key), "status": status,
         "case_id": case_id, "image": str(image), "segmentation_output": str(seg_out),
         "per_model_dir": str(per_model_dir),
-        "command": command, "registry_path": str(registry_file), "return_code": completed.returncode,
-        "timed_out": timed_out, "timeout_sec": timeout_sec, "runtime_sec": round(elapsed, 3),
+        "command": command, "registry_path": str(registry_file), "return_code": int(completed.get("return_code", 1)),
+        "timeout": timed_out, "timed_out": timed_out, "timeout_sec": timeout_sec, "runtime_sec": round(elapsed, 3),
         **output_classification,
         "failure_reason": failure_reason,
         "resolved_python": str(python_executable),
         "resolved_predict_executable": str(predict_executable),
         "resolved_sitecustomize_path": str(sitecustomize_path) if sitecustomize_path else None,
-        "stdout_tail": (completed.stdout or "")[-4000:], "stderr_tail": (completed.stderr or "")[-4000:],
+        "child_pid": completed.get("child_pid"),
+        "process_group_id": completed.get("process_group_id"),
+        "stdout_log": completed.get("stdout_log"),
+        "stderr_log": completed.get("stderr_log"),
+        "gpu_monitor_csv": str(gpu_monitor_csv) if gpu_monitor_csv.exists() else None,
+        "last_stage": nnunet_status.get("last_stage") or nnunet_status.get("stage"),
+        "retained_workdir": nnunet_status.get("retained_workdir"),
+        "stdout_tail": completed.get("stdout_tail") or "",
+        "stderr_tail": completed.get("stderr_tail") or "",
         "private_checkpoint": entry.get("private_checkpoint"),
     }
     _write_run_meta(per_model_dir, model_key, recipe, result)

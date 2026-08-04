@@ -1,17 +1,278 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
+import shlex
 import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+from click.testing import CliRunner
 
 
 def _save(array: np.ndarray, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     nib.save(nib.Nifti1Image(array, np.eye(4)), str(path))
     return path
+
+
+def _load_nnunet_wrapper_module():
+    path = Path("scripts/nnunetv2_predict_and_split.py").resolve()
+    spec = importlib.util.spec_from_file_location("nnunetv2_predict_and_split_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _wait_for_text(path: Path, needle: str, timeout_sec: float = 3.0) -> bool:
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        if path.exists() and needle in path.read_text(encoding="utf-8", errors="replace"):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _pid_alive(pid: int) -> bool:
+    proc = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+    state = proc.stdout.strip()
+    return proc.returncode == 0 and bool(state) and "Z" not in state
+
+
+def test_nnunet_streaming_subprocess_writes_stdout_and_stderr_before_exit(tmp_path: Path):
+    wrapper = _load_nnunet_wrapper_module()
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import sys, time\n"
+        "print('stdout-first', flush=True)\n"
+        "print('stderr-first', file=sys.stderr, flush=True)\n"
+        "time.sleep(1.0)\n"
+        "print('stdout-done', flush=True)\n",
+        encoding="utf-8",
+    )
+    stdout_log = tmp_path / "nnunet_stdout.log"
+    stderr_log = tmp_path / "nnunet_stderr.log"
+    result_box: dict[str, dict] = {}
+    metadata = {
+        "start_time": "test",
+        "python_executable": sys.executable,
+        "predict_executable": sys.executable,
+        "nnUNet_results": str(tmp_path),
+        "workdir": None,
+        "CUDA_VISIBLE_DEVICES": "",
+        "input_dir": str(tmp_path / "input"),
+        "combined_output_dir": str(tmp_path / "combined"),
+        "per_model_output_dir": str(tmp_path / "per_model"),
+    }
+
+    def run_child() -> None:
+        result_box["result"] = wrapper._run_streaming_subprocess(
+            [sys.executable, "-u", str(child)],
+            env=os.environ.copy(),
+            cwd=None,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+            metadata=metadata,
+        )
+
+    thread = threading.Thread(target=run_child)
+    thread.start()
+    assert _wait_for_text(stdout_log, "stdout-first")
+    assert _wait_for_text(stderr_log, "stderr-first")
+    assert thread.is_alive()
+    thread.join(timeout=5)
+    assert result_box["result"]["return_code"] == 0
+    assert "stdout-done" in stdout_log.read_text(encoding="utf-8")
+
+
+def test_registered_streaming_command_returns_zero_and_logs(tmp_path: Path):
+    from cli_anything.medai.core import registered_infer as ri
+
+    stdout_log = tmp_path / "registered_stdout.log"
+    stderr_log = tmp_path / "registered_stderr.log"
+    result = ri._run_shell_command_streaming(
+        f"{shlex.quote(sys.executable)} -c {shlex.quote('print(\"ok\")')}",
+        env=os.environ.copy(),
+        timeout_sec=10,
+        stdout_log=stdout_log,
+        stderr_log=stderr_log,
+        kill_grace_sec=1,
+    )
+
+    assert result["return_code"] == 0
+    assert result["timed_out"] is False
+    assert "ok" in stdout_log.read_text(encoding="utf-8")
+
+
+def test_registered_streaming_command_propagates_nonzero_return_code(tmp_path: Path):
+    from cli_anything.medai.core import registered_infer as ri
+
+    result = ri._run_shell_command_streaming(
+        f"{shlex.quote(sys.executable)} -c {shlex.quote('import sys; print(\"bad\"); sys.exit(7)')}",
+        env=os.environ.copy(),
+        timeout_sec=10,
+        stdout_log=tmp_path / "registered_stdout.log",
+        stderr_log=tmp_path / "registered_stderr.log",
+        kill_grace_sec=1,
+    )
+
+    assert result["return_code"] == 7
+    assert result["timed_out"] is False
+
+
+def test_registered_streaming_timeout_returns_124_and_kills_process_group(tmp_path: Path):
+    from cli_anything.medai.core import registered_infer as ri
+
+    child_pid_file = tmp_path / "grandchild.pid"
+    payload = (
+        "import pathlib, subprocess, sys, time\n"
+        f"pid_file = pathlib.Path({str(child_pid_file)!r})\n"
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "pid_file.write_text(str(p.pid), encoding='utf-8')\n"
+        "time.sleep(60)\n"
+    )
+    result = ri._run_shell_command_streaming(
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(payload)}",
+        env=os.environ.copy(),
+        timeout_sec=1,
+        stdout_log=tmp_path / "registered_stdout.log",
+        stderr_log=tmp_path / "registered_stderr.log",
+        kill_grace_sec=0.2,
+    )
+
+    assert result["return_code"] == 124
+    assert result["timed_out"] is True
+    assert result["process_group_id"]
+    assert child_pid_file.exists()
+    grandchild_pid = int(child_pid_file.read_text(encoding="utf-8"))
+    deadline = time.time() + 5
+    while time.time() < deadline and _pid_alive(grandchild_pid):
+        time.sleep(0.1)
+    assert not _pid_alive(grandchild_pid)
+
+
+def test_nnunet_diagnostic_workdir_is_retained(tmp_path: Path):
+    image = _save(np.zeros((4, 4, 4), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    dataset_json = tmp_path / "dataset.json"
+    dataset_json.write_text(json.dumps({"labels": {"background": 0, "airway_tree": 1}}), encoding="utf-8")
+    nnunet_results = tmp_path / "nnunet_results"
+    nnunet_results.mkdir()
+    fake_predict = tmp_path / "fake_nnunet_predict.py"
+    fake_predict.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "import nibabel as nib\n"
+        "import numpy as np\n"
+        "args = sys.argv\n"
+        "input_dir = Path(args[args.index('-i') + 1])\n"
+        "output_dir = Path(args[args.index('-o') + 1])\n"
+        "output_dir.mkdir(parents=True, exist_ok=True)\n"
+        "src = next(input_dir.glob('*.nii.gz'))\n"
+        "img = nib.load(str(src))\n"
+        "arr = np.ones(img.shape[:3], dtype=np.uint8)\n"
+        "nib.save(nib.Nifti1Image(arr, img.affine, img.header), str(output_dir / src.name.replace('_0000.nii.gz', '.nii.gz')))\n"
+        "print('fake predictor completed', flush=True)\n",
+        encoding="utf-8",
+    )
+    fake_predict.chmod(0o755)
+    output = tmp_path / "out"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "scripts/nnunetv2_predict_and_split.py",
+            "--image", str(image),
+            "--output", str(output),
+            "--dataset-id", "1370",
+            "--nnunet-results", str(nnunet_results),
+            "--dataset-json", str(dataset_json),
+            "--trainer", "nnUNetTrainer",
+            "--plans", "nnUNetPlans",
+            "--predict-executable", str(fake_predict),
+            "--organs", "airway_tree",
+            "--diagnostic",
+            "--keep-workdir",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    metadata = json.loads((output / "nnunet_run_metadata.json").read_text(encoding="utf-8"))
+    retained = Path(metadata["retained_workdir"])
+    assert retained.exists()
+    assert (retained / "input").exists()
+    assert (retained / "combined").exists()
+    assert (output / "segmentations" / "airway_tree.nii.gz").exists()
+    assert "-npp 1" in metadata["command_text"]
+    assert "-nps 1" in metadata["command_text"]
+
+
+def test_strict_delivery_cli_failure_exits_nonzero(tmp_path: Path, monkeypatch):
+    from cli_anything.medai import medai_cli
+
+    def fake_loop(*args, **kwargs):
+        return {
+            "stage": "run_loop",
+            "status": "failed",
+            "strict_delivery_failure_count": 1,
+            "strict_delivery_failures": [{"status": "failed", "reason": "expected_mask_missing"}],
+        }
+
+    monkeypatch.setattr(medai_cli, "run_multimodel_annotation_loop", fake_loop)
+    result = CliRunner().invoke(
+        medai_cli.cli,
+        [
+            "--json", "run-loop",
+            "--case-list", str(tmp_path / "cases.csv"),
+            "--models", "atm",
+            "--organs", "airway_tree",
+            "--output", str(tmp_path / "out"),
+            "--dry-run",
+            "--strict-delivery-targets",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert '"strict_delivery_failure_count": 1' in result.output
+
+
+def test_strict_delivery_cli_success_exits_zero_when_expected_mask_succeeds(tmp_path: Path, monkeypatch):
+    from cli_anything.medai import medai_cli
+
+    def fake_loop(*args, **kwargs):
+        return {
+            "stage": "run_loop",
+            "status": "success",
+            "strict_delivery_failure_count": 0,
+            "strict_delivery_failures": [],
+            "inference_results": [{"status": "success", "expected_present": ["airway_tree.nii.gz"], "missing_expected_outputs": []}],
+        }
+
+    monkeypatch.setattr(medai_cli, "run_multimodel_annotation_loop", fake_loop)
+    result = CliRunner().invoke(
+        medai_cli.cli,
+        [
+            "--json", "run-loop",
+            "--case-list", str(tmp_path / "cases.csv"),
+            "--models", "atm",
+            "--organs", "airway_tree",
+            "--output", str(tmp_path / "out"),
+            "--dry-run",
+            "--strict-delivery-targets",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"strict_delivery_failure_count": 0' in result.output
 
 
 def test_registered_infer_fails_when_only_auxiliary_masks_exist(tmp_path: Path, monkeypatch):
@@ -37,9 +298,13 @@ models:
         seg = tmp_path / "out" / "case" / "segmentations"
         _save(np.zeros((4, 4, 4), dtype=np.uint8), seg / "image.nii.gz")
         _save(np.zeros((4, 4, 4), dtype=np.uint8), seg / "zero_mask.nii.gz")
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        stdout_log = Path(kwargs["stdout_log"])
+        stderr_log = Path(kwargs["stderr_log"])
+        stdout_log.write_text("", encoding="utf-8")
+        stderr_log.write_text("", encoding="utf-8")
+        return {"return_code": 0, "timed_out": False, "stdout_log": str(stdout_log), "stderr_log": str(stderr_log)}
 
-    monkeypatch.setattr(ri.subprocess, "run", fake_run)
+    monkeypatch.setattr(ri, "_run_shell_command_streaming", fake_run)
     result = ri.run_registered_model(
         image,
         tmp_path / "out",
@@ -116,9 +381,13 @@ models:
     def fake_run(command, **kwargs):
         seg = tmp_path / "out" / "case" / "segmentations"
         _save(np.ones((4, 4, 4), dtype=np.uint8), seg / "airway_wall.nii.gz")
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        stdout_log = Path(kwargs["stdout_log"])
+        stderr_log = Path(kwargs["stderr_log"])
+        stdout_log.write_text("", encoding="utf-8")
+        stderr_log.write_text("", encoding="utf-8")
+        return {"return_code": 0, "timed_out": False, "stdout_log": str(stdout_log), "stderr_log": str(stderr_log)}
 
-    monkeypatch.setattr(ri.subprocess, "run", fake_run)
+    monkeypatch.setattr(ri, "_run_shell_command_streaming", fake_run)
     result = ri.run_registered_model(
         image,
         tmp_path / "out",
