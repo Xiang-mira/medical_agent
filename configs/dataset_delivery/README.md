@@ -9,8 +9,11 @@ inputs.
 - `task1/task1_alias_groups.csv`: explicit many-to-one alias declarations.
 - `task1/task2_generate_targets_23.csv`: fixed Task 2 targets that must never execute as Task 1 rename.
 - `task1/non_rename_decisions.csv`: documented coarse-to-fine or pending-review decisions.
+- `task1/taxonomy_semantic_evidence.csv`: manually reviewed semantic relationship evidence for proposal audits.
 - `organ_gap_resolution.csv.example`: Task 2 template only; Teacher inference reads confirmed generate rows there when populated.
 - `cases_100_manifest.csv.example`: manifest schema example.
 
 The canonical 373 target source remains `configs/student_3d_prompt_target_organs.json`.
 The `main` branch is the only maintenance branch for Task 1.
+The read-only proposal audit entrypoint is `tools/dataset_delivery/propose_task1_finalization.py`;
+the HPC wrapper is `scripts/run_task1_proposal_audit_hpc.sh`.
