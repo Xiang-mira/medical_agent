@@ -1,0 +1,24 @@
+target_name,classification,status,reason,evidence
+airway_tree,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+airway_wall,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+blood,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+brain_ventricle,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+cerebrospinal_fluid,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+common_iliac_artery_left,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+common_iliac_artery_right,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+common_iliac_vein_left,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+common_iliac_vein_right,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+compact_bone,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+eyeball,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+face,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+gland_structure,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+gray_matter,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+kidney_cortex,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+kidney_medulla,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+kidney_pelvicalyceal_system,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+lung_pulmonary_arteries,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+lung_pulmonary_veins,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+muscle_of_head,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+scalp,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+spongy_bone,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename
+white_matter,task2_generate,confirmed,fixed_task2_generate_target,User-defined Task 2 target requiring generated or finer-grained mask; never executable as Task 1 rename

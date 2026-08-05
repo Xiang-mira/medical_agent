@@ -16,17 +16,36 @@ from tools.dataset_delivery.delivery_lib import apply_rename
 def main() -> int:
     p = argparse.ArgumentParser(description="Safely rename existing anatomical NIfTI mask files.")
     p.add_argument("--data-root", required=True, type=Path)
-    p.add_argument("--mapping-file", required=True, type=Path)
+    p.add_argument("--mapping", "--mapping-file", dest="mapping_file", required=True, type=Path)
     p.add_argument("--taxonomy", required=True, type=Path)
+    p.add_argument("--task2-targets", type=Path)
+    p.add_argument("--alias-groups", type=Path)
+    p.add_argument("--boundary-classification", type=Path)
+    p.add_argument("--output-data-root", type=Path, help="Required for --apply; rename is performed only in this copied output tree.")
     p.add_argument("--report", required=True, type=Path)
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", default=False)
     mode.add_argument("--apply", action="store_true", default=False)
     args = p.parse_args()
-    print(json.dumps(apply_rename(args.data_root, args.mapping_file, args.taxonomy, args.report, apply=args.apply), indent=2))
-    return 0
+    try:
+        result = apply_rename(
+            args.data_root,
+            args.mapping_file,
+            args.taxonomy,
+            args.report,
+            apply=args.apply,
+            task2_targets=args.task2_targets,
+            alias_groups=args.alias_groups,
+            boundary_classification=args.boundary_classification,
+            output_data_root=args.output_data_root,
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    except Exception as exc:
+        failure = {"status": "failed", "error": str(exc)}
+        print(json.dumps(failure, indent=2))
+        return 2
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

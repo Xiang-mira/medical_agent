@@ -1,0 +1,22 @@
+alias_group,target_name,source_name,status,evidence
+alias_brachiocephalic_vein_left,brachiocephalic_vein_left,left_brachiocephalic_vein,confirmed,word-order aliases for the same left brachiocephalic vein
+alias_brachiocephalic_vein_left,brachiocephalic_vein_left,vein_brachiocephalic_left,confirmed,word-order aliases for the same left brachiocephalic vein
+alias_brachiocephalic_vein_right,brachiocephalic_vein_right,right_brachiocephalic_vein,confirmed,word-order aliases for the same right brachiocephalic vein
+alias_brachiocephalic_vein_right,brachiocephalic_vein_right,vein_brachiocephalic_right,confirmed,word-order aliases for the same right brachiocephalic vein
+alias_lung_lower_left_lobe,lung_lower_left_lobe,left_lung_lower_lobe,confirmed,word-order aliases for the same left lower lung lobe
+alias_lung_lower_left_lobe,lung_lower_left_lobe,lung_lobe_lower_left,confirmed,word-order aliases for the same left lower lung lobe
+alias_lung_lower_left_lobe,lung_lower_left_lobe,lung_lower_lobe_left,confirmed,word-order aliases for the same left lower lung lobe
+alias_lung_upper_left_lobe,lung_upper_left_lobe,left_lung_upper_lobe,confirmed,word-order aliases for the same left upper lung lobe
+alias_lung_upper_left_lobe,lung_upper_left_lobe,lung_lobe_upper_left,confirmed,word-order aliases for the same left upper lung lobe
+alias_lung_upper_left_lobe,lung_upper_left_lobe,lung_upper_lobe_left,confirmed,word-order aliases for the same left upper lung lobe
+alias_lung_lower_right_lobe,lung_lower_right_lobe,right_lung_lower_lobe,confirmed,word-order aliases for the same right lower lung lobe
+alias_lung_lower_right_lobe,lung_lower_right_lobe,lung_lobe_lower_right,confirmed,word-order aliases for the same right lower lung lobe
+alias_lung_lower_right_lobe,lung_lower_right_lobe,lung_lower_lobe_right,confirmed,word-order aliases for the same right lower lung lobe
+alias_lung_middle_right_lobe,lung_middle_right_lobe,right_lung_middle_lobe,confirmed,word-order aliases for the same right middle lung lobe
+alias_lung_middle_right_lobe,lung_middle_right_lobe,lung_lobe_middle_right,confirmed,word-order aliases for the same right middle lung lobe
+alias_lung_middle_right_lobe,lung_middle_right_lobe,lung_middle_lobe_right,confirmed,word-order aliases for the same right middle lung lobe
+alias_lung_upper_right_lobe,lung_upper_right_lobe,right_lung_upper_lobe,confirmed,word-order aliases for the same right upper lung lobe
+alias_lung_upper_right_lobe,lung_upper_right_lobe,lung_lobe_upper_right,confirmed,word-order aliases for the same right upper lung lobe
+alias_lung_upper_right_lobe,lung_upper_right_lobe,lung_upper_lobe_right,confirmed,word-order aliases for the same right upper lung lobe
+alias_celiac_aa_celiac_artery,celiac_aa_celiac_artery,celiac_aa,confirmed,taxonomy target spells the same class as celiac_aa (celiac_artery)
+alias_celiac_aa_celiac_artery,celiac_aa_celiac_artery,celiac_artery,confirmed,taxonomy target spells the same class as celiac_aa (celiac_artery)

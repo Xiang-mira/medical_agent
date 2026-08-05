@@ -18,6 +18,8 @@ from typing import Any, Iterable
 ALLOWED_RENAME_STATUS = {"confirmed", "pending_review", "rejected"}
 ALLOWED_GAP_RESOLUTION = {"rename", "generate", "manual_review"}
 ALLOWED_GAP_STATUS = {"confirmed", "pending_review", "rejected"}
+ALLOWED_BOUNDARY_CLASSIFICATION = {"task1_rename", "task2_generate", "boundary_review", "exclude"}
+ALLOWED_BOUNDARY_STATUS = {"confirmed", "pending_review", "rejected", "excluded"}
 NIFTI_SUFFIX = ".nii.gz"
 
 
@@ -58,10 +60,16 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
         ]
 
 
+def read_csv_fieldnames(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return [str(field or "").strip() for field in (reader.fieldnames or [])]
+
+
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -97,25 +105,30 @@ def load_taxonomy_names(path: Path, *, expected_count: int = 373) -> list[str]:
     return unique
 
 
-def iter_mask_dirs(data_root: Path) -> Iterable[tuple[str, Path, Path]]:
-    """Yield mask directories without materializing every dataset path in memory."""
+def discover_mask_dirs(data_root: Path) -> list[tuple[str, Path, Path]]:
+    """Return (case_id, case_root, mask_dir) for directories containing NIfTI masks."""
     root = data_root.resolve()
+    out: list[tuple[str, Path, Path]] = []
     if not root.exists():
         raise DeliveryError(f"data-root does not exist: {root}")
-
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames.sort()
-        filenames.sort()
-        if not any(name.endswith(NIFTI_SUFFIX) for name in filenames):
+    for seg in sorted(root.rglob("*")):
+        if not seg.is_dir():
             continue
-        mask_dir = Path(dirpath)
-        case_root = mask_dir.parent if mask_dir.name == "segmentations" else mask_dir
-        yield case_root.name, case_root, mask_dir
+        if not any(p.is_file() and p.name.endswith(NIFTI_SUFFIX) for p in seg.iterdir()):
+            continue
+        case_root = seg.parent if seg.name == "segmentations" else seg
+        case_id = case_root.name
+        out.append((case_id, case_root, seg))
+    if root.is_dir() and any(p.is_file() and p.name.endswith(NIFTI_SUFFIX) for p in root.iterdir()):
+        out.insert(0, (root.name, root, root))
+    seen: set[Path] = set()
+    unique = []
+    for item in out:
+        if item[2] not in seen:
+            unique.append(item)
+            seen.add(item[2])
+    return unique
 
-
-def discover_mask_dirs(data_root: Path) -> list[tuple[str, Path, Path]]:
-    """Return mask directories as a compatibility list."""
-    return list(iter_mask_dirs(data_root))
 
 def candidate_score_name(source: str, target: str) -> tuple[int, str]:
     s = normalize_name(source)
@@ -140,34 +153,13 @@ def candidate_score_name(source: str, target: str) -> tuple[int, str]:
 def audit_label_names(data_root: Path, taxonomy: Path, output_dir: Path, *, max_candidates: int = 5) -> dict[str, Any]:
     targets = load_taxonomy_names(taxonomy)
     target_set = set(targets)
-    inventory: dict[str, dict[str, Any]] = {}
-    cases_scanned: set[str] = set()
-
-    for case_id, _case_root, mask_dir in iter_mask_dirs(data_root):
-        cases_scanned.add(case_id)
-        labels_in_dir = {
-            safe_label_name(name)
-            for name in os.listdir(mask_dir)
-            if name.endswith(NIFTI_SUFFIX)
-        }
-        for label_name in labels_in_dir:
-            stats = inventory.setdefault(
-                label_name,
-                {"case_count": 0, "example_case_id": case_id, "last_case_id": None},
-            )
-            if stats["last_case_id"] != case_id:
-                stats["case_count"] += 1
-                stats["last_case_id"] = case_id
-            if case_id < str(stats["example_case_id"]):
-                stats["example_case_id"] = case_id
-
+    inventory: dict[str, set[str]] = {}
+    for case_id, _case_root, mask_dir in discover_mask_dirs(data_root):
+        for mask in sorted(mask_dir.glob(f"*{NIFTI_SUFFIX}")):
+            inventory.setdefault(safe_label_name(mask.name), set()).add(case_id)
     label_rows = [
-        {
-            "label_name": name,
-            "case_count": int(stats["case_count"]),
-            "example_case_id": str(stats["example_case_id"]),
-        }
-        for name, stats in sorted(inventory.items())
+        {"label_name": name, "case_count": len(cases), "example_case_id": sorted(cases)[0]}
+        for name, cases in sorted(inventory.items())
     ]
     exact = sorted(set(inventory) & target_set)
     unmatched_targets = sorted(target_set - set(inventory))
@@ -180,50 +172,19 @@ def audit_label_names(data_root: Path, taxonomy: Path, output_dir: Path, *, max_
             if score:
                 scored.append((score, reason, target))
         for score, reason, target in sorted(scored, reverse=True)[:max_candidates]:
-            candidate_rows.append(
-                {
-                    "source_name": source,
-                    "candidate_target_name": target,
-                    "score": score,
-                    "reason": reason,
-                }
-            )
-
+            candidate_rows.append({"source_name": source, "candidate_target_name": target, "score": score, "reason": reason})
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_csv(
-        output_dir / "label_inventory.csv",
-        label_rows,
-        ["label_name", "case_count", "example_case_id"],
-    )
-    write_csv(
-        output_dir / "exact_matches.csv",
-        [{"label_name": x} for x in exact],
-        ["label_name"],
-    )
-    write_csv(
-        output_dir / "unmatched_target_labels.csv",
-        [{"target_name": x} for x in unmatched_targets],
-        ["target_name"],
-    )
-    write_csv(
-        output_dir / "unmatched_dataset_labels.csv",
-        [
-            {"source_name": x, "case_count": int(inventory[x]["case_count"])}
-            for x in extra
-        ],
-        ["source_name", "case_count"],
-    )
-    write_csv(
-        output_dir / "candidate_matches.csv",
-        candidate_rows,
-        ["source_name", "candidate_target_name", "score", "reason"],
-    )
+    write_csv(output_dir / "label_inventory.csv", label_rows, ["label_name", "case_count", "example_case_id"])
+    write_csv(output_dir / "exact_matches.csv", [{"label_name": x} for x in exact], ["label_name"])
+    write_csv(output_dir / "unmatched_target_labels.csv", [{"target_name": x} for x in unmatched_targets], ["target_name"])
+    write_csv(output_dir / "unmatched_dataset_labels.csv", [{"source_name": x, "case_count": len(inventory[x])} for x in extra], ["source_name", "case_count"])
+    write_csv(output_dir / "candidate_matches.csv", candidate_rows, ["source_name", "candidate_target_name", "score", "reason"])
     summary = {
         "status": "success",
         "data_root": str(data_root),
         "taxonomy": str(taxonomy),
         "taxonomy_count": len(targets),
-        "cases_scanned": len(cases_scanned),
+        "cases_scanned": len({c for cases in inventory.values() for c in cases}),
         "dataset_label_count": len(inventory),
         "exact_match_count": len(exact),
         "unmatched_target_count": len(unmatched_targets),
@@ -261,6 +222,84 @@ def read_rename_mapping(path: Path) -> list[RenameMapping]:
     return rows
 
 
+def load_task2_targets(path: Path | None) -> set[str]:
+    if path is None or not path.exists():
+        return set()
+    rows = read_csv_rows(path)
+    targets: set[str] = set()
+    if rows:
+        for row in rows:
+            value = row.get("target_name") or next(iter(row.values()), "")
+            if value:
+                targets.add(safe_label_name(value))
+    return targets
+
+
+def read_alias_groups(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None or not path.exists():
+        return {}
+    groups: dict[str, dict[str, Any]] = {}
+    for row in read_csv_rows(path):
+        target = safe_label_name(row.get("target_name", ""))
+        source = safe_label_name(row.get("source_name", ""))
+        group_id = row.get("alias_group") or row.get("alias_group_id") or target
+        entry = groups.setdefault(target, {"alias_group": group_id, "target_name": target, "sources": set(), "rows": []})
+        entry["sources"].add(source)
+        entry["rows"].append(row)
+    return groups
+
+
+def read_boundary_classification(path: Path | None) -> dict[tuple[str, str], dict[str, str]]:
+    if path is None or not path.exists():
+        return {}
+    out: dict[tuple[str, str], dict[str, str]] = {}
+    for row in read_csv_rows(path):
+        source = safe_label_name(row.get("source_name", ""))
+        target = safe_label_name(row.get("target_name", ""))
+        normalized = dict(row)
+        normalized["source_name"] = source
+        normalized["target_name"] = target
+        out[(source, target)] = normalized
+    return out
+
+
+def _truth_cell(value: str) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _write_markdown_report(path: Path, title: str, summary: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"# {title}", ""]
+    status = summary.get("status", "unknown")
+    lines.append(f"- status: `{status}`")
+    for key in (
+        "mapping_file",
+        "taxonomy",
+        "rows",
+        "confirmed_count",
+        "pending_review_count",
+        "task2_generate_count",
+        "exclude_count",
+        "task2_overlap_count",
+        "one_to_many_count",
+        "many_to_one_alias_group_count",
+        "errors_count",
+    ):
+        if key in summary:
+            lines.append(f"- {key}: `{summary[key]}`")
+    errors = summary.get("errors") or []
+    if errors:
+        lines.extend(["", "## Errors"])
+        for error in errors[:200]:
+            lines.append(f"- `{error.get('type', 'error')}`: {json.dumps(error, ensure_ascii=False)}")
+    warnings = summary.get("warnings") or []
+    if warnings:
+        lines.extend(["", "## Warnings"])
+        for warning in warnings[:200]:
+            lines.append(f"- `{warning.get('type', 'warning')}`: {json.dumps(warning, ensure_ascii=False)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _side(name: str) -> str | None:
     parts = set(normalize_name(name).split("_"))
     left = "left" in parts
@@ -272,59 +311,223 @@ def _side(name: str) -> str | None:
     return None
 
 
-def validate_rename_mapping(path: Path, taxonomy: Path, report: Path | None = None) -> dict[str, Any]:
+def validate_rename_mapping(
+    path: Path,
+    taxonomy: Path,
+    report: Path | None = None,
+    *,
+    task2_targets: Path | None = None,
+    alias_groups: Path | None = None,
+    boundary_classification: Path | None = None,
+    output_md: Path | None = None,
+    standalone_dir: Path | None = None,
+) -> dict[str, Any]:
     targets = set(load_taxonomy_names(taxonomy))
+    task2 = load_task2_targets(task2_targets)
+    aliases = read_alias_groups(alias_groups)
+    boundary = read_boundary_classification(boundary_classification)
+    fieldnames = read_csv_fieldnames(path)
+    required_fields = ["source_name", "target_name", "status", "reason", "notes"]
     rows = read_rename_mapping(path)
     errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if fieldnames[: len(required_fields)] != required_fields:
+        errors.append({"type": "invalid_mapping_schema", "expected_prefix": required_fields, "actual": fieldnames})
     seen_rows: set[tuple[str, str, str]] = set()
+    seen_pairs: set[tuple[str, str]] = set()
     source_to_targets: dict[str, set[str]] = {}
+    target_to_sources: dict[str, set[str]] = {}
+    confirmed_targets: set[str] = set()
     for idx, row in enumerate(rows, start=2):
         key = (row.source_name, row.target_name, row.status)
         if key in seen_rows:
             errors.append({"row": idx, "type": "duplicate_row", "source_name": row.source_name, "target_name": row.target_name})
         seen_rows.add(key)
+        pair = (row.source_name, row.target_name)
+        if pair in seen_pairs:
+            errors.append({"row": idx, "type": "duplicate_source_target_pair", "source_name": row.source_name, "target_name": row.target_name})
+        seen_pairs.add(pair)
         if row.target_name not in targets:
             errors.append({"row": idx, "type": "target_not_in_taxonomy", "target_name": row.target_name})
         if row.source_name == row.target_name:
             errors.append({"row": idx, "type": "source_equals_target", "source_name": row.source_name})
         if _side(row.source_name) and _side(row.target_name) and _side(row.source_name) != _side(row.target_name):
             errors.append({"row": idx, "type": "left_right_conflict", "source_name": row.source_name, "target_name": row.target_name})
+        if not row.reason:
+            errors.append({"row": idx, "type": "missing_reason", "source_name": row.source_name, "target_name": row.target_name})
+        target_to_sources.setdefault(row.target_name, set()).add(row.source_name)
         if row.status == "confirmed":
+            confirmed_targets.add(row.target_name)
             source_to_targets.setdefault(row.source_name, set()).add(row.target_name)
+            if row.target_name in task2:
+                errors.append({"row": idx, "type": "task2_overlap", "target_name": row.target_name})
     for source, mapped_targets in sorted(source_to_targets.items()):
         if len(mapped_targets) > 1:
             errors.append({"type": "one_to_many_source_mapping", "source_name": source, "target_names": sorted(mapped_targets)})
-    summary = {"status": "failed" if errors else "success", "mapping_file": str(path), "taxonomy": str(taxonomy), "rows": len(rows), "errors": errors}
+    many_to_one_alias_targets: set[str] = set()
+    for target, sources in sorted(target_to_sources.items()):
+        if len(sources) <= 1:
+            continue
+        alias = aliases.get(target)
+        if not alias:
+            errors.append({"type": "undeclared_many_to_one_target", "target_name": target, "source_names": sorted(sources)})
+            continue
+        alias_sources = set(alias["sources"])
+        missing = sorted(sources - alias_sources)
+        if missing:
+            errors.append({"type": "many_to_one_sources_missing_from_alias_group", "target_name": target, "source_names": missing})
+        else:
+            many_to_one_alias_targets.add(target)
+    for target, alias in sorted(aliases.items()):
+        if target not in targets:
+            errors.append({"type": "alias_group_target_not_in_taxonomy", "target_name": target})
+        if len(alias["sources"]) < 2:
+            warnings.append({"type": "alias_group_has_single_source", "target_name": target})
+    if boundary:
+        boundary_keys = set(boundary)
+        mapping_keys = {(row.source_name, row.target_name) for row in rows}
+        missing_boundary = sorted(mapping_keys - boundary_keys)
+        extra_boundary = sorted(boundary_keys - mapping_keys)
+        for source, target in missing_boundary:
+            errors.append({"type": "missing_boundary_row", "source_name": source, "target_name": target})
+        for source, target in extra_boundary:
+            errors.append({"type": "extra_boundary_row", "source_name": source, "target_name": target})
+        for idx, row in enumerate(rows, start=2):
+            b = boundary.get((row.source_name, row.target_name))
+            if not b:
+                continue
+            classification = b.get("classification", "")
+            b_status = b.get("status", "")
+            if classification not in ALLOWED_BOUNDARY_CLASSIFICATION:
+                errors.append({"row": idx, "type": "invalid_boundary_classification", "classification": classification})
+            if b_status not in ALLOWED_BOUNDARY_STATUS:
+                errors.append({"row": idx, "type": "invalid_boundary_status", "status": b_status})
+            if row.status == "confirmed":
+                if classification != "task1_rename" or b_status != "confirmed":
+                    errors.append({"row": idx, "type": "confirmed_mapping_boundary_mismatch", "source_name": row.source_name, "target_name": row.target_name, "classification": classification, "boundary_status": b_status})
+                for key_name, expected in (("same_anatomy", True), ("same_laterality", True), ("same_granularity", True), ("requires_voxel_change", False)):
+                    actual = _truth_cell(b.get(key_name, ""))
+                    if actual != expected:
+                        errors.append({"row": idx, "type": "confirmed_boundary_condition_failed", "field": key_name, "source_name": row.source_name, "target_name": row.target_name})
+                if not b.get("evidence", "").strip():
+                    errors.append({"row": idx, "type": "confirmed_missing_evidence", "source_name": row.source_name, "target_name": row.target_name})
+            elif row.status == "pending_review":
+                if classification != "boundary_review" or b_status != "pending_review":
+                    errors.append({"row": idx, "type": "pending_mapping_boundary_mismatch", "source_name": row.source_name, "target_name": row.target_name, "classification": classification, "boundary_status": b_status})
+            elif classification == "task1_rename" and b_status == "confirmed":
+                errors.append({"row": idx, "type": "boundary_confirmed_but_mapping_not_confirmed", "source_name": row.source_name, "target_name": row.target_name})
+    if standalone_dir is not None:
+        standalone_checks: list[tuple[Path, Path, str]] = [
+            (path, standalone_dir / "configs" / "organ_rename_mapping_373.csv", "standalone_mapping"),
+        ]
+        if task2_targets is not None:
+            standalone_checks.append((task2_targets, standalone_dir / "configs" / "task2_generate_targets_23.csv", "standalone_task2_targets"))
+        if alias_groups is not None:
+            standalone_checks.append((alias_groups, standalone_dir / "configs" / "task1_alias_groups.csv", "standalone_alias_groups"))
+        if boundary_classification is not None:
+            standalone_checks.append((boundary_classification, standalone_dir / "configs" / "task_boundary_classification.csv", "standalone_boundary_classification"))
+        repo_root = Path(__file__).resolve().parents[2]
+        for rel in (
+            "tools/dataset_delivery/delivery_lib.py",
+            "tools/dataset_delivery/rename_anatomical_labels.py",
+            "tools/dataset_delivery/validate_rename_mapping.py",
+        ):
+            standalone_checks.append((repo_root / rel, standalone_dir / rel, f"standalone_{Path(rel).name}"))
+        for canonical, exported, check_type in standalone_checks:
+            if not canonical.exists():
+                errors.append({"type": f"{check_type}_canonical_missing", "path": str(canonical)})
+            elif not exported.exists():
+                errors.append({"type": f"{check_type}_missing", "path": str(exported)})
+            elif sha256_file(canonical) != sha256_file(exported):
+                errors.append({"type": f"{check_type}_sha_mismatch", "canonical": str(canonical), "standalone": str(exported)})
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        status_counts[row.status] = status_counts.get(row.status, 0) + 1
+    task2_overlap = sorted(confirmed_targets & task2)
+    summary = {
+        "status": "failed" if errors else "success",
+        "mapping_file": str(path),
+        "taxonomy": str(taxonomy),
+        "rows": len(rows),
+        "confirmed_count": status_counts.get("confirmed", 0),
+        "pending_review_count": status_counts.get("pending_review", 0),
+        "rejected_count": status_counts.get("rejected", 0),
+        "task2_generate_count": 0,
+        "exclude_count": 0,
+        "task2_overlap_count": len(task2_overlap),
+        "task2_overlap": task2_overlap,
+        "one_to_many_count": sum(1 for targets_for_source in source_to_targets.values() if len(targets_for_source) > 1),
+        "many_to_one_alias_group_count": len(many_to_one_alias_targets),
+        "many_to_one_alias_group_targets": sorted(many_to_one_alias_targets),
+        "errors_count": len(errors),
+        "errors": errors,
+        "warnings": warnings,
+    }
     if report:
         write_json(report, summary)
+    if output_md:
+        _write_markdown_report(output_md, "Task 1 Rename Mapping Validation", summary)
     if errors:
         raise DeliveryError(f"Rename mapping validation failed with {len(errors)} error(s)")
     return summary
 
 
-def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Path, *, apply: bool = False) -> dict[str, Any]:
-    validate_rename_mapping(mapping_file, taxonomy)
+def _copy_mask_dir_once(source_mask_dir: Path, data_root: Path, output_data_root: Path, case_id: str) -> Path:
+    try:
+        rel = source_mask_dir.resolve().relative_to(data_root.resolve())
+    except Exception:
+        rel = Path(case_id) / "segmentations"
+    dst = output_data_root / rel
+    if not dst.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_mask_dir, dst)
+    return dst
+
+
+def apply_rename(
+    data_root: Path,
+    mapping_file: Path,
+    taxonomy: Path,
+    report: Path,
+    *,
+    apply: bool = False,
+    task2_targets: Path | None = None,
+    alias_groups: Path | None = None,
+    boundary_classification: Path | None = None,
+    output_data_root: Path | None = None,
+) -> dict[str, Any]:
+    validate_rename_mapping(
+        mapping_file,
+        taxonomy,
+        task2_targets=task2_targets,
+        alias_groups=alias_groups,
+        boundary_classification=boundary_classification,
+    )
+    if apply:
+        if output_data_root is None:
+            raise DeliveryError("--apply requires an independent --output-data-root; in-place Task 1 rename is not allowed")
+        if data_root.resolve() == output_data_root.resolve():
+            raise DeliveryError("--output-data-root must differ from --data-root")
     mappings = [m for m in read_rename_mapping(mapping_file) if m.status == "confirmed"]
+    pending = [m for m in read_rename_mapping(mapping_file) if m.status == "pending_review"]
+    aliases = read_alias_groups(alias_groups)
     mode = "apply" if apply else "dry_run"
-    fields = ["case_id", "source_name", "target_name", "source_path", "target_path", "mode", "status", "reason"]
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report_handle = report.open("w", encoding="utf-8", newline="")
-    writer = csv.DictWriter(report_handle, fieldnames=fields, extrasaction="ignore")
-    writer.writeheader()
-    status_counts: dict[str, int] = {}
-    operation_count = 0
+    report_rows: list[dict[str, Any]] = []
     case_count = 0
-    for case_id, _case_root, mask_dir in iter_mask_dirs(data_root):
+    for case_id, _case_root, source_mask_dir in discover_mask_dirs(data_root):
         case_count += 1
+        mask_dir = _copy_mask_dir_once(source_mask_dir, data_root, output_data_root, case_id) if apply and output_data_root else source_mask_dir
         present = {safe_label_name(p.name): p for p in mask_dir.glob(f"*{NIFTI_SUFFIX}")}
         target_hits: dict[str, list[str]] = {}
         for m in mappings:
             if m.source_name in present:
                 target_hits.setdefault(m.target_name, []).append(m.source_name)
         blocked_targets = {target for target, sources in target_hits.items() if len(sources) > 1}
+        for target, alias in aliases.items():
+            present_aliases = sorted(set(alias["sources"]) & set(present))
+            if len(present_aliases) > 1:
+                blocked_targets.add(target)
         for m in mappings:
-            if m.source_name not in present:
-                continue
             src = mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"
             dst = mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"
             row = {
@@ -338,22 +541,35 @@ def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Pa
                 "reason": "",
             }
             if m.target_name in blocked_targets:
-                row.update({"status": "conflict", "reason": "multiple_sources_to_same_target_in_case"})
+                row.update({"status": "conflict", "reason": "alias_group_coexistence"})
             elif src.exists() and dst.exists():
                 row.update({"status": "conflict", "reason": "source_and_target_exist"})
             elif not src.exists() and dst.exists():
-                row.update({"status": "already_applied", "reason": "source_missing_target_exists"})
+                row.update({"status": "already_normalized", "reason": "source_missing_target_exists"})
             elif not src.exists() and not dst.exists():
                 row.update({"status": "source_missing", "reason": "source_and_target_missing"})
             else:
                 row.update({"status": "renamed" if apply else "would_rename", "reason": "confirmed_mapping"})
                 if apply:
                     src.rename(dst)
-            writer.writerow(row)
-            operation_count += 1
-            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
-    report_handle.close()
-    return {"status": "success", "mode": mode, "cases_scanned": case_count, "operations": operation_count, "status_counts": status_counts, "report": str(report)}
+            report_rows.append(row)
+        for m in pending:
+            report_rows.append({
+                "case_id": case_id,
+                "source_name": m.source_name,
+                "target_name": m.target_name,
+                "source_path": str(mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"),
+                "target_path": str(mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"),
+                "mode": mode,
+                "status": "skipped_pending_review",
+                "reason": "mapping_status_pending_review",
+            })
+    fields = ["case_id", "source_name", "target_name", "source_path", "target_path", "mode", "status", "reason"]
+    write_csv(report, report_rows, fields)
+    status_counts: dict[str, int] = {}
+    for row in report_rows:
+        status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+    return {"status": "success", "mode": mode, "cases_scanned": case_count, "operations": len(report_rows), "status_counts": status_counts, "report": str(report)}
 
 
 def read_gap_resolution(path: Path) -> list[dict[str, str]]:
@@ -397,11 +613,13 @@ def validate_gap_resolution(gap_file: Path, taxonomy: Path, rename_mapping: Path
 def validate_100case_manifest(path: Path, *, check_exists: bool = True, report: Path | None = None) -> dict[str, Any]:
     rows = read_csv_rows(path)
     errors = []
-    required = {"index", "case_id", "image_path", "reference_mask_dir"}
+    required = {"index", "case_id", "reference_mask_dir"}
     columns = set(rows[0]) if rows else set()
     missing_cols = sorted(required - columns)
     if missing_cols:
         errors.append({"type": "missing_columns", "columns": missing_cols})
+    if rows and not ({"image_path", "ct_path"} & columns):
+        errors.append({"type": "missing_columns", "columns": ["image_path_or_ct_path"]})
     if len(rows) != 100:
         errors.append({"type": "row_count", "actual": len(rows), "expected": 100})
     indices = []
@@ -413,9 +631,11 @@ def validate_100case_manifest(path: Path, *, check_exists: bool = True, report: 
             errors.append({"row": i + 2, "type": "invalid_index", "index": row.get("index")})
         case_ids.append(row.get("case_id", ""))
         if check_exists:
-            for key in ("image_path", "reference_mask_dir"):
-                if row.get(key) and not Path(row[key]).exists():
-                    errors.append({"row": i + 2, "type": f"{key}_missing", "path": row[key]})
+            image_path = row.get("image_path") or row.get("ct_path")
+            if image_path and not Path(image_path).exists():
+                errors.append({"row": i + 2, "type": "image_path_missing", "path": image_path})
+            if row.get("reference_mask_dir") and not Path(row["reference_mask_dir"]).exists():
+                errors.append({"row": i + 2, "type": "reference_mask_dir_missing", "path": row["reference_mask_dir"]})
     if indices and indices != list(range(100)):
         errors.append({"type": "index_sequence", "actual": indices[:105], "expected": "0-99"})
     duplicates = sorted({x for x in case_ids if case_ids.count(x) > 1})
@@ -456,9 +676,9 @@ def run_preflight(
         case_rows.append({
             "index": row.get("index"),
             "case_id": row.get("case_id"),
-            "image_path": row.get("image_path"),
+            "image_path": row.get("image_path") or row.get("ct_path"),
             "reference_mask_dir": row.get("reference_mask_dir"),
-            "image_exists": Path(row.get("image_path", "")).is_file(),
+            "image_exists": Path(row.get("image_path") or row.get("ct_path") or "").is_file(),
             "reference_mask_dir_exists": mask_dir.is_dir(),
             "existing_target_mask_count": len(existing),
         })
@@ -507,6 +727,12 @@ def load_manifest_case(manifest: Path, case_index: int) -> dict[str, str]:
     if case_index < 0 or case_index >= len(rows):
         raise DeliveryError(f"case index out of range: {case_index}")
     return rows[case_index]
+
+def case_image_path(case: dict[str, str]) -> str:
+    value = case.get("image_path") or case.get("ct_path")
+    if not value:
+        raise DeliveryError(f"manifest case {case.get('case_id', '<unknown>')} is missing image_path/ct_path")
+    return value
 
 
 def locate_generated_mask_dir(case_run_dir: Path, case_id: str) -> Path | None:
@@ -562,7 +788,7 @@ def run_teacher_case(
     one_case_manifest = case_dir / "case_manifest.csv"
     write_csv(one_case_manifest, [{
         "case_id": case_id,
-        "ct_path": case["image_path"],
+        "ct_path": case_image_path(case),
         "annotation_folder": case["reference_mask_dir"],
     }], ["case_id", "ct_path", "annotation_folder"])
     command = [
@@ -574,6 +800,8 @@ def run_teacher_case(
         "--registry", str(registry),
         "--output", str(raw_dir),
         "--timeout-sec", str(timeout_sec),
+        "--strict-delivery-targets",
+        "--log-file", str(log_dir / "run_loop.log"),
     ]
     if device:
         command.extend(["--device", device])
@@ -581,21 +809,25 @@ def run_teacher_case(
         command.append("--dry-run")
     (case_dir / "command.txt").write_text(" ".join(command) + "\n", encoding="utf-8")
     started = utc_now()
-    write_json(status_path, {"status": "running", "case_id": case_id, "command": command, "image_path": case["image_path"], "organ_list": organs, "output_directory": str(raw_dir), "python_executable": python, "started_at": started})
+    write_json(status_path, {"status": "running", "case_id": case_id, "command": command, "image_path": case_image_path(case), "organ_list": organs, "output_directory": str(raw_dir), "python_executable": python, "started_at": started, "log_file": str(log_dir / "run_loop.log")})
     proc = subprocess.run(command, cwd=str(code_root), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     (log_dir / "stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
     (log_dir / "stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
     generated_dir = locate_generated_mask_dir(case_dir, case_id)
     generated_files = sorted(generated_dir.glob(f"*{NIFTI_SUFFIX}")) if generated_dir else []
     expected_files = [p for p in generated_files if safe_label_name(p.name) in set(organs)]
-    status_name = "inference_succeeded" if proc.returncode == 0 and expected_files else "failed"
+    missing_organs = sorted(set(organs) - {safe_label_name(p.name) for p in expected_files})
+    run_summary_path = raw_dir / "run_summary.json"
+    run_summary = json.loads(run_summary_path.read_text(encoding="utf-8")) if run_summary_path.exists() else {}
+    strict_failures = run_summary.get("strict_delivery_failures", []) if isinstance(run_summary, dict) else []
+    status_name = "inference_succeeded" if proc.returncode == 0 and not missing_organs and not strict_failures else "failed"
     if dry_run and proc.returncode == 0:
         status_name = "pending"
     status = {
         "status": status_name,
         "case_id": case_id,
         "command": command,
-        "image_path": case["image_path"],
+        "image_path": case_image_path(case),
         "organ_list": organs,
         "output_directory": str(raw_dir),
         "python_executable": python,
@@ -603,8 +835,18 @@ def run_teacher_case(
         "ended_at": utc_now(),
         "return_code": proc.returncode,
         "generated_file_count": len(expected_files),
+        "expected_file_count": len(organs),
+        "missing_expected_organs": missing_organs,
+        "run_summary": str(run_summary_path) if run_summary_path.exists() else "",
+        "strict_delivery_failures": strict_failures,
+        "log_file": str(log_dir / "run_loop.log"),
         "validation_status": "not_run",
-        "failure_reason": "" if status_name != "failed" else "no_real_expected_nifti_output" if proc.returncode == 0 else "teacher_command_failed",
+        "failure_reason": "" if status_name != "failed" else (
+            "strict_delivery_failure" if strict_failures
+            else "expected_mask_missing" if missing_organs
+            else "no_real_expected_nifti_output" if proc.returncode == 0
+            else "teacher_command_failed"
+        ),
     }
     write_json(status_path, status)
     if proc.returncode != 0:
@@ -628,7 +870,7 @@ def validate_generated_masks(run_dir: Path, manifest: Path, gap_file: Path, taxo
     conflicts = []
     for case in read_csv_rows(manifest):
         case_id = case["case_id"]
-        ct_path = Path(case["image_path"])
+        ct_path = Path(case_image_path(case))
         ref_dir = Path(case["reference_mask_dir"])
         mask_dir = locate_generated_mask_dir(run_dir / "cases" / case_id, case_id)
         try:

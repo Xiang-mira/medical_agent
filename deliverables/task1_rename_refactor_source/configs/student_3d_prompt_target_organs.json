@@ -6290,12 +6290,12 @@
         "kidney cortex",
         "kidney cortex (renal structure)"
       ],
-      "region": "head and craniofacial region",
+      "region": "abdomen and retroperitoneum",
       "landmarks": [
-        "skull",
-        "orbits",
-        "brainstem",
-        "adjacent soft tissues"
+        "kidney",
+        "renal sinus",
+        "renal medulla",
+        "retroperitoneal fat"
       ],
       "ct_appearance": "soft-tissue structure with CT boundaries guided by adjacent anatomy",
       "prompts": {
@@ -6304,8 +6304,8 @@
           "outline the kidney cortex"
         ],
         "anatomical_location": [
-          "Segment the kidney cortex in the head and craniofacial region; use nearby landmarks such as skull, orbits, brainstem, adjacent soft tissues.",
-          "Find the kidney cortex by its expected location in the head and craniofacial region, adjacent to skull, orbits, brainstem, adjacent soft tissues."
+          "Segment the kidney cortex in the abdomen and retroperitoneum; use nearby landmarks such as kidney, renal sinus, renal medulla, retroperitoneal fat.",
+          "Find the kidney cortex by its expected location in the abdomen and retroperitoneum, adjacent to kidney, renal sinus, renal medulla, retroperitoneal fat."
         ],
         "ct_appearance": [
           "Identify the kidney cortex on CT as a soft-tissue structure with CT boundaries guided by adjacent anatomy.",
@@ -6317,7 +6317,7 @@
         ],
         "natural_language": [
           "Please delineate the kidney cortex on this CT volume while respecting its expected shape, location, and boundaries.",
-          "Mark only the voxels belonging to the kidney cortex; avoid adjacent structures such as skull, orbits, brainstem, adjacent soft tissues."
+          "Mark only the voxels belonging to the kidney cortex; avoid adjacent structures such as kidney, renal sinus, renal medulla, retroperitoneal fat."
         ]
       }
     },
@@ -16376,13 +16376,13 @@
     "kidney_cortex": [
       "segment the kidney cortex",
       "outline the kidney cortex",
-      "Segment the kidney cortex in the head and craniofacial region; use nearby landmarks such as skull, orbits, brainstem, adjacent soft tissues.",
-      "Find the kidney cortex by its expected location in the head and craniofacial region, adjacent to skull, orbits, brainstem, adjacent soft tissues.",
+      "Segment the kidney cortex in the abdomen and retroperitoneum; use nearby landmarks such as kidney, renal sinus, renal medulla, retroperitoneal fat.",
+      "Find the kidney cortex by its expected location in the abdomen and retroperitoneum, adjacent to kidney, renal sinus, renal medulla, retroperitoneal fat.",
       "Identify the kidney cortex on CT as a soft-tissue structure with CT boundaries guided by adjacent anatomy.",
       "Create a mask for the kidney cortex, following its CT appearance as a soft-tissue structure with CT boundaries guided by adjacent anatomy.",
       "segment the kidney cortex (renal structure)",
       "Please delineate the kidney cortex on this CT volume while respecting its expected shape, location, and boundaries.",
-      "Mark only the voxels belonging to the kidney cortex; avoid adjacent structures such as skull, orbits, brainstem, adjacent soft tissues."
+      "Mark only the voxels belonging to the kidney cortex; avoid adjacent structures such as kidney, renal sinus, renal medulla, retroperitoneal fat."
     ],
     "kidney_left": [
       "segment the left kidney",

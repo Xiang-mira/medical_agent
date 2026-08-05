@@ -1,26 +1,17 @@
-# 373 Anatomical Label Rename Delivery
+# Task 1 Rename Standalone Export
 
-This package standardizes confirmed anatomical mask aliases to the canonical 373-class taxonomy.
-Only the same anatomy, same side, and same granularity are renamed.
-The package does not split, merge, generate, or modify NIfTI voxel values.
+This directory is generated from canonical source in `configs/dataset_delivery/task1/` and `tools/dataset_delivery/`.
+Do not hand-edit files here; regenerate with `tools/dataset_delivery/export_task1_standalone.py`.
 
-Confirmed mappings: configs/organ_rename_mapping_373.csv
-Canonical taxonomy: configs/student_3d_prompt_target_organs.json
+Task 1 only renames existing masks when anatomy, laterality, and granularity are identical.
+Task 2 targets are listed separately and are never executed as Task 1 renames.
 
-Run from the package root.
+Validate this export from the repository root:
 
-Dry run:
-python tools/dataset_delivery/rename_anatomical_labels.py --data-root /PATH/TO/MASK_DATA --mapping-file configs/organ_rename_mapping_373.csv --taxonomy configs/student_3d_prompt_target_organs.json --report rename_dry_run_report.csv --dry-run
-
-Apply only after reviewing every conflict in the dry-run report:
-python tools/dataset_delivery/rename_anatomical_labels.py --data-root /PATH/TO/WRITABLE_MASK_DATA --mapping-file configs/organ_rename_mapping_373.csv --taxonomy configs/student_3d_prompt_target_organs.json --report rename_apply_report.csv --apply
-
-Existing target files are never overwritten.
-Multiple sources competing for one target are skipped and reported.
-Only status=confirmed mappings are executed.
-Missing or finer-grained structures are handled separately by the 100-case generation workflow.
-
-Confirmed rename rules: 107.
-Canonical taxonomy targets covered by rename rules: 94.
-The four ambiguous carotid/subclavian aliases are excluded from automatic rename because they coexist with two independent canonical taxonomy targets; see non_rename_decisions.csv.
-Targets not solvable by filename normalization are listed in unresolved_unmatched_targets.txt for the separate label-generation or derivation workflow.
+```bash
+python tools/dataset_delivery/validate_rename_mapping.py \
+  --mapping configs/dataset_delivery/task1/organ_rename_mapping_373.csv \
+  --taxonomy configs/student_3d_prompt_target_organs.json \
+  --task2-targets configs/dataset_delivery/task1/task2_generate_targets_23.csv \
+  --alias-groups configs/dataset_delivery/task1/task1_alias_groups.csv
+```

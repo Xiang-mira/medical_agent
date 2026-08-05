@@ -1,8 +1,0 @@
-bones
-celiac_aa_celiac_artery
-liver_hepatic_vein
-liver_portal_vein
-lung
-parotid_glands
-prosthetic_breast_implant
-submandibular_glands

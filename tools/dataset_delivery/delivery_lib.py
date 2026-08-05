@@ -18,6 +18,8 @@ from typing import Any, Iterable
 ALLOWED_RENAME_STATUS = {"confirmed", "pending_review", "rejected"}
 ALLOWED_GAP_RESOLUTION = {"rename", "generate", "manual_review"}
 ALLOWED_GAP_STATUS = {"confirmed", "pending_review", "rejected"}
+ALLOWED_BOUNDARY_CLASSIFICATION = {"task1_rename", "task2_generate", "boundary_review", "exclude"}
+ALLOWED_BOUNDARY_STATUS = {"confirmed", "pending_review", "rejected", "excluded"}
 NIFTI_SUFFIX = ".nii.gz"
 
 
@@ -58,10 +60,16 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
         ]
 
 
+def read_csv_fieldnames(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return [str(field or "").strip() for field in (reader.fieldnames or [])]
+
+
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -214,6 +222,84 @@ def read_rename_mapping(path: Path) -> list[RenameMapping]:
     return rows
 
 
+def load_task2_targets(path: Path | None) -> set[str]:
+    if path is None or not path.exists():
+        return set()
+    rows = read_csv_rows(path)
+    targets: set[str] = set()
+    if rows:
+        for row in rows:
+            value = row.get("target_name") or next(iter(row.values()), "")
+            if value:
+                targets.add(safe_label_name(value))
+    return targets
+
+
+def read_alias_groups(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None or not path.exists():
+        return {}
+    groups: dict[str, dict[str, Any]] = {}
+    for row in read_csv_rows(path):
+        target = safe_label_name(row.get("target_name", ""))
+        source = safe_label_name(row.get("source_name", ""))
+        group_id = row.get("alias_group") or row.get("alias_group_id") or target
+        entry = groups.setdefault(target, {"alias_group": group_id, "target_name": target, "sources": set(), "rows": []})
+        entry["sources"].add(source)
+        entry["rows"].append(row)
+    return groups
+
+
+def read_boundary_classification(path: Path | None) -> dict[tuple[str, str], dict[str, str]]:
+    if path is None or not path.exists():
+        return {}
+    out: dict[tuple[str, str], dict[str, str]] = {}
+    for row in read_csv_rows(path):
+        source = safe_label_name(row.get("source_name", ""))
+        target = safe_label_name(row.get("target_name", ""))
+        normalized = dict(row)
+        normalized["source_name"] = source
+        normalized["target_name"] = target
+        out[(source, target)] = normalized
+    return out
+
+
+def _truth_cell(value: str) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _write_markdown_report(path: Path, title: str, summary: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"# {title}", ""]
+    status = summary.get("status", "unknown")
+    lines.append(f"- status: `{status}`")
+    for key in (
+        "mapping_file",
+        "taxonomy",
+        "rows",
+        "confirmed_count",
+        "pending_review_count",
+        "task2_generate_count",
+        "exclude_count",
+        "task2_overlap_count",
+        "one_to_many_count",
+        "many_to_one_alias_group_count",
+        "errors_count",
+    ):
+        if key in summary:
+            lines.append(f"- {key}: `{summary[key]}`")
+    errors = summary.get("errors") or []
+    if errors:
+        lines.extend(["", "## Errors"])
+        for error in errors[:200]:
+            lines.append(f"- `{error.get('type', 'error')}`: {json.dumps(error, ensure_ascii=False)}")
+    warnings = summary.get("warnings") or []
+    if warnings:
+        lines.extend(["", "## Warnings"])
+        for warning in warnings[:200]:
+            lines.append(f"- `{warning.get('type', 'warning')}`: {json.dumps(warning, ensure_ascii=False)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _side(name: str) -> str | None:
     parts = set(normalize_name(name).split("_"))
     left = "left" in parts
@@ -225,50 +311,222 @@ def _side(name: str) -> str | None:
     return None
 
 
-def validate_rename_mapping(path: Path, taxonomy: Path, report: Path | None = None) -> dict[str, Any]:
+def validate_rename_mapping(
+    path: Path,
+    taxonomy: Path,
+    report: Path | None = None,
+    *,
+    task2_targets: Path | None = None,
+    alias_groups: Path | None = None,
+    boundary_classification: Path | None = None,
+    output_md: Path | None = None,
+    standalone_dir: Path | None = None,
+) -> dict[str, Any]:
     targets = set(load_taxonomy_names(taxonomy))
+    task2 = load_task2_targets(task2_targets)
+    aliases = read_alias_groups(alias_groups)
+    boundary = read_boundary_classification(boundary_classification)
+    fieldnames = read_csv_fieldnames(path)
+    required_fields = ["source_name", "target_name", "status", "reason", "notes"]
     rows = read_rename_mapping(path)
     errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    if fieldnames[: len(required_fields)] != required_fields:
+        errors.append({"type": "invalid_mapping_schema", "expected_prefix": required_fields, "actual": fieldnames})
     seen_rows: set[tuple[str, str, str]] = set()
+    seen_pairs: set[tuple[str, str]] = set()
     source_to_targets: dict[str, set[str]] = {}
+    target_to_sources: dict[str, set[str]] = {}
+    confirmed_targets: set[str] = set()
     for idx, row in enumerate(rows, start=2):
         key = (row.source_name, row.target_name, row.status)
         if key in seen_rows:
             errors.append({"row": idx, "type": "duplicate_row", "source_name": row.source_name, "target_name": row.target_name})
         seen_rows.add(key)
+        pair = (row.source_name, row.target_name)
+        if pair in seen_pairs:
+            errors.append({"row": idx, "type": "duplicate_source_target_pair", "source_name": row.source_name, "target_name": row.target_name})
+        seen_pairs.add(pair)
         if row.target_name not in targets:
             errors.append({"row": idx, "type": "target_not_in_taxonomy", "target_name": row.target_name})
         if row.source_name == row.target_name:
             errors.append({"row": idx, "type": "source_equals_target", "source_name": row.source_name})
         if _side(row.source_name) and _side(row.target_name) and _side(row.source_name) != _side(row.target_name):
             errors.append({"row": idx, "type": "left_right_conflict", "source_name": row.source_name, "target_name": row.target_name})
+        if not row.reason:
+            errors.append({"row": idx, "type": "missing_reason", "source_name": row.source_name, "target_name": row.target_name})
+        target_to_sources.setdefault(row.target_name, set()).add(row.source_name)
         if row.status == "confirmed":
+            confirmed_targets.add(row.target_name)
             source_to_targets.setdefault(row.source_name, set()).add(row.target_name)
+            if row.target_name in task2:
+                errors.append({"row": idx, "type": "task2_overlap", "target_name": row.target_name})
     for source, mapped_targets in sorted(source_to_targets.items()):
         if len(mapped_targets) > 1:
             errors.append({"type": "one_to_many_source_mapping", "source_name": source, "target_names": sorted(mapped_targets)})
-    summary = {"status": "failed" if errors else "success", "mapping_file": str(path), "taxonomy": str(taxonomy), "rows": len(rows), "errors": errors}
+    many_to_one_alias_targets: set[str] = set()
+    for target, sources in sorted(target_to_sources.items()):
+        if len(sources) <= 1:
+            continue
+        alias = aliases.get(target)
+        if not alias:
+            errors.append({"type": "undeclared_many_to_one_target", "target_name": target, "source_names": sorted(sources)})
+            continue
+        alias_sources = set(alias["sources"])
+        missing = sorted(sources - alias_sources)
+        if missing:
+            errors.append({"type": "many_to_one_sources_missing_from_alias_group", "target_name": target, "source_names": missing})
+        else:
+            many_to_one_alias_targets.add(target)
+    for target, alias in sorted(aliases.items()):
+        if target not in targets:
+            errors.append({"type": "alias_group_target_not_in_taxonomy", "target_name": target})
+        if len(alias["sources"]) < 2:
+            warnings.append({"type": "alias_group_has_single_source", "target_name": target})
+    if boundary:
+        boundary_keys = set(boundary)
+        mapping_keys = {(row.source_name, row.target_name) for row in rows}
+        missing_boundary = sorted(mapping_keys - boundary_keys)
+        extra_boundary = sorted(boundary_keys - mapping_keys)
+        for source, target in missing_boundary:
+            errors.append({"type": "missing_boundary_row", "source_name": source, "target_name": target})
+        for source, target in extra_boundary:
+            errors.append({"type": "extra_boundary_row", "source_name": source, "target_name": target})
+        for idx, row in enumerate(rows, start=2):
+            b = boundary.get((row.source_name, row.target_name))
+            if not b:
+                continue
+            classification = b.get("classification", "")
+            b_status = b.get("status", "")
+            if classification not in ALLOWED_BOUNDARY_CLASSIFICATION:
+                errors.append({"row": idx, "type": "invalid_boundary_classification", "classification": classification})
+            if b_status not in ALLOWED_BOUNDARY_STATUS:
+                errors.append({"row": idx, "type": "invalid_boundary_status", "status": b_status})
+            if row.status == "confirmed":
+                if classification != "task1_rename" or b_status != "confirmed":
+                    errors.append({"row": idx, "type": "confirmed_mapping_boundary_mismatch", "source_name": row.source_name, "target_name": row.target_name, "classification": classification, "boundary_status": b_status})
+                for key_name, expected in (("same_anatomy", True), ("same_laterality", True), ("same_granularity", True), ("requires_voxel_change", False)):
+                    actual = _truth_cell(b.get(key_name, ""))
+                    if actual != expected:
+                        errors.append({"row": idx, "type": "confirmed_boundary_condition_failed", "field": key_name, "source_name": row.source_name, "target_name": row.target_name})
+                if not b.get("evidence", "").strip():
+                    errors.append({"row": idx, "type": "confirmed_missing_evidence", "source_name": row.source_name, "target_name": row.target_name})
+            elif row.status == "pending_review":
+                if classification != "boundary_review" or b_status != "pending_review":
+                    errors.append({"row": idx, "type": "pending_mapping_boundary_mismatch", "source_name": row.source_name, "target_name": row.target_name, "classification": classification, "boundary_status": b_status})
+            elif classification == "task1_rename" and b_status == "confirmed":
+                errors.append({"row": idx, "type": "boundary_confirmed_but_mapping_not_confirmed", "source_name": row.source_name, "target_name": row.target_name})
+    if standalone_dir is not None:
+        standalone_checks: list[tuple[Path, Path, str]] = [
+            (path, standalone_dir / "configs" / "organ_rename_mapping_373.csv", "standalone_mapping"),
+        ]
+        if task2_targets is not None:
+            standalone_checks.append((task2_targets, standalone_dir / "configs" / "task2_generate_targets_23.csv", "standalone_task2_targets"))
+        if alias_groups is not None:
+            standalone_checks.append((alias_groups, standalone_dir / "configs" / "task1_alias_groups.csv", "standalone_alias_groups"))
+        if boundary_classification is not None:
+            standalone_checks.append((boundary_classification, standalone_dir / "configs" / "task_boundary_classification.csv", "standalone_boundary_classification"))
+        repo_root = Path(__file__).resolve().parents[2]
+        for rel in (
+            "tools/dataset_delivery/delivery_lib.py",
+            "tools/dataset_delivery/rename_anatomical_labels.py",
+            "tools/dataset_delivery/validate_rename_mapping.py",
+        ):
+            standalone_checks.append((repo_root / rel, standalone_dir / rel, f"standalone_{Path(rel).name}"))
+        for canonical, exported, check_type in standalone_checks:
+            if not canonical.exists():
+                errors.append({"type": f"{check_type}_canonical_missing", "path": str(canonical)})
+            elif not exported.exists():
+                errors.append({"type": f"{check_type}_missing", "path": str(exported)})
+            elif sha256_file(canonical) != sha256_file(exported):
+                errors.append({"type": f"{check_type}_sha_mismatch", "canonical": str(canonical), "standalone": str(exported)})
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        status_counts[row.status] = status_counts.get(row.status, 0) + 1
+    task2_overlap = sorted(confirmed_targets & task2)
+    summary = {
+        "status": "failed" if errors else "success",
+        "mapping_file": str(path),
+        "taxonomy": str(taxonomy),
+        "rows": len(rows),
+        "confirmed_count": status_counts.get("confirmed", 0),
+        "pending_review_count": status_counts.get("pending_review", 0),
+        "rejected_count": status_counts.get("rejected", 0),
+        "task2_generate_count": 0,
+        "exclude_count": 0,
+        "task2_overlap_count": len(task2_overlap),
+        "task2_overlap": task2_overlap,
+        "one_to_many_count": sum(1 for targets_for_source in source_to_targets.values() if len(targets_for_source) > 1),
+        "many_to_one_alias_group_count": len(many_to_one_alias_targets),
+        "many_to_one_alias_group_targets": sorted(many_to_one_alias_targets),
+        "errors_count": len(errors),
+        "errors": errors,
+        "warnings": warnings,
+    }
     if report:
         write_json(report, summary)
+    if output_md:
+        _write_markdown_report(output_md, "Task 1 Rename Mapping Validation", summary)
     if errors:
         raise DeliveryError(f"Rename mapping validation failed with {len(errors)} error(s)")
     return summary
 
 
-def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Path, *, apply: bool = False) -> dict[str, Any]:
-    validate_rename_mapping(mapping_file, taxonomy)
+def _copy_mask_dir_once(source_mask_dir: Path, data_root: Path, output_data_root: Path, case_id: str) -> Path:
+    try:
+        rel = source_mask_dir.resolve().relative_to(data_root.resolve())
+    except Exception:
+        rel = Path(case_id) / "segmentations"
+    dst = output_data_root / rel
+    if not dst.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_mask_dir, dst)
+    return dst
+
+
+def apply_rename(
+    data_root: Path,
+    mapping_file: Path,
+    taxonomy: Path,
+    report: Path,
+    *,
+    apply: bool = False,
+    task2_targets: Path | None = None,
+    alias_groups: Path | None = None,
+    boundary_classification: Path | None = None,
+    output_data_root: Path | None = None,
+) -> dict[str, Any]:
+    validate_rename_mapping(
+        mapping_file,
+        taxonomy,
+        task2_targets=task2_targets,
+        alias_groups=alias_groups,
+        boundary_classification=boundary_classification,
+    )
+    if apply:
+        if output_data_root is None:
+            raise DeliveryError("--apply requires an independent --output-data-root; in-place Task 1 rename is not allowed")
+        if data_root.resolve() == output_data_root.resolve():
+            raise DeliveryError("--output-data-root must differ from --data-root")
     mappings = [m for m in read_rename_mapping(mapping_file) if m.status == "confirmed"]
+    pending = [m for m in read_rename_mapping(mapping_file) if m.status == "pending_review"]
+    aliases = read_alias_groups(alias_groups)
     mode = "apply" if apply else "dry_run"
     report_rows: list[dict[str, Any]] = []
     case_count = 0
-    for case_id, _case_root, mask_dir in discover_mask_dirs(data_root):
+    for case_id, _case_root, source_mask_dir in discover_mask_dirs(data_root):
         case_count += 1
+        mask_dir = _copy_mask_dir_once(source_mask_dir, data_root, output_data_root, case_id) if apply and output_data_root else source_mask_dir
         present = {safe_label_name(p.name): p for p in mask_dir.glob(f"*{NIFTI_SUFFIX}")}
         target_hits: dict[str, list[str]] = {}
         for m in mappings:
             if m.source_name in present:
                 target_hits.setdefault(m.target_name, []).append(m.source_name)
         blocked_targets = {target for target, sources in target_hits.items() if len(sources) > 1}
+        for target, alias in aliases.items():
+            present_aliases = sorted(set(alias["sources"]) & set(present))
+            if len(present_aliases) > 1:
+                blocked_targets.add(target)
         for m in mappings:
             src = mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"
             dst = mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"
@@ -283,11 +541,11 @@ def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Pa
                 "reason": "",
             }
             if m.target_name in blocked_targets:
-                row.update({"status": "conflict", "reason": "multiple_sources_to_same_target_in_case"})
+                row.update({"status": "conflict", "reason": "alias_group_coexistence"})
             elif src.exists() and dst.exists():
                 row.update({"status": "conflict", "reason": "source_and_target_exist"})
             elif not src.exists() and dst.exists():
-                row.update({"status": "already_applied", "reason": "source_missing_target_exists"})
+                row.update({"status": "already_normalized", "reason": "source_missing_target_exists"})
             elif not src.exists() and not dst.exists():
                 row.update({"status": "source_missing", "reason": "source_and_target_missing"})
             else:
@@ -295,6 +553,17 @@ def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Pa
                 if apply:
                     src.rename(dst)
             report_rows.append(row)
+        for m in pending:
+            report_rows.append({
+                "case_id": case_id,
+                "source_name": m.source_name,
+                "target_name": m.target_name,
+                "source_path": str(mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"),
+                "target_path": str(mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"),
+                "mode": mode,
+                "status": "skipped_pending_review",
+                "reason": "mapping_status_pending_review",
+            })
     fields = ["case_id", "source_name", "target_name", "source_path", "target_path", "mode", "status", "reason"]
     write_csv(report, report_rows, fields)
     status_counts: dict[str, int] = {}
