@@ -76,6 +76,33 @@ def parse_organ_option(organs: str, target_config: str = "configs/student_3d_pro
     return [x.strip() for x in token.replace(";", ",").split(",") if x.strip()]
 
 
+def parse_strict_delivery_fov_override_organs(
+    organs: str,
+    *,
+    target_config: str = "configs/student_3d_prompt_target_organs.json",
+) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for organ in (organs or "").replace(";", ",").split(","):
+        value = organ.strip()
+        if not value or value in seen:
+            continue
+        values.append(value)
+        seen.add(value)
+    if not values:
+        return []
+    config_path = resolve_path(target_config)
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    target_set = {str(x) for x in data.get("target_organs", [])}
+    unknown = [organ for organ in values if organ not in target_set]
+    if unknown:
+        raise click.ClickException(
+            "strict-delivery FOV override organs must be formal taxonomy targets: "
+            + ",".join(unknown)
+        )
+    return values
+
+
 def strict_delivery_exit_code(result: dict[str, Any], *, strict_delivery_targets: bool) -> int:
     if not strict_delivery_targets:
         return 0
@@ -798,8 +825,16 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--roi-margin-mm", type=float, default=20.0, show_default=True)
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--strict-delivery-targets", is_flag=True, default=False, help="Fail strict delivery runs when requested teachers/outputs are not actually produced.")
+@click.option(
+    "--strict-delivery-fov-override-organs",
+    default="",
+    help=(
+        "Comma-separated explicitly requested organs that may bypass FOV "
+        "pruning only when visibility is partially_visible in a strict-delivery run."
+    ),
+)
 @click.option("--log-file", default=os.getenv("MEDAI_LOG_FILE"), help="Optional fixed log file; run-loop progress and final JSON are tee'd here.")
-def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run, strict_delivery_targets, log_file):
+def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run, strict_delivery_targets, strict_delivery_fov_override_organs, log_file):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
     if not enable_shapekit and not dry_run and not debug_allow_no_shapekit:
         fail({
@@ -812,6 +847,17 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
         })
     model_list = [x.strip() for x in models.replace(";", ",").split(",") if x.strip()]
     organ_list = parse_organ_option(organs, target_config=target_config)
+    fov_override_organs = parse_strict_delivery_fov_override_organs(
+        strict_delivery_fov_override_organs,
+        target_config=target_config,
+    )
+    if fov_override_organs and not strict_delivery_targets:
+        fail({
+            "status": "failed",
+            "reason": "not_strict_delivery",
+            "message": "--strict-delivery-fov-override-organs is only valid with --strict-delivery-targets.",
+            "strict_delivery_fov_override_organs": fov_override_organs,
+        })
     def _run() -> dict[str, Any]:
         return run_multimodel_annotation_loop(
             resolve_path(case_list), resolve_path(output_folder), model_list,
@@ -832,6 +878,7 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
             roi_margin_mm=roi_margin_mm,
             vlm_model=critic_vlm_model,
             strict_delivery_targets=strict_delivery_targets,
+            strict_delivery_fov_override_organs=fov_override_organs,
         )
 
     if log_file:

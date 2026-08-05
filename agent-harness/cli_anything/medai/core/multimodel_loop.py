@@ -1020,6 +1020,7 @@ def _hierarchical_plan_cache_key(
     major_organs: list[str],
     child_organs: list[str],
     execution_plan: dict[str, Any],
+    fov_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the semantic parts that make a hierarchical ROI cache reusable."""
     per_organ = execution_plan.get("per_organ", {}) or {}
@@ -1028,6 +1029,13 @@ def _hierarchical_plan_cache_key(
         "requested_organs": list(requested_organs),
         "major_organs": list(major_organs),
         "child_organs": list(child_organs),
+        "strict_delivery_fov_override": {
+            "enabled": bool((fov_override or {}).get("enabled")),
+            "requested_override_organs": list(
+                (fov_override or {}).get("requested_override_organs") or []
+            ),
+            "applied_organs": list((fov_override or {}).get("applied_organs") or []),
+        },
         "execution_plan": {
             "candidate_mode": execution_plan.get("candidate_mode"),
             "teacher_run_list": list(execution_plan.get("teacher_run_list", []) or []),
@@ -1041,6 +1049,14 @@ def _hierarchical_cache_keys_equivalent(left: dict[str, Any], right: dict[str, A
     """Treat the retired postcava target as the inferior_vena_cava alias."""
     def normalize(key: dict[str, Any]) -> dict[str, Any]:
         value = json.loads(json.dumps(key))
+        value.setdefault(
+            "strict_delivery_fov_override",
+            {
+                "enabled": False,
+                "requested_override_organs": [],
+                "applied_organs": [],
+            },
+        )
         for field in ("requested_organs", "major_organs", "child_organs"):
             value[field] = sorted({
                 "inferior_vena_cava" if x == "postcava" else x
@@ -3512,6 +3528,105 @@ def _fov_pruned_organs(
     return [organ for organ in organs if organ in active]
 
 
+def _apply_strict_delivery_fov_override(
+    *,
+    organs: list[str],
+    initial_fov_organs: list[str],
+    strict_delivery_targets: bool,
+    strict_delivery_fov_override_organs: list[str],
+    taxonomy: dict[str, Any],
+    presence_context: dict[str, Any],
+    registry: dict[str, Any],
+    project_root: Path,
+    requested_models: list[str],
+    preseeded_model_dirs: dict[str, Path] | None,
+    candidate_mode: str,
+) -> tuple[list[str], dict[str, Any]]:
+    """Restore explicitly requested, partially visible strict-delivery organs."""
+    requested_set = set(organs)
+    fov_set = set(initial_fov_organs)
+    initial_pruned_organs = [organ for organ in organs if organ not in fov_set]
+    override_organs = list(dict.fromkeys(strict_delivery_fov_override_organs or []))
+    override_set = set(override_organs)
+    applied_organs: list[str] = []
+    rejected_organs: list[str] = []
+    rows: list[dict[str, Any]] = []
+    result_organs = list(initial_fov_organs)
+
+    fov_override = {
+        "enabled": bool(override_organs),
+        "requested_override_organs": override_organs,
+        "initial_fov_organs": list(initial_fov_organs),
+        "initial_pruned_organs": initial_pruned_organs,
+        "applied_organs": applied_organs,
+        "rejected_organs": rejected_organs,
+        "rows": rows,
+    }
+    if not override_organs:
+        return result_organs, fov_override
+
+    for organ in override_organs:
+        visibility = _fov_status_for_organ(organ, presence_context)
+        row: dict[str, Any] = {
+            "organ": organ,
+            "visibility": visibility,
+            "decision": "rejected",
+            "reason": "",
+            "requested_models": list(requested_models),
+            "eligible_teachers": [],
+            "presence_evidence": list((presence_context or {}).get("coverage_evidence", []) or []),
+        }
+
+        if not strict_delivery_targets:
+            row["reason"] = "not_strict_delivery"
+        elif taxonomy_entry(taxonomy, organ) is None:
+            row["reason"] = "organ_not_in_taxonomy"
+        elif organ not in requested_set:
+            row["reason"] = "organ_not_explicitly_requested"
+        elif visibility == "out_of_fov":
+            row["reason"] = "visibility_out_of_fov"
+        elif visibility == "unknown":
+            row["reason"] = "visibility_unknown"
+        elif organ not in override_set:
+            row["reason"] = "organ_not_in_override_allowlist"
+        elif organ in fov_set:
+            row["decision"] = "not_needed"
+            row["reason"] = "already_in_fov"
+        elif visibility != "partially_visible":
+            row["reason"] = "visibility_not_partially_visible"
+        else:
+            probe_plan = _build_case_execution_plan(
+                organs=[organ],
+                registry=registry,
+                project_root=project_root,
+                requested_models=requested_models,
+                preseeded_model_dirs=preseeded_model_dirs,
+                candidate_mode=candidate_mode,
+            )
+            per_organ = (probe_plan.get("per_organ") or {}).get(organ, {}) or {}
+            eligible = list(per_organ.get("eligible_teachers") or [])
+            if not eligible:
+                row["reason"] = "eligible_teacher_missing"
+            else:
+                row["decision"] = "applied"
+                row["reason"] = "explicit_strict_delivery_partial_visibility_override"
+                row["eligible_teachers"] = eligible
+                result_organs.append(organ)
+                fov_set.add(organ)
+                applied_organs.append(organ)
+
+        if row["decision"] == "rejected":
+            if organ in fov_set:
+                fov_set.discard(organ)
+                result_organs = [item for item in result_organs if item != organ]
+            rejected_organs.append(organ)
+        rows.append(row)
+
+    fov_override["applied_organs"] = applied_organs
+    fov_override["rejected_organs"] = rejected_organs
+    return result_organs, fov_override
+
+
 def _case_resume_state(
     *,
     case_out: Path,
@@ -5254,6 +5369,7 @@ def run_multimodel_annotation_loop(
     strict_labelcritic_selection: bool = True,
     use_annotation_folder_reference: bool = True,
     strict_delivery_targets: bool = False,
+    strict_delivery_fov_override_organs: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -5303,8 +5419,25 @@ def run_multimodel_annotation_loop(
         organs = _load_default_target_organs(project_root)
     if models is None:
         models = ["mock_seg"] if dry_run else ["totalsegmentator"]
+    strict_delivery_fov_override_organs = list(
+        dict.fromkeys(
+            str(organ).strip()
+            for organ in (strict_delivery_fov_override_organs or [])
+            if str(organ).strip()
+        )
+    )
+    if strict_delivery_fov_override_organs and not strict_delivery_targets:
+        raise ValueError(
+            "strict_delivery_fov_override_organs requires strict_delivery_targets=True"
+        )
     target_validation = _target_validation_for_run(project_root, organs)
     student_target_ids = _load_student_target_ids(project_root)
+    non_taxonomy_override_organs = sorted(set(strict_delivery_fov_override_organs) - set(student_target_ids))
+    if non_taxonomy_override_organs:
+        raise ValueError(
+            "strict_delivery_fov_override_organs include non-target organs for the formal 373-organ mainline: "
+            + json.dumps(non_taxonomy_override_organs, ensure_ascii=False)
+        )
     target_blocking = target_validation.get("blocking", {}) if isinstance(target_validation, dict) else {}
     if target_blocking.get("requested_non_target_organs"):
         raise ValueError(
@@ -5334,6 +5467,7 @@ def run_multimodel_annotation_loop(
     review_queue = out / "review_queue.jsonl"
     timing_rows: list[dict[str, Any]] = []
     strict_delivery_failures: list[dict[str, Any]] = []
+    strict_delivery_fov_override_rows: list[dict[str, Any]] = []
     vlm_decisions = out / "vlm_decisions.jsonl"
     traces_jsonl = out / "patient_traces.jsonl"
     report_supervision_jsonl = out / "report_supervision.jsonl"
@@ -5382,7 +5516,22 @@ def run_multimodel_annotation_loop(
             "labelcritic_compare_batch_enabled": compare_batch_enabled,
         }
 
-        fov_organs = _fov_pruned_organs(list(organs), taxonomy, presence_context)
+        initial_fov_organs = _fov_pruned_organs(list(organs), taxonomy, presence_context)
+        fov_organs, fov_override = _apply_strict_delivery_fov_override(
+            organs=list(organs),
+            initial_fov_organs=initial_fov_organs,
+            strict_delivery_targets=strict_delivery_targets,
+            strict_delivery_fov_override_organs=strict_delivery_fov_override_organs,
+            taxonomy=taxonomy,
+            presence_context=presence_context,
+            registry=registry,
+            project_root=project_root,
+            requested_models=list(models),
+            preseeded_model_dirs=preseeded_model_dirs,
+            candidate_mode=candidate_mode,
+        )
+        for row in fov_override.get("rows", []) or []:
+            strict_delivery_fov_override_rows.append({"case_id": case_id, **row})
         execution_organs = list(fov_organs)
         if teacher_inference_mode == "hierarchical_roi" and not reuse_preseeded_only:
             for requested_organ in fov_organs:
@@ -5441,6 +5590,7 @@ def run_multimodel_annotation_loop(
                 major_organs=major_organs_for_cache,
                 child_organs=child_organs_for_cache,
                 execution_plan=case_execution_plan,
+                fov_override=fov_override,
             )
             hierarchy_plan_cache_key_sha256 = _stable_json_sha256(hierarchy_plan_cache_key)
 
@@ -5504,6 +5654,7 @@ def run_multimodel_annotation_loop(
             "teacher_inference_mode": teacher_inference_mode,
             "roi_margin_mm": roi_margin_mm,
             "annotation_folder_reference_enabled": use_annotation_folder_reference,
+            "fov_override": fov_override,
             **case_execution_plan,
         })
         organ_task_state_path = updated_root / case_id / "organ_task_state.json"
@@ -7071,6 +7222,15 @@ def run_multimodel_annotation_loop(
         "reuse_preseeded_only": reuse_preseeded_only,
         "annotation_folder_reference_enabled": use_annotation_folder_reference,
         "strict_delivery_targets": strict_delivery_targets,
+        "strict_delivery_fov_override_enabled": bool(strict_delivery_fov_override_organs),
+        "strict_delivery_fov_override_organs": list(strict_delivery_fov_override_organs),
+        "strict_delivery_fov_override_applied_count": sum(
+            1 for row in strict_delivery_fov_override_rows if row.get("decision") == "applied"
+        ),
+        "strict_delivery_fov_override_rejected_count": sum(
+            1 for row in strict_delivery_fov_override_rows if row.get("decision") == "rejected"
+        ),
+        "strict_delivery_fov_override_rows": strict_delivery_fov_override_rows,
         "strict_delivery_failure_count": len(strict_delivery_failures),
         "strict_delivery_failures": strict_delivery_failures,
         "round2_competition_audit": _summarize_preseeded_competition(

@@ -59,6 +59,45 @@ def _stage_names(output: Path) -> list[str]:
     ]
 
 
+def _run_loop_case_csv(tmp_path: Path, *, case_id: str = "case_001") -> Path:
+    cases = tmp_path / "cases.csv"
+    cases.write_text(
+        "case_id,ct_path,annotation_folder\n"
+        f"{case_id},{tmp_path / 'missing_ct.nii.gz'},{tmp_path / 'ref'}\n",
+        encoding="utf-8",
+    )
+    return cases
+
+
+def _presence_context(
+    *,
+    abdomen: bool = False,
+    thorax: bool = False,
+    partial_thorax: bool = False,
+    region_evidence: bool = True,
+) -> dict:
+    terms = []
+    if abdomen:
+        terms.append("abdomen")
+    if thorax:
+        terms.append("thorax")
+    return {
+        "metadata": {"body_region": "multi_region" if len(terms) > 1 else (terms[0] if terms else "unknown")},
+        "coverage_terms": terms,
+        "confirmed_absent_organs": [],
+        "has_abdomen_coverage": abdomen,
+        "has_pelvis_coverage": False,
+        "has_head_coverage": False,
+        "has_thorax_coverage": thorax,
+        "has_partial_thorax_coverage": partial_thorax,
+        "has_extremity_coverage": False,
+        "has_region_evidence": region_evidence,
+        "coverage_evidence": ["automatic_ct_coverage:high"],
+        "dataset_prior": None,
+        "excludes_head": False,
+    }
+
+
 def _write_fake_nnunet_predict(path: Path, mode: str) -> Path:
     path.write_text(
         "#!/usr/bin/env python3\n"
@@ -855,6 +894,347 @@ def test_strict_run_loop_fails_when_requested_teacher_pruned_to_empty_plan(tmp_p
         "requested_organs_pruned_by_fov",
         "requested_teacher_not_scheduled",
     }
+
+
+def test_strict_fov_override_applies_for_partial_airway_tree_and_schedules_atm(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    monkeypatch.setattr(
+        loop,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(abdomen=True, partial_thorax=True),
+    )
+    result = loop.run_multimodel_annotation_loop(
+        _run_loop_case_csv(tmp_path),
+        tmp_path / "out",
+        models=["atm"],
+        organs=["airway_tree"],
+        registry_path=Path("configs/model_registry.yaml"),
+        enable_shapekit=False,
+        enable_critic=False,
+        dry_run=True,
+        teacher_inference_mode="full_volume",
+        strict_delivery_targets=True,
+        strict_delivery_fov_override_organs=["airway_tree"],
+    )
+
+    reasons = {row["reason"] for row in result["strict_delivery_failures"]}
+    assert "requested_organs_pruned_by_fov" not in reasons
+    assert "requested_teacher_not_scheduled" not in reasons
+    assert result["strict_delivery_fov_override_applied_count"] == 1
+    assert result["strict_delivery_fov_override_rejected_count"] == 0
+    summary_row = result["strict_delivery_fov_override_rows"][0]
+    assert summary_row["organ"] == "airway_tree"
+    assert summary_row["visibility"] == "partially_visible"
+    assert summary_row["decision"] == "applied"
+
+    plan = _read_json(tmp_path / "out" / "annotation_versions" / "case_001" / "case_execution_plan.json")
+    assert "atm" in plan["teacher_run_list"]
+    assert plan["fov_override"]["applied_organs"] == ["airway_tree"]
+    assert plan["fov_override"]["initial_pruned_organs"] == ["airway_tree"]
+
+
+def test_strict_fov_override_rejects_out_of_fov_airway_tree(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    monkeypatch.setattr(
+        loop,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(abdomen=True, partial_thorax=False),
+    )
+    result = loop.run_multimodel_annotation_loop(
+        _run_loop_case_csv(tmp_path),
+        tmp_path / "out",
+        models=["atm"],
+        organs=["airway_tree"],
+        registry_path=Path("configs/model_registry.yaml"),
+        enable_shapekit=False,
+        enable_critic=False,
+        dry_run=True,
+        teacher_inference_mode="full_volume",
+        strict_delivery_targets=True,
+        strict_delivery_fov_override_organs=["airway_tree"],
+    )
+
+    assert result["strict_delivery_fov_override_applied_count"] == 0
+    assert result["strict_delivery_fov_override_rejected_count"] == 1
+    assert result["strict_delivery_fov_override_rows"][0]["reason"] == "visibility_out_of_fov"
+    assert {row["reason"] for row in result["strict_delivery_failures"]} >= {
+        "requested_organs_pruned_by_fov",
+        "requested_teacher_not_scheduled",
+    }
+
+
+def test_strict_fov_override_rejects_unknown_airway_tree(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    monkeypatch.setattr(
+        loop,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(region_evidence=False),
+    )
+    result = loop.run_multimodel_annotation_loop(
+        _run_loop_case_csv(tmp_path),
+        tmp_path / "out",
+        models=["atm"],
+        organs=["airway_tree"],
+        registry_path=Path("configs/model_registry.yaml"),
+        enable_shapekit=False,
+        enable_critic=False,
+        dry_run=True,
+        teacher_inference_mode="full_volume",
+        strict_delivery_targets=True,
+        strict_delivery_fov_override_organs=["airway_tree"],
+    )
+
+    assert result["strict_delivery_fov_override_applied_count"] == 0
+    assert result["strict_delivery_fov_override_rejected_count"] == 1
+    assert result["strict_delivery_fov_override_rows"][0]["reason"] == "visibility_unknown"
+
+
+def test_strict_fov_override_does_not_restore_unrequested_or_non_allowlisted_organs(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    monkeypatch.setattr(
+        loop,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(abdomen=True, partial_thorax=True),
+    )
+    result = loop.run_multimodel_annotation_loop(
+        _run_loop_case_csv(tmp_path),
+        tmp_path / "out",
+        models=["atm", "airrc"],
+        organs=["airway_tree", "airway_wall"],
+        registry_path=Path("configs/model_registry.yaml"),
+        enable_shapekit=False,
+        enable_critic=False,
+        dry_run=True,
+        teacher_inference_mode="full_volume",
+        strict_delivery_targets=True,
+        strict_delivery_fov_override_organs=["airway_tree"],
+    )
+
+    pruned = [row["organ"] for row in result["strict_delivery_failures"] if row["reason"] == "requested_organs_pruned_by_fov"]
+    assert pruned == ["airway_wall"]
+    plan = _read_json(tmp_path / "out" / "annotation_versions" / "case_001" / "case_execution_plan.json")
+    assert plan["fov_override"]["applied_organs"] == ["airway_tree"]
+    assert "airway_wall" not in plan["fov_override"]["applied_organs"]
+    assert "airway_wall" not in plan["per_organ"]
+    assert "atm" in plan["teacher_run_list"]
+
+
+def test_strict_fov_override_rejects_when_eligible_teacher_missing(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    monkeypatch.setattr(
+        loop,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(abdomen=True, partial_thorax=True),
+    )
+    result = loop.run_multimodel_annotation_loop(
+        _run_loop_case_csv(tmp_path),
+        tmp_path / "out",
+        models=["unest"],
+        organs=["airway_tree"],
+        registry_path=Path("configs/model_registry.yaml"),
+        enable_shapekit=False,
+        enable_critic=False,
+        dry_run=True,
+        teacher_inference_mode="full_volume",
+        strict_delivery_targets=True,
+        strict_delivery_fov_override_organs=["airway_tree"],
+    )
+
+    assert result["strict_delivery_fov_override_applied_count"] == 0
+    assert result["strict_delivery_fov_override_rejected_count"] == 1
+    assert result["strict_delivery_fov_override_rows"][0]["reason"] == "eligible_teacher_missing"
+    assert {row["reason"] for row in result["strict_delivery_failures"]} >= {
+        "requested_organs_pruned_by_fov",
+        "requested_teacher_not_scheduled",
+    }
+
+
+def test_strict_fov_override_cli_requires_strict_delivery(tmp_path: Path, monkeypatch):
+    from cli_anything.medai import medai_cli
+
+    monkeypatch.setattr(
+        medai_cli,
+        "run_multimodel_annotation_loop",
+        lambda *args, **kwargs: {"stage": "run_loop", "status": "success"},
+    )
+    result = CliRunner().invoke(
+        medai_cli.cli,
+        [
+            "--json", "run-loop",
+            "--case-list", str(tmp_path / "cases.csv"),
+            "--models", "atm",
+            "--organs", "airway_tree",
+            "--output", str(tmp_path / "out"),
+            "--dry-run",
+            "--strict-delivery-fov-override-organs", "airway_tree",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert '"reason": "not_strict_delivery"' in result.output
+
+
+def test_strict_fov_override_cli_rejects_non_taxonomy_organ(tmp_path: Path, monkeypatch):
+    from cli_anything.medai import medai_cli
+
+    monkeypatch.setattr(
+        medai_cli,
+        "run_multimodel_annotation_loop",
+        lambda *args, **kwargs: {"stage": "run_loop", "status": "success"},
+    )
+    result = CliRunner().invoke(
+        medai_cli.cli,
+        [
+            "--json", "run-loop",
+            "--case-list", str(tmp_path / "cases.csv"),
+            "--models", "atm",
+            "--organs", "airway_tree",
+            "--output", str(tmp_path / "out"),
+            "--dry-run",
+            "--strict-delivery-targets",
+            "--strict-delivery-fov-override-organs", "not_a_real_organ",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "strict-delivery FOV override organs must be formal taxonomy targets" in result.output
+
+
+def test_strict_fov_override_cli_passes_deduplicated_organs(tmp_path: Path, monkeypatch):
+    from cli_anything.medai import medai_cli
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_loop(*args, **kwargs):
+        captured["override"] = kwargs["strict_delivery_fov_override_organs"]
+        return {
+            "stage": "run_loop",
+            "status": "success",
+            "strict_delivery_failure_count": 0,
+            "strict_delivery_failures": [],
+        }
+
+    monkeypatch.setattr(medai_cli, "run_multimodel_annotation_loop", fake_loop)
+    result = CliRunner().invoke(
+        medai_cli.cli,
+        [
+            "--json", "run-loop",
+            "--case-list", str(tmp_path / "cases.csv"),
+            "--models", "atm",
+            "--organs", "airway_tree",
+            "--output", str(tmp_path / "out"),
+            "--dry-run",
+            "--strict-delivery-targets",
+            "--strict-delivery-fov-override-organs", "airway_tree,airway_tree",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["override"] == ["airway_tree"]
+
+
+def test_strict_fov_override_changes_hierarchical_cache_key():
+    from cli_anything.medai.core import multimodel_loop as loop
+
+    execution_plan = {"teacher_run_list": ["atm"], "per_organ": {"airway_tree": {"primary_teacher": "atm"}}}
+    without_override = loop._hierarchical_plan_cache_key(
+        requested_organs=["airway_tree"],
+        major_organs=[],
+        child_organs=["airway_tree"],
+        execution_plan=execution_plan,
+        fov_override={"enabled": False, "requested_override_organs": [], "applied_organs": []},
+    )
+    with_override = loop._hierarchical_plan_cache_key(
+        requested_organs=["airway_tree"],
+        major_organs=[],
+        child_organs=["airway_tree"],
+        execution_plan=execution_plan,
+        fov_override={"enabled": True, "requested_override_organs": ["airway_tree"], "applied_organs": ["airway_tree"]},
+    )
+
+    assert without_override != with_override
+    assert not loop._hierarchical_cache_keys_equivalent(without_override, with_override)
+
+
+def test_task2_100case_preflight_marks_partial_atm_eligible_only_with_override(tmp_path: Path, monkeypatch):
+    from tools.dataset_delivery import audit_task2_100case_launch as audit
+
+    targets = sorted({organ for values in audit.MODEL_GROUP_TARGETS.values() for organ in values})
+    taxonomy = tmp_path / "taxonomy.json"
+    taxonomy.write_text(json.dumps({"target_organs": targets + audit.BLOCKED_TARGETS}), encoding="utf-8")
+    manifest = _run_loop_case_csv(tmp_path)
+    monkeypatch.setattr(
+        audit,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(abdomen=True, partial_thorax=True),
+    )
+
+    without_override = audit.build_preflight(
+        case_manifest=manifest,
+        data_root=tmp_path / "masks",
+        taxonomy=taxonomy,
+        output_root=tmp_path / "without",
+        override_organs=[],
+    )
+    with_override = audit.build_preflight(
+        case_manifest=manifest,
+        data_root=tmp_path / "masks",
+        taxonomy=taxonomy,
+        output_root=tmp_path / "with",
+        override_organs=["airway_tree"],
+    )
+
+    without_rows = [
+        row for row in audit.read_csv_rows(tmp_path / "without" / "task2_100case_preflight_rows.csv")
+        if row["model_group"] == "atm"
+    ]
+    with_rows = [
+        row for row in audit.read_csv_rows(tmp_path / "with" / "task2_100case_preflight_rows.csv")
+        if row["model_group"] == "atm"
+    ]
+    assert without_override["read_only"] is True
+    assert without_override["source_data_mutation"] is False
+    assert without_rows[0]["eligible_for_launch"] == "false"
+    assert without_rows[0]["reason"] == "partial_visibility_requires_explicit_airway_tree_override"
+    assert with_override["model_groups"]["atm"]["eligible_case_count"] == 1
+    assert with_rows[0]["eligible_for_launch"] == "true"
+    assert with_rows[0]["override_required"] == "true"
+    assert with_rows[0]["reason"] == "partial_visibility_allowed_by_explicit_airway_tree_override"
+
+
+def test_task2_100case_preflight_does_not_launch_unknown_atm_with_override(tmp_path: Path, monkeypatch):
+    from tools.dataset_delivery import audit_task2_100case_launch as audit
+
+    targets = sorted({organ for values in audit.MODEL_GROUP_TARGETS.values() for organ in values})
+    taxonomy = tmp_path / "taxonomy.json"
+    taxonomy.write_text(json.dumps({"target_organs": targets + audit.BLOCKED_TARGETS}), encoding="utf-8")
+    manifest = _run_loop_case_csv(tmp_path)
+    monkeypatch.setattr(
+        audit,
+        "_load_case_presence_context",
+        lambda *args, **kwargs: _presence_context(region_evidence=False),
+    )
+    summary = audit.build_preflight(
+        case_manifest=manifest,
+        data_root=tmp_path / "masks",
+        taxonomy=taxonomy,
+        output_root=tmp_path / "preflight",
+        override_organs=["airway_tree"],
+    )
+
+    rows = [
+        row for row in audit.read_csv_rows(tmp_path / "preflight" / "task2_100case_preflight_rows.csv")
+        if row["model_group"] == "atm"
+    ]
+    assert summary["model_groups"]["atm"]["eligible_case_count"] == 0
+    assert rows[0]["coverage_status"] == "unknown"
+    assert rows[0]["eligible_for_launch"] == "false"
+    assert rows[0]["reason"] == "visibility_unknown"
 
 
 def test_task2_scope_contains_blocked_totalsegmentator(tmp_path: Path):
