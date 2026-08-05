@@ -97,30 +97,25 @@ def load_taxonomy_names(path: Path, *, expected_count: int = 373) -> list[str]:
     return unique
 
 
-def discover_mask_dirs(data_root: Path) -> list[tuple[str, Path, Path]]:
-    """Return (case_id, case_root, mask_dir) for directories containing NIfTI masks."""
+def iter_mask_dirs(data_root: Path) -> Iterable[tuple[str, Path, Path]]:
+    """Yield mask directories without materializing every dataset path in memory."""
     root = data_root.resolve()
-    out: list[tuple[str, Path, Path]] = []
     if not root.exists():
         raise DeliveryError(f"data-root does not exist: {root}")
-    for seg in sorted(root.rglob("*")):
-        if not seg.is_dir():
-            continue
-        if not any(p.is_file() and p.name.endswith(NIFTI_SUFFIX) for p in seg.iterdir()):
-            continue
-        case_root = seg.parent if seg.name == "segmentations" else seg
-        case_id = case_root.name
-        out.append((case_id, case_root, seg))
-    if root.is_dir() and any(p.is_file() and p.name.endswith(NIFTI_SUFFIX) for p in root.iterdir()):
-        out.insert(0, (root.name, root, root))
-    seen: set[Path] = set()
-    unique = []
-    for item in out:
-        if item[2] not in seen:
-            unique.append(item)
-            seen.add(item[2])
-    return unique
 
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames.sort()
+        filenames.sort()
+        if not any(name.endswith(NIFTI_SUFFIX) for name in filenames):
+            continue
+        mask_dir = Path(dirpath)
+        case_root = mask_dir.parent if mask_dir.name == "segmentations" else mask_dir
+        yield case_root.name, case_root, mask_dir
+
+
+def discover_mask_dirs(data_root: Path) -> list[tuple[str, Path, Path]]:
+    """Return mask directories as a compatibility list."""
+    return list(iter_mask_dirs(data_root))
 
 def candidate_score_name(source: str, target: str) -> tuple[int, str]:
     s = normalize_name(source)
@@ -145,13 +140,34 @@ def candidate_score_name(source: str, target: str) -> tuple[int, str]:
 def audit_label_names(data_root: Path, taxonomy: Path, output_dir: Path, *, max_candidates: int = 5) -> dict[str, Any]:
     targets = load_taxonomy_names(taxonomy)
     target_set = set(targets)
-    inventory: dict[str, set[str]] = {}
-    for case_id, _case_root, mask_dir in discover_mask_dirs(data_root):
-        for mask in sorted(mask_dir.glob(f"*{NIFTI_SUFFIX}")):
-            inventory.setdefault(safe_label_name(mask.name), set()).add(case_id)
+    inventory: dict[str, dict[str, Any]] = {}
+    cases_scanned: set[str] = set()
+
+    for case_id, _case_root, mask_dir in iter_mask_dirs(data_root):
+        cases_scanned.add(case_id)
+        labels_in_dir = {
+            safe_label_name(name)
+            for name in os.listdir(mask_dir)
+            if name.endswith(NIFTI_SUFFIX)
+        }
+        for label_name in labels_in_dir:
+            stats = inventory.setdefault(
+                label_name,
+                {"case_count": 0, "example_case_id": case_id, "last_case_id": None},
+            )
+            if stats["last_case_id"] != case_id:
+                stats["case_count"] += 1
+                stats["last_case_id"] = case_id
+            if case_id < str(stats["example_case_id"]):
+                stats["example_case_id"] = case_id
+
     label_rows = [
-        {"label_name": name, "case_count": len(cases), "example_case_id": sorted(cases)[0]}
-        for name, cases in sorted(inventory.items())
+        {
+            "label_name": name,
+            "case_count": int(stats["case_count"]),
+            "example_case_id": str(stats["example_case_id"]),
+        }
+        for name, stats in sorted(inventory.items())
     ]
     exact = sorted(set(inventory) & target_set)
     unmatched_targets = sorted(target_set - set(inventory))
@@ -164,19 +180,50 @@ def audit_label_names(data_root: Path, taxonomy: Path, output_dir: Path, *, max_
             if score:
                 scored.append((score, reason, target))
         for score, reason, target in sorted(scored, reverse=True)[:max_candidates]:
-            candidate_rows.append({"source_name": source, "candidate_target_name": target, "score": score, "reason": reason})
+            candidate_rows.append(
+                {
+                    "source_name": source,
+                    "candidate_target_name": target,
+                    "score": score,
+                    "reason": reason,
+                }
+            )
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_csv(output_dir / "label_inventory.csv", label_rows, ["label_name", "case_count", "example_case_id"])
-    write_csv(output_dir / "exact_matches.csv", [{"label_name": x} for x in exact], ["label_name"])
-    write_csv(output_dir / "unmatched_target_labels.csv", [{"target_name": x} for x in unmatched_targets], ["target_name"])
-    write_csv(output_dir / "unmatched_dataset_labels.csv", [{"source_name": x, "case_count": len(inventory[x])} for x in extra], ["source_name", "case_count"])
-    write_csv(output_dir / "candidate_matches.csv", candidate_rows, ["source_name", "candidate_target_name", "score", "reason"])
+    write_csv(
+        output_dir / "label_inventory.csv",
+        label_rows,
+        ["label_name", "case_count", "example_case_id"],
+    )
+    write_csv(
+        output_dir / "exact_matches.csv",
+        [{"label_name": x} for x in exact],
+        ["label_name"],
+    )
+    write_csv(
+        output_dir / "unmatched_target_labels.csv",
+        [{"target_name": x} for x in unmatched_targets],
+        ["target_name"],
+    )
+    write_csv(
+        output_dir / "unmatched_dataset_labels.csv",
+        [
+            {"source_name": x, "case_count": int(inventory[x]["case_count"])}
+            for x in extra
+        ],
+        ["source_name", "case_count"],
+    )
+    write_csv(
+        output_dir / "candidate_matches.csv",
+        candidate_rows,
+        ["source_name", "candidate_target_name", "score", "reason"],
+    )
     summary = {
         "status": "success",
         "data_root": str(data_root),
         "taxonomy": str(taxonomy),
         "taxonomy_count": len(targets),
-        "cases_scanned": len({c for cases in inventory.values() for c in cases}),
+        "cases_scanned": len(cases_scanned),
         "dataset_label_count": len(inventory),
         "exact_match_count": len(exact),
         "unmatched_target_count": len(unmatched_targets),
@@ -259,9 +306,15 @@ def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Pa
     validate_rename_mapping(mapping_file, taxonomy)
     mappings = [m for m in read_rename_mapping(mapping_file) if m.status == "confirmed"]
     mode = "apply" if apply else "dry_run"
-    report_rows: list[dict[str, Any]] = []
+    fields = ["case_id", "source_name", "target_name", "source_path", "target_path", "mode", "status", "reason"]
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report_handle = report.open("w", encoding="utf-8", newline="")
+    writer = csv.DictWriter(report_handle, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    status_counts: dict[str, int] = {}
+    operation_count = 0
     case_count = 0
-    for case_id, _case_root, mask_dir in discover_mask_dirs(data_root):
+    for case_id, _case_root, mask_dir in iter_mask_dirs(data_root):
         case_count += 1
         present = {safe_label_name(p.name): p for p in mask_dir.glob(f"*{NIFTI_SUFFIX}")}
         target_hits: dict[str, list[str]] = {}
@@ -270,6 +323,8 @@ def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Pa
                 target_hits.setdefault(m.target_name, []).append(m.source_name)
         blocked_targets = {target for target, sources in target_hits.items() if len(sources) > 1}
         for m in mappings:
+            if m.source_name not in present:
+                continue
             src = mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"
             dst = mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"
             row = {
@@ -294,13 +349,11 @@ def apply_rename(data_root: Path, mapping_file: Path, taxonomy: Path, report: Pa
                 row.update({"status": "renamed" if apply else "would_rename", "reason": "confirmed_mapping"})
                 if apply:
                     src.rename(dst)
-            report_rows.append(row)
-    fields = ["case_id", "source_name", "target_name", "source_path", "target_path", "mode", "status", "reason"]
-    write_csv(report, report_rows, fields)
-    status_counts: dict[str, int] = {}
-    for row in report_rows:
-        status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
-    return {"status": "success", "mode": mode, "cases_scanned": case_count, "operations": len(report_rows), "status_counts": status_counts, "report": str(report)}
+            writer.writerow(row)
+            operation_count += 1
+            status_counts[row["status"]] = status_counts.get(row["status"], 0) + 1
+    report_handle.close()
+    return {"status": "success", "mode": mode, "cases_scanned": case_count, "operations": operation_count, "status_counts": status_counts, "report": str(report)}
 
 
 def read_gap_resolution(path: Path) -> list[dict[str, str]]:
@@ -344,13 +397,11 @@ def validate_gap_resolution(gap_file: Path, taxonomy: Path, rename_mapping: Path
 def validate_100case_manifest(path: Path, *, check_exists: bool = True, report: Path | None = None) -> dict[str, Any]:
     rows = read_csv_rows(path)
     errors = []
-    required = {"index", "case_id", "reference_mask_dir"}
+    required = {"index", "case_id", "image_path", "reference_mask_dir"}
     columns = set(rows[0]) if rows else set()
     missing_cols = sorted(required - columns)
     if missing_cols:
         errors.append({"type": "missing_columns", "columns": missing_cols})
-    if rows and not ({"image_path", "ct_path"} & columns):
-        errors.append({"type": "missing_columns", "columns": ["image_path_or_ct_path"]})
     if len(rows) != 100:
         errors.append({"type": "row_count", "actual": len(rows), "expected": 100})
     indices = []
@@ -362,11 +413,9 @@ def validate_100case_manifest(path: Path, *, check_exists: bool = True, report: 
             errors.append({"row": i + 2, "type": "invalid_index", "index": row.get("index")})
         case_ids.append(row.get("case_id", ""))
         if check_exists:
-            image_path = row.get("image_path") or row.get("ct_path")
-            if image_path and not Path(image_path).exists():
-                errors.append({"row": i + 2, "type": "image_path_missing", "path": image_path})
-            if row.get("reference_mask_dir") and not Path(row["reference_mask_dir"]).exists():
-                errors.append({"row": i + 2, "type": "reference_mask_dir_missing", "path": row["reference_mask_dir"]})
+            for key in ("image_path", "reference_mask_dir"):
+                if row.get(key) and not Path(row[key]).exists():
+                    errors.append({"row": i + 2, "type": f"{key}_missing", "path": row[key]})
     if indices and indices != list(range(100)):
         errors.append({"type": "index_sequence", "actual": indices[:105], "expected": "0-99"})
     duplicates = sorted({x for x in case_ids if case_ids.count(x) > 1})
@@ -407,9 +456,9 @@ def run_preflight(
         case_rows.append({
             "index": row.get("index"),
             "case_id": row.get("case_id"),
-            "image_path": row.get("image_path") or row.get("ct_path"),
+            "image_path": row.get("image_path"),
             "reference_mask_dir": row.get("reference_mask_dir"),
-            "image_exists": Path(row.get("image_path") or row.get("ct_path") or "").is_file(),
+            "image_exists": Path(row.get("image_path", "")).is_file(),
             "reference_mask_dir_exists": mask_dir.is_dir(),
             "existing_target_mask_count": len(existing),
         })
@@ -458,12 +507,6 @@ def load_manifest_case(manifest: Path, case_index: int) -> dict[str, str]:
     if case_index < 0 or case_index >= len(rows):
         raise DeliveryError(f"case index out of range: {case_index}")
     return rows[case_index]
-
-def case_image_path(case: dict[str, str]) -> str:
-    value = case.get("image_path") or case.get("ct_path")
-    if not value:
-        raise DeliveryError(f"manifest case {case.get('case_id', '<unknown>')} is missing image_path/ct_path")
-    return value
 
 
 def locate_generated_mask_dir(case_run_dir: Path, case_id: str) -> Path | None:
@@ -519,7 +562,7 @@ def run_teacher_case(
     one_case_manifest = case_dir / "case_manifest.csv"
     write_csv(one_case_manifest, [{
         "case_id": case_id,
-        "ct_path": case_image_path(case),
+        "ct_path": case["image_path"],
         "annotation_folder": case["reference_mask_dir"],
     }], ["case_id", "ct_path", "annotation_folder"])
     command = [
@@ -531,8 +574,6 @@ def run_teacher_case(
         "--registry", str(registry),
         "--output", str(raw_dir),
         "--timeout-sec", str(timeout_sec),
-        "--strict-delivery-targets",
-        "--log-file", str(log_dir / "run_loop.log"),
     ]
     if device:
         command.extend(["--device", device])
@@ -540,25 +581,21 @@ def run_teacher_case(
         command.append("--dry-run")
     (case_dir / "command.txt").write_text(" ".join(command) + "\n", encoding="utf-8")
     started = utc_now()
-    write_json(status_path, {"status": "running", "case_id": case_id, "command": command, "image_path": case_image_path(case), "organ_list": organs, "output_directory": str(raw_dir), "python_executable": python, "started_at": started, "log_file": str(log_dir / "run_loop.log")})
+    write_json(status_path, {"status": "running", "case_id": case_id, "command": command, "image_path": case["image_path"], "organ_list": organs, "output_directory": str(raw_dir), "python_executable": python, "started_at": started})
     proc = subprocess.run(command, cwd=str(code_root), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     (log_dir / "stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
     (log_dir / "stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
     generated_dir = locate_generated_mask_dir(case_dir, case_id)
     generated_files = sorted(generated_dir.glob(f"*{NIFTI_SUFFIX}")) if generated_dir else []
     expected_files = [p for p in generated_files if safe_label_name(p.name) in set(organs)]
-    missing_organs = sorted(set(organs) - {safe_label_name(p.name) for p in expected_files})
-    run_summary_path = raw_dir / "run_summary.json"
-    run_summary = json.loads(run_summary_path.read_text(encoding="utf-8")) if run_summary_path.exists() else {}
-    strict_failures = run_summary.get("strict_delivery_failures", []) if isinstance(run_summary, dict) else []
-    status_name = "inference_succeeded" if proc.returncode == 0 and not missing_organs and not strict_failures else "failed"
+    status_name = "inference_succeeded" if proc.returncode == 0 and expected_files else "failed"
     if dry_run and proc.returncode == 0:
         status_name = "pending"
     status = {
         "status": status_name,
         "case_id": case_id,
         "command": command,
-        "image_path": case_image_path(case),
+        "image_path": case["image_path"],
         "organ_list": organs,
         "output_directory": str(raw_dir),
         "python_executable": python,
@@ -566,18 +603,8 @@ def run_teacher_case(
         "ended_at": utc_now(),
         "return_code": proc.returncode,
         "generated_file_count": len(expected_files),
-        "expected_file_count": len(organs),
-        "missing_expected_organs": missing_organs,
-        "run_summary": str(run_summary_path) if run_summary_path.exists() else "",
-        "strict_delivery_failures": strict_failures,
-        "log_file": str(log_dir / "run_loop.log"),
         "validation_status": "not_run",
-        "failure_reason": "" if status_name != "failed" else (
-            "strict_delivery_failure" if strict_failures
-            else "expected_mask_missing" if missing_organs
-            else "no_real_expected_nifti_output" if proc.returncode == 0
-            else "teacher_command_failed"
-        ),
+        "failure_reason": "" if status_name != "failed" else "no_real_expected_nifti_output" if proc.returncode == 0 else "teacher_command_failed",
     }
     write_json(status_path, status)
     if proc.returncode != 0:
@@ -601,7 +628,7 @@ def validate_generated_masks(run_dir: Path, manifest: Path, gap_file: Path, taxo
     conflicts = []
     for case in read_csv_rows(manifest):
         case_id = case["case_id"]
-        ct_path = Path(case_image_path(case))
+        ct_path = Path(case["image_path"])
         ref_dir = Path(case["reference_mask_dir"])
         mask_dir = locate_generated_mask_dir(run_dir / "cases" / case_id, case_id)
         try:

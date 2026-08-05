@@ -1,0 +1,122 @@
+project:
+  name: abdomenatlaspro_373
+  full_target_count: 373
+  pilot_target_count: 373
+  completed_target_count_after_mapping_audit: 373
+  target_terminology: target_anatomical_structures
+  seed: 20260724
+
+paths:
+  code_root: .
+  work_root: .
+  run_root: runs
+  output_root: outputs
+  report_root: reports
+  image_root: /projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro
+  mask_root: /projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro
+  target_config: configs/student_3d_prompt_target_organs.json
+  target_mapping: configs/abdomenatlaspro_target_mapping_373.json
+  train_input_case_list: data_manifest/abdomenatlaspro_selected_train_input_strict_no_gt.csv
+  train_eval_case_list: data_manifest/abdomenatlaspro_selected_train_eval_reference.csv
+  test_input_case_list: data_manifest/abdomenatlaspro_selected_test_input_strict_no_gt.csv
+  test_eval_case_list: data_manifest/abdomenatlaspro_selected_test_eval_reference.csv
+  selection_run_dir: runs/case_selection/latest
+
+resource_profiles: configs/resource_profiles.yaml
+
+gpu_budget:
+  max_t4_gpus: 8
+  max_a100_gpus: 2
+  max_h100_gpus: 8
+  labelcritic_replicas: 1
+  max_labelcritic_replicas: 2
+  reserve_h100_for_labelcritic: true
+
+resource_limits:
+  max_cpu_array_concurrent: 5
+  max_t4_concurrent: 8
+  max_a100_training_gpus: 2
+  max_h100_gpus: 8
+  max_labelcritic_replicas: 2
+
+cpu_parallel:
+  inventory:
+    partition: cpu
+    cpus_per_task: 8
+    memory: 32G
+    time: "06:00:00"
+  header_scan:
+    partition: cpu
+    num_shards: 20
+    max_concurrent: 5
+    cpus_per_task: 4
+    memory: 16G
+    time: "06:00:00"
+  deep_mask_audit:
+    partition: cpu
+    num_shards: 10
+    max_concurrent: 4
+    cpus_per_task: 4
+    memory: 16G
+    time: "08:00:00"
+
+gpu_parallel:
+  teacher_inference:
+    partition: gpu
+    preferred_gpu: T4
+    gpus_per_task: 1
+    cpus_per_task: 4
+    memory: 32G
+    time: "08:00:00"
+    max_concurrent: 8
+    max_configurable: 16
+  student_inference:
+    partition: gpu
+    preferred_gpu: T4
+    gpus_per_task: 1
+    cpus_per_task: 4
+    memory: 32G
+    time: "08:00:00"
+    max_concurrent: 8
+    max_configurable: 16
+
+student_training:
+  default_profile: student_train_a100_1gpu
+  ddp_validated: false
+  cross_node_ddp: false
+
+labelcritic:
+  model: Qwen/Qwen2-VL-72B-Instruct-AWQ
+  partition: gpuh100
+  gpus_per_replica: 4
+  tensor_parallel_size: 4
+  default_replicas: 1
+  max_replicas: 2
+
+resource_policy:
+  teacher_train_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  teacher_test_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  student_train_resource_selection:
+    preferred_order: [student_train_a100_1gpu, student_train_a100_2gpu_ddp]
+    smoke_required: true
+    hard_constraints:
+      multi_gpu: forbidden_unless_ddp_validated
+  student_test_resource_selection:
+    preferred_order: [t4_single_gpu, a100_single_gpu]
+    smoke_required: true
+  labelcritic_resource_selection:
+    preferred_order: [labelcritic_72b_4h100_formal]
+    smoke_required: true
+
+resource_binding_mode: static_at_launch
+ddp_validated: false
+h100_ddp_allowed: false
+
+slurm_defaults:
+  account:
+  qos:
+  constraint:

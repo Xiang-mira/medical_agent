@@ -26,5 +26,5 @@ def select_resource_tier(policy: dict[str, Any], task_name: str, smoke_results: 
 
 
 def enforce_student_single_gpu(profile: dict[str, Any]) -> None:
-    if int(profile.get("gpu_count") or 0) > 1:
+    if int(profile.get("gpu_count") or 0) > 1 and not bool(profile.get("ddp_validated")):
         raise SchedulerError("Student training profile must remain single GPU unless DDP is explicitly validated")

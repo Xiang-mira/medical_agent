@@ -1,0 +1,28 @@
+project:
+  name: abdomenatlaspro_case_selection
+  full_target_count: 373
+  target_terminology: target_anatomical_structures
+
+paths:
+  work_root: /projects/bodymaps/users/xhan74/medical_agent
+  run_root: /projects/bodymaps/users/xhan74/medical_agent/runs
+  cache_root: /projects/bodymaps/users/xhan74/medical_agent/cache
+  report_root: /projects/bodymaps/users/xhan74/medical_agent/reports
+  image_root: /projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro
+  mask_root: /projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro
+  target_config: configs/student_3d_prompt_target_organs.json
+  target_mapping: configs/abdomenatlaspro_target_mapping_373.json
+
+candidate_pool:
+  multiplier: 20
+  minimum: 1000
+  maximum: 5000
+  backup_ratio: 0.20
+
+scoring:
+  mapped_positive_target_weight: 0.55
+  physical_si_extent_weight: 0.35
+  quality_weight: 0.10
+
+quality:
+  affine_atol: 0.001

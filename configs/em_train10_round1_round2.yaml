@@ -1,0 +1,61 @@
+experiment:
+  name: em_train10_round1_round2
+  seed: 20260726
+  train_cases: 10
+  test_cases: 0
+  max_inventory_cases: 10
+  ordering: sorted_case_id
+
+paths:
+  work_root: ${FORMAL10_PIPE_ROOT:-.}
+  code_root: ${CODE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/code/medical_agent}
+  formal10_root: ${FORMAL10_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/runs/em/em_train30_test20_round1_round2_20260724_114620/formal_round1_train10_20260725_213816}
+  case_list: ${CASE_LIST:-/projects/bodymaps/users/xhan74/medical_agent/runs/em/em_train30_test20_round1_round2_20260724_114620/formal_round1_train10_20260725_213816/manifests/train10.csv}
+  target_config: configs/student_3d_prompt_target_organs.json
+  target_mapping: configs/abdomenatlaspro_target_mapping_373.json
+  python_bin: /home/xhan74/envs/medical_agent_train_py311/bin/python
+  vllm_container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+  labelcritic_model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
+  labelcritic_served_model_name: Qwen/Qwen2-VL-72B-Instruct-AWQ
+  labelcritic_port: 8000
+  voxtell_model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/VoxTell/voxtell_v1.1
+  qwen_embedding_model: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen3-Embedding-4B
+
+teachers:
+  models:
+    - epai_20250421
+    - vsmtrans
+
+runtime:
+  student_backend: voxtell_style_3d_prompt
+  mstep_backend: project_voxtell_prompt_distillation_student
+  candidate_mode_round1: route_pruned_with_competition
+  candidate_mode_round2: em_student_vs_previous
+  amp_mode: off
+  batch_size: 1
+  max_steps: 2000
+  teacher_timeout_sec: 3600
+
+gpu_parallel:
+  teacher_train:
+    partition: gpu
+    gpu_type: t4
+    gpus: 1
+    cpus_per_task: 4
+    memory: 32G
+    time: 08:00:00
+    smoke_time: 00:45:00
+    max_concurrent: 8
+  student_inference_train:
+    partition: gpu
+    gpu_type: t4
+    gpus: 1
+    cpus_per_task: 4
+    memory: 32G
+    time: 08:00:00
+    max_concurrent: 8
+
+resource_limits:
+  max_t4_gpus: 8
+  max_a100_gpus: 1
+  max_h100_gpus: 4

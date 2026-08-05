@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "agent-harness"))
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from batchgenerators.utilities.file_and_folder_operations import join, load_json
 from nnunetv2.preprocessing.cropping.cropping import crop_to_nonzero
@@ -39,6 +40,7 @@ from nnunetv2.preprocessing.normalization.default_normalization_schemes import Z
 from nnunetv2.training.loss.compound_losses import DC_and_BCE_loss
 from nnunetv2.training.loss.dice import MemoryEfficientSoftDiceLoss
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel
 from torch._dynamo import OptimizedModule
 from transformers import AutoModel, AutoTokenizer
 
@@ -120,6 +122,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--seed", type=int, default=int(env.get("MEDAI_SEED", "42")))
     ap.add_argument("--save-every", type=int, default=int(env.get("MEDAI_SAVE_EVERY", "0")), help="0 disables intermediate checkpoints.")
     ap.add_argument("--dry-run", action="store_true", help="Validate inputs and write a training plan without loading Qwen/model weights.")
+    ap.add_argument("--ddp", action="store_true", default=os.getenv("WORLD_SIZE", "1") not in {"", "1"}, help="Enable single-node torch.distributed training when launched with torchrun.")
+    ap.add_argument("--local-rank", "--local_rank", type=int, default=int(env.get("LOCAL_RANK", "0")), help="Local rank provided by torchrun.")
     ap.add_argument(
         "--run-spec",
         default=env.get("MEDAI_RUN_SPEC"),
@@ -151,6 +155,49 @@ def parse_args() -> argparse.Namespace:
         help="Maximum gradient norm after AMP unscale; <=0 disables clipping.",
     )
     return ap.parse_args()
+
+
+def init_distributed_if_needed(args: argparse.Namespace) -> dict[str, Any]:
+    world_size = int(os.environ.get("WORLD_SIZE", "1") or 1)
+    rank = int(os.environ.get("RANK", "0") or 0)
+    local_rank = int(os.environ.get("LOCAL_RANK", str(args.local_rank)) or 0)
+    enabled = bool(args.ddp or world_size > 1)
+    if enabled:
+        if not torch.cuda.is_available():
+            raise RuntimeError("DDP training requires CUDA devices")
+        torch.cuda.set_device(local_rank)
+        if not dist.is_initialized():
+            dist.init_process_group(backend="nccl")
+    return {"enabled": enabled, "world_size": world_size, "rank": rank, "local_rank": local_rank, "is_rank0": rank == 0}
+
+
+def cleanup_distributed(ddp: dict[str, Any]) -> None:
+    if ddp.get("enabled") and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def ddp_mean(value: float, device: torch.device, ddp: dict[str, Any]) -> float:
+    if not ddp.get("enabled"):
+        return float(value)
+    tensor = torch.tensor([float(value)], device=device)
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    tensor /= max(int(ddp.get("world_size") or 1), 1)
+    return float(tensor.item())
+
+
+def maybe_wrap_ddp(module: nn.Module, ddp: dict[str, Any]) -> nn.Module:
+    if not ddp.get("enabled"):
+        return module
+    return DistributedDataParallel(module, device_ids=[int(ddp["local_rank"])], output_device=int(ddp["local_rank"]), find_unused_parameters=False)
+
+
+def model_state_dict(module: nn.Module) -> dict[str, Any]:
+    return module.module.state_dict() if isinstance(module, DistributedDataParallel) else module.state_dict()
+
+
+def load_model_state_dict(module: nn.Module, state: dict[str, Any], *, strict: bool = True) -> None:
+    target = module.module if isinstance(module, DistributedDataParallel) else module
+    target.load_state_dict(state, strict=strict)
 
 
 def sha256_file(path: Path, chunk_size: int = 8 * 1024 * 1024) -> str | None:
@@ -909,10 +956,14 @@ def write_voxtell_model_dir(
     network: nn.Module,
     step: int,
     manifest_path: Path,
+    *,
+    rank0_write: bool = True,
 ) -> Path:
     """Write an inference-compatible VoxTell model directory."""
     model_out = output_dir / "voxtell_finetuned_model"
     fold_out = model_out / "fold_0"
+    if not rank0_write:
+        return model_out
     fold_out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_model_dir / "plans.json", model_out / "plans.json")
     info_path = source_model_dir / "fold_0" / "INFO.txt"
@@ -922,7 +973,7 @@ def write_voxtell_model_dir(
         {
             "eligible_for_next_round_prompt_student": False,
         "eligible_as_teacher_candidate": False,
-        "network_weights": network.state_dict(),
+        "network_weights": model_state_dict(network),
             "source_model_dir": str(source_model_dir),
             "manifest": str(manifest_path),
             "step": step,
@@ -1970,6 +2021,7 @@ def mask_locality_shuffle(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
+    ddp = init_distributed_if_needed(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -2188,6 +2240,14 @@ def main() -> int:
         "official_embedding_bank": official_bank_audit,
         "paper_sampler_contract_audit": str(output_dir / "paper_sampler_contract_audit.json"),
         "amp_mode": args.amp_mode,
+        "ddp": ddp,
+        "ddp_contract": {
+            "launcher": "torchrun",
+            "single_node_only": True,
+            "uses_local_rank": True,
+            "rank0_checkpoint_writes": True,
+            "destroy_process_group_on_exit": True,
+        },
     }
     prompt_mapping_audit, prompt_mapping_rows = build_prompt_organ_mapping_audit(rows)
     prompt_mapping_audit["csv"] = str(output_dir / "prompt_organ_mapping_audit.csv")
@@ -2228,7 +2288,10 @@ def main() -> int:
         return 2
 
     write_json(output_dir / "case_split.json", case_split)
-    device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
+    if ddp["enabled"]:
+        device = torch.device(f"cuda:{ddp['local_rank']}")
+    else:
+        device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     patch_size = load_patch_size(model_dir)
     prompts = sorted(
         {str(r["prompt"]) for r in training_rows}
@@ -2250,6 +2313,8 @@ def main() -> int:
         official_network.requires_grad_(False)
         official_network.to(device)
         official_network.eval()
+
+    network = maybe_wrap_ddp(network, ddp)
 
     trainable_parameters = [p for p in network.parameters() if p.requires_grad]
     optim = build_optimizer(trainable_parameters, args)
@@ -2730,20 +2795,21 @@ def main() -> int:
                 best_task_score = window_task
                 best_anchor_score = window_retention
                 checkpoint_bad_windows = 0
-                torch.save(
-                    {
-                        "eligible_for_next_round_prompt_student": False,
-                        "eligible_as_teacher_candidate": False,
-                        "network_weights": network.state_dict(),
-                        "step": total_steps,
-                        "selection": {
-                            "new_supervision_foreground_dice": window_task,
-                            "anchor_foreground_dice": window_retention,
-                            "retention_anchor_baseline": retention_anchor_baseline,
+                if ddp["is_rank0"]:
+                    torch.save(
+                        {
+                            "eligible_for_next_round_prompt_student": False,
+                            "eligible_as_teacher_candidate": False,
+                            "network_weights": model_state_dict(network),
+                            "step": total_steps,
+                            "selection": {
+                                "new_supervision_foreground_dice": window_task,
+                                "anchor_foreground_dice": window_retention,
+                                "retention_anchor_baseline": retention_anchor_baseline,
+                            },
                         },
-                    },
-                    best_checkpoint,
-                )
+                        best_checkpoint,
+                    )
             else:
                 checkpoint_bad_windows += 1
             if checkpoint_bad_windows >= checkpoint_patience:
@@ -2752,22 +2818,24 @@ def main() -> int:
         if args.save_every > 0 and total_steps % args.save_every == 0:
             # Rotate one recovery checkpoint; 3D checkpoints are ~1.7 GB
             # and retaining every interval can exhaust the experiment disk.
-            torch.save({"eligible_for_next_round_prompt_student": False,
+            if ddp["is_rank0"]:
+                torch.save({"eligible_for_next_round_prompt_student": False,
         "eligible_as_teacher_candidate": False,
-        "network_weights": network.state_dict(), "step": total_steps}, output_dir / "checkpoint_latest.pth")
+        "network_weights": model_state_dict(network), "step": total_steps}, output_dir / "checkpoint_latest.pth")
     if total_steps < max_steps and not stopped_early:
         raise RuntimeError(f"Runtime sampler produced only {total_steps}/{max_steps} steps after {attempts} attempts")
 
     best_candidate_found = best_checkpoint.exists()
     if best_candidate_found:
         best_payload = torch.load(best_checkpoint, map_location=device, weights_only=False)
-        network.load_state_dict(best_payload["network_weights"], strict=True)
+        load_model_state_dict(network, best_payload["network_weights"], strict=True)
     elif official_network is not None:
         # Fail safe: never publish the last step when no rolling candidate
         # satisfied the anchor constraint.
-        network.load_state_dict(official_network.state_dict(), strict=True)
+        load_model_state_dict(network, official_network.state_dict(), strict=True)
     final_ckpt = output_dir / "model_finetune.pth"
-    torch.save({
+    if ddp["is_rank0"]:
+        torch.save({
         "training_mode": "project_voxtell_prompt_distillation_student",
         "legacy_mode": "project_distillation_experimental",
         "canonical_training_backend": "project_voxtell_prompt_distillation_student",
@@ -2776,15 +2844,16 @@ def main() -> int:
         "is_prompt_conditioned_student": True,
         "eligible_for_next_round_prompt_student": False,
         "eligible_as_teacher_candidate": False,
-        "network_weights": network.state_dict(),
+        "network_weights": model_state_dict(network),
         "optimizer_state": optim.state_dict(),
         "source_model_dir": str(model_dir),
         "manifest": str(manifest_path),
         "step": total_steps,
         "patch_size": patch_size,
     }, final_ckpt)
-    inference_model_dir = write_voxtell_model_dir(model_dir, output_dir, network, total_steps, manifest_path)
-    best_checkpoint.unlink(missing_ok=True)
+    inference_model_dir = write_voxtell_model_dir(model_dir, output_dir, network, total_steps, manifest_path, rank0_write=ddp["is_rank0"])
+    if ddp["is_rank0"]:
+        best_checkpoint.unlink(missing_ok=True)
     finite_losses = [x for x in losses if np.isfinite(x)]
     write_json(output_dir / "loss_history.json", {"steps": total_steps, "history": loss_history, "sampling_history": sampling_history, "skipped_sampling_attempts": skipped_attempts})
     write_loss_curve_artifacts(output_dir, loss_history)

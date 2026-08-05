@@ -1,0 +1,75 @@
+name: abdomenatlaspro_case_selection
+description: CPU-only AbdomenAtlasPro coverage-enriched case selection DAG.
+
+tasks:
+  inventory_cpu:
+    task_type: case_selection_inventory
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_small
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: []
+
+  header_scan_array:
+    task_type: case_selection_header_scan
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_large
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [inventory_cpu]
+
+  merge_header_metrics:
+    task_type: case_selection_merge
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_merge
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [header_scan_array]
+
+  candidate_prefilter:
+    task_type: case_selection_prefilter
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_merge
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [merge_header_metrics]
+
+  deep_mask_audit_array:
+    task_type: case_selection_deep_audit
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_large
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [candidate_prefilter]
+
+  merge_deep_metrics:
+    task_type: case_selection_merge
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_merge
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [deep_mask_audit_array]
+
+  select_and_split:
+    task_type: case_selection_split
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_merge
+    launcher: python
+    gt_access_policy: eval_reference_only
+    dependencies: [merge_deep_metrics]
+
+  validate_manifests:
+    task_type: case_selection_validate
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [select_and_split]
+
+  final_selection_report:
+    task_type: case_selection_report
+    entrypoint: scheduler_builtin
+    resource_profile: cpu_scan_small
+    launcher: python
+    gt_access_policy: none
+    dependencies: [validate_manifests]

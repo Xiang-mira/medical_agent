@@ -19,6 +19,36 @@ resource_profiles:
     walltime: "04:00:00"
     gpu_count: 0
 
+  cpu_scan_small:
+    tier: cpu
+    partition: cpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 4
+    memory_gb: 16
+    walltime: "06:00:00"
+    gpu_count: 0
+
+  cpu_scan_large:
+    tier: cpu
+    partition: cpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 8
+    memory_gb: 32
+    walltime: "12:00:00"
+    gpu_count: 0
+
+  cpu_scan_merge:
+    tier: cpu
+    partition: cpu
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 8
+    memory_gb: 32
+    walltime: "04:00:00"
+    gpu_count: 0
+
   t4_single_gpu:
     tier: sufficient_if_smoke_passed
     partition: gpu
@@ -38,6 +68,40 @@ resource_profiles:
     memory_gb: 96
     walltime: "06:00:00"
     gpu_count: 1
+
+  student_train_a100_1gpu:
+    tier: validated_single_gpu_train
+    partition: gpua100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 12
+    memory_gb: 96
+    walltime: "10:00:00"
+    gpu_count: 1
+
+  student_train_a100_2gpu_ddp:
+    tier: requires_ddp_smoke
+    partition: gpua100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 16
+    memory_gb: 160
+    walltime: "10:00:00"
+    gpu_count: 2
+    ddp_validated: false
+    launcher: torchrun
+
+  student_train_h100_4gpu_ddp_optional:
+    tier: optional_requires_explicit_h100_ddp_smoke
+    partition: gpuh100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 24
+    memory_gb: 256
+    walltime: "10:00:00"
+    gpu_count: 4
+    ddp_validated: false
+    launcher: torchrun
 
   labelcritic_72b_4h100_formal:
     tier: official_formal_preferred_but_scarce
