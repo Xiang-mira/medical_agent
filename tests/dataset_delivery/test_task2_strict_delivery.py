@@ -224,7 +224,7 @@ def test_registered_streaming_command_returns_zero_and_logs(tmp_path: Path):
     stdout_log = tmp_path / "registered_stdout.log"
     stderr_log = tmp_path / "registered_stderr.log"
     result = ri._run_shell_command_streaming(
-        f"{shlex.quote(sys.executable)} -c {shlex.quote('print(\"ok\")')}",
+        shlex.quote(sys.executable) + " -c " + shlex.quote('print("ok")'),
         env=os.environ.copy(),
         timeout_sec=10,
         stdout_log=stdout_log,
@@ -241,7 +241,7 @@ def test_registered_streaming_command_propagates_nonzero_return_code(tmp_path: P
     from cli_anything.medai.core import registered_infer as ri
 
     result = ri._run_shell_command_streaming(
-        f"{shlex.quote(sys.executable)} -c {shlex.quote('import sys; print(\"bad\"); sys.exit(7)')}",
+        shlex.quote(sys.executable) + " -c " + shlex.quote('import sys; print("bad"); sys.exit(7)'),
         env=os.environ.copy(),
         timeout_sec=10,
         stdout_log=tmp_path / "registered_stdout.log",
