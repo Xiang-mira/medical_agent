@@ -1031,10 +1031,10 @@ def _hierarchical_plan_cache_key(
         "child_organs": list(child_organs),
         "strict_delivery_fov_override": {
             "enabled": bool((fov_override or {}).get("enabled")),
-            "requested_override_organs": list(
-                (fov_override or {}).get("requested_override_organs") or []
+            "requested_override_organs": sorted(
+                set((fov_override or {}).get("requested_override_organs") or [])
             ),
-            "applied_organs": list((fov_override or {}).get("applied_organs") or []),
+            "applied_organs": sorted(set((fov_override or {}).get("applied_organs") or [])),
         },
         "execution_plan": {
             "candidate_mode": execution_plan.get("candidate_mode"),
@@ -1057,6 +1057,12 @@ def _hierarchical_cache_keys_equivalent(left: dict[str, Any], right: dict[str, A
                 "applied_organs": [],
             },
         )
+        override = value.get("strict_delivery_fov_override") or {}
+        override["requested_override_organs"] = sorted(
+            set(override.get("requested_override_organs") or [])
+        )
+        override["applied_organs"] = sorted(set(override.get("applied_organs") or []))
+        value["strict_delivery_fov_override"] = override
         for field in ("requested_organs", "major_organs", "child_organs"):
             value[field] = sorted({
                 "inferior_vena_cava" if x == "postcava" else x
@@ -1171,6 +1177,7 @@ def _run_hierarchical_case_inference(
     preseeded_seg_dirs: dict[str, Path] | None = None,
     external_parent_masks: dict[str, Path] | None = None,
     external_parent_records: list[dict[str, Any]] | None = None,
+    fov_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     registry_file = Path(registry_path).resolve()
     registry_sha256 = hashlib.sha256(registry_file.read_bytes()).hexdigest() if registry_file.is_file() else None
@@ -1205,6 +1212,7 @@ def _run_hierarchical_case_inference(
         major_organs=major_organs,
         child_organs=child_organs,
         execution_plan=execution_plan,
+        fov_override=fov_override,
     )
     cache_key_sha256 = _stable_json_sha256(cache_key)
     existing_manifest = case_out / "hierarchical_inference_plan.json"
@@ -1672,6 +1680,12 @@ def _run_hierarchical_case_inference(
         "model_checkpoint_refs": checkpoint_refs,
         "margin_mm": margin_mm,
         "requested_organs": requested_organs,
+        "fov_override": fov_override or {
+            "enabled": False,
+            "requested_override_organs": [],
+            "applied_organs": [],
+            "rows": [],
+        },
         "hierarchical_plan_cache_key": cache_key,
         "hierarchical_plan_cache_key_sha256": cache_key_sha256,
         "cross_parent_roi_merge": "adaptive_parent_support_validation",
@@ -3546,7 +3560,7 @@ def _apply_strict_delivery_fov_override(
     requested_set = set(organs)
     fov_set = set(initial_fov_organs)
     initial_pruned_organs = [organ for organ in organs if organ not in fov_set]
-    override_organs = list(dict.fromkeys(strict_delivery_fov_override_organs or []))
+    override_organs = sorted(set(strict_delivery_fov_override_organs or []))
     override_set = set(override_organs)
     applied_organs: list[str] = []
     rejected_organs: list[str] = []
@@ -3570,8 +3584,11 @@ def _apply_strict_delivery_fov_override(
         row: dict[str, Any] = {
             "organ": organ,
             "visibility": visibility,
+            "original_visibility": visibility,
             "decision": "rejected",
+            "effective_action": "blocked",
             "reason": "",
+            "model_key": "",
             "requested_models": list(requested_models),
             "eligible_teachers": [],
             "presence_evidence": list((presence_context or {}).get("coverage_evidence", []) or []),
@@ -3591,6 +3608,7 @@ def _apply_strict_delivery_fov_override(
             row["reason"] = "organ_not_in_override_allowlist"
         elif organ in fov_set:
             row["decision"] = "not_needed"
+            row["effective_action"] = "already_scheduled_by_fov"
             row["reason"] = "already_in_fov"
         elif visibility != "partially_visible":
             row["reason"] = "visibility_not_partially_visible"
@@ -3609,7 +3627,9 @@ def _apply_strict_delivery_fov_override(
                 row["reason"] = "eligible_teacher_missing"
             else:
                 row["decision"] = "applied"
+                row["effective_action"] = "allow_teacher_scheduling"
                 row["reason"] = "explicit_strict_delivery_partial_visibility_override"
+                row["model_key"] = eligible[0]
                 row["eligible_teachers"] = eligible
                 result_organs.append(organ)
                 fov_set.add(organ)
@@ -5420,11 +5440,11 @@ def run_multimodel_annotation_loop(
     if models is None:
         models = ["mock_seg"] if dry_run else ["totalsegmentator"]
     strict_delivery_fov_override_organs = list(
-        dict.fromkeys(
+        sorted({
             str(organ).strip()
             for organ in (strict_delivery_fov_override_organs or [])
             if str(organ).strip()
-        )
+        })
     )
     if strict_delivery_fov_override_organs and not strict_delivery_targets:
         raise ValueError(
@@ -5546,6 +5566,19 @@ def run_multimodel_annotation_loop(
             preseeded_model_dirs=preseeded_model_dirs,
             candidate_mode=candidate_mode,
         )
+        fov_override_applied_records = [
+            {
+                "organ": row.get("organ"),
+                "original_visibility": row.get("original_visibility") or row.get("visibility"),
+                "effective_action": row.get("effective_action"),
+                "reason": row.get("reason"),
+                "model_key": row.get("model_key"),
+                "eligible_teachers": list(row.get("eligible_teachers") or []),
+            }
+            for row in (fov_override.get("rows", []) or [])
+            if row.get("decision") == "applied"
+        ]
+        fov_override["applied_records"] = fov_override_applied_records
         if strict_delivery_targets:
             pruned_organs = [organ for organ in organs if organ not in set(fov_organs)]
             for organ in pruned_organs:
@@ -5654,6 +5687,8 @@ def run_multimodel_annotation_loop(
             "teacher_inference_mode": teacher_inference_mode,
             "roi_margin_mm": roi_margin_mm,
             "annotation_folder_reference_enabled": use_annotation_folder_reference,
+            "strict_delivery_fov_override_organs_requested": list(strict_delivery_fov_override_organs),
+            "fov_override_applied": fov_override_applied_records,
             "fov_override": fov_override,
             **case_execution_plan,
         })
@@ -5718,6 +5753,7 @@ def run_multimodel_annotation_loop(
                 preseeded_seg_dirs=resolved_preseeded_seg_dirs,
                 external_parent_masks=external_parent_masks,
                 external_parent_records=external_parent_records,
+                fov_override=fov_override,
             )
             model_seg_dirs.update(hierarchy_result["model_seg_dirs"])
             inference_results.extend(hierarchy_result["inference_results"])
@@ -7205,6 +7241,20 @@ def run_multimodel_annotation_loop(
         notes="Use `mstep-update --target-model <primary_model>` for each trainable primary model in mstep_model_routing.json. TotalSegmentator is baseline-only in this project.",
     )
 
+    strict_delivery_fov_override_applied = [
+        {
+            "case_id": row.get("case_id"),
+            "organ": row.get("organ"),
+            "original_visibility": row.get("original_visibility") or row.get("visibility"),
+            "effective_action": row.get("effective_action"),
+            "reason": row.get("reason"),
+            "model_key": row.get("model_key"),
+            "eligible_teachers": list(row.get("eligible_teachers") or []),
+        }
+        for row in strict_delivery_fov_override_rows
+        if row.get("decision") == "applied"
+    ]
+
     summary = {
         "stage": "run_loop", "status": "failed" if strict_delivery_failures else "success", "case_list": str(case_csv), "output_folder": str(out),
         "num_cases": len(cases), "models_requested": models, "organs": organs,
@@ -7223,7 +7273,9 @@ def run_multimodel_annotation_loop(
         "annotation_folder_reference_enabled": use_annotation_folder_reference,
         "strict_delivery_targets": strict_delivery_targets,
         "strict_delivery_fov_override_enabled": bool(strict_delivery_fov_override_organs),
+        "strict_delivery_fov_override_organs_requested": list(strict_delivery_fov_override_organs),
         "strict_delivery_fov_override_organs": list(strict_delivery_fov_override_organs),
+        "fov_override_applied": strict_delivery_fov_override_applied,
         "strict_delivery_fov_override_applied_count": sum(
             1 for row in strict_delivery_fov_override_rows if row.get("decision") == "applied"
         ),

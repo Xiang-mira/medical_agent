@@ -38,7 +38,9 @@ Each `case_execution_plan.json` records:
 `run_summary.json` records:
 
 - `strict_delivery_fov_override_enabled`;
+- `strict_delivery_fov_override_organs_requested`;
 - `strict_delivery_fov_override_organs`;
+- `fov_override_applied`;
 - applied and rejected counts;
 - all override decision rows.
 
@@ -47,21 +49,29 @@ previous "ATM not scheduled" plan cannot be reused as an override run.
 
 ## ATM Smoke
 
-Submit a single-case ATM strict-delivery smoke:
+Run the single-case partial-thorax ATM strict-delivery smoke in an HPC
+interactive allocation or batch step:
 
 ```bash
 source "$HOME/.bodymaps_env"
 export CODE_ROOT=/projects/bodymaps/users/xhan74/medical_agent/code/medical_agent
 export PYTHON=/home/xhan74/envs/medical_agent/bin/python
 export CASE_MANIFEST=/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv
-bash scripts/submit_atm_strict_delivery_smoke.sh
+bash scripts/run_atm_strict_delivery_partial_thorax_smoke_hpc.sh
 ```
 
-After the Slurm job completes, verify it:
+The wrapper uses `teacher-inference-mode=hierarchical_roi`, writes a timestamped
+output directory, saves `command.txt`, `git_commit.txt`, `case_execution_plan.json`,
+`run_summary.json`, `strict_delivery_failures.csv`, `inference_summary.json`,
+`airway_tree_validation.json`, `smoke_verdict.json`, and `smoke_verdict.md`, and
+returns `0` only when all smoke gates pass.
+
+There is also a Slurm submit/verify pair when queue submission is preferred:
 
 ```bash
 source "$HOME/.bodymaps_env"
 export PYTHON=/home/xhan74/envs/medical_agent/bin/python
+bash scripts/submit_atm_strict_delivery_smoke.sh
 source /path/to/atm_smoke_submission.env
 bash scripts/verify_atm_strict_delivery_smoke.sh
 ```

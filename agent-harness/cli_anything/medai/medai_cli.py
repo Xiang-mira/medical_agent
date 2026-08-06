@@ -100,7 +100,7 @@ def parse_strict_delivery_fov_override_organs(
             "strict-delivery FOV override organs must be formal taxonomy targets: "
             + ",".join(unknown)
         )
-    return values
+    return sorted(values)
 
 
 def strict_delivery_exit_code(result: dict[str, Any], *, strict_delivery_targets: bool) -> int:
