@@ -3354,6 +3354,120 @@ def _quality_status(review_flags: list[str] | None, quality_flags: list[str] | N
     return "review"
 
 
+def _delivery_hard_validation(mask_path: str | Path | None, ct_path: Path, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate the hard Dataset Delivery contract for a selected binary mask."""
+    meta = meta or {}
+    result: dict[str, Any] = {
+        "status": "failed",
+        "valid": False,
+        "path": str(mask_path or ""),
+        "errors": [],
+        "labels": [],
+        "foreground_voxels": 0,
+        "shape_matches_ct": None,
+        "spacing_matches_ct": None,
+        "affine_matches_ct": None,
+    }
+    errors: list[str] = result["errors"]
+    if not mask_path:
+        errors.append("missing_final_mask")
+        return result
+    path = Path(mask_path)
+    if not path.exists():
+        errors.append("missing_final_mask")
+        return result
+    try:
+        if path.stat().st_size <= 0:
+            errors.append("empty_file")
+            return result
+    except Exception as exc:
+        errors.append(f"stat_failed:{type(exc).__name__}")
+        return result
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        mask_img = nib.load(str(path))
+        mask_arr = np.asanyarray(mask_img.dataobj)
+        labels = sorted({int(value) for value in np.unique(mask_arr)})
+        foreground = int((mask_arr != 0).sum())
+        result["labels"] = labels
+        result["foreground_voxels"] = foreground
+        if not set(labels).issubset({0, 1}):
+            errors.append("non_binary_mask")
+        if foreground <= 0:
+            errors.append("empty_mask")
+        if not ct_path.exists():
+            errors.append("ct_missing")
+        else:
+            ct_img = nib.load(str(ct_path))
+            spacing_ok = bool(np.allclose(mask_img.header.get_zooms()[:3], ct_img.header.get_zooms()[:3], rtol=0, atol=1e-5))
+            affine_ok = bool(np.allclose(mask_img.affine, ct_img.affine, rtol=0, atol=1e-5))
+            shape_ok = tuple(mask_img.shape[:3]) == tuple(ct_img.shape[:3])
+            result.update({
+                "shape": list(mask_img.shape[:3]),
+                "spacing": [float(x) for x in mask_img.header.get_zooms()[:3]],
+                "ct_shape": list(ct_img.shape[:3]),
+                "ct_spacing": [float(x) for x in ct_img.header.get_zooms()[:3]],
+                "shape_matches_ct": shape_ok,
+                "spacing_matches_ct": spacing_ok,
+                "affine_matches_ct": affine_ok,
+            })
+            if not shape_ok:
+                errors.append("shape_mismatch_ct")
+            if not spacing_ok:
+                errors.append("spacing_mismatch_ct")
+            if not affine_ok:
+                errors.append("affine_mismatch_ct")
+    except Exception as exc:
+        errors.append(f"nifti_unreadable:{type(exc).__name__}")
+        return result
+
+    organ = str(meta.get("organ") or "")
+    if meta.get("identity_status") and meta.get("identity_status") != "valid":
+        errors.append("canonical_identity_mismatch")
+    resolved = str(meta.get("resolved_canonical_id") or organ)
+    requested = str(meta.get("requested_canonical_id") or organ)
+    if organ and resolved and resolved != organ:
+        errors.append("resolved_canonical_id_mismatch")
+    if organ and requested and requested != organ:
+        errors.append("requested_canonical_id_mismatch")
+    if meta.get("identity_mismatch_reasons"):
+        errors.append("identity_mismatch_reasons_present")
+    fov_status = str(meta.get("fov_status") or "")
+    if fov_status in {"out_of_fov", "unknown", "invalid", "missing_visibility_evidence"}:
+        errors.append(f"fov_not_eligible:{fov_status}")
+    result["valid"] = not errors
+    result["status"] = "valid" if result["valid"] else "failed"
+    return result
+
+
+def _delivery_status_for_selected_label(meta: dict[str, Any], hard_validation: dict[str, Any]) -> str:
+    if not hard_validation.get("valid"):
+        return "rejected"
+    flags = set(meta.get("review_flags") or []) | set(meta.get("quality_flags") or []) | set(meta.get("selected_candidate_qc_flags") or [])
+    review_only_flags = {
+        "many_connected_components",
+        "single_teacher_no_pairwise_comparison",
+        "single_teacher_provisional",
+        "family_consensus_unavailable",
+        "oof_student_unavailable",
+        "cross_round_evidence_unavailable",
+        "candidate_qc_review",
+        "candidate_qc_review_required",
+    }
+    grade = str(meta.get("grade") or "").upper()
+    try:
+        training_weight = float(meta.get("training_weight") if meta.get("training_weight") is not None else 1.0)
+    except Exception:
+        training_weight = 0.0
+    if grade == "D" or training_weight <= 0.0 or flags:
+        return "delivered_for_review"
+    if flags & review_only_flags:
+        return "delivered_for_review"
+    return "delivered"
+
+
 def _distillation_gate_for_selected_label(meta: dict[str, Any]) -> dict[str, Any]:
     grade_raw = meta.get("grade")
     grade = str(grade_raw or "").upper()
@@ -4101,6 +4215,85 @@ def _rebuild_selected_metadata_from_artifacts(updated_root: Path) -> list[dict[s
             if isinstance(row, dict):
                 rows.append({"case_id": case_id, **row})
     return rows
+
+
+def _build_final_delivery_rows(
+    *,
+    cases: list[dict[str, str]],
+    organs: list[str],
+    updated_root: Path,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    rows: list[dict[str, Any]] = []
+    for idx, case in enumerate(cases, start=1):
+        case_id = case.get("case_id") or Path(case.get("ct_path", f"case_{idx}")).parent.name
+        case_root = updated_root / case_id
+        updated_dir = case_root / "updated"
+        meta_doc: dict[str, Any] = {}
+        meta_path = case_root / "selection_metadata.json"
+        if meta_path.exists():
+            try:
+                meta_doc = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                meta_doc = {}
+        selected_by_organ = {
+            str(row.get("organ")): row
+            for row in (meta_doc.get("selected_organs") or [])
+            if isinstance(row, dict) and row.get("organ")
+        }
+        ct_path = Path(str(meta_doc.get("ct_path") or case.get("ct_path") or ""))
+        for organ in organs:
+            meta = selected_by_organ.get(organ, {})
+            final_path = updated_dir / f"{organ}.nii.gz"
+            hard = _delivery_hard_validation(final_path, ct_path, {**meta, "organ": organ})
+            stored_status = str(meta.get("delivery_status") or "")
+            target_type = str(meta.get("target_type") or "")
+            fov_status = str(meta.get("fov_status") or "")
+            if hard.get("valid") and stored_status in {"delivered", "delivered_for_review"}:
+                final_status = stored_status
+            elif target_type in {"negative_absent", "absent_negative"}:
+                final_status = "confirmed_absent"
+            elif fov_status == "out_of_fov":
+                final_status = "out_of_fov"
+            elif stored_status == "rejected" or str(meta.get("publication_status")) == "rejected_but_recorded":
+                final_status = "rejected"
+            elif hard.get("valid"):
+                final_status = "delivered_for_review"
+            else:
+                final_status = "failed"
+            rows.append({
+                "case_id": case_id,
+                "organ": organ,
+                "final_status": final_status,
+                "delivery_status": stored_status,
+                "publication_status": meta.get("publication_status"),
+                "student_training_status": meta.get("student_training_status"),
+                "training_weight": meta.get("training_weight"),
+                "distillation_eligible": meta.get("distillation_eligible"),
+                "mask_path": str(final_path),
+                "hard_valid": bool(hard.get("valid")),
+                "hard_errors": list(hard.get("errors") or []),
+                "foreground_voxels": hard.get("foreground_voxels", 0),
+                "grade": meta.get("grade"),
+                "review_flags": meta.get("review_flags", []),
+                "quality_flags": meta.get("quality_flags", []),
+                "fov_status": fov_status,
+                "target_type": target_type,
+            })
+    counts = {
+        "requested_target_count": len(rows),
+        "delivered_count": sum(1 for row in rows if row["final_status"] == "delivered"),
+        "delivered_for_review_count": sum(1 for row in rows if row["final_status"] == "delivered_for_review"),
+        "rejected_count": sum(1 for row in rows if row["final_status"] == "rejected"),
+        "out_of_fov_count": sum(1 for row in rows if row["final_status"] == "out_of_fov"),
+        "confirmed_absent_count": sum(1 for row in rows if row["final_status"] == "confirmed_absent"),
+        "failed_count": sum(1 for row in rows if row["final_status"] == "failed"),
+    }
+    counts["materialized_count"] = sum(1 for row in rows if Path(str(row.get("mask_path") or "")).exists())
+    counts["missing_delivery_count"] = sum(
+        1 for row in rows
+        if row["final_status"] not in {"delivered", "delivered_for_review", "out_of_fov", "confirmed_absent"}
+    )
+    return rows, counts
 
 
 def _build_formal_organ_audit_rows(
@@ -6941,17 +7134,29 @@ def run_multimodel_annotation_loop(
             distillation_gate = _distillation_gate_for_selected_label(meta)
             meta["distillation_eligible"] = bool(distillation_gate["eligible"])
             meta["distillation_exclusion_reason"] = distillation_gate["reason"]
-            grade = str(meta.get("grade") or "D").upper()
             method = str(meta.get("selection_method") or "")
             status = str(meta.get("selection_status") or "")
-            if grade == "D":
+            hard_validation = _delivery_hard_validation(final, ct, meta)
+            delivery_status = _delivery_status_for_selected_label(meta, hard_validation)
+            meta["delivery_hard_validation"] = hard_validation
+            meta["delivery_status"] = delivery_status
+            meta["dataset_delivery_policy"] = (
+                "Hard-valid teacher masks are published even when Student distillation "
+                "weight is zero; weak evidence becomes delivered_for_review."
+            )
+            meta["student_training_status"] = (
+                "eligible" if meta.get("distillation_eligible") else "excluded_from_student_training"
+            )
+            if delivery_status == "rejected":
                 publication_status = "rejected_but_recorded"
+            elif delivery_status == "delivered_for_review":
+                publication_status = "delivered_for_review"
             elif method in {"near_identical_agreement", "geometric_teacher_consensus", "consensus"}:
-                publication_status = "accepted_by_consensus"
+                publication_status = "delivered"
             elif status == "fallback":
-                publication_status = "accepted_by_fallback"
+                publication_status = "delivered_for_review"
             else:
-                publication_status = "selected_by_decision"
+                publication_status = "delivered"
             meta["publication_status"] = publication_status
             if publication_status == "rejected_but_recorded" and final and Path(final).exists():
                 rejected_dir = case_updated.parent / "rejected"
@@ -6962,6 +7167,12 @@ def run_multimodel_annotation_loop(
                 meta["final_mask"] = None
                 meta["mask_path"] = None
                 meta["mask"] = None
+            elif final and Path(final).exists():
+                delivery_dir = case_updated.parent / (
+                    "delivered_for_review" if delivery_status == "delivered_for_review" else "delivered"
+                )
+                delivery_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(final), str(delivery_dir / Path(final).name))
             passport_mask = meta.get("audit_mask_path") or meta.get("final_mask")
             if passport_mask:
                 passport["mask_path"] = str(passport_mask)
@@ -7170,6 +7381,41 @@ def run_multimodel_annotation_loop(
     })
     all_selection_rows = _rebuild_selection_rows_from_artifacts(updated_root)
     rebuilt_selected_metadata = _rebuild_selected_metadata_from_artifacts(updated_root)
+    final_delivery_rows, final_delivery_counts = _build_final_delivery_rows(
+        cases=cases,
+        organs=list(organs),
+        updated_root=updated_root,
+    )
+    if strict_delivery_targets and not dry_run:
+        for row in final_delivery_rows:
+            if row["final_status"] not in {"delivered", "delivered_for_review"}:
+                strict_delivery_failures.append({
+                    "case_id": row.get("case_id"),
+                    "organ": row.get("organ"),
+                    "reason": "missing_delivery",
+                    "status": "failed",
+                    "final_status": row.get("final_status"),
+                    "delivery_status": row.get("delivery_status"),
+                    "publication_status": row.get("publication_status"),
+                    "hard_errors": row.get("hard_errors"),
+                    "mask_path": row.get("mask_path"),
+                })
+    write_json(out / "final_delivery_status.json", {
+        "stage": "final_delivery_status",
+        "status": "success" if final_delivery_counts["missing_delivery_count"] == 0 else "failed",
+        "counts": final_delivery_counts,
+        "rows": final_delivery_rows,
+    })
+    _write_csv(
+        out / "final_delivery_status.csv",
+        final_delivery_rows,
+        [
+            "case_id", "organ", "final_status", "delivery_status", "publication_status",
+            "student_training_status", "training_weight", "distillation_eligible",
+            "mask_path", "hard_valid", "hard_errors", "foreground_voxels",
+            "grade", "review_flags", "quality_flags", "fov_status", "target_type",
+        ],
+    )
     case_373_summaries = []
     for case in cases:
         sid = case.get("case_id")
@@ -7347,6 +7593,14 @@ def run_multimodel_annotation_loop(
         ),
         "strict_delivery_fov_override_rows": strict_delivery_fov_override_rows,
         "runtime_context": model_runtime_context,
+        "final_delivery_counts": {
+            **final_delivery_counts,
+            "routed_target_count": sum(1 for row in final_delivery_rows if row.get("fov_status") not in {"out_of_fov", "unknown"}),
+            "inference_success_count": sum(1 for result in inference_results if result.get("status") == "success"),
+            "candidate_generated_count": sum(1 for row in final_delivery_rows if int(row.get("foreground_voxels") or 0) > 0),
+            "valid_candidate_count": sum(1 for row in final_delivery_rows if row.get("hard_valid")),
+        },
+        "final_delivery_status": str((out / "final_delivery_status.json").resolve()),
         "strict_delivery_failure_count": len(strict_delivery_failures),
         "strict_delivery_failures": strict_delivery_failures,
         "round2_competition_audit": _summarize_preseeded_competition(
@@ -7357,7 +7611,11 @@ def run_multimodel_annotation_loop(
         "pseudo_label_transition_detail_counts": transition_detail_counts_373,
         "label_role_counts": label_role_counts_373,
         "round_rows": round_rows,
-        "total_updated": len(rebuilt_selected_metadata),
+        "total_updated": (
+            final_delivery_counts["delivered_count"]
+            + final_delivery_counts["delivered_for_review_count"]
+        ),
+        "legacy_selected_organs_count": len(rebuilt_selected_metadata),
         "total_labelcritic_decisions": sum(int(r.get("vlm_reviewed", 0) or 0) for r in round_rows),
     }
     if strict_delivery_targets:
@@ -7369,7 +7627,12 @@ def run_multimodel_annotation_loop(
         _write_csv(
             out / "strict_delivery_failures.csv",
             strict_delivery_failures,
-            ["case_id", "organ", "reason", "status", "requested_models", "eligible_teachers", "teacher_run_list", "model_key", "return_code", "segmentation_output"],
+            [
+                "case_id", "organ", "reason", "status", "final_status", "delivery_status",
+                "publication_status", "hard_errors", "mask_path", "requested_models",
+                "eligible_teachers", "teacher_run_list", "model_key", "return_code",
+                "segmentation_output",
+            ],
         )
     timing_rows = _merge_case_timing_rows(cases, updated_root, timing_rows)
     _write_csv(

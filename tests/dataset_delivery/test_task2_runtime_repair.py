@@ -282,4 +282,4 @@ def test_smoke_validator_passes_all_formal_cads_masks(tmp_path: Path):
     report = validate_smoke_root(smoke_root=tmp_path, groups=["cads"], slurm_status_csv=slurm_csv)
 
     assert report["status"] == "passed"
-    assert len(report["groups"][0]["passed_targets"]) == 8
+    assert len(report["groups"][0]["passed_targets"]) == 15
