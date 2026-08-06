@@ -30,6 +30,7 @@ from .label_verifier import verify_annotation
 from .labelcritic_wrapper import run_labelcritic_compare, run_labelcritic_compare_batch, run_labelcritic_grade, run_labelcritic_grade_batch
 from .mstep_runner import build_training_manifest, write_mstep_config
 from .model_registry import candidate_models_for_organs, load_registry, recommend_primary_models_for_organs
+from .model_key_resolver import canonical_model_keys, resolve_model_key
 from .organ_model_performance import OrganModelPerformance
 from .radthinking import build_reasoning_trace
 from .registered_infer import run_registered_model
@@ -726,7 +727,8 @@ def _build_case_execution_plan(
     branch_map = _load_teacher_branch_map(project_root)
     routed = candidate_models_for_organs(registry, organs)
     registry_models = registry.get("models", {}) or {}
-    requested_set = {str(m).strip() for m in (requested_models or []) if str(m).strip()}
+    requested_keys, requested_model_diagnostics = canonical_model_keys(requested_models or [], registry)
+    requested_set = set(requested_keys)
     runtime_profile = profile_runtime_policy(os.getenv("MEDAI_EXPERIMENT_PROFILE", "advisor_aligned_default"))
     official_voxtell_policy = runtime_profile.get("official_voxtell_pretrained") or {}
     special_candidate_keys = {
@@ -741,10 +743,25 @@ def _build_case_execution_plan(
         norm = _norm_organ_key(organ)
         branch_entry = branch_map.get(organ) or branch_map.get(norm) or {}
         raw_routed_candidates = [str(m).strip() for m in routed.get(norm, []) if str(m).strip()]
+        routed_candidate_diagnostics: list[dict[str, Any]] = []
+        canonical_routed_candidates: list[str] = []
+        seen_routed: set[str] = set()
+        for raw_model in raw_routed_candidates:
+            resolved = resolve_model_key(raw_model, registry)
+            routed_candidate_diagnostics.append({
+                "raw": raw_model,
+                "resolved": resolved.resolved,
+                "ok": resolved.ok,
+                "source": resolved.source,
+                "reason": resolved.reason,
+            })
+            if resolved.ok and resolved.resolved and resolved.resolved in registry_models and resolved.resolved not in seen_routed:
+                canonical_routed_candidates.append(resolved.resolved)
+                seen_routed.add(resolved.resolved)
         if requested_set:
-            routed_candidates = [m for m in raw_routed_candidates if m in requested_set]
+            routed_candidates = [m for m in canonical_routed_candidates if m in requested_set]
         else:
-            routed_candidates = [m for m in raw_routed_candidates if m in registry_models]
+            routed_candidates = [m for m in canonical_routed_candidates if m in registry_models]
         route = _resolve_routed_models(
             registry,
             organ,
@@ -820,8 +837,15 @@ def _build_case_execution_plan(
             route["competition_teachers"] = []
             route["route_confidence"] = "em_student_vs_previous"
         if candidate_mode == "formal_full_legacy":
-            eligible = list(requested_models)
+            eligible = list(requested_keys or requested_models)
         route["eligible_teachers"] = eligible
+        route["raw_routed_candidates"] = raw_routed_candidates
+        route["resolved_routed_candidates"] = canonical_routed_candidates
+        route["requested_model_resolution"] = requested_model_diagnostics
+        route["routed_candidate_resolution"] = routed_candidate_diagnostics
+        route["route_eligible"] = bool(eligible)
+        if requested_models and not eligible:
+            route["filtered_reason"] = "requested_model_has_no_executable_route"
         route["grade_required_for_training"] = True
         route["compare_required_when_conflict"] = True
         route["compare_bypass_when_single_or_high_agreement"] = True
@@ -832,12 +856,13 @@ def _build_case_execution_plan(
                 seen_teachers.add(model_key)
 
     if candidate_mode == "formal_full_legacy":
-        teacher_run_list = list(requested_models)
+        teacher_run_list = list(requested_keys or requested_models)
 
     return {
         "candidate_mode": candidate_mode,
         "organs": organs,
         "teacher_run_list": teacher_run_list,
+        "requested_model_resolution": requested_model_diagnostics,
         "preseeded_models": sorted((preseeded_model_dirs or {}).keys()),
         "per_organ": per_organ,
     }
@@ -5665,6 +5690,9 @@ def run_multimodel_annotation_loop(
     out.mkdir(parents=True, exist_ok=True)
     cases = _read_case_list(case_csv)
     registry = load_registry(registry_path)
+    model_keys, model_resolution = canonical_model_keys(models or [], registry)
+    if models is not None:
+        models = model_keys
     project_root = Path(__file__).resolve().parents[4]
     resolved_checkpoint_root = resolve_checkpoint_root(
         explicit=checkpoint_root,
@@ -5684,6 +5712,7 @@ def run_multimodel_annotation_loop(
         "checkpoint_root": str(resolved_checkpoint_root),
         "predict_executable": str(resolved_predict_executable),
         "unest_python_executable": str(resolved_unest_python),
+        "requested_model_resolution": model_resolution,
     }
     alias_config = _load_model_label_aliases(project_root)
     taxonomy = _load_organ_taxonomy(project_root)
@@ -5740,6 +5769,7 @@ def run_multimodel_annotation_loop(
     review_queue = out / "review_queue.jsonl"
     timing_rows: list[dict[str, Any]] = []
     strict_delivery_failures: list[dict[str, Any]] = []
+    route_resolution_failures: list[dict[str, Any]] = []
     strict_delivery_fov_override_rows: list[dict[str, Any]] = []
     vlm_decisions = out / "vlm_decisions.jsonl"
     traces_jsonl = out / "patient_traces.jsonl"
@@ -5832,6 +5862,7 @@ def run_multimodel_annotation_loop(
             if row.get("decision") == "applied"
         ]
         fov_override["applied_records"] = fov_override_applied_records
+        route_failure_row: dict[str, Any] | None = None
         if strict_delivery_targets:
             pruned_organs = [organ for organ in organs if organ not in set(fov_organs)]
             for organ in pruned_organs:
@@ -5844,16 +5875,22 @@ def run_multimodel_annotation_loop(
                     "presence_context": presence_context,
                 })
             if models and not list(case_execution_plan.get("teacher_run_list", []) or []):
-                strict_delivery_failures.append({
+                failure_row = {
                     "case_id": case_id,
                     "organ": ",".join(fov_organs or organs),
-                    "reason": "requested_teacher_not_scheduled",
+                    "reason": "route_resolution_failed" if fov_organs else "requested_teacher_not_scheduled",
                     "status": "failed",
                     "requested_models": list(models),
                     "teacher_run_list": [],
                     "fov_organs": fov_organs,
                     "execution_organs": execution_organs,
-                })
+                    "inference_called": False,
+                    "route_diagnostics": case_execution_plan.get("per_organ", {}),
+                }
+                strict_delivery_failures.append(failure_row)
+                if fov_organs:
+                    route_failure_row = failure_row
+                    route_resolution_failures.append(failure_row)
         hierarchy_plan_cache_key: dict[str, Any] | None = None
         hierarchy_plan_cache_key_sha256: str | None = None
         if teacher_inference_mode == "hierarchical_roi":
@@ -5947,6 +5984,47 @@ def run_multimodel_annotation_loop(
             "runtime_context": model_runtime_context,
             **case_execution_plan,
         })
+        if route_failure_row is not None:
+            write_json(updated_root / case_id / "route_resolution_failure.json", route_failure_row)
+            _append_jsonl(review_queue, {"case_id": case_id, **route_failure_row})
+            case_timing = {
+                "case_id": case_id,
+                "candidate_mode": candidate_mode,
+                "teacher_inference_mode": teacher_inference_mode,
+                "teacher_inference_models": [],
+                "teacher_inference_count": 0,
+                "hierarchy_blocked_count": 0,
+                "selected_organs": 0,
+                "compare_used_count": 0,
+                "grade_used_count": 0,
+                "runtime_sec": round(_time.time() - _case_start, 3),
+                "stage_timing_sec": {k: round(v, 3) for k, v in stage_timing.items()},
+                "stage_counts": {**stage_counts, "route_resolution_failed": True, "inference_called": False},
+            }
+            timing_rows.append(case_timing)
+            write_json(updated_root / case_id / "case_timing_breakdown.json", case_timing)
+            write_json(updated_root / case_id / "selection_metadata.json", {
+                "quality_contract_version": QUALITY_CONTRACT_VERSION,
+                "case_id": case_id,
+                "ct_path": str(ct),
+                "candidate_mode": candidate_mode,
+                "case_presence_context": presence_context,
+                "case_execution_plan": case_execution_plan,
+                "case_timing": case_timing,
+                "selected_organs": [],
+                "selection_rows": [],
+                "route_resolution_failure": route_failure_row,
+            })
+            round_rows.append({
+                "case_id": case_id,
+                "checked_masks": 0,
+                "accepted_masks": 0,
+                "low_dice_masks": 0,
+                "vlm_reviewed": 0,
+                "updated_masks": 0,
+                "remaining_uncertain": len(fov_organs or organs),
+            })
+            continue
         organ_task_state_path = updated_root / case_id / "organ_task_state.json"
         organ_task_state = _load_organ_task_state(organ_task_state_path)
         mask_cache = _CaseMaskCache(max_arrays=int(os.getenv("MEDAI_MASK_CACHE_MAX_ARRAYS", "96")))
@@ -7387,7 +7465,15 @@ def run_multimodel_annotation_loop(
         updated_root=updated_root,
     )
     if strict_delivery_targets and not dry_run:
+        route_failed_targets = {
+            organ
+            for failure in route_resolution_failures
+            for organ in str(failure.get("organ") or "").split(",")
+            if organ
+        }
         for row in final_delivery_rows:
+            if row.get("organ") in route_failed_targets:
+                continue
             if row["final_status"] not in {"delivered", "delivered_for_review"}:
                 strict_delivery_failures.append({
                     "case_id": row.get("case_id"),
@@ -7564,8 +7650,9 @@ def run_multimodel_annotation_loop(
         if row.get("decision") == "applied"
     ]
 
+    run_status = "ROUTE_RESOLUTION_FAILED" if route_resolution_failures else ("failed" if strict_delivery_failures else "success")
     summary = {
-        "stage": "run_loop", "status": "failed" if strict_delivery_failures else "success", "case_list": str(case_csv), "output_folder": str(out),
+        "stage": "run_loop", "status": run_status, "case_list": str(case_csv), "output_folder": str(out),
         "num_cases": len(cases), "models_requested": models, "organs": organs,
         "target_space_policy": _load_target_space_policy(project_root, organs),
         "formal_373_target_validation": target_validation,
@@ -7603,6 +7690,8 @@ def run_multimodel_annotation_loop(
         "final_delivery_status": str((out / "final_delivery_status.json").resolve()),
         "strict_delivery_failure_count": len(strict_delivery_failures),
         "strict_delivery_failures": strict_delivery_failures,
+        "route_resolution_failure_count": len(route_resolution_failures),
+        "route_resolution_failures": route_resolution_failures,
         "round2_competition_audit": _summarize_preseeded_competition(
             preseeded_keys=[] if preseeded_parent_only else sorted((preseeded_model_dirs or {}).keys()),
             selection_rows=all_selection_rows,

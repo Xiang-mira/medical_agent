@@ -50,6 +50,12 @@ Preflight status is now tracked per smoke group. A group must pass model/runtime
 preflight, shell syntax validation, and Slurm `sbatch --test-only` before it can
 enter `READY_TO_SUBMIT`.
 
+Smoke preflight also checks route executability. For AirRC, the route gate must
+resolve `AirRC`/`AIRRC`/`Dataset1380_AirRC` to registry key `airrc`, verify the
+three requested targets keep an eligible route, and produce
+`teacher_run_list=["airrc"]`. If the run list is empty, status is
+`ROUTE_RESOLUTION_FAILED` and no GPU job is submitted for that group.
+
 ## Smoke Submission
 
 Use the versioned wrapper; it generates one `.sbatch` file per model group and
@@ -90,6 +96,10 @@ The GRES value is case-sensitive and is preserved from configuration through the
 rendered `#SBATCH --gres` line. Each group manifest records configured and
 rendered resources, the generated sbatch path, `bash -n` result, and
 `sbatch --test-only` command/stdout/stderr/return code.
+
+Route failures and model failures are distinct. `ROUTE_RESOLUTION_FAILED` means
+the requested teacher never entered inference; `MODEL_FAILED` is reserved for a
+teacher process that was actually invoked and failed.
 
 Default submission is all-or-nothing. With `TASK2_SUBMIT_READY_GROUPS=1`, groups
 that reach `READY_TO_SUBMIT` are submitted even if another requested group is

@@ -19,6 +19,13 @@ if str(REPO_ROOT / "agent-harness") not in sys.path:
 
 from cli_anything.medai.core.runtime_resolver import DEFAULT_HPC_CHECKPOINT_ROOT, DEFAULT_NNUNETV2_PREDICT  # noqa: E402
 from tools.dataset_delivery.cads15_contract_audit import DEFAULT_CONTRACT, contract_targets  # noqa: E402
+from tools.dataset_delivery.cads15_slurm_resources import (  # noqa: E402
+    available_partitions,
+    preflight_sbatch_script,
+    profile_manifest,
+    resolve_gpu_profile,
+    resolve_panel_profile,
+)
 from tools.dataset_delivery.delivery_lib import write_csv, write_json  # noqa: E402
 
 
@@ -430,17 +437,18 @@ def prepare_cads15_orchestration(
     checkpoint_root: Path,
     nnunet_predict_executable: Path,
     timeout_sec: int,
-    panel_partition: str,
-    panel_cpus_per_task: int,
-    panel_mem: str,
-    panel_time_limit: str,
-    gpu_partition: str,
-    gpu_gres: str,
-    gpu_cpus_per_task: int,
-    gpu_mem: str,
-    gpu_time_limit: str,
+    panel_partition: str | None,
+    panel_cpus_per_task: int | None,
+    panel_mem: str | None,
+    panel_time_limit: str | None,
+    gpu_partition: str | None,
+    gpu_gres: str | None,
+    gpu_cpus_per_task: int | None,
+    gpu_mem: str | None,
+    gpu_time_limit: str | None,
     allow_heavy_ct_fov: bool,
     require_clean_tracked: bool = True,
+    run_slurm_test_only: bool = True,
 ) -> dict[str, Any]:
     smoke_root.mkdir(parents=True, exist_ok=False)
     expected_commit = _git_commit(code_root)
@@ -455,6 +463,19 @@ def prepare_cads15_orchestration(
     slurm_root = smoke_root / "slurm"
     panel_sbatch = slurm_root / "cads15_panel_prepare.sbatch"
     gpu_sbatch = slurm_root / "cads15_gpu_smoke.sbatch"
+    panel_profile = resolve_panel_profile(
+        partition=panel_partition,
+        cpus_per_task=panel_cpus_per_task,
+        memory=panel_mem,
+        time_limit=panel_time_limit,
+    )
+    gpu_profile = resolve_gpu_profile(
+        partition=gpu_partition,
+        gres=gpu_gres,
+        cpus_per_task=gpu_cpus_per_task,
+        memory=gpu_mem,
+        time_limit=gpu_time_limit,
+    )
     _write_panel_sbatch(
         path=panel_sbatch,
         code_root=code_root,
@@ -464,10 +485,10 @@ def prepare_cads15_orchestration(
         checkpoint_root=checkpoint_root,
         nnunet_predict_executable=nnunet_predict_executable,
         expected_commit=expected_commit,
-        partition=panel_partition,
-        cpus_per_task=panel_cpus_per_task,
-        mem=panel_mem,
-        time_limit=panel_time_limit,
+        partition=panel_profile.partition,
+        cpus_per_task=panel_profile.cpus_per_task,
+        mem=panel_profile.memory,
+        time_limit=panel_profile.time_limit,
         allow_heavy_ct_fov=allow_heavy_ct_fov,
     )
     _write_gpu_panel_sbatch(
@@ -478,15 +499,41 @@ def prepare_cads15_orchestration(
         checkpoint_root=checkpoint_root,
         nnunet_predict_executable=nnunet_predict_executable,
         expected_commit=expected_commit,
-        partition=gpu_partition,
-        gres=gpu_gres,
-        cpus_per_task=gpu_cpus_per_task,
-        mem=gpu_mem,
-        time_limit=gpu_time_limit,
+        partition=gpu_profile.partition,
+        gres=gpu_profile.gres,
+        cpus_per_task=gpu_profile.cpus_per_task,
+        mem=gpu_profile.memory,
+        time_limit=gpu_profile.time_limit,
         timeout_sec=timeout_sec,
     )
+    partitions, partition_query = available_partitions()
+    panel_preflight = preflight_sbatch_script(
+        profile=panel_profile,
+        sbatch_file=panel_sbatch,
+        available=partitions,
+        available_query=partition_query,
+        run_sbatch_test_only=run_slurm_test_only,
+    )
+    gpu_preflight = preflight_sbatch_script(
+        profile=gpu_profile,
+        sbatch_file=gpu_sbatch,
+        available=partitions,
+        available_query=partition_query,
+        run_sbatch_test_only=run_slurm_test_only,
+    )
+    workflow_status = "NOT_SUBMITTED"
+    failure_stage = ""
+    failure_reason = ""
+    if panel_preflight["status"] != "READY":
+        workflow_status = str(panel_preflight["status"])
+        failure_stage = "panel_preparation"
+        failure_reason = str(panel_preflight["reason"])
+    elif gpu_preflight["status"] != "READY":
+        workflow_status = str(gpu_preflight["status"])
+        failure_stage = "gpu_smoke"
+        failure_reason = str(gpu_preflight["reason"])
     manifest = {
-        "status": "NOT_SUBMITTED",
+        "status": workflow_status,
         "workflow": "cads15_smoke",
         "smoke_root": str(smoke_root),
         "expected_commit": expected_commit,
@@ -497,18 +544,31 @@ def prepare_cads15_orchestration(
         "panel": {
             "sbatch_file": str(panel_sbatch),
             "job_id": "",
-            "state": "NOT_SUBMITTED",
+            "state": "NOT_SUBMITTED" if workflow_status == "NOT_SUBMITTED" else workflow_status,
+            "resources": profile_manifest(panel_profile),
+            "preflight": panel_preflight,
         },
         "gpu": {
             "sbatch_file": str(gpu_sbatch),
             "job_ids": [],
             "dependency": "",
             "state": "NOT_SUBMITTED",
+            "resources": profile_manifest(gpu_profile),
+            "preflight": gpu_preflight,
         },
         "formal_100case_array": False,
+        "resource_preflight": {
+            "status": "READY" if workflow_status == "NOT_SUBMITTED" else workflow_status,
+            "failure_stage": failure_stage,
+            "failure_reason": failure_reason,
+            "available_partitions": partitions,
+            "partition_query": partition_query,
+            "panel": panel_preflight,
+            "gpu": gpu_preflight,
+        },
     }
     _atomic_write_json(smoke_root / "submission_manifest.json", manifest)
-    _atomic_write_json(smoke_root / "panel_state.json", {"status": "NOT_SUBMITTED"})
+    _atomic_write_json(smoke_root / "panel_state.json", {"status": workflow_status if workflow_status != "NOT_SUBMITTED" else "NOT_SUBMITTED", "reason": failure_reason})
     _atomic_write_json(smoke_root / "gpu_state.json", {"status": "NOT_SUBMITTED"})
     return manifest
 
@@ -613,15 +673,16 @@ def main() -> int:
     parser.add_argument("--cpus-per-task", default=8, type=int, help="Legacy single-stage sbatch CPU count.")
     parser.add_argument("--mem", default="64G", help="Legacy single-stage sbatch memory.")
     parser.add_argument("--time-limit", default="06:00:00", help="Legacy single-stage sbatch time limit.")
-    parser.add_argument("--panel-partition", default="shared")
-    parser.add_argument("--panel-cpus-per-task", default=8, type=int)
-    parser.add_argument("--panel-mem", default="32G")
-    parser.add_argument("--panel-time-limit", default="02:00:00")
-    parser.add_argument("--gpu-partition", default="gpu")
-    parser.add_argument("--gpu-gres", default="gpu:T4:1")
-    parser.add_argument("--gpu-cpus-per-task", default=8, type=int)
-    parser.add_argument("--gpu-mem", default="64G")
-    parser.add_argument("--gpu-time-limit", default="06:00:00")
+    parser.add_argument("--panel-partition", default=None)
+    parser.add_argument("--panel-cpus-per-task", default=None, type=int)
+    parser.add_argument("--panel-mem", default=None)
+    parser.add_argument("--panel-time-limit", default=None)
+    parser.add_argument("--gpu-partition", default=None)
+    parser.add_argument("--gpu-gres", default=None)
+    parser.add_argument("--gpu-cpus-per-task", default=None, type=int)
+    parser.add_argument("--gpu-mem", default=None)
+    parser.add_argument("--gpu-time-limit", default=None)
+    parser.add_argument("--no-slurm-test-only", action="store_true")
     parser.add_argument("--allow-heavy-ct-fov", action="store_true")
     parser.add_argument("--allow-dirty-tracked", action="store_true")
     args = parser.parse_args()
@@ -647,9 +708,17 @@ def main() -> int:
             gpu_time_limit=args.gpu_time_limit,
             allow_heavy_ct_fov=bool(args.allow_heavy_ct_fov),
             require_clean_tracked=not bool(args.allow_dirty_tracked),
+            run_slurm_test_only=not bool(args.no_slurm_test_only),
         )
+        if summary["status"] != "NOT_SUBMITTED":
+            preflight = summary.get("resource_preflight") or {}
+            print(f"STAGE={preflight.get('failure_stage') or ''}")
+            failed = (preflight.get("panel") or {}) if preflight.get("failure_stage") == "panel_preparation" else (preflight.get("gpu") or {})
+            print(f"REQUESTED_PARTITION={failed.get('configured_partition') or ''}")
+            print(f"AVAILABLE_PARTITIONS={','.join(preflight.get('available_partitions') or [])}")
+            print(f"REASON={str(preflight.get('failure_reason') or '').split(':')[0]}")
         print(json.dumps({"status": summary["status"], "smoke_root": summary["smoke_root"]}, indent=2))
-        return 0
+        return 0 if summary["status"] == "NOT_SUBMITTED" else 2
     if args.execute_panel:
         if not args.panel_json:
             raise SystemExit("--panel-json is required with --execute-panel")

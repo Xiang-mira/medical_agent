@@ -121,6 +121,70 @@ def test_orchestration_writes_cpu_panel_and_dependent_gpu_sbatch(tmp_path: Path)
     assert "--execute-panel" in gpu.read_text(encoding="utf-8")
 
 
+def test_default_cads15_panel_partition_is_cpu_and_has_no_gres(monkeypatch):
+    from tools.dataset_delivery.cads15_slurm_resources import resolve_gpu_profile, resolve_panel_profile
+
+    monkeypatch.delenv("TASK2_CPU_PARTITION", raising=False)
+    panel = resolve_panel_profile()
+    gpu = resolve_gpu_profile()
+
+    assert panel.partition == "cpu"
+    assert panel.gres == ""
+    assert gpu.partition == "gpu"
+    assert gpu.gres == "gpu:T4:1"
+
+
+def test_task2_cpu_partition_env_overrides_default(monkeypatch):
+    from tools.dataset_delivery.cads15_slurm_resources import resolve_panel_profile
+
+    monkeypatch.setenv("TASK2_CPU_PARTITION", "interactive")
+    panel = resolve_panel_profile()
+
+    assert panel.partition == "interactive"
+    assert panel.partition_source == "env:TASK2_CPU_PARTITION"
+
+
+def test_cads15_orchestration_blocks_missing_panel_partition(monkeypatch, tmp_path: Path):
+    from tools.dataset_delivery import cads15_smoke_launcher as launcher
+
+    monkeypatch.setattr(
+        launcher,
+        "available_partitions",
+        lambda: (["cpu", "gpu", "gpua100", "gpuh100", "interactive"], {"ok": True, "return_code": 0}),
+    )
+    smoke_root = tmp_path / "smoke"
+    manifest = _write_manifest(tmp_path)
+    predictor = _write_executable(tmp_path / "bin" / "nnUNetv2_predict")
+
+    summary = launcher.prepare_cads15_orchestration(
+        smoke_root=smoke_root,
+        case_manifest=manifest,
+        code_root=REPO_ROOT,
+        python=Path(sys.executable),
+        checkpoint_root=REPO_ROOT / "checkpoints",
+        nnunet_predict_executable=predictor,
+        timeout_sec=10,
+        panel_partition="shared",
+        panel_cpus_per_task=2,
+        panel_mem="4G",
+        panel_time_limit="00:30:00",
+        gpu_partition="gpu",
+        gpu_gres="gpu:T4:1",
+        gpu_cpus_per_task=4,
+        gpu_mem="8G",
+        gpu_time_limit="01:00:00",
+        allow_heavy_ct_fov=True,
+        require_clean_tracked=False,
+    )
+
+    assert summary["status"] == "PANEL_RESOURCE_INVALID"
+    preflight = summary["resource_preflight"]["panel"]
+    assert preflight["reason"] == "partition_not_found:shared"
+    assert preflight["available_partitions"] == ["cpu", "gpu", "gpua100", "gpuh100", "interactive"]
+    assert summary["gpu"]["job_ids"] == []
+    assert "SBATCH --gres" not in (smoke_root / "slurm" / "cads15_panel_prepare.sbatch").read_text(encoding="utf-8")
+
+
 def test_smoke_status_pending_and_running_are_not_failed(tmp_path: Path):
     from tools.dataset_delivery.cads15_smoke_status import smoke_status
 

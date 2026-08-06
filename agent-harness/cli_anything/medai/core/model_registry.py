@@ -15,6 +15,8 @@ try:
 except Exception:  # pragma: no cover
     yaml = None
 
+from .model_key_resolver import resolve_model_key
+
 
 XLSX_NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 IGNORED_TEACHER_KEYS = {"duke", "goacc", "pedro"}
@@ -589,10 +591,12 @@ def load_registry(path: str | Path) -> dict[str, Any]:
 
 def get_model_entry(registry: dict[str, Any], model_key: str) -> dict[str, Any]:
     models = registry.get("models", {})
-    if model_key not in models:
+    resolved = resolve_model_key(model_key, registry)
+    key = resolved.resolved if resolved.ok and resolved.resolved else str(model_key)
+    if key not in models:
         raise KeyError(f"model '{model_key}' not found in registry. Available: {', '.join(sorted(models)[:50])}")
-    entry = dict(models[model_key])
-    entry["model_key"] = model_key
+    entry = dict(models[key])
+    entry["model_key"] = key
     return entry
 
 
@@ -618,7 +622,8 @@ def candidate_models_for_organs(registry: dict[str, Any], organs: list[str], inc
             keys: list[str] = []
             seen_routed: set[str] = set()
             for item in candidates or []:
-                model_key = item.get("model_key")
+                resolved = resolve_model_key(item.get("model_key"), registry)
+                model_key = resolved.resolved if resolved.ok else item.get("model_key")
                 if (
                     model_key
                     and model_key in models
@@ -636,8 +641,10 @@ def candidate_models_for_organs(registry: dict[str, Any], organs: list[str], inc
         candidates = list(routed_by_organ.get(key) or [])
         if not candidates:
             candidates = [
-                m for m in list(mapping.get(key, []))
-                if m in models and (include_mock or m != "mock_seg")
+                resolved.resolved
+                for raw in list(mapping.get(key, []))
+                for resolved in [resolve_model_key(raw, registry)]
+                if resolved.ok and resolved.resolved in models and (include_mock or resolved.resolved != "mock_seg")
             ]
         seen = set(candidates)
         for model_key, entry in models.items():

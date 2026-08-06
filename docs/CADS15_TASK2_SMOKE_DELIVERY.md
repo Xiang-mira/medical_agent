@@ -96,6 +96,22 @@ recorded in `gpu_state.json` and `gpu_progress.json`. The panel uses
 and invalidates only the affected case cache when the CT or reference mask
 fingerprint changes.
 
+The default JHU HPC resource profiles are intentionally separate:
+
+```text
+panel: partition=cpu, cpus-per-task=8, mem=32G, time=02:00:00, gres=none
+gpu:   partition=gpu, gres=gpu:T4:1, cpus-per-task=8, mem=64G, time=06:00:00
+```
+
+Override them with `TASK2_CPU_PARTITION`, `TASK2_CADS_PANEL_CPUS`,
+`TASK2_CADS_PANEL_MEMORY`, `TASK2_CADS_PANEL_TIME`,
+`TASK2_CADS_GPU_PARTITION`, `TASK2_CADS_GPU_GRES`,
+`TASK2_CADS_GPU_CPUS`, `TASK2_CADS_GPU_MEMORY`, and
+`TASK2_CADS_GPU_TIME`. The launcher runs `bash -n`, partition existence
+preflight, and `sbatch --test-only` for both stages before any formal
+submission. If the panel partition is invalid, status is
+`PANEL_RESOURCE_INVALID` and the GPU job is not submitted.
+
 ## HPC Commands
 
 Submit CADS15 smoke only:
@@ -125,9 +141,18 @@ turning pending or running jobs into failed validation:
 
 ```text
 NOT_SUBMITTED
+PANEL_RESOURCE_INVALID
+PANEL_SCRIPT_INVALID
 PANEL_PENDING
 PANEL_RUNNING
 PANEL_FAILED
+PANEL_COMPLETED
+GPU_RESOURCE_INVALID
+GPU_SCRIPT_INVALID
+GPU_SMOKE_PENDING
+GPU_SMOKE_RUNNING
+GPU_SMOKE_FAILED
+PASSED
 PANEL_COMPLETED
 GPU_SMOKE_PENDING
 GPU_SMOKE_RUNNING

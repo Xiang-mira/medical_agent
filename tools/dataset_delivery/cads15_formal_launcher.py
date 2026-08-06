@@ -20,6 +20,11 @@ if str(REPO_ROOT / "agent-harness") not in sys.path:
 from cli_anything.medai.core.runtime_resolver import DEFAULT_HPC_CHECKPOINT_ROOT, DEFAULT_NNUNETV2_PREDICT  # noqa: E402
 from tools.dataset_delivery.cads15_smoke_launcher import _command_for_case  # noqa: E402
 from tools.dataset_delivery.cads15_contract_audit import DEFAULT_CONTRACT, audit_contract, contract_targets  # noqa: E402
+from tools.dataset_delivery.cads15_slurm_resources import (  # noqa: E402
+    preflight_sbatch_script,
+    profile_manifest,
+    resolve_gpu_profile,
+)
 from tools.dataset_delivery.delivery_lib import write_csv, write_json  # noqa: E402
 
 
@@ -124,14 +129,26 @@ def _task_failed(output_root: Path, case_id: str, model: str) -> bool:
     return state.get("status") == "failed"
 
 
-def _write_array_sbatch(path: Path, *, code_root: Path, python: Path, task_manifest: Path, output_root: Path) -> None:
+def _write_array_sbatch(
+    path: Path,
+    *,
+    code_root: Path,
+    python: Path,
+    task_manifest: Path,
+    output_root: Path,
+    partition: str,
+    gres: str,
+    cpus_per_task: int,
+    mem: str,
+    time_limit: str,
+) -> None:
     content = f"""#!/usr/bin/env bash
 #SBATCH --job-name=cads15_formal
-#SBATCH --partition=${{GPU_PARTITION:-gpu}}
-#SBATCH --gres=${{GPU_GRES:-gpu:T4:1}}
-#SBATCH --cpus-per-task=${{GPU_CPUS_PER_TASK:-8}}
-#SBATCH --mem=${{GPU_MEM:-64G}}
-#SBATCH --time=${{GPU_TIME_LIMIT:-06:00:00}}
+#SBATCH --partition={partition}
+#SBATCH --gres={gres}
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem={mem}
+#SBATCH --time={time_limit}
 #SBATCH --output={output_root / 'slurm' / 'cads15_formal_%A_%a.out'}
 #SBATCH --error={output_root / 'slurm' / 'cads15_formal_%A_%a.err'}
 
@@ -235,6 +252,12 @@ def build_formal_plan(
     retry_failed: bool = False,
     dry_run: bool = False,
     allow_dirty_tracked: bool = False,
+    gpu_partition: str | None = None,
+    gpu_gres: str | None = None,
+    gpu_cpus_per_task: int | None = None,
+    gpu_mem: str | None = None,
+    gpu_time_limit: str | None = None,
+    run_slurm_test_only: bool = True,
 ) -> dict[str, Any]:
     models = models or list(CADS15_MODEL_TARGETS)
     contract_hash = _sha256_file(contract_path)
@@ -316,13 +339,33 @@ def build_formal_plan(
         task_rows,
         ["task_index", "case_id", "model", "targets", "ct_path", "annotation_folder", "contract_sha256", "output_root", "status"],
     )
+    gpu_profile = resolve_gpu_profile(
+        partition=gpu_partition,
+        gres=gpu_gres,
+        cpus_per_task=gpu_cpus_per_task,
+        memory=gpu_mem,
+        time_limit=gpu_time_limit,
+    )
     _write_array_sbatch(
         output_root / "slurm" / "cads15_formal_array.sbatch",
         code_root=code_root,
         python=python,
         task_manifest=output_root / "cads15_model_task_manifest.csv",
         output_root=output_root,
+        partition=gpu_profile.partition,
+        gres=gpu_profile.gres,
+        cpus_per_task=gpu_profile.cpus_per_task,
+        mem=gpu_profile.memory,
+        time_limit=gpu_profile.time_limit,
     )
+    resource_preflight = preflight_sbatch_script(
+        profile=gpu_profile,
+        sbatch_file=output_root / "slurm" / "cads15_formal_array.sbatch",
+        run_sbatch_test_only=run_slurm_test_only,
+    )
+    if resource_preflight["status"] != "READY":
+        add_check("slurm_resource_preflight", False, str(resource_preflight.get("reason") or "resource_invalid"))
+        blocked_checks = [check for check in checks if not check["ok"]]
     summary = {
         "status": "READY" if not blocked_checks else "BLOCKED",
         "dry_run": dry_run,
@@ -340,6 +383,8 @@ def build_formal_plan(
         "blocked_checks": blocked_checks,
         "task_manifest": str(output_root / "cads15_model_task_manifest.csv"),
         "sbatch_file": str(output_root / "slurm" / "cads15_formal_array.sbatch"),
+        "resources": profile_manifest(gpu_profile),
+        "resource_preflight": resource_preflight,
     }
     write_json(output_root / "cads15_formal_preflight.json", summary)
     write_json(output_root / "submission_manifest.json", summary)
@@ -366,6 +411,12 @@ def main() -> int:
     parser.add_argument("--execute-task-index", default=None)
     parser.add_argument("--task-manifest", default=None, type=Path)
     parser.add_argument("--timeout-sec", default=14400, type=int)
+    parser.add_argument("--gpu-partition", default=None)
+    parser.add_argument("--gpu-gres", default=None)
+    parser.add_argument("--gpu-cpus-per-task", default=None, type=int)
+    parser.add_argument("--gpu-mem", default=None)
+    parser.add_argument("--gpu-time-limit", default=None)
+    parser.add_argument("--no-slurm-test-only", action="store_true")
     args = parser.parse_args()
     if args.execute_task_index is not None:
         if args.task_manifest is None:
@@ -402,6 +453,12 @@ def main() -> int:
         retry_failed=bool(args.retry_failed),
         dry_run=bool(args.dry_run),
         allow_dirty_tracked=bool(args.allow_dirty_tracked),
+        gpu_partition=args.gpu_partition,
+        gpu_gres=args.gpu_gres,
+        gpu_cpus_per_task=args.gpu_cpus_per_task,
+        gpu_mem=args.gpu_mem,
+        gpu_time_limit=args.gpu_time_limit,
+        run_slurm_test_only=not bool(args.no_slurm_test_only),
     )
     print(json.dumps({"status": summary["status"], "task_count": summary["task_count"]}, indent=2))
     return 0 if summary["status"] == "READY" or args.dry_run else 2

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .json_utils import read_json
+from .model_key_resolver import resolve_model_key
 from .paths import resolve_path
 
 
@@ -92,25 +93,37 @@ def route_organs(
             if override_entry:
                 token_entry = override_entry
             if not token_entry:
-                organ_disabled.append({
-                    "token": token,
-                    "model_key": None,
-                    "subtask": None,
-                    "enabled": False,
-                    "reason": "Token not found in routing_token_to_model.json",
-                })
-                continue
+                resolved = resolve_model_key(token)
+                if resolved.ok and resolved.resolved:
+                    token_entry = {
+                        "model": resolved.resolved,
+                        "subtask": None,
+                        "enabled": True,
+                        "reason": None,
+                        "note": f"Resolved by canonical model-key resolver from {resolved.source}",
+                    }
+                else:
+                    organ_disabled.append({
+                        "token": token,
+                        "model_key": None,
+                        "subtask": None,
+                        "enabled": False,
+                        "reason": "Token not found in routing_token_to_model.json",
+                    })
+                    continue
 
             if token == "CADS" and token_entry.get("model") is None:
                 token_entry = _route_cads_fallback(organ, token_entry, token_map_doc)
+            resolved_model = resolve_model_key(token_entry.get("model"))
+            model_key = resolved_model.resolved if resolved_model.ok else token_entry.get("model")
 
             candidate = RoutedCandidate(
                 organ=organ,
                 token=token,
-                model_key=token_entry.get("model"),
+                model_key=model_key,
                 subtask=token_entry.get("subtask"),
-                enabled=bool(token_entry.get("enabled", False)) and bool(token_entry.get("model")),
-                reason=token_entry.get("reason"),
+                enabled=bool(token_entry.get("enabled", False)) and bool(model_key),
+                reason=token_entry.get("reason") or (resolved_model.reason if not resolved_model.ok else None),
                 note=token_entry.get("note"),
             )
             item = {

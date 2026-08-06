@@ -15,6 +15,11 @@ RESUME=${RESUME:-0}
 RETRY_FAILED=${RETRY_FAILED:-0}
 CASE_ID=${CASE_ID:-}
 MODELS=${MODELS:-}
+GPU_PARTITION=${GPU_PARTITION:-${TASK2_CADS_GPU_PARTITION:-gpu}}
+GPU_GRES=${GPU_GRES:-${TASK2_CADS_GPU_GRES:-gpu:T4:1}}
+GPU_CPUS_PER_TASK=${GPU_CPUS_PER_TASK:-${TASK2_CADS_GPU_CPUS:-8}}
+GPU_MEM=${GPU_MEM:-${TASK2_CADS_GPU_MEMORY:-64G}}
+GPU_TIME_LIMIT=${GPU_TIME_LIMIT:-${TASK2_CADS_GPU_TIME:-06:00:00}}
 
 if [ -f "$HOME/.bodymaps_env" ]; then
   source "$HOME/.bodymaps_env"
@@ -45,6 +50,11 @@ ARGS=(
   --python "$PYTHON"
   --checkpoint-root "$CHECKPOINT_ROOT"
   --nnunet-predict-executable "$NNUNETV2_PREDICT_EXECUTABLE"
+  --gpu-partition "$GPU_PARTITION"
+  --gpu-gres "$GPU_GRES"
+  --gpu-cpus-per-task "$GPU_CPUS_PER_TASK"
+  --gpu-mem "$GPU_MEM"
+  --gpu-time-limit "$GPU_TIME_LIMIT"
 )
 [ "$DRY_RUN" = "1" ] && ARGS+=(--dry-run)
 [ "$RESUME" = "1" ] && ARGS+=(--resume)
@@ -72,6 +82,17 @@ PY
 )
 if [ "$TASK_COUNT" -le 0 ]; then
   echo "No formal CADS15 tasks to submit." >&2
+  exit 2
+fi
+PREFLIGHT_STATUS=$("$PYTHON" - "$OUT_ROOT/cads15_formal_preflight.json" <<'PY'
+import json, sys
+doc=json.load(open(sys.argv[1], encoding="utf-8"))
+preflight=doc.get("resource_preflight") or {}
+print(preflight.get("status") or "")
+PY
+)
+if [ "$PREFLIGHT_STATUS" != "READY" ]; then
+  echo "CADS15 formal Slurm resource preflight blocked submission: $PREFLIGHT_STATUS" >&2
   exit 2
 fi
 ARRAY_MAX=$((TASK_COUNT - 1))

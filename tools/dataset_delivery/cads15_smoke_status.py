@@ -74,6 +74,7 @@ def smoke_status(*, smoke_root: Path | None, use_sacct: bool = True) -> dict[str
         gpu_job_ids = [line.strip() for line in text.splitlines() if line.strip()]
     panel_progress = _read_json(smoke_root / "preflight" / "panel_progress.json") or _read_json(smoke_root / "panel_progress.json")
     panel_state_json = _read_json(smoke_root / "preflight" / "panel_state.json") or _read_json(smoke_root / "panel_state.json")
+    manifest_status = str(manifest.get("status") or "")
     panel_job = _job_state(panel_job_id, use_sacct=use_sacct)
     base = {
         "smoke_root": str(smoke_root),
@@ -84,6 +85,17 @@ def smoke_status(*, smoke_root: Path | None, use_sacct: bool = True) -> dict[str
         "gpu_smoke_started": bool(gpu_job_ids),
         "panel_slurm": panel_job,
     }
+    if manifest_status in {
+        "PANEL_RESOURCE_INVALID",
+        "PANEL_SCRIPT_INVALID",
+        "PANEL_NOT_SUBMITTED",
+        "PANEL_SUBMISSION_REJECTED",
+        "GPU_RESOURCE_INVALID",
+        "GPU_SCRIPT_INVALID",
+        "GPU_NOT_SUBMITTED",
+        "GPU_SUBMISSION_REJECTED",
+    }:
+        return {**base, "status": manifest_status, "reason": (manifest.get("resource_preflight") or {}).get("failure_reason", "")}
     if (smoke_root / "PANEL_FAILED").exists() or panel_state_json.get("status") == "PANEL_FAILED" or panel_job.get("state") in FAIL_STATES:
         return {**base, "status": "PANEL_FAILED"}
     panel_completed = (

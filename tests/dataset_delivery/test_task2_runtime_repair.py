@@ -211,6 +211,93 @@ def test_run_loop_cli_passes_explicit_runtime_paths(tmp_path: Path, monkeypatch)
     assert str(captured["unest_python_executable"]) == str(unest_python.resolve())
 
 
+def test_model_key_resolver_airrc_aliases_and_regressions():
+    from cli_anything.medai.core.model_key_resolver import resolve_model_key
+    from cli_anything.medai.core.model_registry import load_registry
+
+    registry = load_registry(REPO_ROOT / "configs" / "model_registry.yaml")
+
+    for raw in ["AirRC", "AIRRC", "airrc", "air_rc", "Dataset1380_AirRC"]:
+        assert resolve_model_key(raw, registry).resolved == "airrc"
+    for raw, expected in {
+        "ATM": "atm",
+        "atm": "atm",
+        "UNEST": "unest",
+        "unest": "unest",
+        "CADS553": "cads553",
+        "CADS557": "cads557",
+        "CADS559": "cads559",
+    }.items():
+        assert resolve_model_key(raw, registry).resolved == expected
+
+
+def test_airrc_full_volume_execution_plan_uses_single_canonical_teacher():
+    from cli_anything.medai.core.model_registry import load_registry
+    from cli_anything.medai.core.multimodel_loop import _build_case_execution_plan
+
+    registry = load_registry(REPO_ROOT / "configs" / "model_registry.yaml")
+    organs = ["airway_wall", "lung_pulmonary_arteries", "lung_pulmonary_veins"]
+    plan = _build_case_execution_plan(
+        registry=registry,
+        project_root=REPO_ROOT,
+        organs=organs,
+        requested_models=["Dataset1380_AirRC"],
+        preseeded_model_dirs=None,
+        candidate_mode="route_pruned_with_competition",
+    )
+
+    assert plan["teacher_run_list"] == ["airrc"]
+    assert list(plan["per_organ"]) == organs
+    assert "hard_palate" not in plan["per_organ"]
+    assert all(plan["per_organ"][organ]["primary_teacher"] == "airrc" for organ in organs)
+
+
+def test_airrc_route_preflight_ready_with_canonical_run_list():
+    from tools.dataset_delivery.task2_smoke_launcher import build_route_preflight
+
+    report = build_route_preflight(group="airrc", registry_path=REPO_ROOT / "configs" / "model_registry.yaml")
+
+    assert report["status"] == "READY"
+    assert report["teacher_run_list"] == ["airrc"]
+    for target in ["airway_wall", "lung_pulmonary_arteries", "lung_pulmonary_veins"]:
+        row = report["targets"][target]
+        assert row["primary_teacher_raw"] == "AirRC"
+        assert row["primary_teacher_resolved"] == "airrc"
+        assert row["registry_enabled"] is True
+        assert row["route_eligible"] is True
+
+
+def test_airrc_route_failure_validator_does_not_report_model_failed(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    case_id = "case_001"
+    root = tmp_path / "smoke"
+    run_out = root / "airrc" / "run_loop"
+    plan_dir = run_out / "annotation_versions" / case_id
+    plan_dir.mkdir(parents=True)
+    (root / "airrc" / "selected_case_manifest.csv").write_text(
+        f"case_id,ct_path,annotation_folder\n{case_id},{tmp_path / 'ct.nii.gz'},{tmp_path / 'ref'}\n",
+        encoding="utf-8",
+    )
+    (run_out / "run_summary.json").write_text(
+        json.dumps({
+            "status": "ROUTE_RESOLUTION_FAILED",
+            "strict_delivery_failure_count": 1,
+            "strict_delivery_failures": [{"status": "failed", "reason": "route_resolution_failed"}],
+        }),
+        encoding="utf-8",
+    )
+    (plan_dir / "route_resolution_failure.json").write_text(json.dumps({"inference_called": False}), encoding="utf-8")
+    slurm_csv = tmp_path / "slurm.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\nairrc,4440395,FAILED,2:0\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=root, groups=["airrc"], slurm_status_csv=slurm_csv)
+
+    assert report["status"] == "ROUTE_RESOLUTION_FAILED"
+    assert report["groups"][0]["status"] == "ROUTE_RESOLUTION_FAILED"
+    assert report["groups"][0]["validation_started"] is False
+
+
 def _write_smoke_run(root: Path, group: str, *, final_masks: bool = True) -> None:
     from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS
 

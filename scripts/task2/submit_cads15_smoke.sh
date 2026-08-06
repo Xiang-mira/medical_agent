@@ -9,15 +9,15 @@ NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_t
 OUT_PARENT=${OUT_PARENT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373}
 OUT_ROOT=${OUT_ROOT:-$OUT_PARENT/cads15_teacher_smoke_$(date +%Y%m%d_%H%M%S)}
 STATE_ROOT=${STATE_ROOT:-$OUT_PARENT/runtime_state}
-PANEL_PARTITION=${PANEL_PARTITION:-shared}
-PANEL_CPUS_PER_TASK=${PANEL_CPUS_PER_TASK:-8}
-PANEL_MEM=${PANEL_MEM:-32G}
-PANEL_TIME_LIMIT=${PANEL_TIME_LIMIT:-02:00:00}
-GPU_PARTITION=${GPU_PARTITION:-gpu}
-GPU_GRES=${GPU_GRES:-gpu:T4:1}
-GPU_CPUS_PER_TASK=${GPU_CPUS_PER_TASK:-8}
-GPU_MEM=${GPU_MEM:-64G}
-GPU_TIME_LIMIT=${GPU_TIME_LIMIT:-06:00:00}
+PANEL_PARTITION=${PANEL_PARTITION:-${TASK2_CPU_PARTITION:-cpu}}
+PANEL_CPUS_PER_TASK=${PANEL_CPUS_PER_TASK:-${TASK2_CADS_PANEL_CPUS:-8}}
+PANEL_MEM=${PANEL_MEM:-${TASK2_CADS_PANEL_MEMORY:-32G}}
+PANEL_TIME_LIMIT=${PANEL_TIME_LIMIT:-${TASK2_CADS_PANEL_TIME:-02:00:00}}
+GPU_PARTITION=${GPU_PARTITION:-${TASK2_CADS_GPU_PARTITION:-gpu}}
+GPU_GRES=${GPU_GRES:-${TASK2_CADS_GPU_GRES:-gpu:T4:1}}
+GPU_CPUS_PER_TASK=${GPU_CPUS_PER_TASK:-${TASK2_CADS_GPU_CPUS:-8}}
+GPU_MEM=${GPU_MEM:-${TASK2_CADS_GPU_MEMORY:-64G}}
+GPU_TIME_LIMIT=${GPU_TIME_LIMIT:-${TASK2_CADS_GPU_TIME:-06:00:00}}
 TIMEOUT_SEC=${TIMEOUT_SEC:-14400}
 
 if [ -f "$HOME/.bodymaps_env" ]; then
@@ -71,7 +71,21 @@ mkdir -p "$OUT_PARENT" "$STATE_ROOT"
 
 PANEL_SBATCH=$OUT_ROOT/slurm/cads15_panel_prepare.sbatch
 GPU_SBATCH=$OUT_ROOT/slurm/cads15_gpu_smoke.sbatch
+PREP_STATUS=$("$PYTHON" - "$OUT_ROOT/submission_manifest.json" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+print(doc.get("status") or "")
+PY
+)
+if [ "$PREP_STATUS" != "NOT_SUBMITTED" ]; then
+  echo "CADS15 smoke resource preflight blocked submission: $PREP_STATUS" >&2
+  exit 2
+fi
 PANEL_JOB_ID=$(sbatch --parsable "$PANEL_SBATCH")
+if [ -z "$PANEL_JOB_ID" ]; then
+  echo "CADS15 panel submission did not return a job id; GPU smoke will not be submitted." >&2
+  exit 2
+fi
 GPU_JOB_ID=$(sbatch --parsable --dependency=afterok:"$PANEL_JOB_ID" "$GPU_SBATCH")
 
 printf "%s\n" "$PANEL_JOB_ID" > "$OUT_ROOT/panel_job_id.txt"

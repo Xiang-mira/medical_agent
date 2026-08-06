@@ -24,6 +24,9 @@ from cli_anything.medai.core.runtime_resolver import (  # noqa: E402
     DEFAULT_NNUNETV2_PREDICT,
     DEFAULT_UNEST_PYTHON,
 )
+from cli_anything.medai.core.model_key_resolver import canonical_model_keys, resolve_model_key  # noqa: E402
+from cli_anything.medai.core.model_registry import candidate_models_for_organs, load_registry  # noqa: E402
+from cli_anything.medai.core.organ_router import route_organs  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_json  # noqa: E402
 from tools.dataset_delivery.task2_preflight import build_preflight  # noqa: E402
 from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS, parse_groups  # noqa: E402
@@ -262,6 +265,80 @@ def _resource_manifest(
     }
 
 
+def _covered_by_model(entry: dict[str, Any], target: str) -> bool:
+    target_norm = target.strip().lower()
+    covered = {str(item).strip().lower().replace(" ", "_") for item in entry.get("covered_organs", []) or []}
+    aliases = {
+        str(k).strip().lower().replace(" ", "_"): str(v).strip().lower().replace(" ", "_")
+        for k, v in (entry.get("supported_organ_aliases") or {}).items()
+    }
+    return target_norm in covered or aliases.get(target_norm) in covered
+
+
+def build_route_preflight(*, group: str, registry_path: Path) -> dict[str, Any]:
+    registry = load_registry(registry_path)
+    spec = SMOKE_SPECS[group]
+    requested_models, requested_resolution = canonical_model_keys(spec["models"], registry)
+    requested_set = set(requested_models)
+    routed = route_organs(list(spec["targets"]))
+    candidate_map = candidate_models_for_organs(registry, list(spec["targets"]))
+    targets: dict[str, Any] = {}
+    teacher_run_list: list[str] = []
+    failures: list[dict[str, Any]] = []
+    for target in spec["targets"]:
+        ranked = (routed.get("ranked_candidates") or {}).get(target, []) or []
+        primary_raw = str((ranked[0] or {}).get("token") or (ranked[0] or {}).get("model_key") or "") if ranked else ""
+        primary_resolved = resolve_model_key(primary_raw or ((ranked[0] or {}).get("model_key") if ranked else ""), registry)
+        candidates = [
+            resolved.resolved
+            for raw in candidate_map.get(target, [])
+            for resolved in [resolve_model_key(raw, registry)]
+            if resolved.ok and resolved.resolved
+        ]
+        eligible = [model for model in candidates if model in requested_set]
+        selected = eligible[0] if eligible else None
+        entry = (registry.get("models", {}) or {}).get(selected or "", {}) if selected else {}
+        registry_enabled = bool(entry.get("enabled", True)) if selected else False
+        source_label_exists = _covered_by_model(entry, target) if selected else False
+        route_eligible = bool(selected and registry_enabled and source_label_exists)
+        reason = ""
+        if not primary_resolved.ok:
+            reason = primary_resolved.reason or "primary_teacher_unresolved"
+        elif not selected:
+            reason = "requested_model_filtered_route"
+        elif not registry_enabled:
+            reason = "registry_entry_disabled"
+        elif not source_label_exists:
+            reason = "source_label_not_covered_by_model"
+        targets[target] = {
+            "primary_teacher_raw": primary_raw,
+            "primary_teacher_resolved": primary_resolved.resolved,
+            "registry_key": selected or primary_resolved.resolved,
+            "registry_entry_exists": bool(selected and selected in (registry.get("models", {}) or {})),
+            "registry_enabled": registry_enabled,
+            "requested_models": requested_models,
+            "candidate_models": candidates,
+            "source_label_exists": source_label_exists,
+            "fov_excluded": False,
+            "route_eligible": route_eligible,
+            "filtered_reason": reason,
+        }
+        if route_eligible and selected and selected not in teacher_run_list:
+            teacher_run_list.append(selected)
+        if not route_eligible:
+            failures.append({"target": target, "reason": reason, "primary_teacher_raw": primary_raw, "primary_teacher_resolved": primary_resolved.resolved})
+    status = "READY" if not failures and teacher_run_list else "ROUTE_RESOLUTION_FAILED"
+    return {
+        "group": group,
+        "route_status": status,
+        "status": status,
+        "requested_model_resolution": requested_resolution,
+        "targets": targets,
+        "teacher_run_list": teacher_run_list,
+        "failures": failures,
+    }
+
+
 def prepare_smokes(
     *,
     smoke_root: Path,
@@ -314,6 +391,8 @@ def prepare_smokes(
             unest_python_executable=str(unest_python_executable),
             run_predictor_help=not skip_predictor_help,
         )
+        route_preflight = build_route_preflight(group=group, registry_path=registry)
+        write_json(group_root / "preflight" / "route_preflight.json", route_preflight)
         command = _command_for_group(
             group=group,
             python=python,
@@ -349,6 +428,9 @@ def prepare_smokes(
         if preflight["status"] != "READY":
             group_status = "BLOCKED_BY_PREFLIGHT"
             sbatch_test_only = {"skipped": True, "reason": "preflight_blocked", "command": ["sbatch", "--test-only", str(slurm_file)], "return_code": None, "stdout": "", "stderr": ""}
+        elif route_preflight["status"] != "READY":
+            group_status = "ROUTE_RESOLUTION_FAILED"
+            sbatch_test_only = {"skipped": True, "reason": "route_resolution_failed", "command": ["sbatch", "--test-only", str(slurm_file)], "return_code": None, "stdout": "", "stderr": ""}
         elif not shell_check["ok"]:
             group_status = "RESOURCE_REQUEST_INVALID"
             sbatch_test_only = {"skipped": True, "reason": "shell_syntax_failed", "command": ["sbatch", "--test-only", str(slurm_file)], "return_code": None, "stdout": "", "stderr": ""}
@@ -374,6 +456,8 @@ def prepare_smokes(
             "group": group,
             "status": group_status,
             "preflight_status": preflight["status"],
+            "route_status": route_preflight["status"],
+            "route_preflight": route_preflight,
             "case_id": selected_case["case_id"],
             "targets": SMOKE_SPECS[group]["targets"],
             "models": SMOKE_SPECS[group]["models"],
@@ -391,12 +475,15 @@ def prepare_smokes(
                 "group": group,
                 "status": group_status,
                 "blocked_checks": preflight.get("blocked_checks", []),
+                "route_preflight": route_preflight,
                 "resources": resources,
             })
         write_json(group_root / "runtime_submission_manifest.json", row)
     summary_status = "READY_TO_SUBMIT" if not blocked else (
         "RESOURCE_REQUEST_INVALID"
         if any(item.get("status") == "RESOURCE_REQUEST_INVALID" for item in blocked)
+        else "ROUTE_RESOLUTION_FAILED"
+        if any(item.get("status") == "ROUTE_RESOLUTION_FAILED" for item in blocked)
         else "BLOCKED_BY_PREFLIGHT"
     )
     summary = {
@@ -453,6 +540,8 @@ def submit_prepared_smokes(
         summary["status"] = (
             "RESOURCE_REQUEST_INVALID"
             if any(row.get("status") == "RESOURCE_REQUEST_INVALID" for row in blocked)
+            else "ROUTE_RESOLUTION_FAILED"
+            if any(row.get("status") == "ROUTE_RESOLUTION_FAILED" for row in blocked)
             else "BLOCKED_BY_PREFLIGHT"
         )
         summary["submission_mode"] = "all_or_nothing"
@@ -483,7 +572,11 @@ def submit_prepared_smokes(
         row["submission_status"] = "NOT_SUBMITTED"
     summary["groups"] = groups
     summary["status"] = "SUBMITTED" if summary["submitted_groups"] else (
-        "SUBMISSION_REJECTED" if summary["submission_rejected_groups"] else "BLOCKED_BY_PREFLIGHT"
+        "SUBMISSION_REJECTED" if summary["submission_rejected_groups"] else (
+            "ROUTE_RESOLUTION_FAILED"
+            if any(row.get("status") == "ROUTE_RESOLUTION_FAILED" for row in blocked)
+            else "BLOCKED_BY_PREFLIGHT"
+        )
     )
     summary["submission_mode"] = "submit_ready_groups" if submit_ready_groups else "all_or_nothing"
     summary["submitted_at"] = _utc_timestamp() if summary["submitted_groups"] else ""
@@ -527,6 +620,13 @@ def emit_human_summary(summary: dict[str, Any]) -> None:
             for check in (preflight.get("blocked_checks") or [])[:8]:
                 print(f"CHECK={check.get('name', '')}")
                 print(f"REASON={check.get('error') or check.get('stderr_tail') or check.get('reason') or check.get('path') or ''}")
+        if row.get("route_status") and row.get("route_status") != "READY":
+            route_preflight = row.get("route_preflight") or {}
+            print(f"ROUTE_STATUS={route_preflight.get('status', '')}")
+            print(f"TEACHER_RUN_LIST={','.join(route_preflight.get('teacher_run_list') or [])}")
+            for failure in (route_preflight.get("failures") or [])[:8]:
+                print(f"ROUTE_TARGET={failure.get('target', '')}")
+                print(f"ROUTE_REASON={failure.get('reason', '')}")
         print(f"SMOKE_ROOT={summary.get('smoke_root', '')}")
 
 

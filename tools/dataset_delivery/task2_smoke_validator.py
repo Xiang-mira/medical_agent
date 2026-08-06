@@ -31,8 +31,9 @@ NONVALIDATION_STATUSES = {
     "SUBMITTED",
     "PENDING",
     "RUNNING",
+    "ROUTE_RESOLUTION_FAILED",
 }
-FAILED_STATUSES = {"MODEL_FAILED", "VALIDATION_FAILED"}
+FAILED_STATUSES = {"ROUTE_RESOLUTION_FAILED", "MODEL_FAILED", "VALIDATION_FAILED"}
 PASSED_STATUS = "PASSED"
 SLURM_PENDING_STATES = {"PENDING", "REQUEUED", "SUSPENDED", "CONFIGURING"}
 SLURM_RUNNING_STATES = {"RUNNING", "COMPLETING"}
@@ -489,6 +490,18 @@ def validate_group(
             slurm=slurm,
         )
     if slurm_status == "MODEL_FAILED":
+        summary = _read_json(run_out / "run_summary.json")
+        route_failure = _read_json(run_out / "annotation_versions" / case_id / "route_resolution_failure.json") if case_id else {}
+        if summary.get("status") == "ROUTE_RESOLUTION_FAILED" or route_failure:
+            return _nonvalidation_group_result(
+                group=group,
+                status="ROUTE_RESOLUTION_FAILED",
+                reason="route_resolution_failed",
+                run_out=run_out,
+                case_id=case_id,
+                targets=list(spec["targets"]),
+                slurm=slurm,
+            )
         return {
             **_nonvalidation_group_result(
                 group=group,
@@ -646,6 +659,8 @@ def validate_smoke_root(
         status = PASSED_STATUS
     elif "VALIDATION_FAILED" in group_statuses:
         status = "VALIDATION_FAILED"
+    elif "ROUTE_RESOLUTION_FAILED" in group_statuses:
+        status = "ROUTE_RESOLUTION_FAILED"
     elif "MODEL_FAILED" in group_statuses:
         status = "MODEL_FAILED"
     elif "RUNNING" in group_statuses:

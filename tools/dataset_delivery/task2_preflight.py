@@ -19,6 +19,7 @@ if str(REPO_ROOT / "agent-harness") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "agent-harness"))
 
 from cli_anything.medai.core.model_registry import get_model_entry, load_registry  # noqa: E402
+from cli_anything.medai.core.model_key_resolver import canonical_model_keys  # noqa: E402
 from cli_anything.medai.core.runtime_resolver import (  # noqa: E402
     DEFAULT_CANONICAL_CODE_ROOT,
     DEFAULT_HPC_CHECKPOINT_ROOT,
@@ -364,6 +365,7 @@ def build_preflight(
 ) -> dict[str, Any]:
     repo_root = REPO_ROOT.resolve()
     registry = load_registry(registry_path)
+    models, model_resolution = canonical_model_keys(models, registry)
     checkpoint_root = resolve_checkpoint_root(
         explicit=checkpoint_root_arg,
         registry_checkpoint_root=registry.get("checkpoint_root"),
@@ -444,6 +446,7 @@ def build_preflight(
         **repo_meta,
         "formal_mode": formal_mode,
         "model_keys": models,
+        "model_key_resolution": model_resolution,
         "case_list": str(case_list),
         "target_config": str(target_config),
         "registry_path": str(registry_path),
