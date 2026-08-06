@@ -17,11 +17,36 @@ from tools.dataset_delivery.delivery_lib import write_csv, write_json  # noqa: E
 
 
 CADS_MODELS = ["cads553", "cads557", "cads559"]
+AIRRC_TARGETS = ["airway_wall", "lung_pulmonary_arteries", "lung_pulmonary_veins"]
+NONVALIDATION_STATUSES = {
+    "NOT_PREPARED",
+    "NOT_SUBMITTED",
+    "PREFLIGHT_RUNNING",
+    "PREFLIGHT_READY",
+    "BLOCKED_BY_PREFLIGHT",
+    "RESOURCE_CHECK_RUNNING",
+    "RESOURCE_REQUEST_INVALID",
+    "READY_TO_SUBMIT",
+    "SUBMISSION_REJECTED",
+    "SUBMITTED",
+    "PENDING",
+    "RUNNING",
+}
+FAILED_STATUSES = {"MODEL_FAILED", "VALIDATION_FAILED"}
+PASSED_STATUS = "PASSED"
+SLURM_PENDING_STATES = {"PENDING", "REQUEUED", "SUSPENDED", "CONFIGURING"}
+SLURM_RUNNING_STATES = {"RUNNING", "COMPLETING"}
+SLURM_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY", "BOOT_FAIL"}
 
 SMOKE_SPECS: dict[str, dict[str, Any]] = {
     "atm": {
         "models": ["atm"],
         "targets": ["airway_tree"],
+    },
+    "airrc": {
+        "models": ["airrc"],
+        "targets": AIRRC_TARGETS,
+        "dataset": "Dataset1380_AirRC",
     },
     "cads": {
         "models": CADS_MODELS,
@@ -55,6 +80,23 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _submission_manifest(smoke_root: Path) -> dict[str, Any]:
+    return _read_json(smoke_root / "submission_manifest.json") or _read_json(smoke_root / "prepare_summary.json")
+
+
+def _manifest_group_row(smoke_root: Path, group: str) -> dict[str, Any]:
+    manifest = _submission_manifest(smoke_root)
+    groups = manifest.get("groups") or []
+    if isinstance(groups, dict):
+        row = groups.get(group) or {}
+        return dict(row) if isinstance(row, dict) else {}
+    if isinstance(groups, list):
+        for row in groups:
+            if isinstance(row, dict) and row.get("group") == group:
+                return dict(row)
+    return {}
+
+
 def _case_id_from_run(run_out: Path) -> str | None:
     rows = _read_csv(run_out.parent / "selected_case_manifest.csv")
     if rows:
@@ -81,13 +123,14 @@ def _slurm_status(slurm_rows: list[dict[str, str]], group: str, case_id: str | N
         state = row.get("state") or row.get("State") or ""
         exit_code = row.get("exit_code") or row.get("ExitCode") or ""
         terminal_success = state == "COMPLETED" and exit_code == "0:0"
-        nonterminal = state in {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
+        nonterminal = state in SLURM_PENDING_STATES or state in SLURM_RUNNING_STATES
         reason = "success" if terminal_success else ("slurm_job_not_terminal" if nonterminal else "slurm_job_failed")
         rows.append({
             "state": state,
             "exit_code": exit_code,
             "job_id": row.get("job_id") or row.get("JobIDRaw") or "",
             "case_id": row.get("case_id") or case_id or "",
+            "node": row.get("node") or row.get("NodeList") or row.get("nodelist") or "",
             "reason": reason,
         })
         if not terminal_success:
@@ -100,7 +143,88 @@ def _slurm_status(slurm_rows: list[dict[str, str]], group: str, case_id: str | N
         "state": rows[0]["state"] if len(rows) == 1 else "MULTI",
         "exit_code": rows[0]["exit_code"] if len(rows) == 1 else "",
         "job_id": rows[0]["job_id"] if len(rows) == 1 else "",
+        "node": rows[0].get("node", "") if len(rows) == 1 else "",
         "reason": "success" if ok else ";".join(sorted(set(reasons))),
+    }
+
+
+def _slurm_state_to_group_status(slurm: dict[str, Any]) -> str | None:
+    if not slurm.get("known"):
+        return None
+    state = str(slurm.get("state") or "")
+    exit_code = str(slurm.get("exit_code") or "")
+    if state in SLURM_PENDING_STATES:
+        return "PENDING"
+    if state in SLURM_RUNNING_STATES:
+        return "RUNNING"
+    if state == "COMPLETED" and exit_code == "0:0":
+        return "COMPLETED"
+    if state == "COMPLETED" or state in SLURM_FAILURE_STATES:
+        return "MODEL_FAILED"
+    if state in {"UNKNOWN", "", "SUBMITTED"}:
+        return "SUBMITTED"
+    return "MODEL_FAILED"
+
+
+def _target_rows_for_unvalidated_state(
+    *,
+    group: str,
+    case_id: str,
+    run_out: Path,
+    targets: list[str],
+    status: str,
+    reason: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "group": group,
+            "case_id": case_id,
+            "target": target,
+            "mask_path": "",
+            "valid": "",
+            "reason": reason,
+            "final_status": status,
+            "delivery_status": "",
+            "strict_failure_reasons": "",
+            "run_out": str(run_out),
+        }
+        for target in targets
+    ]
+
+
+def _nonvalidation_group_result(
+    *,
+    group: str,
+    status: str,
+    reason: str,
+    run_out: Path,
+    case_id: str,
+    targets: list[str],
+    slurm: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "group": group,
+        "status": status,
+        "case_id": case_id,
+        "run_out": str(run_out),
+        "slurm": slurm,
+        "validation_started": False,
+        "requested_models": list(SMOKE_SPECS[group]["models"]),
+        "requested_targets": targets,
+        "teacher_run_list": [],
+        "inference_checks": [],
+        "passed_targets": [],
+        "failed_targets": [],
+        "failures": [] if status not in FAILED_STATUSES else [reason],
+        "reason": reason,
+        "target_rows": _target_rows_for_unvalidated_state(
+            group=group,
+            case_id=case_id,
+            run_out=run_out,
+            targets=targets,
+            status=status,
+            reason=reason,
+        ),
     }
 
 
@@ -289,6 +413,7 @@ def _validate_case_targets(
         "case_id": case_id,
         "run_out": str(run_out),
         "slurm": slurm,
+        "validation_started": True,
         "requested_models": required_models,
         "requested_targets": targets,
         "teacher_run_list": sorted(teacher_run_list),
@@ -329,6 +454,7 @@ def validate_group(
     contract_path: Path = DEFAULT_CONTRACT,
 ) -> dict[str, Any]:
     spec = SMOKE_SPECS[group]
+    manifest_row = _manifest_group_row(smoke_root, group)
     if group in {"cads", "cads15"} and panel_json and panel_json.exists():
         return validate_cads15_panel(
             smoke_root=smoke_root,
@@ -338,23 +464,64 @@ def validate_group(
             contract_path=contract_path,
         )
     run_out = _single_run_out(smoke_root, group)
-    case_id = _case_id_from_run(run_out) or ""
-    if not case_id:
+    case_id = _case_id_from_run(run_out) or str(manifest_row.get("case_id") or "")
+    slurm = _slurm_status(slurm_rows, group)
+    slurm_status = _slurm_state_to_group_status(slurm)
+    manifest_status = str(manifest_row.get("status") or manifest_row.get("submission_status") or "").upper()
+    if manifest_status in NONVALIDATION_STATUSES and not slurm_status:
+        return _nonvalidation_group_result(
+            group=group,
+            status=manifest_status,
+            reason=manifest_status.lower(),
+            run_out=run_out,
+            case_id=case_id,
+            targets=list(spec["targets"]),
+            slurm=slurm,
+        )
+    if slurm_status in {"PENDING", "RUNNING", "SUBMITTED"}:
+        return _nonvalidation_group_result(
+            group=group,
+            status=slurm_status,
+            reason="still_pending" if slurm_status == "PENDING" else ("still_running" if slurm_status == "RUNNING" else "submitted_not_terminal"),
+            run_out=run_out,
+            case_id=case_id,
+            targets=list(spec["targets"]),
+            slurm=slurm,
+        )
+    if slurm_status == "MODEL_FAILED":
         return {
-            "group": group,
-            "status": "failed",
-            "case_id": "",
-            "run_out": str(run_out),
-            "slurm": _slurm_status(slurm_rows, group),
-            "requested_models": spec["models"],
-            "requested_targets": spec["targets"],
-            "teacher_run_list": [],
-            "inference_checks": [],
-            "passed_targets": [],
-            "failed_targets": spec["targets"],
-            "failures": ["case_id_not_resolved"],
-            "target_rows": [],
+            **_nonvalidation_group_result(
+                group=group,
+                status="MODEL_FAILED",
+                reason=f"slurm_job_failed:{slurm.get('state')}:{slurm.get('exit_code')}",
+                run_out=run_out,
+                case_id=case_id,
+                targets=list(spec["targets"]),
+                slurm=slurm,
+            ),
+            "failed_targets": list(spec["targets"]),
+            "failures": [f"slurm_job_failed:{slurm.get('state')}:{slurm.get('exit_code')}"],
         }
+    if manifest_status in {"BLOCKED_BY_PREFLIGHT", "RESOURCE_REQUEST_INVALID", "SUBMISSION_REJECTED", "NOT_SUBMITTED"}:
+        return _nonvalidation_group_result(
+            group=group,
+            status=manifest_status,
+            reason=manifest_status.lower(),
+            run_out=run_out,
+            case_id=case_id,
+            targets=list(spec["targets"]),
+            slurm=slurm,
+        )
+    if not case_id:
+        return _nonvalidation_group_result(
+            group=group,
+            status="NOT_SUBMITTED",
+            reason="case_id_not_resolved",
+            run_out=run_out,
+            case_id="",
+            targets=list(spec["targets"]),
+            slurm=slurm,
+        )
     case_result = _validate_case_targets(
         smoke_root=smoke_root,
         group=group,
@@ -366,7 +533,7 @@ def validate_group(
     )
     return {
         "group": group,
-        "status": "passed" if not case_result["failures"] else "failed",
+        "status": PASSED_STATUS if not case_result["failures"] else "VALIDATION_FAILED",
         **case_result,
     }
 
@@ -422,7 +589,7 @@ def validate_cads15_panel(
     if missing:
         failures.extend(f"target_missing_positive_smoke:{target}" for target in missing)
     passed_targets = sorted(target for target, cases in covered.items() if cases)
-    status = "passed" if not failures else "failed"
+    status = PASSED_STATUS if not failures else "VALIDATION_FAILED"
     return {
         "group": group,
         "status": status,
@@ -438,7 +605,8 @@ def validate_cads15_panel(
         "target_positive_smoke_cases": covered,
         "failures": failures,
         "target_rows": target_rows,
-        "CADS15_SMOKE_STATUS": "PASSED" if status == "passed" else "FAILED",
+        "validation_started": True,
+        "CADS15_SMOKE_STATUS": "PASSED" if status == PASSED_STATUS else "FAILED",
         "TARGETS_REQUESTED": len(expected_targets),
         "TARGETS_STATICALLY_VERIFIED": len(expected_targets),
         "TARGETS_WITH_POSITIVE_SMOKE": len(passed_targets),
@@ -473,13 +641,38 @@ def validate_smoke_root(
         for group in groups
     ]
     target_rows = [row for group in group_results for row in group["target_rows"]]
-    status = "passed" if all(group["status"] == "passed" for group in group_results) else "failed"
+    group_statuses = {str(group["status"]) for group in group_results}
+    if all(status == PASSED_STATUS for status in group_statuses):
+        status = PASSED_STATUS
+    elif "VALIDATION_FAILED" in group_statuses:
+        status = "VALIDATION_FAILED"
+    elif "MODEL_FAILED" in group_statuses:
+        status = "MODEL_FAILED"
+    elif "RUNNING" in group_statuses:
+        status = "RUNNING"
+    elif "PENDING" in group_statuses or "SUBMITTED" in group_statuses:
+        status = "PENDING"
+    elif "SUBMISSION_REJECTED" in group_statuses:
+        status = "SUBMISSION_REJECTED"
+    elif "RESOURCE_REQUEST_INVALID" in group_statuses:
+        status = "RESOURCE_REQUEST_INVALID"
+    elif "BLOCKED_BY_PREFLIGHT" in group_statuses:
+        status = "BLOCKED_BY_PREFLIGHT"
+    elif "NOT_SUBMITTED" in group_statuses:
+        status = "NOT_SUBMITTED"
+    else:
+        status = "UNKNOWN"
     report = {
         "status": status,
         "smoke_root": str(smoke_root),
         "groups": group_results,
-        "passed_groups": [group["group"] for group in group_results if group["status"] == "passed"],
-        "failed_groups": [group["group"] for group in group_results if group["status"] != "passed"],
+        "passed_groups": [group["group"] for group in group_results if group["status"] == PASSED_STATUS],
+        "failed_groups": [group["group"] for group in group_results if group["status"] in FAILED_STATUSES],
+        "blocked_groups": [group["group"] for group in group_results if group["status"] == "BLOCKED_BY_PREFLIGHT"],
+        "resource_invalid_groups": [group["group"] for group in group_results if group["status"] == "RESOURCE_REQUEST_INVALID"],
+        "submission_rejected_groups": [group["group"] for group in group_results if group["status"] == "SUBMISSION_REJECTED"],
+        "pending_groups": [group["group"] for group in group_results if group["status"] in {"PENDING", "SUBMITTED"}],
+        "running_groups": [group["group"] for group in group_results if group["status"] == "RUNNING"],
         "target_rows": target_rows,
     }
     cads15 = next((group for group in group_results if group["group"] in {"cads", "cads15"}), None)
@@ -529,7 +722,7 @@ def parse_groups(value: str) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Task 2 Teacher strict-delivery smoke outputs.")
     parser.add_argument("--smoke-root", required=True, type=Path)
-    parser.add_argument("--groups", default="atm,cads,unest")
+    parser.add_argument("--groups", default="atm,airrc,unest")
     parser.add_argument("--slurm-status-csv", default=None, type=Path)
     parser.add_argument("--panel-json", default=None, type=Path)
     parser.add_argument("--contract", default=DEFAULT_CONTRACT, type=Path)
@@ -544,7 +737,7 @@ def main() -> int:
         write_outputs=not bool(args.no_write),
     )
     print(json.dumps({"status": report["status"], "failed_groups": report["failed_groups"]}, indent=2))
-    return 0 if report["status"] == "passed" else 1
+    return 0 if report["status"] == PASSED_STATUS else (1 if report["failed_groups"] else 0)
 
 
 if __name__ == "__main__":

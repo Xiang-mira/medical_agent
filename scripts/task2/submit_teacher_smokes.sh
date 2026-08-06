@@ -9,12 +9,15 @@ CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent
 NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict}
 UNEST_PYTHON_EXECUTABLE=${UNEST_PYTHON_EXECUTABLE:-/home/xhan74/envs/medical_agent_train_py311/bin/python}
 OUT_ROOT=${OUT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/task2_teacher_smokes_$(date +%Y%m%d_%H%M%S)}
-GROUPS=${GROUPS:-atm,cads,unest}
+STATE_ROOT=${STATE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/runtime_state}
+TASK2_SMOKE_GROUPS=${TASK2_SMOKE_GROUPS:-atm,airrc,unest}
+TASK2_SUBMIT_READY_GROUPS=${TASK2_SUBMIT_READY_GROUPS:-0}
 PARTITION=${PARTITION:-gpu}
-GRES=${GRES:-gpu:t4:1}
+GRES=${GRES:-gpu:T4:1}
 CPUS_PER_TASK=${CPUS_PER_TASK:-8}
 MEM=${MEM:-64G}
 TIME_LIMIT=${TIME_LIMIT:-06:00:00}
+ACCOUNT=${ACCOUNT:-}
 TIMEOUT_SEC=${TIMEOUT_SEC:-14400}
 
 if [ -f "$HOME/.bodymaps_env" ]; then
@@ -33,9 +36,18 @@ if [ "$branch" != "main" ]; then
 fi
 
 mkdir -p "$OUT_ROOT"
+SUBMIT_READY_ARGS=()
+if [ "$TASK2_SUBMIT_READY_GROUPS" = "1" ]; then
+  SUBMIT_READY_ARGS+=(--submit-ready-groups)
+fi
+ACCOUNT_ARGS=()
+if [ -n "$ACCOUNT" ]; then
+  ACCOUNT_ARGS+=(--account "$ACCOUNT")
+fi
+
 "$PYTHON" tools/dataset_delivery/task2_smoke_launcher.py \
   --smoke-root "$OUT_ROOT" \
-  --groups "$GROUPS" \
+  --groups "$TASK2_SMOKE_GROUPS" \
   --case-manifest "$CASE_MANIFEST" \
   --case-id "$CASE_ID" \
   --code-root "$CODE_ROOT" \
@@ -49,33 +61,13 @@ mkdir -p "$OUT_ROOT"
   --gres "$GRES" \
   --cpus-per-task "$CPUS_PER_TASK" \
   --mem "$MEM" \
-  --time-limit "$TIME_LIMIT"
-
-JOBS_FILE=$OUT_ROOT/smoke_jobs.csv
-printf "group,job_id,sbatch_file\n" > "$JOBS_FILE"
-"$PYTHON" - "$OUT_ROOT/prepare_summary.json" "$JOBS_FILE" <<'PY'
-from __future__ import annotations
-
-import csv
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-summary = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-jobs_file = Path(sys.argv[2])
-rows = []
-for group in summary["groups"]:
-    sbatch = group["sbatch_file"]
-    proc = subprocess.run(["sbatch", "--parsable", sbatch], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    if proc.returncode != 0:
-        raise SystemExit(f"sbatch failed for {group['group']}: {proc.stderr.strip()}")
-    rows.append({"group": group["group"], "job_id": proc.stdout.strip(), "sbatch_file": sbatch})
-with jobs_file.open("a", encoding="utf-8", newline="") as handle:
-    writer = csv.DictWriter(handle, fieldnames=["group", "job_id", "sbatch_file"])
-    writer.writerows(rows)
-print(json.dumps({"status": "submitted", "jobs": rows}, indent=2))
-PY
+  --time-limit "$TIME_LIMIT" \
+  "${ACCOUNT_ARGS[@]}" \
+  --run-slurm-test-only \
+  --submit \
+  --runtime-state-root "$STATE_ROOT" \
+  "${SUBMIT_READY_ARGS[@]}"
 
 echo "TASK2_SMOKE_ROOT=$OUT_ROOT"
-echo "TASK2_SMOKE_JOBS=$JOBS_FILE"
+echo "TASK2_SMOKE_JOBS=$OUT_ROOT/smoke_jobs.csv"
+echo "TASK2_SMOKE_SUBMISSION_MANIFEST=$OUT_ROOT/submission_manifest.json"

@@ -103,7 +103,7 @@ def test_orchestration_writes_cpu_panel_and_dependent_gpu_sbatch(tmp_path: Path)
         panel_mem="4G",
         panel_time_limit="00:30:00",
         gpu_partition="gpu",
-        gpu_gres="gpu:t4:1",
+        gpu_gres="gpu:T4:1",
         gpu_cpus_per_task=4,
         gpu_mem="8G",
         gpu_time_limit="01:00:00",

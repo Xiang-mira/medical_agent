@@ -32,6 +32,26 @@ class ResolvedPath:
         }
 
 
+@dataclass(frozen=True)
+class ResolvedExecutable:
+    raw: str
+    source: str
+    configured_path: str
+    execution_path: str
+    real_path: str
+    selection_reason: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "raw": self.raw,
+            "source": self.source,
+            "configured_path": self.configured_path,
+            "execution_path": self.execution_path,
+            "real_path": self.real_path,
+            "selection_reason": self.selection_reason,
+        }
+
+
 def repo_root_from_module() -> Path:
     return Path(__file__).resolve().parents[4]
 
@@ -130,15 +150,15 @@ def resolve_executable(
     if raw:
         path = Path(raw).expanduser()
         if path.is_absolute() or any(sep in raw for sep in ("/", "\\")):
-            resolved = path.resolve()
+            resolved = path.absolute()
         else:
             found = shutil.which(raw)
-            resolved = Path(found).resolve() if found else Path(fallback or raw).expanduser().resolve()
+            resolved = Path(found).absolute() if found else Path(fallback or raw).expanduser().absolute()
     elif name_for_path_lookup:
         found = shutil.which(name_for_path_lookup)
-        resolved = Path(found).resolve() if found else Path(fallback or name_for_path_lookup).expanduser().resolve()
+        resolved = Path(found).absolute() if found else Path(fallback or name_for_path_lookup).expanduser().absolute()
     else:
-        resolved = Path(fallback or "").expanduser().resolve()
+        resolved = Path(fallback or "").expanduser().absolute()
     if require_exists:
         status = executable_status(resolved)
         if not status["exists"]:
@@ -148,6 +168,67 @@ def resolve_executable(
         if not status["is_executable"]:
             raise PermissionError(f"executable is not executable: {resolved}")
     return resolved
+
+
+def resolve_executable_details(
+    *,
+    explicit: str | Path | None = None,
+    env_names: tuple[str, ...] = (),
+    registry_value: str | Path | None = None,
+    fallback: str | Path | None = None,
+    name_for_path_lookup: str | None = None,
+    require_exists: bool = False,
+) -> ResolvedExecutable:
+    raw = ""
+    source = ""
+    if explicit and str(explicit).strip():
+        raw = str(explicit).strip()
+        source = "cli"
+    else:
+        for name in env_names:
+            value = os.getenv(name)
+            if value and value.strip():
+                raw = value.strip()
+                source = f"env:{name}"
+                break
+    if not raw and registry_value and str(registry_value).strip():
+        raw = str(registry_value).strip()
+        source = "registry"
+    if not raw and name_for_path_lookup:
+        found = shutil.which(name_for_path_lookup)
+        if found:
+            raw = found
+            source = "path_lookup"
+    if not raw:
+        raw = str(fallback or "").strip()
+        source = "default"
+
+    path = Path(raw).expanduser()
+    if path.is_absolute() or any(sep in raw for sep in ("/", "\\")):
+        execution = path.absolute()
+    else:
+        found = shutil.which(raw)
+        execution = Path(found).absolute() if found else Path(fallback or raw).expanduser().absolute()
+        if found and source != "path_lookup":
+            source = f"{source}+path_lookup"
+    configured = str(path)
+    details = ResolvedExecutable(
+        raw=raw,
+        source=source,
+        configured_path=configured,
+        execution_path=str(execution),
+        real_path=os.path.realpath(str(execution)),
+        selection_reason=f"selected_{source}_without_symlink_realpath_execution",
+    )
+    if require_exists:
+        status = executable_status(Path(details.execution_path))
+        if not status["exists"]:
+            raise FileNotFoundError(f"executable not found: {details.execution_path}")
+        if not status["is_file"]:
+            raise FileNotFoundError(f"executable is not a file: {details.execution_path}")
+        if not status["is_executable"]:
+            raise PermissionError(f"executable is not executable: {details.execution_path}")
+    return details
 
 
 def resolve_nnunet_predictor(
@@ -188,7 +269,20 @@ def resolve_unest_python(
     registry_value: str | Path | None = None,
     require_exists: bool = False,
 ) -> Path:
-    return resolve_executable(
+    return Path(resolve_unest_python_details(
+        explicit=explicit,
+        registry_value=registry_value,
+        require_exists=require_exists,
+    ).execution_path)
+
+
+def resolve_unest_python_details(
+    *,
+    explicit: str | Path | None = None,
+    registry_value: str | Path | None = None,
+    require_exists: bool = False,
+) -> ResolvedExecutable:
+    return resolve_executable_details(
         explicit=explicit,
         env_names=("UNEST_PYTHON_EXECUTABLE", "MEDAI_UNEST_PYTHON"),
         registry_value=registry_value,

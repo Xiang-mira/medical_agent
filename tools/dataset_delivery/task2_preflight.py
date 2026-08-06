@@ -30,6 +30,7 @@ from cli_anything.medai.core.runtime_resolver import (  # noqa: E402
     resolve_nnunet_predictor,
     resolve_registry_path,
     resolve_unest_python,
+    resolve_unest_python_details,
     run_help_check,
 )
 from tools.dataset_delivery.delivery_lib import read_csv_rows, write_json  # noqa: E402
@@ -38,6 +39,14 @@ from tools.dataset_delivery.delivery_lib import read_csv_rows, write_json  # noq
 NNUNET_MODELS = {"atm", "airrc"}
 CADS_MODELS = {f"cads{i}" for i in range(551, 560)}
 UNEST_MODELS = {"unest"}
+NNUNET_EXPECTED_LABELS: dict[str, dict[str, int]] = {
+    "atm": {"airway_tree": 1},
+    "airrc": {
+        "airway_wall": 2,
+        "lung_pulmonary_arteries": 3,
+        "lung_pulmonary_veins": 4,
+    },
+}
 REQUIRED_UNEST_FILES = [
     "models/model.pt",
     "configs/metadata.json",
@@ -198,6 +207,15 @@ def _nnunet_model_checks(
     trainer_dir = _trainer_dir_from_entry(entry, repo_root, checkpoint_root)
     checks.append({"name": f"{model_key}_checkpoint_root", **_path_check(Path(resolved_checkpoint.resolved), must_be_file=False)})
     checks.append({"name": f"{model_key}_dataset_json", **_path_check(Path(resolved_dataset_json.resolved), must_be_file=True, sha256=True)})
+    dataset_labels: dict[str, Any] = {}
+    if Path(resolved_dataset_json.resolved).exists():
+        try:
+            dataset_doc = json.loads(Path(resolved_dataset_json.resolved).read_text(encoding="utf-8"))
+            raw_labels = dataset_doc.get("labels") or {}
+            if isinstance(raw_labels, dict):
+                dataset_labels = raw_labels
+        except Exception as exc:
+            checks.append({"name": f"{model_key}_dataset_json_parse", "ok": False, "error": f"{type(exc).__name__}: {exc}"})
     if trainer_dir is not None:
         checks.append({"name": f"{model_key}_plans_json", **_path_check(trainer_dir / "plans.json", must_be_file=True)})
         fold = str(entry.get("folds") or "all")
@@ -207,6 +225,15 @@ def _nnunet_model_checks(
         fold_dir = trainer_dir / f"fold_{fold}"
         checks.append({"name": f"{model_key}_fold_dir", **_path_check(fold_dir, must_be_file=False)})
         checks.append({"name": f"{model_key}_checkpoint_file", **_path_check(fold_dir / checkpoint_name, must_be_file=True, sha256=True)})
+    for label_name, expected_id in NNUNET_EXPECTED_LABELS.get(model_key, {}).items():
+        actual = dataset_labels.get(label_name)
+        checks.append({
+            "name": f"{model_key}_label_{label_name}",
+            "ok": actual == expected_id,
+            "label": label_name,
+            "expected_label_id": expected_id,
+            "dataset_label_id": actual,
+        })
     predictor_check = {"name": f"{model_key}_predictor_executable", **executable_status(predictor)}
     predictor_check["ok"] = bool(predictor_check["exists"] and predictor_check["is_file"] and predictor_check["is_executable"])
     checks.append(predictor_check)
@@ -228,6 +255,8 @@ def _nnunet_model_checks(
         "plans": entry.get("plans"),
         "folds": entry.get("folds"),
         "checkpoint_name": entry.get("checkpoint_name"),
+        "expected_labels": NNUNET_EXPECTED_LABELS.get(model_key, {}),
+        "dataset_labels": dataset_labels,
     }
     return checks, meta
 
@@ -256,6 +285,7 @@ def _unest_checks(
     repo_root: Path,
     checkpoint_root: Path,
     unest_python: Path,
+    unest_python_details: dict[str, str],
     require_cuda: bool,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     checks: list[dict[str, Any]] = []
@@ -275,10 +305,15 @@ def _unest_checks(
         try:
             import_probe = _run_python_probe(
                 unest_python,
-                "import json, monai, torch; print(json.dumps({'monai': monai.__version__, 'torch': torch.__version__, 'cuda': torch.version.cuda}))",
+                "import json, sys, monai, torch; print(json.dumps({'sys_executable': sys.executable, 'sys_prefix': sys.prefix, 'sys_base_prefix': sys.base_prefix, 'monai_version': monai.__version__, 'torch_version': torch.__version__, 'cuda_available': torch.cuda.is_available(), 'cuda_version': torch.version.cuda}))",
             )
         except Exception as exc:
             import_probe = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        if import_probe.get("ok") and import_probe.get("stdout"):
+            try:
+                import_probe["parsed"] = json.loads(str(import_probe["stdout"]))
+            except Exception:
+                pass
         checks.append({"name": "unest_import_monai_torch", "ok": bool(import_probe.get("ok")), **import_probe})
         try:
             proc = subprocess.run(
@@ -303,6 +338,7 @@ def _unest_checks(
         "checkpoint_path": str(root),
         "source_code_path": str(source),
         "python_executable": str(unest_python),
+        "python_resolution": unest_python_details,
         "import_probe": import_probe,
         "monai_bundle_help": monai_help,
         "cuda_probe": cuda_probe,
@@ -334,7 +370,12 @@ def build_preflight(
         repo_root=repo_root,
     )
     predictor = resolve_nnunet_predictor(explicit=nnunet_predict_executable, require_exists=False)
-    unest_python = resolve_unest_python(explicit=unest_python_executable, registry_value=(registry.get("models", {}).get("unest", {}) or {}).get("unest_python_executable"), require_exists=False)
+    unest_python_resolution = resolve_unest_python_details(
+        explicit=unest_python_executable,
+        registry_value=(registry.get("models", {}).get("unest", {}) or {}).get("unest_python_executable"),
+        require_exists=False,
+    )
+    unest_python = Path(unest_python_resolution.execution_path)
     resolved_outer_python = Path(outer_python or DEFAULT_OUTER_PYTHON).expanduser().resolve()
     checks: list[dict[str, Any]] = []
     repo_checks, repo_meta = _repo_checks(repo_root, canonical_code_root, formal_mode)
@@ -373,6 +414,7 @@ def build_preflight(
                 repo_root=repo_root,
                 checkpoint_root=checkpoint_root,
                 unest_python=unest_python,
+                unest_python_details=unest_python_resolution.as_dict(),
                 require_cuda=require_cuda,
             )
             checks.extend(model_checks)
@@ -412,6 +454,7 @@ def build_preflight(
         "nnunet_predictor": str(predictor),
         "nnunet_predictor_default": str(DEFAULT_NNUNETV2_PREDICT),
         "unest_python": str(unest_python),
+        "unest_python_resolution": unest_python_resolution.as_dict(),
         "unest_python_default": str(DEFAULT_UNEST_PYTHON),
         "output_root": str(output_root),
         "environment": env_manifest,

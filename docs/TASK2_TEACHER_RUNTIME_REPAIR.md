@@ -46,8 +46,9 @@ python tools/dataset_delivery/task2_preflight.py \
   --formal-mode
 ```
 
-The only top-level statuses are `READY` and `BLOCKED`. A blocked preflight must
-stop submission before `sbatch`.
+Preflight status is now tracked per smoke group. A group must pass model/runtime
+preflight, shell syntax validation, and Slurm `sbatch --test-only` before it can
+enter `READY_TO_SUBMIT`.
 
 ## Smoke Submission
 
@@ -58,9 +59,42 @@ does not use `sbatch --wrap`.
 bash scripts/task2/submit_teacher_smokes.sh
 ```
 
-Default groups are `atm,cads,unest`. Override with `GROUPS=cads` for a CADS-only
-smoke. Each job writes command, git commit, preflight report, runtime manifest,
-task markers, and run-loop artifacts under:
+Default groups are `atm,airrc,unest`. Override with `TASK2_SMOKE_GROUPS`, never
+with Bash's reserved `GROUPS` array:
+
+```bash
+TASK2_SMOKE_GROUPS=atm,airrc,unest \
+TASK2_SUBMIT_READY_GROUPS=1 \
+bash scripts/task2/submit_teacher_smokes.sh
+```
+
+The built-in smoke groups are:
+
+```text
+atm: airway_tree
+airrc: airway_wall, lung_pulmonary_arteries, lung_pulmonary_veins
+unest: kidney_cortex, kidney_medulla, kidney_pelvicalyceal_system
+```
+
+Default smoke resources are:
+
+```text
+partition=gpu
+gres=gpu:T4:1
+cpus-per-task=8
+mem=64G
+time=06:00:00
+```
+
+The GRES value is case-sensitive and is preserved from configuration through the
+rendered `#SBATCH --gres` line. Each group manifest records configured and
+rendered resources, the generated sbatch path, `bash -n` result, and
+`sbatch --test-only` command/stdout/stderr/return code.
+
+Default submission is all-or-nothing. With `TASK2_SUBMIT_READY_GROUPS=1`, groups
+that reach `READY_TO_SUBMIT` are submitted even if another requested group is
+blocked by preflight or resource validation. Each job writes command, git commit,
+preflight report, runtime manifest, task markers, and run-loop artifacts under:
 
 ```text
 task2_teacher_smokes_<timestamp>/
@@ -69,11 +103,14 @@ task2_teacher_smokes_<timestamp>/
 ├── unest/
 ├── slurm/
 ├── prepare_summary.json
+├── submission_manifest.json
 └── smoke_jobs.csv
 ```
 
 The UNEST job checks CUDA on the GPU compute node before invoking MONAI bundle.
 UNEST does not inherit nnUNet diagnostic arguments or predictor environment.
+The selected UNEST executable keeps the configured virtualenv path as the actual
+execution path; its symlink realpath is recorded only for diagnostics.
 
 ## Smoke Validation
 
@@ -86,7 +123,14 @@ bash scripts/task2/check_teacher_smokes.sh
 
 The validator treats `RUNNING`, `PENDING`, unknown Slurm state, non-zero Slurm
 exit code, missing `run_summary.json`, strict-delivery failures, missing teacher
-runs, and missing final masks as failures.
+runs, and missing final masks as distinct states. `PENDING`, `RUNNING`,
+`BLOCKED_BY_PREFLIGHT`, `RESOURCE_REQUEST_INVALID`, and `SUBMISSION_REJECTED`
+do not trigger final mask checks and do not enter `failed_groups`.
+
+Final mask validation starts only after Slurm reports `COMPLETED` with
+`ExitCode=0:0`. At that point missing `run_summary.json`, missing teacher runs,
+strict-delivery failures, and missing final masks become `VALIDATION_FAILED`.
+Non-zero or failed Slurm terminal states become `MODEL_FAILED`.
 
 Masks are accepted only from the formal delivery layer:
 

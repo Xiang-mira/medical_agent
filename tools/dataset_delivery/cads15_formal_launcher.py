@@ -98,7 +98,7 @@ def _annotation_folder(row: dict[str, str]) -> str:
 
 def smoke_passed(smoke_root: Path) -> bool:
     status = _read_json(smoke_root / "task2_smoke_verdict.json")
-    if status.get("status") == "passed":
+    if status.get("status") in {"passed", "PASSED"}:
         summary = status.get("cads15_summary") or {}
         return (
             summary.get("CADS15_SMOKE_STATUS") == "PASSED"
@@ -128,7 +128,7 @@ def _write_array_sbatch(path: Path, *, code_root: Path, python: Path, task_manif
     content = f"""#!/usr/bin/env bash
 #SBATCH --job-name=cads15_formal
 #SBATCH --partition=${{GPU_PARTITION:-gpu}}
-#SBATCH --gres=${{GPU_GRES:-gpu:t4:1}}
+#SBATCH --gres=${{GPU_GRES:-gpu:T4:1}}
 #SBATCH --cpus-per-task=${{GPU_CPUS_PER_TASK:-8}}
 #SBATCH --mem=${{GPU_MEM:-64G}}
 #SBATCH --time=${{GPU_TIME_LIMIT:-06:00:00}}

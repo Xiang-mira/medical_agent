@@ -257,11 +257,11 @@ def test_smoke_validator_requires_formal_updated_layer(tmp_path: Path):
     _write_smoke_run(tmp_path, "cads", final_masks=False)
     report = validate_smoke_root(smoke_root=tmp_path, groups=["cads"])
 
-    assert report["status"] == "failed"
+    assert report["status"] == "VALIDATION_FAILED"
     assert all(row["reason"] == "missing_mask" for row in report["target_rows"])
 
 
-def test_smoke_validator_running_slurm_is_not_success(tmp_path: Path):
+def test_smoke_validator_running_slurm_is_not_failed(tmp_path: Path):
     from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
 
     _write_smoke_run(tmp_path, "cads", final_masks=True)
@@ -269,8 +269,10 @@ def test_smoke_validator_running_slurm_is_not_success(tmp_path: Path):
     slurm_csv.write_text("group,job_id,state,exit_code\ncads,123,RUNNING,0:0\n", encoding="utf-8")
     report = validate_smoke_root(smoke_root=tmp_path, groups=["cads"], slurm_status_csv=slurm_csv)
 
-    assert report["status"] == "failed"
-    assert report["groups"][0]["slurm"]["reason"] == "slurm_job_not_terminal"
+    assert report["status"] == "RUNNING"
+    assert report["failed_groups"] == []
+    assert report["groups"][0]["validation_started"] is False
+    assert report["target_rows"][0]["reason"] == "still_running"
 
 
 def test_smoke_validator_passes_all_formal_cads_masks(tmp_path: Path):
@@ -281,5 +283,350 @@ def test_smoke_validator_passes_all_formal_cads_masks(tmp_path: Path):
     slurm_csv.write_text("group,job_id,state,exit_code\ncads,123,COMPLETED,0:0\n", encoding="utf-8")
     report = validate_smoke_root(smoke_root=tmp_path, groups=["cads"], slurm_status_csv=slurm_csv)
 
-    assert report["status"] == "passed"
+    assert report["status"] == "PASSED"
     assert len(report["groups"][0]["passed_targets"]) == 15
+
+
+def test_unest_python_resolver_preserves_venv_symlink(monkeypatch, tmp_path: Path):
+    from cli_anything.medai.core.runtime_resolver import resolve_unest_python_details
+
+    real_python = _write_executable(tmp_path / "system" / "python3.11")
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(real_python)
+    monkeypatch.setenv("UNEST_PYTHON_EXECUTABLE", str(venv_python))
+    monkeypatch.delenv("MEDAI_UNEST_PYTHON", raising=False)
+
+    details = resolve_unest_python_details()
+
+    assert details.source == "env:UNEST_PYTHON_EXECUTABLE"
+    assert details.execution_path == str(venv_python.absolute())
+    assert details.real_path == str(real_python)
+
+
+def test_unest_python_cli_and_env_priority(monkeypatch, tmp_path: Path):
+    from cli_anything.medai.core.runtime_resolver import resolve_unest_python_details
+
+    cli_python = _write_executable(tmp_path / "cli" / "python")
+    env_python = _write_executable(tmp_path / "env" / "python")
+    medai_python = _write_executable(tmp_path / "medai" / "python")
+    monkeypatch.setenv("UNEST_PYTHON_EXECUTABLE", str(env_python))
+    monkeypatch.setenv("MEDAI_UNEST_PYTHON", str(medai_python))
+
+    cli = resolve_unest_python_details(explicit=cli_python)
+    env = resolve_unest_python_details(explicit=None)
+    monkeypatch.delenv("UNEST_PYTHON_EXECUTABLE")
+    medai = resolve_unest_python_details(explicit=None)
+
+    assert cli.source == "cli"
+    assert cli.execution_path == str(cli_python.absolute())
+    assert env.source == "env:UNEST_PYTHON_EXECUTABLE"
+    assert env.execution_path == str(env_python.absolute())
+    assert medai.source == "env:MEDAI_UNEST_PYTHON"
+    assert medai.execution_path == str(medai_python.absolute())
+
+
+def test_preflight_manifest_records_unest_execution_and_realpath(tmp_path: Path):
+    from tools.dataset_delivery.task2_preflight import build_preflight
+
+    real_python = _write_executable(tmp_path / "system" / "python3.11")
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(real_python)
+    ct = _save(np.zeros((2, 2, 2), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    ref = tmp_path / "ref"
+    ref.mkdir()
+    case_csv = tmp_path / "cases.csv"
+    case_csv.write_text(f"case_id,ct_path,annotation_folder\ncase,{ct},{ref}\n", encoding="utf-8")
+
+    report = build_preflight(
+        models=[],
+        case_list=case_csv,
+        output_root=tmp_path / "out",
+        registry_path=REPO_ROOT / "configs" / "model_registry.yaml",
+        target_config=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json",
+        checkpoint_root_arg=tmp_path / "checkpoints",
+        json_output=tmp_path / "preflight.json",
+        canonical_code_root=REPO_ROOT,
+        formal_mode=False,
+        unest_python_executable=str(venv_python),
+        run_predictor_help=False,
+    )
+
+    resolution = report["runtime_manifest"]["unest_python_resolution"]
+    assert resolution["execution_path"] == str(venv_python.absolute())
+    assert resolution["real_path"] == str(real_python)
+
+
+def test_airrc_group_schema_and_parse_groups():
+    from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS, parse_groups
+
+    assert parse_groups("atm,airrc,unest") == ["atm", "airrc", "unest"]
+    assert SMOKE_SPECS["airrc"]["models"] == ["airrc"]
+    assert SMOKE_SPECS["airrc"]["targets"] == [
+        "airway_wall",
+        "lung_pulmonary_arteries",
+        "lung_pulmonary_veins",
+    ]
+
+
+def test_airrc_smoke_validation_requires_three_valid_masks(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_smoke_run(tmp_path, "airrc", final_masks=True)
+    slurm_csv = tmp_path / "slurm_status.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\nairrc,123,COMPLETED,0:0\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["airrc"], slurm_status_csv=slurm_csv)
+
+    assert report["status"] == "PASSED"
+    assert report["groups"][0]["passed_targets"] == [
+        "airway_wall",
+        "lung_pulmonary_arteries",
+        "lung_pulmonary_veins",
+    ]
+
+
+def test_airrc_missing_or_zero_mask_fails_after_completed_job(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_smoke_run(tmp_path, "airrc", final_masks=True)
+    zero = np.zeros((3, 3, 3), dtype=np.uint8)
+    _save(zero, tmp_path / "airrc" / "run_loop" / "annotation_versions" / "case_001" / "updated" / "airway_wall.nii.gz")
+    (tmp_path / "airrc" / "run_loop" / "annotation_versions" / "case_001" / "updated" / "lung_pulmonary_veins.nii.gz").unlink()
+    slurm_csv = tmp_path / "slurm_status.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\nairrc,123,COMPLETED,0:0\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["airrc"], slurm_status_csv=slurm_csv)
+
+    reasons = {row["target"]: row["reason"] for row in report["target_rows"]}
+    assert report["status"] == "VALIDATION_FAILED"
+    assert reasons["airway_wall"] == "empty_mask"
+    assert reasons["lung_pulmonary_veins"] == "missing_mask"
+
+
+def test_task2_smoke_launcher_preserves_t4_gres_and_records_test_only(monkeypatch, tmp_path: Path):
+    from tools.dataset_delivery import task2_smoke_launcher as launcher
+
+    calls: list[list[str]] = []
+
+    def fake_preflight(**kwargs):
+        return {"status": "READY", "blocked_checks": []}
+
+    def fake_run(command):
+        calls.append(command)
+        return {"command": command, "return_code": 0, "stdout": "test ok", "stderr": "", "ok": True}
+
+    monkeypatch.setattr(launcher, "build_preflight", fake_preflight)
+    monkeypatch.setattr(launcher, "_run_command", fake_run)
+    ct = _save(np.zeros((2, 2, 2), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    ref = tmp_path / "ref"
+    ref.mkdir()
+    case_csv = tmp_path / "cases.csv"
+    case_csv.write_text(f"case_id,ct_path,annotation_folder\ncase,{ct},{ref}\n", encoding="utf-8")
+
+    summary = launcher.prepare_smokes(
+        smoke_root=tmp_path / "smoke",
+        groups=["atm"],
+        case_manifest=case_csv,
+        case_id="case",
+        code_root=REPO_ROOT,
+        python=Path(sys.executable),
+        registry=REPO_ROOT / "configs" / "model_registry.yaml",
+        target_config=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json",
+        checkpoint_root=tmp_path / "checkpoints",
+        nnunet_predict_executable=_write_executable(tmp_path / "bin" / "nnUNetv2_predict"),
+        unest_python_executable=_write_executable(tmp_path / "venv" / "python"),
+        canonical_code_root=REPO_ROOT,
+        formal_mode=False,
+        timeout_sec=10,
+        partition="gpu",
+        gres="gpu:T4:1",
+        cpus_per_task=8,
+        mem="64G",
+        time_limit="06:00:00",
+        account="",
+        run_slurm_test_only=True,
+        skip_predictor_help=True,
+    )
+
+    sbatch_text = Path(summary["groups"][0]["sbatch_file"]).read_text(encoding="utf-8")
+    assert "#SBATCH --gres=gpu:T4:1" in sbatch_text
+    assert "gpu:t4:1" not in sbatch_text
+    assert summary["groups"][0]["status"] == "READY_TO_SUBMIT"
+    assert summary["groups"][0]["resources"]["configured_gres"] == "gpu:T4:1"
+    assert any(command[:2] == ["sbatch", "--test-only"] for command in calls)
+
+
+def test_task2_smoke_launcher_blocks_test_only_failure_before_submit(monkeypatch, tmp_path: Path):
+    from tools.dataset_delivery import task2_smoke_launcher as launcher
+
+    def fake_run(command):
+        if command[:2] == ["sbatch", "--test-only"]:
+            return {"command": command, "return_code": 1, "stdout": "", "stderr": "Requested node configuration is not available", "ok": False}
+        return {"command": command, "return_code": 0, "stdout": "", "stderr": "", "ok": True}
+
+    monkeypatch.setattr(launcher, "build_preflight", lambda **kwargs: {"status": "READY", "blocked_checks": []})
+    monkeypatch.setattr(launcher, "_run_command", fake_run)
+    ct = _save(np.zeros((2, 2, 2), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    ref = tmp_path / "ref"
+    ref.mkdir()
+    case_csv = tmp_path / "cases.csv"
+    case_csv.write_text(f"case_id,ct_path,annotation_folder\ncase,{ct},{ref}\n", encoding="utf-8")
+
+    summary = launcher.prepare_smokes(
+        smoke_root=tmp_path / "smoke",
+        groups=["atm"],
+        case_manifest=case_csv,
+        case_id="case",
+        code_root=REPO_ROOT,
+        python=Path(sys.executable),
+        registry=REPO_ROOT / "configs" / "model_registry.yaml",
+        target_config=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json",
+        checkpoint_root=tmp_path / "checkpoints",
+        nnunet_predict_executable=_write_executable(tmp_path / "bin" / "nnUNetv2_predict"),
+        unest_python_executable=_write_executable(tmp_path / "venv" / "python"),
+        canonical_code_root=REPO_ROOT,
+        formal_mode=False,
+        timeout_sec=10,
+        partition="gpu",
+        gres="gpu:t4:1",
+        cpus_per_task=8,
+        mem="64G",
+        time_limit="06:00:00",
+        account="",
+        run_slurm_test_only=True,
+        skip_predictor_help=True,
+    )
+    submitted = launcher.submit_prepared_smokes(summary=summary, submit_ready_groups=True, runtime_state_root=tmp_path / "state")
+
+    assert summary["groups"][0]["status"] == "RESOURCE_REQUEST_INVALID"
+    assert summary["groups"][0]["resources"]["sbatch_test_only_return_code"] == 1
+    assert submitted["submitted_groups"] == []
+    assert not (tmp_path / "state" / ".last_task2_teacher_smoke").exists()
+
+
+def test_partial_ready_submit_submits_ready_group_and_keeps_blocked_unsubmitted(monkeypatch, tmp_path: Path):
+    from tools.dataset_delivery import task2_smoke_launcher as launcher
+
+    sbatch = tmp_path / "atm.sbatch"
+    sbatch.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    summary = {
+        "status": "BLOCKED_BY_PREFLIGHT",
+        "smoke_root": str(tmp_path / "smoke"),
+        "expected_commit": "abc123",
+        "submitted_groups": [],
+        "blocked_groups": ["unest"],
+        "skipped_groups": [],
+        "submission_rejected_groups": [],
+        "groups": [
+            {"group": "atm", "status": "READY_TO_SUBMIT", "sbatch_file": str(sbatch), "submission_status": "NOT_SUBMITTED"},
+            {"group": "unest", "status": "BLOCKED_BY_PREFLIGHT", "sbatch_file": "", "submission_status": "NOT_SUBMITTED"},
+        ],
+    }
+    monkeypatch.setattr(launcher, "_run_command", lambda command: {"command": command, "return_code": 0, "stdout": "999", "stderr": "", "ok": True})
+
+    result = launcher.submit_prepared_smokes(summary=summary, submit_ready_groups=True, runtime_state_root=tmp_path / "state")
+
+    assert result["status"] == "SUBMITTED"
+    assert result["submitted_groups"] == ["atm"]
+    assert result["groups"][0]["job_id"] == "999"
+    assert result["groups"][1]["submission_status"] == "NOT_SUBMITTED"
+    assert (tmp_path / "state" / ".last_task2_teacher_smoke").exists()
+
+
+def test_all_or_nothing_blocked_group_skips_ready_without_pointer(monkeypatch, tmp_path: Path):
+    from tools.dataset_delivery import task2_smoke_launcher as launcher
+
+    summary = {
+        "status": "BLOCKED_BY_PREFLIGHT",
+        "smoke_root": str(tmp_path / "smoke"),
+        "expected_commit": "abc123",
+        "submitted_groups": [],
+        "blocked_groups": ["unest"],
+        "skipped_groups": [],
+        "submission_rejected_groups": [],
+        "groups": [
+            {"group": "atm", "status": "READY_TO_SUBMIT", "sbatch_file": str(tmp_path / "atm.sbatch"), "submission_status": "NOT_SUBMITTED"},
+            {"group": "unest", "status": "BLOCKED_BY_PREFLIGHT", "sbatch_file": "", "submission_status": "NOT_SUBMITTED"},
+        ],
+    }
+    calls = []
+    monkeypatch.setattr(launcher, "_run_command", lambda command: calls.append(command) or {"command": command, "return_code": 0, "stdout": "999", "stderr": "", "ok": True})
+
+    result = launcher.submit_prepared_smokes(summary=summary, submit_ready_groups=False, runtime_state_root=tmp_path / "state")
+
+    assert result["submitted_groups"] == []
+    assert result["skipped_groups"] == ["atm"]
+    assert calls == []
+    assert not (tmp_path / "state" / ".last_task2_teacher_smoke").exists()
+
+
+def test_submission_rejected_does_not_create_pointer(monkeypatch, tmp_path: Path):
+    from tools.dataset_delivery import task2_smoke_launcher as launcher
+
+    summary = {
+        "status": "READY_TO_SUBMIT",
+        "smoke_root": str(tmp_path / "smoke"),
+        "expected_commit": "abc123",
+        "submitted_groups": [],
+        "blocked_groups": [],
+        "skipped_groups": [],
+        "submission_rejected_groups": [],
+        "groups": [{"group": "atm", "status": "READY_TO_SUBMIT", "sbatch_file": str(tmp_path / "atm.sbatch"), "submission_status": "NOT_SUBMITTED"}],
+    }
+    monkeypatch.setattr(launcher, "_run_command", lambda command: {"command": command, "return_code": 1, "stdout": "", "stderr": "reject", "ok": False})
+
+    result = launcher.submit_prepared_smokes(summary=summary, submit_ready_groups=True, runtime_state_root=tmp_path / "state")
+
+    assert result["status"] == "SUBMISSION_REJECTED"
+    assert result["submission_rejected_groups"] == ["atm"]
+    assert not (tmp_path / "state" / ".last_task2_teacher_smoke").exists()
+
+
+def test_submission_manifest_blocked_group_does_not_trigger_mask_validation(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    root = tmp_path / "smoke"
+    root.mkdir()
+    (root / "submission_manifest.json").write_text(
+        json.dumps({"groups": [{"group": "unest", "status": "BLOCKED_BY_PREFLIGHT", "case_id": "case_001"}]}),
+        encoding="utf-8",
+    )
+
+    report = validate_smoke_root(smoke_root=root, groups=["unest"])
+
+    assert report["status"] == "BLOCKED_BY_PREFLIGHT"
+    assert report["failed_groups"] == []
+    assert report["target_rows"][0]["reason"] == "blocked_by_preflight"
+
+
+def test_submitted_without_terminal_slurm_state_does_not_trigger_mask_validation(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    root = tmp_path / "smoke"
+    root.mkdir()
+    (root / "submission_manifest.json").write_text(
+        json.dumps({"groups": [{"group": "atm", "status": "SUBMITTED", "case_id": "case_001", "job_id": "123"}]}),
+        encoding="utf-8",
+    )
+    slurm_csv = root / "slurm_status.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\natm,123,SUBMITTED,\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=root, groups=["atm"], slurm_status_csv=slurm_csv)
+
+    assert report["status"] == "PENDING"
+    assert report["failed_groups"] == []
+    assert report["target_rows"][0]["reason"] == "submitted_not_terminal"
+
+
+def test_submit_and_check_scripts_use_task2_smoke_groups_not_bash_groups():
+    submit_script = Path("scripts/task2/submit_teacher_smokes.sh").read_text(encoding="utf-8")
+    check_script = Path("scripts/task2/check_teacher_smokes.sh").read_text(encoding="utf-8")
+
+    assert "TASK2_SMOKE_GROUPS" in submit_script
+    assert "TASK2_SMOKE_GROUPS" in check_script
+    assert "GROUPS=${GROUPS" not in submit_script
+    assert "GROUPS=${GROUPS" not in check_script
+    assert "--groups \"$TASK2_SMOKE_GROUPS\"" in submit_script
+    assert "--groups \"$TASK2_SMOKE_GROUPS\"" in check_script
