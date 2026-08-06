@@ -88,6 +88,14 @@ Outputs include:
 If any target has no in-FOV positive smoke case, the status is
 `BLOCKED_NO_POSITIVE_SMOKE_CASE`.
 
+The production submit wrapper does not build this panel on the login node. It
+generates a CPU Slurm panel-preparation job and a dependent GPU smoke job. Panel
+state is recorded in `panel_state.json` and `panel_progress.json`; GPU state is
+recorded in `gpu_state.json` and `gpu_progress.json`. The panel uses
+`preflight/panel_context/<case_id>/presence_context.json` as a resumable cache,
+and invalidates only the affected case cache when the CT or reference mask
+fingerprint changes.
+
 ## HPC Commands
 
 Submit CADS15 smoke only:
@@ -108,7 +116,27 @@ bash scripts/task2/check_cads15_smoke.sh
 ```
 
 Both scripts use timestamped output roots and do not launch the 100-case formal
-array. The submit script creates one Slurm job per selected smoke-panel case.
+array. The submit script performs only lightweight repository and runtime checks
+on the login node, writes the Slurm scripts, submits the CPU panel job, then
+submits the GPU smoke with `afterok:<panel_job_id>`.
+
+The check script is read-only. It reports the workflow state machine without
+turning pending or running jobs into failed validation:
+
+```text
+NOT_SUBMITTED
+PANEL_PENDING
+PANEL_RUNNING
+PANEL_FAILED
+PANEL_COMPLETED
+GPU_SMOKE_PENDING
+GPU_SMOKE_RUNNING
+GPU_SMOKE_FAILED
+PASSED
+VALIDATION_FAILED
+```
+
+The final validator runs only after the GPU smoke is terminally completed.
 
 Expected output layout:
 
@@ -116,6 +144,10 @@ Expected output layout:
 cads15_teacher_smoke_<timestamp>/
 ├── preflight/
 │   ├── route_audit/
+│   ├── panel_context/
+│   │   └── <case_id>/presence_context.json
+│   ├── panel_progress.json
+│   ├── panel_state.json
 │   ├── cads15_smoke_case_panel.json
 │   ├── cads15_smoke_case_panel_rows.csv
 │   └── cads15_selected_case_targets.csv
@@ -126,9 +158,14 @@ cads15_teacher_smoke_<timestamp>/
 │       ├── git_commit.txt
 │       └── run_loop/
 ├── slurm/
-├── cads15_sbatch_manifest.csv
+│   ├── cads15_panel_prepare.sbatch
+│   └── cads15_gpu_smoke.sbatch
+├── submission_manifest.json
 ├── cads15_smoke_jobs.csv
-├── slurm_status.csv
+├── panel_job_id.txt
+├── gpu_job_ids.txt
+├── gpu_progress.json
+├── gpu_state.json
 ├── task2_smoke_verdict.json
 └── task2_smoke_verdict.md
 ```
@@ -137,3 +174,45 @@ The validator only reports `CADS15_SMOKE_STATUS=PASSED` after all 15 target
 names have at least one positive in-FOV case with final status `delivered` or
 `delivered_for_review`, valid non-empty NIfTI output, successful model inference,
 and no strict-delivery failure.
+
+## Formal 100-Case Launcher
+
+The 100-case CADS15 launcher is present only as a gated, case-by-model launcher.
+It does not run by default:
+
+```bash
+source "$HOME/.bodymaps_env"
+cd /projects/bodymaps/users/xhan74/medical_agent/code/medical_agent
+git pull --ff-only origin main
+DRY_RUN=1 bash scripts/task2/submit_cads15_formal_100cases.sh
+```
+
+The launcher refuses real submission unless a CADS15 smoke root has a
+machine-readable `PASSED` verdict. It creates one task per case and CADS model,
+not one task per target, so each CADS family runs once per case and emits all of
+its configured targets. To submit after a real smoke pass:
+
+```bash
+DRY_RUN=0 SMOKE_ROOT=/path/to/passed/cads15_teacher_smoke_<timestamp> \
+  bash scripts/task2/submit_cads15_formal_100cases.sh
+```
+
+Resume controls are explicit:
+
+```bash
+RESUME=1 DRY_RUN=0 bash scripts/task2/submit_cads15_formal_100cases.sh
+RETRY_FAILED=1 RESUME=1 DRY_RUN=0 bash scripts/task2/submit_cads15_formal_100cases.sh
+CASE_ID=BDMAP_00000120 MODELS=cads557 DRY_RUN=0 bash scripts/task2/submit_cads15_formal_100cases.sh
+```
+
+Check formal outputs with:
+
+```bash
+bash scripts/task2/check_cads15_formal_100cases.sh
+```
+
+The formal validator writes `cads15_100case_status_matrix.csv` and
+`cads15_100case_status_matrix.json`, with one row per fixed-manifest
+case/target pair. Zero masks for expected-present targets are failures, and
+`out_of_fov` or `confirmed_absent` rows do not substitute for positive smoke
+evidence.

@@ -45,7 +45,7 @@ python tools/dataset_delivery/cads15_smoke_panel.py \
   --output-root reports/cads15_smoke_panel
 ```
 
-HPC wrapper commands:
+HPC smoke wrapper commands:
 
 ```bash
 bash scripts/task2/submit_cads15_smoke.sh
@@ -53,9 +53,17 @@ bash scripts/task2/check_cads15_smoke.sh
 ```
 
 The smoke does not launch the 100-case formal array. It selects a deterministic
-minimal set of fixed-manifest cases so each of the 15 canonical targets has at
-least one positive in-FOV smoke case. A target passes only when the final
+minimal set of fixed-manifest cases in a CPU Slurm panel job, then starts the
+GPU CADS smoke through an `afterok` dependency. Pending/running Slurm jobs are
+reported as pending/running, not failed validation. A target passes only when the final
 publication layer contains a non-empty, binary, CT-aligned mask with final status
 `delivered` or `delivered_for_review` and no strict-delivery failure.
+
+The formal 100-case CADS15 launcher is gated on a passed smoke and defaults to a
+dry run:
+
+```bash
+DRY_RUN=1 bash scripts/task2/submit_cads15_formal_100cases.sh
+```
 
 More detail: `docs/CADS15_TASK2_SMOKE_DELIVERY.md`.

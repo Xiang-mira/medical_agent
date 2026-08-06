@@ -458,6 +458,7 @@ def validate_smoke_root(
     slurm_status_csv: Path | None = None,
     panel_json: Path | None = None,
     contract_path: Path = DEFAULT_CONTRACT,
+    write_outputs: bool = True,
 ) -> dict[str, Any]:
     slurm_rows = _read_csv(slurm_status_csv) if slurm_status_csv else []
     effective_panel_json = panel_json or _panel_json_default(smoke_root)
@@ -492,27 +493,28 @@ def validate_smoke_root(
                 "TARGETS_UNCOVERED", "STRICT_DELIVERY_FAILURE_COUNT",
             ]
         }
-    write_json(smoke_root / "task2_smoke_verdict.json", report)
-    write_csv(
-        smoke_root / "task2_smoke_target_validation.csv",
-        target_rows,
-        [
-            "group", "case_id", "target", "mask_path", "valid", "reason",
-            "final_status", "delivery_status", "strict_failure_reasons", "run_out",
-        ],
-    )
-    lines = ["# Task 2 Teacher Smoke Verdict", "", f"- Status: `{status}`", f"- Root: `{smoke_root}`", ""]
-    if report.get("cads15_summary"):
-        lines.append("## CADS15")
-        lines.append("")
-        for key, value in report["cads15_summary"].items():
-            lines.append(f"- {key}: `{value}`")
-        lines.append("")
-    for group in group_results:
-        lines.append(f"- {group['group']}: `{group['status']}`; passed `{len(group['passed_targets'])}/{len(group['requested_targets'])}`")
-        if group["failures"]:
-            lines.append(f"  failures: `{'; '.join(group['failures'][:40])}`")
-    (smoke_root / "task2_smoke_verdict.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if write_outputs:
+        write_json(smoke_root / "task2_smoke_verdict.json", report)
+        write_csv(
+            smoke_root / "task2_smoke_target_validation.csv",
+            target_rows,
+            [
+                "group", "case_id", "target", "mask_path", "valid", "reason",
+                "final_status", "delivery_status", "strict_failure_reasons", "run_out",
+            ],
+        )
+        lines = ["# Task 2 Teacher Smoke Verdict", "", f"- Status: `{status}`", f"- Root: `{smoke_root}`", ""]
+        if report.get("cads15_summary"):
+            lines.append("## CADS15")
+            lines.append("")
+            for key, value in report["cads15_summary"].items():
+                lines.append(f"- {key}: `{value}`")
+            lines.append("")
+        for group in group_results:
+            lines.append(f"- {group['group']}: `{group['status']}`; passed `{len(group['passed_targets'])}/{len(group['requested_targets'])}`")
+            if group["failures"]:
+                lines.append(f"  failures: `{'; '.join(group['failures'][:40])}`")
+        (smoke_root / "task2_smoke_verdict.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report
 
 
@@ -531,6 +533,7 @@ def main() -> int:
     parser.add_argument("--slurm-status-csv", default=None, type=Path)
     parser.add_argument("--panel-json", default=None, type=Path)
     parser.add_argument("--contract", default=DEFAULT_CONTRACT, type=Path)
+    parser.add_argument("--no-write", action="store_true", help="Validate in memory without writing verdict files.")
     args = parser.parse_args()
     report = validate_smoke_root(
         smoke_root=args.smoke_root.resolve(),
@@ -538,6 +541,7 @@ def main() -> int:
         slurm_status_csv=args.slurm_status_csv.resolve() if args.slurm_status_csv else None,
         panel_json=args.panel_json.resolve() if args.panel_json else None,
         contract_path=args.contract.resolve(),
+        write_outputs=not bool(args.no_write),
     )
     print(json.dumps({"status": report["status"], "failed_groups": report["failed_groups"]}, indent=2))
     return 0 if report["status"] == "passed" else 1
