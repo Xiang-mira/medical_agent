@@ -122,7 +122,7 @@ def smoke_status(*, smoke_root: Path | None, use_sacct: bool = True) -> dict[str
         panel_json=smoke_root / "preflight" / "cads15_smoke_case_panel.json",
         write_outputs=False,
     )
-    if report.get("status") == "passed":
+    if report.get("status") in {"passed", "PASSED"}:
         return {**gpu_base, "status": "PASSED", "validation": report.get("cads15_summary", {})}
     return {**gpu_base, "status": "VALIDATION_FAILED", "validation": report.get("cads15_summary", {}), "failed_groups": report.get("failed_groups", [])}
 

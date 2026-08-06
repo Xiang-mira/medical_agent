@@ -320,7 +320,7 @@ def test_cads15_panel_validator_requires_all_targets_by_name(tmp_path: Path):
 
     report = validate_smoke_root(smoke_root=tmp_path, groups=["cads15"], panel_json=panel_path)
 
-    assert report["status"] == "failed"
+    assert report["status"] == "VALIDATION_FAILED"
     assert report["cads15_summary"]["TARGETS_WITH_POSITIVE_SMOKE"] == 14
     assert "white_matter" in report["groups"][0]["failed_targets"]
 
@@ -345,7 +345,7 @@ def test_cads15_panel_validator_accepts_delivered_for_review(tmp_path: Path):
 
     report = validate_smoke_root(smoke_root=tmp_path, groups=["cads15"], panel_json=panel_path)
 
-    assert report["status"] == "passed"
+    assert report["status"] == "PASSED"
     assert report["cads15_summary"]["CADS15_SMOKE_STATUS"] == "PASSED"
     assert report["cads15_summary"]["TARGETS_WITH_POSITIVE_SMOKE"] == 15
     assert report["cads15_summary"]["TARGETS_DELIVERED"] + report["cads15_summary"]["TARGETS_DELIVERED_FOR_REVIEW"] == 15

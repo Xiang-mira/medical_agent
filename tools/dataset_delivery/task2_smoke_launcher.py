@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,11 @@ from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS, parse_grou
 
 
 DEFAULT_OUTER_PYTHON = Path("/home/xhan74/envs/medical_agent/bin/python")
+DEFAULT_SMOKE_GRES = "gpu:T4:1"
+
+
+def _utc_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def _git_commit() -> str:
@@ -105,6 +112,20 @@ def _shell_join(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+def _atomic_write_json(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _write_sbatch(
     *,
     path: Path,
@@ -122,6 +143,7 @@ def _write_sbatch(
     cpus_per_task: int,
     mem: str,
     time_limit: str,
+    account: str = "",
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     nnunet_bin = nnunet_predict_executable.parent
@@ -137,6 +159,7 @@ def _write_sbatch(
             "  exit 13\n"
             "fi\n"
         )
+    account_line = f"#SBATCH --account={account}\n" if account else ""
     content = f"""#!/usr/bin/env bash
 #SBATCH --job-name=task2_{group}_smoke
 #SBATCH --partition={partition}
@@ -144,6 +167,7 @@ def _write_sbatch(
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --mem={mem}
 #SBATCH --time={time_limit}
+{account_line.rstrip()}
 #SBATCH --output={path.parent / (group + '_%j.out')}
 #SBATCH --error={path.parent / (group + '_%j.err')}
 
@@ -186,7 +210,56 @@ else
 fi
 exit "$run_rc"
 """
+    content = "\n".join(line for line in content.splitlines() if line.strip() != "") + "\n"
     path.write_text(content, encoding="utf-8")
+
+
+def _sbatch_lines(path: Path) -> list[str]:
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("#SBATCH")]
+
+
+def _run_command(command: list[str]) -> dict[str, Any]:
+    try:
+        proc = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        return {
+            "command": command,
+            "return_code": int(proc.returncode),
+            "stdout": proc.stdout.strip(),
+            "stderr": proc.stderr.strip(),
+            "ok": proc.returncode == 0,
+        }
+    except FileNotFoundError as exc:
+        return {"command": command, "return_code": 127, "stdout": "", "stderr": str(exc), "ok": False}
+
+
+def _resource_manifest(
+    *,
+    partition: str,
+    gres: str,
+    cpus_per_task: int,
+    mem: str,
+    time_limit: str,
+    account: str,
+    sbatch_file: Path,
+    shell_check: dict[str, Any],
+    sbatch_test_only: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "configured_partition": partition,
+        "configured_gres": gres,
+        "rendered_gres": gres,
+        "cpus_per_task": cpus_per_task,
+        "memory": mem,
+        "time_limit": time_limit,
+        "account": account,
+        "sbatch_file": str(sbatch_file),
+        "sbatch_resource_lines": _sbatch_lines(sbatch_file),
+        "shell_syntax_check": shell_check,
+        "sbatch_test_only_command": sbatch_test_only.get("command", ["sbatch", "--test-only", str(sbatch_file)]),
+        "sbatch_test_only_return_code": sbatch_test_only.get("return_code"),
+        "sbatch_test_only_stdout": sbatch_test_only.get("stdout", ""),
+        "sbatch_test_only_stderr": sbatch_test_only.get("stderr", ""),
+    }
 
 
 def prepare_smokes(
@@ -210,6 +283,8 @@ def prepare_smokes(
     cpus_per_task: int,
     mem: str,
     time_limit: str,
+    account: str,
+    run_slurm_test_only: bool,
     skip_predictor_help: bool,
 ) -> dict[str, Any]:
     smoke_root.mkdir(parents=True, exist_ok=True)
@@ -268,10 +343,37 @@ def prepare_smokes(
             cpus_per_task=cpus_per_task,
             mem=mem,
             time_limit=time_limit,
+            account=account,
+        )
+        shell_check = _run_command(["bash", "-n", str(slurm_file)])
+        if preflight["status"] != "READY":
+            group_status = "BLOCKED_BY_PREFLIGHT"
+            sbatch_test_only = {"skipped": True, "reason": "preflight_blocked", "command": ["sbatch", "--test-only", str(slurm_file)], "return_code": None, "stdout": "", "stderr": ""}
+        elif not shell_check["ok"]:
+            group_status = "RESOURCE_REQUEST_INVALID"
+            sbatch_test_only = {"skipped": True, "reason": "shell_syntax_failed", "command": ["sbatch", "--test-only", str(slurm_file)], "return_code": None, "stdout": "", "stderr": ""}
+        else:
+            sbatch_test_only = (
+                _run_command(["sbatch", "--test-only", str(slurm_file)])
+                if run_slurm_test_only
+                else {"skipped": True, "reason": "slurm_test_only_not_requested", "command": ["sbatch", "--test-only", str(slurm_file)], "return_code": None, "stdout": "", "stderr": ""}
+            )
+            group_status = "READY_TO_SUBMIT" if (not run_slurm_test_only or sbatch_test_only.get("ok")) else "RESOURCE_REQUEST_INVALID"
+        resources = _resource_manifest(
+            partition=partition,
+            gres=gres,
+            cpus_per_task=cpus_per_task,
+            mem=mem,
+            time_limit=time_limit,
+            account=account,
+            sbatch_file=slurm_file,
+            shell_check=shell_check,
+            sbatch_test_only=sbatch_test_only,
         )
         row = {
             "group": group,
-            "status": preflight["status"],
+            "status": group_status,
+            "preflight_status": preflight["status"],
             "case_id": selected_case["case_id"],
             "targets": SMOKE_SPECS[group]["targets"],
             "models": SMOKE_SPECS[group]["models"],
@@ -279,14 +381,35 @@ def prepare_smokes(
             "sbatch_file": str(slurm_file),
             "command_txt": str(group_root / "command.txt"),
             "run_out": str(run_out),
+            "resources": resources,
+            "job_id": "",
+            "submission_status": "NOT_SUBMITTED",
         }
         group_rows.append(row)
-        if preflight["status"] != "READY":
-            blocked.append({"group": group, "blocked_checks": preflight.get("blocked_checks", [])})
+        if group_status != "READY_TO_SUBMIT":
+            blocked.append({
+                "group": group,
+                "status": group_status,
+                "blocked_checks": preflight.get("blocked_checks", []),
+                "resources": resources,
+            })
+        write_json(group_root / "runtime_submission_manifest.json", row)
+    summary_status = "READY_TO_SUBMIT" if not blocked else (
+        "RESOURCE_REQUEST_INVALID"
+        if any(item.get("status") == "RESOURCE_REQUEST_INVALID" for item in blocked)
+        else "BLOCKED_BY_PREFLIGHT"
+    )
     summary = {
-        "status": "READY" if not blocked else "BLOCKED",
+        "status": summary_status,
         "read_only_pre_submit": True,
         "formal_mode": formal_mode,
+        "requested_groups": groups,
+        "preflight_ready_groups": [row["group"] for row in group_rows if row["preflight_status"] == "READY"],
+        "resource_valid_groups": [row["group"] for row in group_rows if row["status"] == "READY_TO_SUBMIT"],
+        "submitted_groups": [],
+        "blocked_groups": [row["group"] for row in blocked],
+        "skipped_groups": [],
+        "submission_rejected_groups": [],
         "smoke_root": str(smoke_root),
         "code_root": str(code_root),
         "expected_commit": expected_commit,
@@ -299,13 +422,118 @@ def prepare_smokes(
         "blocked": blocked,
     }
     write_json(smoke_root / "prepare_summary.json", summary)
+    write_json(smoke_root / "submission_manifest.json", summary)
     return summary
+
+
+def _write_jobs_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["group", "job_id", "sbatch_file", "status", "submission_status", "return_code", "stdout", "stderr"]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+
+def submit_prepared_smokes(
+    *,
+    summary: dict[str, Any],
+    submit_ready_groups: bool,
+    runtime_state_root: Path | None,
+) -> dict[str, Any]:
+    groups = list(summary.get("groups") or [])
+    ready = [row for row in groups if row.get("status") == "READY_TO_SUBMIT"]
+    blocked = [row for row in groups if row.get("status") != "READY_TO_SUBMIT"]
+    job_rows: list[dict[str, Any]] = []
+    if blocked and not submit_ready_groups:
+        for row in ready:
+            row["submission_status"] = "SKIPPED_ALL_OR_NOTHING"
+            summary["skipped_groups"].append(row["group"])
+        summary["status"] = (
+            "RESOURCE_REQUEST_INVALID"
+            if any(row.get("status") == "RESOURCE_REQUEST_INVALID" for row in blocked)
+            else "BLOCKED_BY_PREFLIGHT"
+        )
+        summary["submission_mode"] = "all_or_nothing"
+        write_json(Path(summary["smoke_root"]) / "submission_manifest.json", summary)
+        _write_jobs_csv(Path(summary["smoke_root"]) / "smoke_jobs.csv", job_rows)
+        return summary
+
+    for row in ready:
+        proc = _run_command(["sbatch", "--parsable", str(row["sbatch_file"])])
+        job_row = {
+            "group": row["group"],
+            "job_id": proc["stdout"].splitlines()[0].strip() if proc.get("ok") and proc.get("stdout") else "",
+            "sbatch_file": row["sbatch_file"],
+            "status": "SUBMITTED" if proc.get("ok") else "SUBMISSION_REJECTED",
+            "submission_status": "SUBMITTED" if proc.get("ok") else "SUBMISSION_REJECTED",
+            "return_code": proc.get("return_code"),
+            "stdout": proc.get("stdout", ""),
+            "stderr": proc.get("stderr", ""),
+        }
+        row.update(job_row)
+        if proc.get("ok"):
+            summary["submitted_groups"].append(row["group"])
+        else:
+            summary["submission_rejected_groups"].append(row["group"])
+        job_rows.append(job_row)
+
+    for row in blocked:
+        row["submission_status"] = "NOT_SUBMITTED"
+    summary["groups"] = groups
+    summary["status"] = "SUBMITTED" if summary["submitted_groups"] else (
+        "SUBMISSION_REJECTED" if summary["submission_rejected_groups"] else "BLOCKED_BY_PREFLIGHT"
+    )
+    summary["submission_mode"] = "submit_ready_groups" if submit_ready_groups else "all_or_nothing"
+    summary["submitted_at"] = _utc_timestamp() if summary["submitted_groups"] else ""
+    root = Path(summary["smoke_root"])
+    write_json(root / "submission_manifest.json", summary)
+    _write_jobs_csv(root / "smoke_jobs.csv", job_rows)
+    if summary["submitted_groups"] and runtime_state_root:
+        runtime_state_root.mkdir(parents=True, exist_ok=True)
+        pointer = {
+            "smoke_root": str(root),
+            "commit": summary.get("expected_commit", ""),
+            "submitted_at": summary["submitted_at"],
+            "job_ids": {row["group"]: row.get("job_id", "") for row in groups if row.get("job_id")},
+            "submitted_groups": summary["submitted_groups"],
+        }
+        _atomic_write_json(runtime_state_root / ".last_task2_teacher_smoke.json", pointer)
+        _atomic_write_text(runtime_state_root / ".last_task2_teacher_smoke", str(root) + "\n")
+    return summary
+
+
+def emit_human_summary(summary: dict[str, Any]) -> None:
+    for row in summary.get("groups") or []:
+        print(f"GROUP={row.get('group')}")
+        print(f"STATUS={row.get('status')}")
+        print(f"SUBMISSION_STATUS={row.get('submission_status', '')}")
+        if row.get("job_id"):
+            print(f"JOB_ID={row.get('job_id')}")
+        resources = row.get("resources") or {}
+        if resources:
+            print(f"PARTITION={resources.get('configured_partition', '')}")
+            print(f"GRES={resources.get('rendered_gres', '')}")
+            print(f"SBATCH_TEST_RC={resources.get('sbatch_test_only_return_code', '')}")
+            if resources.get("sbatch_test_only_stderr"):
+                print(f"SBATCH_TEST_STDERR={resources.get('sbatch_test_only_stderr')}")
+        if row.get("preflight_status") != "READY":
+            preflight_path = Path(str(row.get("preflight_json") or ""))
+            try:
+                preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+            except Exception:
+                preflight = {}
+            for check in (preflight.get("blocked_checks") or [])[:8]:
+                print(f"CHECK={check.get('name', '')}")
+                print(f"REASON={check.get('error') or check.get('stderr_tail') or check.get('reason') or check.get('path') or ''}")
+        print(f"SMOKE_ROOT={summary.get('smoke_root', '')}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare Task 2 Teacher strict-delivery smoke sbatch files.")
     parser.add_argument("--smoke-root", required=True, type=Path)
-    parser.add_argument("--groups", default="atm,cads,unest")
+    parser.add_argument("--groups", default="atm,airrc,unest")
     parser.add_argument("--case-manifest", required=True, type=Path)
     parser.add_argument("--case-id", default="BDMAP_00000120")
     parser.add_argument("--code-root", default=REPO_ROOT, type=Path)
@@ -319,10 +547,15 @@ def main() -> int:
     parser.add_argument("--formal-mode", action="store_true")
     parser.add_argument("--timeout-sec", default=14400, type=int)
     parser.add_argument("--partition", default="gpu")
-    parser.add_argument("--gres", default="gpu:t4:1")
+    parser.add_argument("--gres", default=DEFAULT_SMOKE_GRES)
     parser.add_argument("--cpus-per-task", default=8, type=int)
     parser.add_argument("--mem", default="64G")
     parser.add_argument("--time-limit", default="06:00:00")
+    parser.add_argument("--account", default="")
+    parser.add_argument("--run-slurm-test-only", action="store_true")
+    parser.add_argument("--submit", action="store_true")
+    parser.add_argument("--submit-ready-groups", action="store_true")
+    parser.add_argument("--runtime-state-root", default=None, type=Path)
     parser.add_argument("--skip-predictor-help", action="store_true")
     args = parser.parse_args()
     summary = prepare_smokes(
@@ -345,10 +578,26 @@ def main() -> int:
         cpus_per_task=args.cpus_per_task,
         mem=args.mem,
         time_limit=args.time_limit,
+        account=args.account,
+        run_slurm_test_only=bool(args.run_slurm_test_only),
         skip_predictor_help=bool(args.skip_predictor_help),
     )
-    print(json.dumps({"status": summary["status"], "smoke_root": summary["smoke_root"]}, indent=2))
-    return 0 if summary["status"] == "READY" else 2
+    if args.submit:
+        summary = submit_prepared_smokes(
+            summary=summary,
+            submit_ready_groups=bool(args.submit_ready_groups),
+            runtime_state_root=args.runtime_state_root.resolve() if args.runtime_state_root else None,
+        )
+    emit_human_summary(summary)
+    print(json.dumps({
+        "status": summary["status"],
+        "smoke_root": summary["smoke_root"],
+        "submitted_groups": summary.get("submitted_groups", []),
+        "blocked_groups": summary.get("blocked_groups", []),
+        "submission_rejected_groups": summary.get("submission_rejected_groups", []),
+    }, indent=2))
+    ok_statuses = {"READY_TO_SUBMIT", "SUBMITTED"}
+    return 0 if summary["status"] in ok_statuses or (args.submit and summary.get("submitted_groups")) else 2
 
 
 if __name__ == "__main__":
