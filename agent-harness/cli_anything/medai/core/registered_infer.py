@@ -13,14 +13,26 @@ from typing import Any
 
 from .backend_capabilities import profile_runtime_policy
 from .model_registry import get_model_entry, load_registry
+from .runtime_resolver import (
+    resolve_checkpoint_root,
+    resolve_nnunet_predictor,
+    resolve_registry_path,
+    resolve_unest_python,
+    scrub_env_for_runner,
+)
 from .totalseg_runner import run_totalseg_with_contract, run_totalsegmentator
 from .voxtell_official_predictor import OfficialVoxTellPretrainedAdapter
 
-_PREDICT_SCRIPTS = (
+_PER_MODEL_DIR_SCRIPTS = (
     "nnunetv2_predict_and_split.py",
     "atlasnet_predict_and_split.py",
     "vista3d_predict_and_split.py",
     "unest_predict_and_split.py",
+)
+_NNUNET_DIAGNOSTIC_SCRIPTS = (
+    "nnunetv2_predict_and_split.py",
+    "atlasnet_predict_and_split.py",
+    "vista3d_predict_and_split.py",
 )
 
 _AUXILIARY_MASK_NAMES = {
@@ -64,7 +76,7 @@ def _append_flag(command: str, flag: str) -> str:
 
 
 def _maybe_enable_nnunet_diagnostics(command: str) -> str:
-    if not any(script in command for script in _PREDICT_SCRIPTS):
+    if not any(script in command for script in _NNUNET_DIAGNOSTIC_SCRIPTS):
         return command
     if _truthy_env("MEDAI_NNUNET_DIAGNOSTIC"):
         command = _append_flag(command, "--diagnostic")
@@ -592,8 +604,15 @@ def run_registered_model(
     per_model_dir = case_out / "per_model" / model_key
     per_model_dir.mkdir(parents=True, exist_ok=True)
 
-    # project root relative to configs/model_registry.yaml
-    project_root = registry_file.parent.parent
+    # Runtime paths are independent of where a registry copy is stored. The
+    # repository root is the installed source tree; checkpoint-like paths use an
+    # explicit checkpoint root resolver below.
+    project_root = Path(__file__).resolve().parents[4]
+    checkpoint_root = resolve_checkpoint_root(
+        explicit=extra_context.get("checkpoint_root"),
+        registry_checkpoint_root=registry.get("checkpoint_root"),
+        repo_root=project_root,
+    )
 
     if model_key == "official_voxtell_pretrained":
         return _run_official_voxtell_pretrained(
@@ -632,12 +651,12 @@ def run_registered_model(
 
     checkpoint_path_value = entry.get("checkpoint_path", "")
     if checkpoint_path_value:
-        checkpoint_path_raw = Path(str(checkpoint_path_value))
-        checkpoint_path = (
-            checkpoint_path_raw
-            if checkpoint_path_raw.is_absolute()
-            else (project_root / checkpoint_path_raw)
-        ).resolve()
+        checkpoint_path = Path(resolve_registry_path(
+            checkpoint_path_value,
+            repo_root=project_root,
+            checkpoint_root=checkpoint_root,
+            path_kind="checkpoint",
+        ).resolved)
         if _is_relative_to(case_out, checkpoint_path):
             return {
                 "stage": "infer", "backend": "registered", "model_key": model_key,
@@ -699,24 +718,29 @@ def run_registered_model(
     # Registry file is configs/model_registry.yaml; checkpoint paths like
     # "checkpoints/..." are relative to the project root (one level up).
 
-    def _resolve_from_registry(p: str) -> Path:
-        """Resolve a path relative to the project root (parent of configs/)."""
-        pp = Path(p)
-        if pp.is_absolute():
-            return pp
-        return (project_root / pp).resolve()
+    def _resolve_from_registry(p: str, *, key: str = "") -> Path:
+        path_kind = "checkpoint" if key in {"checkpoint_path", "dataset_json_path", "model_folder"} else "repo"
+        if key == "source_code_path" and str(p).startswith("checkpoints"):
+            path_kind = "checkpoint"
+        return Path(resolve_registry_path(
+            p,
+            repo_root=project_root,
+            checkpoint_root=checkpoint_root,
+            path_kind=path_kind,
+        ).resolved)
 
     python_executable = (
-        entry.get("python_executable")
-        or extra_context.get("python_executable")
+        extra_context.get("python_executable")
         or os.getenv("MEDAI_PYTHON_EXECUTABLE")
+        or entry.get("python_executable")
         or sys.executable
     )
     predict_executable = (
-        entry.get("predict_executable")
-        or extra_context.get("predict_executable")
-        or os.getenv("MEDAI_NNUNETV2_PREDICT")
-        or "nnUNetv2_predict"
+        resolve_nnunet_predictor(
+            explicit=extra_context.get("predict_executable"),
+            registry_value=entry.get("predict_executable"),
+            require_exists=False,
+        )
     )
     sitecustomize_path = (
         entry.get("sitecustomize_path")
@@ -732,8 +756,8 @@ def run_registered_model(
         "output_folder": _q(output_root),
         "per_model_dir": _q(per_model_dir),
         "case_id": case_id,
-        "checkpoint_path": _q(_resolve_from_registry(checkpoint_path)) if checkpoint_path else "",
-        "checkpoint_root": _q(_resolve_from_registry(registry.get("checkpoint_root", "checkpoints"))),
+        "checkpoint_path": _q(_resolve_from_registry(checkpoint_path, key="checkpoint_path")) if checkpoint_path else "",
+        "checkpoint_root": _q(checkpoint_root),
         "model_key": model_key,
         "device": device or "",
         "subtask": extra_context.get("subtask") or "",
@@ -753,16 +777,18 @@ def run_registered_model(
         else:
             sv = str(v)
             if k.endswith(("_path", "_root", "_json", "_folder")) or "/" in sv or "\\" in sv:
-                context[k] = _q(_resolve_from_registry(sv))
+                context[k] = _q(_resolve_from_registry(sv, key=k))
             else:
                 context[k] = sv
-    env_template_overrides = {
-        "unest_python_executable": os.getenv("MEDAI_UNEST_PYTHON"),
-    }
-    for key, value in env_template_overrides.items():
-        if value:
-            context[key] = _quote_command_value(value)
-    context.update(extra_context)
+    if model_key == "unest":
+        context["unest_python_executable"] = _quote_command_value(resolve_unest_python(
+            explicit=extra_context.get("unest_python_executable"),
+            registry_value=entry.get("unest_python_executable"),
+            require_exists=False,
+        ))
+    for key, value in extra_context.items():
+        if key not in context:
+            context[key] = value
     try:
         command = template.format(**context)
     except Exception as exc:
@@ -779,7 +805,7 @@ def run_registered_model(
 
     # Inject --per-model-dir for predict scripts that support it but whose templates
     # don't reference {per_model_dir} explicitly (keeps registry templates compact).
-    if any(s in command for s in _PREDICT_SCRIPTS) and "--per-model-dir" not in command:
+    if any(s in command for s in _PER_MODEL_DIR_SCRIPTS) and "--per-model-dir" not in command:
         command += f" --per-model-dir {_q(per_model_dir)}"
     command = _maybe_enable_nnunet_diagnostics(command)
     command = _maybe_set_nnunet_prediction_timeout(command, timeout_sec)
@@ -797,6 +823,9 @@ def run_registered_model(
             "resolved_python": str(python_executable),
             "resolved_predict_executable": str(predict_executable),
             "resolved_sitecustomize_path": str(sitecustomize_path) if sitecustomize_path else None,
+            "raw_checkpoint_path": str(checkpoint_path_value or ""),
+            "checkpoint_root": str(checkpoint_root),
+            "resolved_checkpoint_path": str(_resolve_from_registry(checkpoint_path, key="checkpoint_path")) if checkpoint_path else None,
             "notes": entry.get("notes"),
         }
         _write_inference_summary(case_out, result, seg_out)
@@ -813,7 +842,7 @@ def run_registered_model(
             pass
 
     start = time.time()
-    env = os.environ.copy()
+    env = scrub_env_for_runner(os.environ.copy(), runner=model_key)
     env_overrides = entry.get("environment_overrides") or {}
     if isinstance(env_overrides, dict):
         for key, value in env_overrides.items():
@@ -883,6 +912,9 @@ def run_registered_model(
         "resolved_python": str(python_executable),
         "resolved_predict_executable": str(predict_executable),
         "resolved_sitecustomize_path": str(sitecustomize_path) if sitecustomize_path else None,
+        "raw_checkpoint_path": str(checkpoint_path_value or ""),
+        "checkpoint_root": str(checkpoint_root),
+        "resolved_checkpoint_path": str(_resolve_from_registry(checkpoint_path, key="checkpoint_path")) if checkpoint_path else None,
         "child_pid": completed.get("child_pid"),
         "process_group_id": completed.get("process_group_id"),
         "stdout_log": completed.get("stdout_log"),

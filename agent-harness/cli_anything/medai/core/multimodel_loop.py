@@ -33,6 +33,12 @@ from .model_registry import candidate_models_for_organs, load_registry, recommen
 from .organ_model_performance import OrganModelPerformance
 from .radthinking import build_reasoning_trace
 from .registered_infer import run_registered_model
+from .runtime_resolver import (
+    resolve_checkpoint_root,
+    resolve_nnunet_predictor,
+    resolve_registry_path,
+    resolve_unest_python,
+)
 from .organ_taxonomy import identity_contract, load_taxonomy, taxonomy_entry, topological_order_organs
 from .hierarchical_roi import HIERARCHICAL_PIPELINE_VERSION, execute_roi_tasks, plan_roi_tasks, write_hierarchical_manifest
 from .shapekit_runner import run_shapekit, _SHAPEKIT_TARGET_REQUIREMENTS
@@ -1021,6 +1027,7 @@ def _hierarchical_plan_cache_key(
     child_organs: list[str],
     execution_plan: dict[str, Any],
     fov_override: dict[str, Any] | None = None,
+    runtime_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the semantic parts that make a hierarchical ROI cache reusable."""
     per_organ = execution_plan.get("per_organ", {}) or {}
@@ -1035,6 +1042,11 @@ def _hierarchical_plan_cache_key(
                 set((fov_override or {}).get("requested_override_organs") or [])
             ),
             "applied_organs": sorted(set((fov_override or {}).get("applied_organs") or [])),
+        },
+        "runtime_context": {
+            "checkpoint_root": str((runtime_context or {}).get("checkpoint_root") or ""),
+            "predict_executable": str((runtime_context or {}).get("predict_executable") or ""),
+            "unest_python_executable": str((runtime_context or {}).get("unest_python_executable") or ""),
         },
         "execution_plan": {
             "candidate_mode": execution_plan.get("candidate_mode"),
@@ -1063,6 +1075,11 @@ def _hierarchical_cache_keys_equivalent(left: dict[str, Any], right: dict[str, A
         )
         override["applied_organs"] = sorted(set(override.get("applied_organs") or []))
         value["strict_delivery_fov_override"] = override
+        value.setdefault("runtime_context", {
+            "checkpoint_root": "",
+            "predict_executable": "",
+            "unest_python_executable": "",
+        })
         for field in ("requested_organs", "major_organs", "child_organs"):
             value[field] = sorted({
                 "inferior_vena_cava" if x == "postcava" else x
@@ -1178,6 +1195,7 @@ def _run_hierarchical_case_inference(
     external_parent_masks: dict[str, Path] | None = None,
     external_parent_records: list[dict[str, Any]] | None = None,
     fov_override: dict[str, Any] | None = None,
+    runtime_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     registry_file = Path(registry_path).resolve()
     registry_sha256 = hashlib.sha256(registry_file.read_bytes()).hexdigest() if registry_file.is_file() else None
@@ -1213,6 +1231,7 @@ def _run_hierarchical_case_inference(
         child_organs=child_organs,
         execution_plan=execution_plan,
         fov_override=fov_override,
+        runtime_context=runtime_context,
     )
     cache_key_sha256 = _stable_json_sha256(cache_key)
     existing_manifest = case_out / "hierarchical_inference_plan.json"
@@ -1371,7 +1390,12 @@ def _run_hierarchical_case_inference(
         result = run_registered_model(
             ct, case_raw / "hierarchical_full" / model, model, registry_path=registry_path, case_id=case_id,
             dry_run=dry_run, timeout_sec=timeout_sec, device=device,
-            extra_context={"requested_organs": target_organs, "teacher_inference_mode": "hierarchical_roi", "inference_scope": "major_full_volume"},
+            extra_context={
+                "requested_organs": target_organs,
+                "teacher_inference_mode": "hierarchical_roi",
+                "inference_scope": "major_full_volume",
+                **(runtime_context or {}),
+            },
         )
         result.setdefault("inference_scope", "major_full_volume")
         seg_dir = Path(str(result.get("segmentation_output", case_raw / model / case_id / "segmentations")))
@@ -1472,7 +1496,12 @@ def _run_hierarchical_case_inference(
         result = run_registered_model(
             image, output, model, registry_path=registry_path, case_id=task_id,
             dry_run=dry_run, timeout_sec=timeout_sec, device=device,
-            extra_context={"requested_organs": target_organs, "teacher_inference_mode": "hierarchical_roi", "inference_scope": "child_roi"},
+            extra_context={
+                "requested_organs": target_organs,
+                "teacher_inference_mode": "hierarchical_roi",
+                "inference_scope": "child_roi",
+                **(runtime_context or {}),
+            },
         )
         result.setdefault("inference_scope", "child_roi")
         raw_results.append({"case_id": case_id, "inference_scope": "child_roi", "roi_task_id": task_id, **result})
@@ -1657,12 +1686,20 @@ def _run_hierarchical_case_inference(
     manifest_path = case_out / "hierarchical_inference_plan.json"
     registry_doc = load_registry(registry_file) if registry_file.exists() else {"models": {}}
     checkpoint_refs: dict[str, Any] = {}
-    project_root = registry_file.parent.parent
+    project_root = Path(__file__).resolve().parents[4]
+    checkpoint_root = resolve_checkpoint_root(
+        explicit=(runtime_context or {}).get("checkpoint_root"),
+        registry_checkpoint_root=registry_doc.get("checkpoint_root"),
+        repo_root=project_root,
+    )
     for model in sorted(merged_dirs):
         raw_checkpoint = str(((registry_doc.get("models", {}) or {}).get(model, {}) or {}).get("checkpoint_path") or "")
-        checkpoint_path = Path(raw_checkpoint)
-        if raw_checkpoint and not checkpoint_path.is_absolute():
-            checkpoint_path = project_root / checkpoint_path
+        checkpoint_path = Path(resolve_registry_path(
+            raw_checkpoint,
+            repo_root=project_root,
+            checkpoint_root=checkpoint_root,
+            path_kind="checkpoint",
+        ).resolved) if raw_checkpoint else Path()
         checkpoint_refs[model] = {
             "configured_path": raw_checkpoint,
             "resolved_path": str(checkpoint_path.resolve()) if raw_checkpoint else None,
@@ -1677,6 +1714,7 @@ def _run_hierarchical_case_inference(
         "taxonomy_schema_version": taxonomy.get("schema_version"),
         "taxonomy_source_sha256": taxonomy.get("source_sha256"),
         "registry_sha256": registry_sha256,
+        "runtime_context": runtime_context or {},
         "model_checkpoint_refs": checkpoint_refs,
         "margin_mm": margin_mm,
         "requested_organs": requested_organs,
@@ -5390,6 +5428,9 @@ def run_multimodel_annotation_loop(
     use_annotation_folder_reference: bool = True,
     strict_delivery_targets: bool = False,
     strict_delivery_fov_override_organs: list[str] | None = None,
+    checkpoint_root: str | Path | None = None,
+    predict_executable: str | Path | None = None,
+    unest_python_executable: str | Path | None = None,
 ) -> dict[str, Any]:
     """
     preseeded_model_dirs: mapping of model_key -> base directory where
@@ -5432,6 +5473,25 @@ def run_multimodel_annotation_loop(
     cases = _read_case_list(case_csv)
     registry = load_registry(registry_path)
     project_root = Path(__file__).resolve().parents[4]
+    resolved_checkpoint_root = resolve_checkpoint_root(
+        explicit=checkpoint_root,
+        registry_checkpoint_root=registry.get("checkpoint_root"),
+        repo_root=project_root,
+    )
+    resolved_predict_executable = resolve_nnunet_predictor(
+        explicit=predict_executable,
+        require_exists=False,
+    )
+    resolved_unest_python = resolve_unest_python(
+        explicit=unest_python_executable,
+        registry_value=(registry.get("models", {}).get("unest", {}) or {}).get("unest_python_executable"),
+        require_exists=False,
+    )
+    model_runtime_context = {
+        "checkpoint_root": str(resolved_checkpoint_root),
+        "predict_executable": str(resolved_predict_executable),
+        "unest_python_executable": str(resolved_unest_python),
+    }
     alias_config = _load_model_label_aliases(project_root)
     taxonomy = _load_organ_taxonomy(project_root)
     organ_prompts = _load_organ_prompts(project_root)
@@ -5624,6 +5684,7 @@ def run_multimodel_annotation_loop(
                 child_organs=child_organs_for_cache,
                 execution_plan=case_execution_plan,
                 fov_override=fov_override,
+                runtime_context=model_runtime_context,
             )
             hierarchy_plan_cache_key_sha256 = _stable_json_sha256(hierarchy_plan_cache_key)
 
@@ -5690,6 +5751,7 @@ def run_multimodel_annotation_loop(
             "strict_delivery_fov_override_organs_requested": list(strict_delivery_fov_override_organs),
             "fov_override_applied": fov_override_applied_records,
             "fov_override": fov_override,
+            "runtime_context": model_runtime_context,
             **case_execution_plan,
         })
         organ_task_state_path = updated_root / case_id / "organ_task_state.json"
@@ -5754,6 +5816,7 @@ def run_multimodel_annotation_loop(
                 external_parent_masks=external_parent_masks,
                 external_parent_records=external_parent_records,
                 fov_override=fov_override,
+                runtime_context=model_runtime_context,
             )
             model_seg_dirs.update(hierarchy_result["model_seg_dirs"])
             inference_results.extend(hierarchy_result["inference_results"])
@@ -5823,7 +5886,7 @@ def run_multimodel_annotation_loop(
                     dry_run=dry_run,
                     timeout_sec=timeout_sec,
                     device=device,
-                    extra_context={"requested_organs": organs},
+                    extra_context={"requested_organs": organs, **model_runtime_context},
                 )
             inference_results.append({"case_id": case_id, **infer})
             seg_dir = Path(infer.get("segmentation_output", case_raw / model_key / case_id / "segmentations"))
@@ -7283,6 +7346,7 @@ def run_multimodel_annotation_loop(
             1 for row in strict_delivery_fov_override_rows if row.get("decision") == "rejected"
         ),
         "strict_delivery_fov_override_rows": strict_delivery_fov_override_rows,
+        "runtime_context": model_runtime_context,
         "strict_delivery_failure_count": len(strict_delivery_failures),
         "strict_delivery_failures": strict_delivery_failures,
         "round2_competition_audit": _summarize_preseeded_competition(

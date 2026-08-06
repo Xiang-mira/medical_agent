@@ -8,6 +8,8 @@ PREFERRED_CASE_ID=${PREFERRED_CASE_ID:-BDMAP_00000120}
 OUT_ROOT=${OUT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/cads_remaining8_strict_smoke_$(date +%Y%m%d_%H%M%S)}
 REGISTRY=${REGISTRY:-configs/model_registry.yaml}
 TIMEOUT_SEC=${TIMEOUT_SEC:-14400}
+CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints}
+NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict}
 
 cd "$CODE_ROOT"
 mkdir -p "$OUT_ROOT"
@@ -159,6 +161,8 @@ cat > "$COMMAND_TXT" <<EOF
   --organs "$CADS_TARGETS" \\
   --registry "$REGISTRY" \\
   --output "$RUN_OUT" \\
+  --checkpoint-root "$CHECKPOINT_ROOT" \\
+  --nnunet-predict-executable "$NNUNETV2_PREDICT_EXECUTABLE" \\
   --timeout-sec "$TIMEOUT_SEC" \\
   --teacher-inference-mode full_volume \\
   --no-enable-shapekit \\
@@ -175,6 +179,8 @@ set +e
   --organs "$CADS_TARGETS" \
   --registry "$REGISTRY" \
   --output "$RUN_OUT" \
+  --checkpoint-root "$CHECKPOINT_ROOT" \
+  --nnunet-predict-executable "$NNUNETV2_PREDICT_EXECUTABLE" \
   --timeout-sec "$TIMEOUT_SEC" \
   --teacher-inference-mode full_volume \
   --no-enable-shapekit \

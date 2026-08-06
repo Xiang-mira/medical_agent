@@ -801,6 +801,30 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
 @click.option("--target-config", default="configs/student_3d_prompt_target_organs.json", show_default=True, help="Target config used when --organs=student_373.")
 @click.option("--registry", "registry_path", default="configs/model_registry.yaml", show_default=True)
 @click.option("--output", "output_folder", required=True)
+@click.option(
+    "--checkpoint-root",
+    default=None,
+    help=(
+        "Explicit Teacher checkpoint root. Overrides MEDAI_CHECKPOINT_ROOT and "
+        "keeps registry checkpoint paths independent of copied output registries."
+    ),
+)
+@click.option(
+    "--nnunet-predict-executable",
+    default=None,
+    help=(
+        "Absolute nnUNetv2_predict executable for nnUNet/CADS/ATM/AirRC teachers. "
+        "If omitted, the runtime resolver checks environment, PATH, then the HPC default."
+    ),
+)
+@click.option(
+    "--unest-python-executable",
+    default=None,
+    help=(
+        "Python executable used only inside the UNEST MONAI bundle runner. "
+        "The outer run-loop Python remains unchanged."
+    ),
+)
 @click.option("--checkpoint-map-models/--no-checkpoint-map-models", default=False, show_default=True, help="Also include all organ-specific candidates from registry.")
 @click.option("--shapekit-root", default="third_party/ShapeKit-main", show_default=True)
 @click.option("--enable-shapekit/--no-enable-shapekit", default=True, show_default=True)
@@ -834,7 +858,7 @@ def critic_cmd(ct_image, mask_a, mask_b, organ, output_json, labelcritic_root, b
     ),
 )
 @click.option("--log-file", default=os.getenv("MEDAI_LOG_FILE"), help="Optional fixed log file; run-loop progress and final JSON are tee'd here.")
-def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run, strict_delivery_targets, strict_delivery_fov_override_organs, log_file):
+def run_loop_cmd(case_list, models, organs, target_config, registry_path, output_folder, checkpoint_root, nnunet_predict_executable, unest_python_executable, checkpoint_map_models, shapekit_root, enable_shapekit, debug_allow_no_shapekit, enable_critic, critic_backend, critic_base_url, critic_port, critic_vlm_model, labelcritic_no_dice_check, labelcritic_no_dual_confirmation, labelcritic_simple_prompt_ablation, labelcritic_conservative_dual, labelcritic_skip_organ_presence_gate, labelcritic_strict_choice_prompt, vlm_threshold, accept_threshold, device, timeout_sec, perf_tracker_path, teacher_inference_mode, roi_margin_mm, dry_run, strict_delivery_targets, strict_delivery_fov_override_organs, log_file):
     """End-to-end multi-model annotation refinement loop for the 50-case debug set."""
     if not enable_shapekit and not dry_run and not debug_allow_no_shapekit:
         fail({
@@ -879,6 +903,9 @@ def run_loop_cmd(case_list, models, organs, target_config, registry_path, output
             vlm_model=critic_vlm_model,
             strict_delivery_targets=strict_delivery_targets,
             strict_delivery_fov_override_organs=fov_override_organs,
+            checkpoint_root=resolve_path(checkpoint_root) if checkpoint_root else None,
+            predict_executable=resolve_path(nnunet_predict_executable) if nnunet_predict_executable else None,
+            unest_python_executable=resolve_path(unest_python_executable) if unest_python_executable else None,
         )
 
     if log_file:

@@ -25,6 +25,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT / "agent-harness") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "agent-harness"))
+
+from cli_anything.medai.core.runtime_resolver import (  # noqa: E402
+    resolve_nnunet_predict_from_modelfolder,
+    resolve_nnunet_predictor,
+)
+
 
 ORGAN_ALIASES = {
     "cerebrospinal_fluid": "csf",
@@ -936,8 +945,8 @@ def main() -> int:
     ap.add_argument("--configuration", default="3d_fullres")
     ap.add_argument("--folds", default="all")
     ap.add_argument("--checkpoint-name", default="checkpoint_final.pth")
-    ap.add_argument("--predict-executable", default=os.getenv("MEDAI_NNUNETV2_PREDICT", "nnUNetv2_predict"), help="Stable nnUNetv2_predict executable path/name.")
-    ap.add_argument("--predict-from-modelfolder-executable", default=os.getenv("MEDAI_NNUNETV2_PREDICT_FROM_MODELFOLDER", "nnUNetv2_predict_from_modelfolder"), help="Stable nnUNetv2_predict_from_modelfolder executable path/name.")
+    ap.add_argument("--predict-executable", default=None, help="Stable nnUNetv2_predict executable path/name. Defaults to NNUNETV2_PREDICT_EXECUTABLE, MEDAI_NNUNETV2_PREDICT, PATH lookup, then the HPC wrapper path.")
+    ap.add_argument("--predict-from-modelfolder-executable", default=None, help="Stable nnUNetv2_predict_from_modelfolder executable path/name.")
     ap.add_argument("--sitecustomize-path", default=os.getenv("MEDAI_NNUNET_COMPAT_SITECUSTOMIZE"), help="Optional compatibility sitecustomize.py injected only into the nnUNet subprocess.")
     ap.add_argument("--save-probabilities", action="store_true")
     ap.add_argument("--device", default=None, help="Optional CUDA_VISIBLE_DEVICES value or cpu")
@@ -974,17 +983,22 @@ def main() -> int:
 
     case_id = image.parent.name if image.name == "ct.nii.gz" else image.name.replace(".nii.gz", "").replace("_0000", "")
     requested_organs = [x.strip() for x in args.organs.replace(";", ",").split(",") if x.strip()] if args.organs else None
+    predict_executable = resolve_nnunet_predictor(explicit=args.predict_executable, require_exists=not args.dry_run)
+    predict_from_modelfolder_executable = resolve_nnunet_predict_from_modelfolder(
+        explicit=args.predict_from_modelfolder_executable,
+        require_exists=bool(model_folder and not args.dry_run),
+    )
 
     if args.dry_run:
         if model_folder:
             command = [
-                args.predict_from_modelfolder_executable, "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
+                str(predict_from_modelfolder_executable), "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
                 "-m", str(model_folder), "-f", str(args.folds), "--input_csv", "<input_csv>", "--output_csv", "<output_csv>",
                 "--continue_prediction", "-chk", args.checkpoint_name, "--output_label_mode", args.output_label_mode,
             ]
         else:
             command = [
-                args.predict_executable, "-d", str(args.dataset_id), "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
+                str(predict_executable), "-d", str(args.dataset_id), "-i", "<prepared_input_dir>", "-o", "<combined_output_dir>",
                 "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "-chk", args.checkpoint_name, "--continue_prediction",
             ]
         print(json.dumps({"status": "dry_run", "command": command, "output": str(output), "seg_dir": str(seg_dir), "output_label_mode": args.output_label_mode}, indent=2))
@@ -1069,7 +1083,7 @@ def main() -> int:
             "status": "running",
             "start_time": _utc_now(),
             "python_executable": sys.executable,
-            "predict_executable": args.predict_from_modelfolder_executable if model_folder else args.predict_executable,
+            "predict_executable": str(predict_from_modelfolder_executable) if model_folder else str(predict_executable),
             "nnUNet_results": str(nnunet_results),
             "workdir": str(workdir) if workdir else None,
             "temporary_workdir": str(tmp),
@@ -1130,7 +1144,7 @@ def main() -> int:
             npp = _worker_count(args.preprocess_workers, diagnostic=args.diagnostic, default=3)
             nps = _worker_count(args.export_workers, diagnostic=args.diagnostic, default=3)
             cmd = [
-                args.predict_from_modelfolder_executable, "-i", str(input_dir), "-o", str(combined_dir),
+                str(predict_from_modelfolder_executable), "-i", str(input_dir), "-o", str(combined_dir),
                 "-m", str(model_folder), "-f", str(args.folds), "--input_csv", str(input_csv), "--output_csv", str(output_csv),
                 "--continue_prediction", "-npp", str(npp), "-nps", str(nps), "-num_parts", "1", "-part_id", "0",
                 "-chk", args.checkpoint_name, "--output_label_mode", args.output_label_mode,
@@ -1142,7 +1156,7 @@ def main() -> int:
             metadata_doc.update({
                 "command": [str(part) for part in cmd],
                 "command_text": shlex.join([str(part) for part in cmd]),
-                "predict_executable": args.predict_from_modelfolder_executable,
+                "predict_executable": str(predict_from_modelfolder_executable),
                 "preprocess_workers": npp,
                 "export_workers": nps,
             })
@@ -1234,7 +1248,7 @@ def main() -> int:
             _append_log_footer(stderr_log, end_time=proc_end_time, return_code=proc_return_code)
         else:
             cmd = [
-                args.predict_executable, "-d", str(args.dataset_id), "-i", str(input_dir), "-o", str(combined_dir),
+                str(predict_executable), "-d", str(args.dataset_id), "-i", str(input_dir), "-o", str(combined_dir),
                 "-tr", args.trainer, "-c", args.configuration, "-f", str(args.folds), "-p", args.plans, "-chk", args.checkpoint_name, "--continue_prediction",
             ]
             npp = _worker_count(args.preprocess_workers, diagnostic=args.diagnostic, default=None)
@@ -1248,7 +1262,7 @@ def main() -> int:
             metadata_doc.update({
                 "command": [str(part) for part in cmd],
                 "command_text": shlex.join([str(part) for part in cmd]),
-                "predict_executable": args.predict_executable,
+                "predict_executable": str(predict_executable),
                 "preprocess_workers": npp,
                 "export_workers": nps,
             })

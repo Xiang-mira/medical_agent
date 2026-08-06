@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse, json, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT / "agent-harness") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "agent-harness"))
+
+from cli_anything.medai.core.runtime_resolver import resolve_unest_python, scrub_env_for_runner  # noqa: E402
+
 # UNEST outputs a 4-class combined label map (0=bg, 1=cortex, 2=medulla, 3=pelvicalyceal)
 LABEL_MAP = {
     1: 'kidney_cortex',
@@ -47,7 +53,7 @@ def main() -> int:
     output = Path(args.output).resolve()
     seg_dir = output / 'segmentations'
     unest_root = Path(args.unest_root).resolve()
-    python_executable = args.python_executable or __import__('os').environ.get('MEDAI_UNEST_PYTHON') or sys.executable
+    python_executable = resolve_unest_python(explicit=args.python_executable, require_exists=not args.dry_run)
     per_model_dir = Path(args.per_model_dir).resolve() if args.per_model_dir else output
     output.mkdir(parents=True, exist_ok=True)
     seg_dir.mkdir(parents=True, exist_ok=True)
@@ -83,11 +89,12 @@ def main() -> int:
         # Override bundle_root, dataset_dir, output_dir via CLI flags.
         # PYTHONPATH must include the bundle's scripts/ so UNesT network can be imported.
         import os
-        existing_pythonpath = os.environ.get('PYTHONPATH', '')
+        base_env = scrub_env_for_runner(os.environ, runner='unest')
+        existing_pythonpath = base_env.get('PYTHONPATH', '')
         env_patch = {
             'PYTHONPATH': str(unest_root / 'scripts') + ((os.pathsep + existing_pythonpath) if existing_pythonpath else ''),
         }
-        env = {**os.environ, **env_patch}
+        env = {**base_env, **env_patch}
 
         command = [
             str(python_executable), '-m', 'monai.bundle', 'run', 'evaluating',

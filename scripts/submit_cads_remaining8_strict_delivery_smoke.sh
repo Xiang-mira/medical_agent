@@ -6,6 +6,8 @@ PYTHON=${PYTHON:-/home/xhan74/envs/medical_agent/bin/python}
 CASE_MANIFEST=${CASE_MANIFEST:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv}
 PREFERRED_CASE_ID=${PREFERRED_CASE_ID:-BDMAP_00000120}
 REGISTRY=${REGISTRY:-configs/model_registry.yaml}
+CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints}
+NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict}
 PARTITION=${PARTITION:-gpu}
 GRES=${GRES:-gpu:t4:1}
 CPUS_PER_TASK=${CPUS_PER_TASK:-8}
@@ -44,6 +46,11 @@ export PREFERRED_CASE_ID="$PREFERRED_CASE_ID"
 export OUT_ROOT="$OUT_ROOT"
 export REGISTRY="$REGISTRY"
 export TIMEOUT_SEC="${TIMEOUT_SEC:-14400}"
+export CHECKPOINT_ROOT="$CHECKPOINT_ROOT"
+export NNUNETV2_PREDICT_EXECUTABLE="$NNUNETV2_PREDICT_EXECUTABLE"
+export MEDAI_CHECKPOINT_ROOT="$CHECKPOINT_ROOT"
+export MEDAI_NNUNETV2_PREDICT="$NNUNETV2_PREDICT_EXECUTABLE"
+export PATH="$(dirname "$NNUNETV2_PREDICT_EXECUTABLE"):\$PATH"
 bash "$CODE_ROOT/scripts/run_cads_remaining8_strict_delivery_smoke_hpc.sh"
 EOF
 
