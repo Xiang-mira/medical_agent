@@ -12,8 +12,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.dataset_delivery.cads15_contract_audit import CADS15_TARGETS, DEFAULT_CONTRACT, contract_targets  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_csv, write_json  # noqa: E402
 
+
+CADS_MODELS = ["cads553", "cads557", "cads559"]
 
 SMOKE_SPECS: dict[str, dict[str, Any]] = {
     "atm": {
@@ -21,17 +24,14 @@ SMOKE_SPECS: dict[str, dict[str, Any]] = {
         "targets": ["airway_tree"],
     },
     "cads": {
-        "models": ["cads553", "cads557", "cads559"],
-        "targets": [
-            "blood",
-            "common_iliac_artery_left",
-            "common_iliac_artery_right",
-            "common_iliac_vein_left",
-            "common_iliac_vein_right",
-            "compact_bone",
-            "gland_structure",
-            "spongy_bone",
-        ],
+        "models": CADS_MODELS,
+        "targets": CADS15_TARGETS,
+        "panel_capable": True,
+    },
+    "cads15": {
+        "models": CADS_MODELS,
+        "targets": CADS15_TARGETS,
+        "panel_capable": True,
     },
     "unest": {
         "models": ["unest"],
@@ -67,21 +67,40 @@ def _case_id_from_run(run_out: Path) -> str | None:
     return None
 
 
-def _slurm_status(slurm_rows: list[dict[str, str]], group: str) -> dict[str, Any]:
-    row = next((item for item in slurm_rows if item.get("group") == group), None)
-    if row is None:
+def _slurm_status(slurm_rows: list[dict[str, str]], group: str, case_id: str | None = None) -> dict[str, Any]:
+    matches = [
+        item for item in slurm_rows
+        if item.get("group") == group and (case_id is None or not item.get("case_id") or item.get("case_id") == case_id)
+    ]
+    if not matches:
         return {"known": False, "ok": True, "reason": "slurm_not_checked"}
-    state = row.get("state") or row.get("State") or ""
-    exit_code = row.get("exit_code") or row.get("ExitCode") or ""
-    terminal_success = state == "COMPLETED" and exit_code == "0:0"
-    nonterminal = state in {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
+    rows: list[dict[str, Any]] = []
+    ok = True
+    reasons: list[str] = []
+    for row in matches:
+        state = row.get("state") or row.get("State") or ""
+        exit_code = row.get("exit_code") or row.get("ExitCode") or ""
+        terminal_success = state == "COMPLETED" and exit_code == "0:0"
+        nonterminal = state in {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED"}
+        reason = "success" if terminal_success else ("slurm_job_not_terminal" if nonterminal else "slurm_job_failed")
+        rows.append({
+            "state": state,
+            "exit_code": exit_code,
+            "job_id": row.get("job_id") or row.get("JobIDRaw") or "",
+            "case_id": row.get("case_id") or case_id or "",
+            "reason": reason,
+        })
+        if not terminal_success:
+            ok = False
+            reasons.append(reason)
     return {
         "known": True,
-        "ok": terminal_success,
-        "state": state,
-        "exit_code": exit_code,
-        "job_id": row.get("job_id") or row.get("JobIDRaw") or "",
-        "reason": "success" if terminal_success else ("slurm_job_not_terminal" if nonterminal else "slurm_job_failed"),
+        "ok": ok,
+        "rows": rows,
+        "state": rows[0]["state"] if len(rows) == 1 else "MULTI",
+        "exit_code": rows[0]["exit_code"] if len(rows) == 1 else "",
+        "job_id": rows[0]["job_id"] if len(rows) == 1 else "",
+        "reason": "success" if ok else ";".join(sorted(set(reasons))),
     }
 
 
@@ -167,75 +186,268 @@ def _model_inference_ok(run_out: Path, case_id: str, model: str) -> dict[str, An
     return {"model": model, "ok": ok, "summaries": rows}
 
 
-def validate_group(smoke_root: Path, group: str, slurm_rows: list[dict[str, str]]) -> dict[str, Any]:
-    spec = SMOKE_SPECS[group]
-    group_root = smoke_root / group
-    run_out = group_root / "run_loop"
-    case_id = _case_id_from_run(run_out)
+def _contract_model_by_target(contract_path: Path = DEFAULT_CONTRACT) -> dict[str, str]:
+    return {
+        str(row.get("canonical_id")): str(row.get("primary_model"))
+        for row in contract_targets(contract_path)
+        if row.get("canonical_id") and row.get("primary_model")
+    }
+
+
+def _required_models_for_targets(group: str, targets: list[str], contract_path: Path = DEFAULT_CONTRACT) -> list[str]:
+    if group in {"cads", "cads15"}:
+        model_by_target = _contract_model_by_target(contract_path)
+        ordered = []
+        for model in CADS_MODELS:
+            if any(model_by_target.get(target) == model for target in targets):
+                ordered.append(model)
+        return ordered
+    return list(SMOKE_SPECS[group]["models"])
+
+
+def _final_delivery_row(run_out: Path, case_id: str, target: str) -> dict[str, Any]:
+    doc = _read_json(run_out / "final_delivery_status.json")
+    for row in doc.get("rows") or []:
+        if row.get("case_id") == case_id and row.get("organ") == target:
+            return dict(row)
+    return {}
+
+
+def _validate_case_targets(
+    *,
+    smoke_root: Path,
+    group: str,
+    run_out: Path,
+    case_id: str,
+    targets: list[str],
+    slurm_rows: list[dict[str, str]],
+    contract_path: Path = DEFAULT_CONTRACT,
+) -> dict[str, Any]:
     failures: list[str] = []
     target_rows: list[dict[str, Any]] = []
-    slurm = _slurm_status(slurm_rows, group)
+    slurm = _slurm_status(slurm_rows, group, case_id)
     if not slurm.get("ok"):
         failures.append(str(slurm.get("reason")))
-    if not case_id:
-        failures.append("case_id_not_resolved")
-        case_id = ""
 
     summary = _read_json(run_out / "run_summary.json")
-    plan = _read_json(run_out / "annotation_versions" / case_id / "case_execution_plan.json") if case_id else {}
+    plan = _read_json(run_out / "annotation_versions" / case_id / "case_execution_plan.json")
     ct_path = Path(str(plan.get("ct_path") or ""))
     if summary.get("status") != "success":
         failures.append(f"run_summary_status:{summary.get('status')}")
     if int(summary.get("strict_delivery_failure_count") or 0) != 0:
         failures.append(f"strict_delivery_failure_count:{summary.get('strict_delivery_failure_count')}")
     teacher_run_list = set(plan.get("teacher_run_list") or [])
-    for model in spec["models"]:
+    required_models = _required_models_for_targets(group, targets, contract_path)
+    for model in required_models:
         if model not in teacher_run_list:
             failures.append(f"teacher_run_list_missing:{model}")
-    inference_checks = [_model_inference_ok(run_out, case_id, model) for model in spec["models"] if case_id]
+    inference_checks = [_model_inference_ok(run_out, case_id, model) for model in required_models]
     for check in inference_checks:
         if not check["ok"]:
             failures.append(f"inference_not_success:{check['model']}")
     strict_failures = summary.get("strict_delivery_failures") or []
-    for target in spec["targets"]:
+    for target in targets:
         mask = run_out / "annotation_versions" / case_id / "updated" / f"{target}.nii.gz"
         validation = validate_mask(mask, ct_path if ct_path.exists() else None)
+        final_row = _final_delivery_row(run_out, case_id, target)
+        final_status = str(final_row.get("final_status") or "")
+        delivery_status = str(final_row.get("delivery_status") or "")
+        acceptable_final = final_status in {"delivered", "delivered_for_review"} or (
+            not final_row and validation["valid"]
+        )
         failure_reasons = [
             str(item.get("reason"))
             for item in strict_failures
             if item.get("organ") == target
         ]
+        valid = bool(validation["valid"] and acceptable_final and not failure_reasons)
         row = {
             "group": group,
             "case_id": case_id,
             "target": target,
             "mask_path": str(mask),
-            "valid": validation["valid"],
-            "reason": validation["reason"],
+            "valid": valid,
+            "reason": (
+                "valid"
+                if valid else
+                ("final_status_not_delivered" if validation["valid"] and not acceptable_final else validation["reason"])
+            ),
+            "final_status": final_status,
+            "delivery_status": delivery_status,
             "strict_failure_reasons": ";".join(failure_reasons),
+            "run_out": str(run_out),
             **{f"mask_{key}": value for key, value in validation.items() if key not in {"path", "valid", "reason"}},
         }
         target_rows.append(row)
         if not validation["valid"]:
             failures.append(f"{target}:{validation['reason']}")
+        elif not acceptable_final:
+            failures.append(f"{target}:final_status:{final_status or 'missing'}")
         if failure_reasons:
             failures.append(f"{target}:strict_delivery_failure:{';'.join(failure_reasons)}")
-    passed_targets = [row["target"] for row in target_rows if row["valid"]]
-    failed_targets = [row["target"] for row in target_rows if not row["valid"]]
     return {
-        "group": group,
-        "status": "passed" if not failures else "failed",
         "case_id": case_id,
         "run_out": str(run_out),
         "slurm": slurm,
-        "requested_models": spec["models"],
-        "requested_targets": spec["targets"],
+        "requested_models": required_models,
+        "requested_targets": targets,
         "teacher_run_list": sorted(teacher_run_list),
         "inference_checks": inference_checks,
-        "passed_targets": passed_targets,
-        "failed_targets": failed_targets,
+        "passed_targets": [row["target"] for row in target_rows if row["valid"]],
+        "failed_targets": [row["target"] for row in target_rows if not row["valid"]],
         "failures": failures,
         "target_rows": target_rows,
+    }
+
+
+def _single_run_out(smoke_root: Path, group: str) -> Path:
+    group_root = smoke_root / group
+    if (group_root / "run_loop").exists():
+        return group_root / "run_loop"
+    if group == "cads15" and (smoke_root / "cads" / "run_loop").exists():
+        return smoke_root / "cads" / "run_loop"
+    return group_root / "run_loop"
+
+
+def _panel_json_default(smoke_root: Path) -> Path | None:
+    for path in [
+        smoke_root / "preflight" / "cads15_smoke_case_panel.json",
+        smoke_root / "cads15_smoke_case_panel.json",
+        smoke_root / "cads15" / "cads15_smoke_case_panel.json",
+    ]:
+        if path.exists():
+            return path
+    return None
+
+
+def validate_group(
+    smoke_root: Path,
+    group: str,
+    slurm_rows: list[dict[str, str]],
+    *,
+    panel_json: Path | None = None,
+    contract_path: Path = DEFAULT_CONTRACT,
+) -> dict[str, Any]:
+    spec = SMOKE_SPECS[group]
+    if group in {"cads", "cads15"} and panel_json and panel_json.exists():
+        return validate_cads15_panel(
+            smoke_root=smoke_root,
+            group=group,
+            panel_json=panel_json,
+            slurm_rows=slurm_rows,
+            contract_path=contract_path,
+        )
+    run_out = _single_run_out(smoke_root, group)
+    case_id = _case_id_from_run(run_out) or ""
+    if not case_id:
+        return {
+            "group": group,
+            "status": "failed",
+            "case_id": "",
+            "run_out": str(run_out),
+            "slurm": _slurm_status(slurm_rows, group),
+            "requested_models": spec["models"],
+            "requested_targets": spec["targets"],
+            "teacher_run_list": [],
+            "inference_checks": [],
+            "passed_targets": [],
+            "failed_targets": spec["targets"],
+            "failures": ["case_id_not_resolved"],
+            "target_rows": [],
+        }
+    case_result = _validate_case_targets(
+        smoke_root=smoke_root,
+        group=group,
+        run_out=run_out,
+        case_id=case_id,
+        targets=list(spec["targets"]),
+        slurm_rows=slurm_rows,
+        contract_path=contract_path,
+    )
+    return {
+        "group": group,
+        "status": "passed" if not case_result["failures"] else "failed",
+        **case_result,
+    }
+
+
+def _run_out_for_panel_case(smoke_root: Path, group: str, case_id: str) -> Path:
+    for path in [
+        smoke_root / group / case_id / "run_loop",
+        smoke_root / group / "cases" / case_id / "run_loop",
+        smoke_root / "cads15" / case_id / "run_loop",
+        smoke_root / "cads" / case_id / "run_loop",
+    ]:
+        if path.exists():
+            return path
+    return smoke_root / group / case_id / "run_loop"
+
+
+def validate_cads15_panel(
+    *,
+    smoke_root: Path,
+    group: str,
+    panel_json: Path,
+    slurm_rows: list[dict[str, str]],
+    contract_path: Path = DEFAULT_CONTRACT,
+) -> dict[str, Any]:
+    panel = _read_json(panel_json)
+    target_rows: list[dict[str, Any]] = []
+    case_results: list[dict[str, Any]] = []
+    failures: list[str] = []
+    if panel.get("status") != "READY_FOR_HPC_SMOKE":
+        failures.append(f"panel_status:{panel.get('status')}")
+    for case in panel.get("cases") or []:
+        case_id = str(case.get("case_id") or "")
+        targets = [str(target) for target in (case.get("targets") or []) if str(target)]
+        run_out = _run_out_for_panel_case(smoke_root, group, case_id)
+        case_result = _validate_case_targets(
+            smoke_root=smoke_root,
+            group=group,
+            run_out=run_out,
+            case_id=case_id,
+            targets=targets,
+            slurm_rows=slurm_rows,
+            contract_path=contract_path,
+        )
+        case_results.append(case_result)
+        target_rows.extend(case_result["target_rows"])
+        failures.extend(f"{case_id}:{reason}" for reason in case_result["failures"])
+    expected_targets = list(CADS15_TARGETS)
+    covered: dict[str, list[str]] = {target: [] for target in expected_targets}
+    for row in target_rows:
+        if row.get("valid") and row.get("target") in covered:
+            covered[str(row["target"])].append(str(row["case_id"]))
+    missing = sorted(target for target, cases in covered.items() if not cases)
+    if missing:
+        failures.extend(f"target_missing_positive_smoke:{target}" for target in missing)
+    passed_targets = sorted(target for target, cases in covered.items() if cases)
+    status = "passed" if not failures else "failed"
+    return {
+        "group": group,
+        "status": status,
+        "panel_json": str(panel_json),
+        "case_results": case_results,
+        "case_count": len(case_results),
+        "requested_models": CADS_MODELS,
+        "requested_targets": expected_targets,
+        "teacher_run_list": sorted({model for case in case_results for model in case.get("teacher_run_list", [])}),
+        "inference_checks": [check for case in case_results for check in case.get("inference_checks", [])],
+        "passed_targets": passed_targets,
+        "failed_targets": missing,
+        "target_positive_smoke_cases": covered,
+        "failures": failures,
+        "target_rows": target_rows,
+        "CADS15_SMOKE_STATUS": "PASSED" if status == "passed" else "FAILED",
+        "TARGETS_REQUESTED": len(expected_targets),
+        "TARGETS_STATICALLY_VERIFIED": len(expected_targets),
+        "TARGETS_WITH_POSITIVE_SMOKE": len(passed_targets),
+        "TARGETS_DELIVERED": sum(1 for row in target_rows if row.get("valid") and row.get("final_status") == "delivered"),
+        "TARGETS_DELIVERED_FOR_REVIEW": sum(1 for row in target_rows if row.get("valid") and row.get("final_status") == "delivered_for_review"),
+        "TARGETS_FAILED": len(missing),
+        "TARGETS_REJECTED": sum(1 for row in target_rows if row.get("final_status") == "rejected"),
+        "TARGETS_UNCOVERED": len(missing),
+        "STRICT_DELIVERY_FAILURE_COUNT": sum(1 for row in target_rows if row.get("strict_failure_reasons")),
     }
 
 
@@ -244,9 +456,21 @@ def validate_smoke_root(
     smoke_root: Path,
     groups: list[str],
     slurm_status_csv: Path | None = None,
+    panel_json: Path | None = None,
+    contract_path: Path = DEFAULT_CONTRACT,
 ) -> dict[str, Any]:
     slurm_rows = _read_csv(slurm_status_csv) if slurm_status_csv else []
-    group_results = [validate_group(smoke_root, group, slurm_rows) for group in groups]
+    effective_panel_json = panel_json or _panel_json_default(smoke_root)
+    group_results = [
+        validate_group(
+            smoke_root,
+            group,
+            slurm_rows,
+            panel_json=effective_panel_json,
+            contract_path=contract_path,
+        )
+        for group in groups
+    ]
     target_rows = [row for group in group_results for row in group["target_rows"]]
     status = "passed" if all(group["status"] == "passed" for group in group_results) else "failed"
     report = {
@@ -257,17 +481,37 @@ def validate_smoke_root(
         "failed_groups": [group["group"] for group in group_results if group["status"] != "passed"],
         "target_rows": target_rows,
     }
+    cads15 = next((group for group in group_results if group["group"] in {"cads", "cads15"}), None)
+    if cads15 and "CADS15_SMOKE_STATUS" in cads15:
+        report["cads15_summary"] = {
+            key: cads15[key]
+            for key in [
+                "CADS15_SMOKE_STATUS", "TARGETS_REQUESTED", "TARGETS_STATICALLY_VERIFIED",
+                "TARGETS_WITH_POSITIVE_SMOKE", "TARGETS_DELIVERED",
+                "TARGETS_DELIVERED_FOR_REVIEW", "TARGETS_FAILED", "TARGETS_REJECTED",
+                "TARGETS_UNCOVERED", "STRICT_DELIVERY_FAILURE_COUNT",
+            ]
+        }
     write_json(smoke_root / "task2_smoke_verdict.json", report)
     write_csv(
         smoke_root / "task2_smoke_target_validation.csv",
         target_rows,
-        ["group", "case_id", "target", "mask_path", "valid", "reason", "strict_failure_reasons"],
+        [
+            "group", "case_id", "target", "mask_path", "valid", "reason",
+            "final_status", "delivery_status", "strict_failure_reasons", "run_out",
+        ],
     )
     lines = ["# Task 2 Teacher Smoke Verdict", "", f"- Status: `{status}`", f"- Root: `{smoke_root}`", ""]
+    if report.get("cads15_summary"):
+        lines.append("## CADS15")
+        lines.append("")
+        for key, value in report["cads15_summary"].items():
+            lines.append(f"- {key}: `{value}`")
+        lines.append("")
     for group in group_results:
         lines.append(f"- {group['group']}: `{group['status']}`; passed `{len(group['passed_targets'])}/{len(group['requested_targets'])}`")
         if group["failures"]:
-            lines.append(f"  failures: `{'; '.join(group['failures'])}`")
+            lines.append(f"  failures: `{'; '.join(group['failures'][:40])}`")
     (smoke_root / "task2_smoke_verdict.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report
 
@@ -285,11 +529,15 @@ def main() -> int:
     parser.add_argument("--smoke-root", required=True, type=Path)
     parser.add_argument("--groups", default="atm,cads,unest")
     parser.add_argument("--slurm-status-csv", default=None, type=Path)
+    parser.add_argument("--panel-json", default=None, type=Path)
+    parser.add_argument("--contract", default=DEFAULT_CONTRACT, type=Path)
     args = parser.parse_args()
     report = validate_smoke_root(
         smoke_root=args.smoke_root.resolve(),
         groups=parse_groups(args.groups),
         slurm_status_csv=args.slurm_status_csv.resolve() if args.slurm_status_csv else None,
+        panel_json=args.panel_json.resolve() if args.panel_json else None,
+        contract_path=args.contract.resolve(),
     )
     print(json.dumps({"status": report["status"], "failed_groups": report["failed_groups"]}, indent=2))
     return 0 if report["status"] == "passed" else 1

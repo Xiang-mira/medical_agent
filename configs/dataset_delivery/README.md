@@ -18,46 +18,44 @@ The `main` branch is the only maintenance branch for Task 1.
 The read-only proposal audit entrypoint is `tools/dataset_delivery/propose_task1_finalization.py`;
 the HPC wrapper is `scripts/run_task1_proposal_audit_hpc.sh`.
 
-## Task 2 CADS Remaining-target Smoke
+## Task 2 CADS15 Smoke
 
-CADS Task 2 status is recomputed from the canonical 23 generate-target CSV,
-the 373 taxonomy, the model registry, the class checkpoint map, and existing
-CADS reports. The read-only audit entrypoint is:
+CADS Task 2 delivery is now maintained as a 15-target canonical contract. The
+historical completed-7/remaining-8 split remains only as a legacy audit record;
+it is not a delivery success criterion.
 
-```bash
-python tools/dataset_delivery/audit_cads_remaining_targets.py audit \
-  --output-root reports/cads_remaining8_status
-```
-
-The current canonical CADS scope is 15 targets. The historical completed set is
-7 targets, and the remaining strict-delivery smoke scope is the canonical
-difference:
-
-```text
-blood
-common_iliac_artery_left
-common_iliac_artery_right
-common_iliac_vein_left
-common_iliac_vein_right
-compact_bone
-gland_structure
-spongy_bone
-```
-
-The older candidate names `brain`, `trachea`, `brainstem`, `oral_cavity`, and
-`larynx` are not in the current Task 2 23-target generate list and must not be
-reintroduced by the CADS smoke workflow.
-
-The single-case HPC smoke wrappers are:
+The CADS15 contract source of truth is:
 
 ```bash
-bash scripts/submit_cads_remaining8_strict_delivery_smoke.sh
-bash scripts/verify_cads_remaining8_strict_delivery_smoke.sh
+configs/cads15_target_contract.json
 ```
 
-The smoke runs CADS only, enables strict delivery, writes to a timestamped output
-directory, records the selected case and complete command, and validates each
-requested target NIfTI for existence, non-empty foreground, binary labels, and
-CT shape/spacing/affine agreement. It does not launch the 100-case formal array,
-does not modify original NIfTI files, and does not overwrite completed CADS
-outputs.
+Static route audit:
+
+```bash
+python tools/dataset_delivery/cads15_contract_audit.py \
+  --output-root reports/cads15_route_audit
+```
+
+Positive smoke panel generation:
+
+```bash
+python tools/dataset_delivery/cads15_smoke_panel.py \
+  --case-manifest /projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv \
+  --output-root reports/cads15_smoke_panel
+```
+
+HPC wrapper commands:
+
+```bash
+bash scripts/task2/submit_cads15_smoke.sh
+bash scripts/task2/check_cads15_smoke.sh
+```
+
+The smoke does not launch the 100-case formal array. It selects a deterministic
+minimal set of fixed-manifest cases so each of the 15 canonical targets has at
+least one positive in-FOV smoke case. A target passes only when the final
+publication layer contains a non-empty, binary, CT-aligned mask with final status
+`delivered` or `delivered_for_review` and no strict-delivery failure.
+
+More detail: `docs/CADS15_TASK2_SMOKE_DELIVERY.md`.
