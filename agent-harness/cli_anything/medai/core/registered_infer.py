@@ -273,7 +273,21 @@ def _mask_summary(seg_out: Path) -> tuple[int, list[str]]:
     return len(masks), masks[:80]
 
 
-def _expected_output_organs(entry: dict[str, Any], extra_context: dict[str, Any]) -> list[str]:
+def _load_model_label_aliases(project_root: Path) -> dict[str, Any]:
+    path = project_root / "configs" / "model_label_aliases.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"models": {}}
+    return data if isinstance(data, dict) else {"models": {}}
+
+
+def _expected_output_organs(
+    entry: dict[str, Any],
+    extra_context: dict[str, Any],
+    *,
+    project_root: Path | None = None,
+) -> list[str]:
     requested = [
         str(x).strip()
         for x in (extra_context.get("requested_organs") or [])
@@ -284,7 +298,29 @@ def _expected_output_organs(entry: dict[str, Any], extra_context: dict[str, Any]
     covered = {str(x).strip() for x in (entry.get("covered_organs") or []) if str(x).strip()}
     if not covered:
         return requested
-    return [organ for organ in requested if organ in covered]
+    supported_aliases = {
+        str(global_name).strip(): str(local_name).strip()
+        for global_name, local_name in (entry.get("supported_organ_aliases") or {}).items()
+        if str(global_name).strip() and str(local_name).strip()
+    }
+    if project_root is not None:
+        model_aliases = (
+            (_load_model_label_aliases(project_root).get("models", {}) or {}).get(
+                str(entry.get("model_key") or ""),
+                {},
+            )
+            or {}
+        )
+        for local_name, global_name in (model_aliases.get("local_to_global", {}) or {}).items():
+            local = str(local_name).strip()
+            global_target = str(global_name).strip()
+            if local and global_target:
+                supported_aliases.setdefault(global_target, local)
+    return [
+        organ
+        for organ in requested
+        if organ in covered or supported_aliases.get(organ) in covered
+    ]
 
 
 def _classify_mask_outputs(seg_out: Path, expected_organs: list[str]) -> dict[str, Any]:
@@ -749,7 +785,7 @@ def run_registered_model(
     command = _maybe_set_nnunet_prediction_timeout(command, timeout_sec)
 
     if dry_run:
-        expected_organs = _expected_output_organs(entry, extra_context)
+        expected_organs = _expected_output_organs(entry, extra_context, project_root=project_root)
         result = {
             "stage": "infer", "backend": "registered", "model_key": model_key,
             "model_name": entry.get("name", model_key), "status": "dry_run",
@@ -803,7 +839,7 @@ def run_registered_model(
         _stop_gpu_monitor(gpu_stop, gpu_thread)
     timed_out = bool(completed.get("timed_out"))
     elapsed = time.time() - start
-    expected_organs = _expected_output_organs(entry, extra_context)
+    expected_organs = _expected_output_organs(entry, extra_context, project_root=project_root)
     output_classification = _classify_mask_outputs(seg_out, expected_organs)
     if timed_out:
         status = "timed_out"

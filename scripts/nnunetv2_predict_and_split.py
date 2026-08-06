@@ -27,9 +27,21 @@ from typing import Any
 
 
 ORGAN_ALIASES = {
+    "cerebrospinal_fluid": "csf",
     "celiac_aa_celiac_artery": "celiac_aa",
+    "common_iliac_artery_left": "iliac_artery_left",
+    "common_iliac_artery_right": "iliac_artery_right",
+    "common_iliac_vein_left": "iliac_vena_left",
+    "common_iliac_vein_right": "iliac_vena_right",
+    "compact_bone": "compact bone",
+    "eyeball": "eye balls",
+    "gland_structure": "glands",
+    "gray_matter": "gray matter",
+    "muscle_of_head": "head muscles",
     "inferior_vena_cava": "postcava",
     "small_intestine": "intestine",
+    "spongy_bone": "spongy bone",
+    "white_matter": "white matter",
 }
 
 
@@ -168,6 +180,21 @@ def _requested_label_names(requested_organs: list[str] | None) -> set[str] | Non
         names.add(ORGAN_ALIASES.get(name, name))
         names.add(reverse_aliases.get(name, name))
     return names
+
+
+def _canonical_output_name(label_name: str, requested_organs: list[str] | None) -> str:
+    raw_name = str(label_name).strip()
+    if not raw_name:
+        return raw_name
+    if requested_organs:
+        for organ in requested_organs:
+            requested = str(organ).strip()
+            if not requested:
+                continue
+            if raw_name == requested or raw_name == ORGAN_ALIASES.get(requested, requested):
+                return requested
+    reverse_aliases = {v: k for k, v in ORGAN_ALIASES.items()}
+    return reverse_aliases.get(raw_name, raw_name)
 
 
 def _dataset_label_sets(dataset_json: Path, requested_organs: list[str] | None) -> tuple[set[int], dict[str, list[int]]]:
@@ -815,10 +842,7 @@ def split_labelmap(label_map: Path, dataset_json: Path, seg_dir: Path, requested
 
     labels = load_labels(dataset_json)
     if requested_organs:
-        requested = set()
-        for organ in requested_organs:
-            requested.add(organ)
-            requested.add(ORGAN_ALIASES.get(organ, organ))
+        requested = _requested_label_names(requested_organs) or set()
         labels = {k: v for k, v in labels.items() if k in requested}
     img = nib.load(str(label_map))
     arr = np.asanyarray(img.dataobj)
@@ -828,9 +852,16 @@ def split_labelmap(label_map: Path, dataset_json: Path, seg_dir: Path, requested
         mask = (arr == value).astype("uint8")
         if int(mask.sum()) == 0:
             continue
-        out = seg_dir / f"{organ}.nii.gz"
+        output_organ = _canonical_output_name(organ, requested_organs)
+        out = seg_dir / f"{output_organ}.nii.gz"
         nib.save(nib.Nifti1Image(mask, img.affine, img.header), str(out))
-        written.append({"organ": organ, "label_value": value, "path": str(out), "voxels": int(mask.sum())})
+        written.append({
+            "organ": output_organ,
+            "source_label": organ,
+            "label_value": value,
+            "path": str(out),
+            "voxels": int(mask.sum()),
+        })
     return {"num_written": len(written), "written_masks": written, "labels_available": labels}
 
 
