@@ -230,6 +230,44 @@ def test_panel_completed_then_gpu_pending(tmp_path: Path):
     assert smoke_status(smoke_root=root, use_sacct=False)["status"] == "GPU_SMOKE_PENDING"
 
 
+def test_manifest_without_real_job_id_stays_not_submitted(tmp_path: Path):
+    from tools.dataset_delivery.cads15_smoke_status import smoke_status
+
+    root = tmp_path / "smoke"
+    root.mkdir()
+    (root / "submission_manifest.json").write_text(
+        json.dumps({
+            "status": "NOT_SUBMITTED",
+            "panel": {"job_id": "", "state": "NOT_SUBMITTED"},
+            "gpu": {"job_ids": [], "state": "NOT_SUBMITTED"},
+        }),
+        encoding="utf-8",
+    )
+    (root / "panel_state.json").write_text(json.dumps({"status": "NOT_SUBMITTED"}), encoding="utf-8")
+
+    status = smoke_status(smoke_root=root, use_sacct=False)
+
+    assert status["status"] == "NOT_SUBMITTED"
+    assert status["gpu_smoke_started"] is False
+
+
+def test_gpu_submission_rejected_is_specific_status(tmp_path: Path):
+    from tools.dataset_delivery.cads15_smoke_status import smoke_status
+
+    root = tmp_path / "smoke"
+    root.mkdir()
+    (root / "submission_manifest.json").write_text(
+        json.dumps({
+            "status": "GPU_SUBMISSION_REJECTED",
+            "panel": {"job_id": "123", "state": "PANEL_PENDING"},
+            "gpu": {"job_ids": [], "state": "GPU_SUBMISSION_REJECTED"},
+        }),
+        encoding="utf-8",
+    )
+
+    assert smoke_status(smoke_root=root, use_sacct=False)["status"] == "GPU_SUBMISSION_REJECTED"
+
+
 def test_panel_cache_reuses_completed_cases_without_reloading_reference(monkeypatch, tmp_path: Path):
     from tools.dataset_delivery import cads15_smoke_panel as panel
 

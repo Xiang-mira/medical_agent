@@ -28,6 +28,7 @@ from cli_anything.medai.core.model_key_resolver import canonical_model_keys, res
 from cli_anything.medai.core.model_registry import candidate_models_for_organs, load_registry  # noqa: E402
 from cli_anything.medai.core.organ_router import route_organs  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_json  # noqa: E402
+from tools.dataset_delivery.cads15_contract_audit import DEFAULT_CONTRACT, contract_targets  # noqa: E402
 from tools.dataset_delivery.task2_preflight import build_preflight  # noqa: E402
 from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS, parse_groups  # noqa: E402
 
@@ -275,6 +276,10 @@ def _covered_by_model(entry: dict[str, Any], target: str) -> bool:
     return target_norm in covered or aliases.get(target_norm) in covered
 
 
+def _cads15_contract_by_target() -> dict[str, dict[str, Any]]:
+    return {str(row.get("canonical_id")): dict(row) for row in contract_targets(DEFAULT_CONTRACT)}
+
+
 def build_route_preflight(*, group: str, registry_path: Path) -> dict[str, Any]:
     registry = load_registry(registry_path)
     spec = SMOKE_SPECS[group]
@@ -282,6 +287,7 @@ def build_route_preflight(*, group: str, registry_path: Path) -> dict[str, Any]:
     requested_set = set(requested_models)
     routed = route_organs(list(spec["targets"]))
     candidate_map = candidate_models_for_organs(registry, list(spec["targets"]))
+    cads_contract = _cads15_contract_by_target() if group in {"cads", "cads15"} else {}
     targets: dict[str, Any] = {}
     teacher_run_list: list[str] = []
     failures: list[dict[str, Any]] = []
@@ -299,7 +305,11 @@ def build_route_preflight(*, group: str, registry_path: Path) -> dict[str, Any]:
         selected = eligible[0] if eligible else None
         entry = (registry.get("models", {}) or {}).get(selected or "", {}) if selected else {}
         registry_enabled = bool(entry.get("enabled", True)) if selected else False
-        source_label_exists = _covered_by_model(entry, target) if selected else False
+        contract_row = cads_contract.get(target, {})
+        if contract_row:
+            source_label_exists = selected == contract_row.get("primary_model") and bool(contract_row.get("source_label"))
+        else:
+            source_label_exists = _covered_by_model(entry, target) if selected else False
         route_eligible = bool(selected and registry_enabled and source_label_exists)
         reason = ""
         if not primary_resolved.ok:
@@ -319,6 +329,7 @@ def build_route_preflight(*, group: str, registry_path: Path) -> dict[str, Any]:
             "requested_models": requested_models,
             "candidate_models": candidates,
             "source_label_exists": source_label_exists,
+            "source_label": contract_row.get("source_label", ""),
             "fov_excluded": False,
             "route_eligible": route_eligible,
             "filtered_reason": reason,

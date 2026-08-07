@@ -18,6 +18,19 @@ from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root  # 
 FAIL_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY", "BOOT_FAIL"}
 RUNNING_STATES = {"RUNNING", "CONFIGURING", "COMPLETING"}
 PENDING_STATES = {"PENDING", "REQUEUED", "SUSPENDED"}
+FAILED_WORKFLOW_STATUSES = {
+    "PANEL_RESOURCE_INVALID",
+    "PANEL_SCRIPT_INVALID",
+    "PANEL_NOT_SUBMITTED",
+    "PANEL_SUBMISSION_REJECTED",
+    "PANEL_FAILED",
+    "GPU_RESOURCE_INVALID",
+    "GPU_SCRIPT_INVALID",
+    "GPU_NOT_SUBMITTED",
+    "GPU_SUBMISSION_REJECTED",
+    "GPU_SMOKE_FAILED",
+    "VALIDATION_FAILED",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -96,6 +109,10 @@ def smoke_status(*, smoke_root: Path | None, use_sacct: bool = True) -> dict[str
         "GPU_SUBMISSION_REJECTED",
     }:
         return {**base, "status": manifest_status, "reason": (manifest.get("resource_preflight") or {}).get("failure_reason", "")}
+    if not panel_job_id and manifest_status in {"", "NOT_SUBMITTED"}:
+        return {**base, "status": "NOT_SUBMITTED", "reason": "no_panel_job_id"}
+    if not panel_job_id and panel_state_json.get("status") == "NOT_SUBMITTED":
+        return {**base, "status": "NOT_SUBMITTED", "reason": "panel_not_submitted"}
     if (smoke_root / "PANEL_FAILED").exists() or panel_state_json.get("status") == "PANEL_FAILED" or panel_job.get("state") in FAIL_STATES:
         return {**base, "status": "PANEL_FAILED"}
     panel_completed = (
@@ -146,7 +163,7 @@ def main() -> int:
     args = parser.parse_args()
     report = smoke_status(smoke_root=args.smoke_root.resolve() if args.smoke_root else None, use_sacct=not bool(args.no_sacct))
     print(json.dumps(report, indent=2))
-    return 1 if report["status"] in {"PANEL_FAILED", "GPU_SMOKE_FAILED", "VALIDATION_FAILED"} else 0
+    return 1 if report["status"] in FAILED_WORKFLOW_STATUSES else 0
 
 
 if __name__ == "__main__":

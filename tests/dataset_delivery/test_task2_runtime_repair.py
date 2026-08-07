@@ -267,6 +267,18 @@ def test_airrc_route_preflight_ready_with_canonical_run_list():
         assert row["route_eligible"] is True
 
 
+def test_cads_route_preflight_uses_contract_source_labels():
+    from tools.dataset_delivery.task2_smoke_launcher import build_route_preflight
+
+    report = build_route_preflight(group="cads15", registry_path=REPO_ROOT / "configs" / "model_registry.yaml")
+
+    assert report["status"] == "READY"
+    assert report["teacher_run_list"] == ["cads557", "cads553", "cads559"]
+    assert report["targets"]["cerebrospinal_fluid"]["source_label"] == "csf"
+    assert report["targets"]["common_iliac_artery_left"]["source_label"] == "iliac_artery_left"
+    assert report["targets"]["gland_structure"]["source_label"] == "glands"
+
+
 def test_airrc_route_failure_validator_does_not_report_model_failed(tmp_path: Path):
     from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
 

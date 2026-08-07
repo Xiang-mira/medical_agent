@@ -81,14 +81,96 @@ if [ "$PREP_STATUS" != "NOT_SUBMITTED" ]; then
   echo "CADS15 smoke resource preflight blocked submission: $PREP_STATUS" >&2
   exit 2
 fi
-PANEL_JOB_ID=$(sbatch --parsable "$PANEL_SBATCH")
+PANEL_SUBMIT_ERR=$OUT_ROOT/panel_sbatch_submit.err
+if ! PANEL_JOB_ID=$(sbatch --parsable "$PANEL_SBATCH" 2>"$PANEL_SUBMIT_ERR"); then
+  "$PYTHON" - "$OUT_ROOT/submission_manifest.json" "$PANEL_SUBMIT_ERR" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+stderr_path = Path(sys.argv[2])
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+doc["status"] = "PANEL_SUBMISSION_REJECTED"
+doc["panel"]["state"] = "PANEL_SUBMISSION_REJECTED"
+doc["panel"]["submission_stderr"] = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, manifest_path)
+PY
+  echo "CADS15 panel sbatch submission was rejected; GPU smoke will not be submitted." >&2
+  exit 2
+fi
 if [ -z "$PANEL_JOB_ID" ]; then
+  "$PYTHON" - "$OUT_ROOT/submission_manifest.json" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+doc["status"] = "PANEL_NOT_SUBMITTED"
+doc["panel"]["state"] = "PANEL_NOT_SUBMITTED"
+tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, manifest_path)
+PY
   echo "CADS15 panel submission did not return a job id; GPU smoke will not be submitted." >&2
   exit 2
 fi
-GPU_JOB_ID=$(sbatch --parsable --dependency=afterok:"$PANEL_JOB_ID" "$GPU_SBATCH")
-
 printf "%s\n" "$PANEL_JOB_ID" > "$OUT_ROOT/panel_job_id.txt"
+"$PYTHON" - "$OUT_ROOT/submission_manifest.json" "$PANEL_JOB_ID" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+panel_job = sys.argv[2]
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+doc["status"] = "PANEL_PENDING"
+doc["panel"]["job_id"] = panel_job
+doc["panel"]["state"] = "PANEL_PENDING"
+doc["gpu"]["state"] = "GPU_NOT_SUBMITTED"
+tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, manifest_path)
+PY
+GPU_SUBMIT_ERR=$OUT_ROOT/gpu_sbatch_submit.err
+if ! GPU_JOB_ID=$(sbatch --parsable --dependency=afterok:"$PANEL_JOB_ID" "$GPU_SBATCH" 2>"$GPU_SUBMIT_ERR"); then
+  "$PYTHON" - "$OUT_ROOT/submission_manifest.json" "$PANEL_JOB_ID" "$GPU_SUBMIT_ERR" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+panel_job = sys.argv[2]
+stderr_path = Path(sys.argv[3])
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+doc["status"] = "GPU_SUBMISSION_REJECTED"
+doc["panel"]["job_id"] = panel_job
+doc["panel"]["state"] = "PANEL_PENDING"
+doc["gpu"]["dependency"] = f"afterok:{panel_job}"
+doc["gpu"]["state"] = "GPU_SUBMISSION_REJECTED"
+doc["gpu"]["submission_stderr"] = stderr_path.read_text(encoding="utf-8") if stderr_path.exists() else ""
+tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, manifest_path)
+PY
+  echo "CADS15 GPU sbatch submission was rejected after panel job $PANEL_JOB_ID; dependency smoke was not submitted." >&2
+  exit 2
+fi
 printf "%s\n" "$GPU_JOB_ID" > "$OUT_ROOT/gpu_job_ids.txt"
 printf "group,case_id,targets,job_id,sbatch_file,dependency\n" > "$OUT_ROOT/cads15_smoke_jobs.csv"
 printf "cads15_panel,,,\"%s\",\"%s\",\n" "$PANEL_JOB_ID" "$PANEL_SBATCH" >> "$OUT_ROOT/cads15_smoke_jobs.csv"
