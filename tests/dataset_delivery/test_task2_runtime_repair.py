@@ -350,6 +350,87 @@ def _write_smoke_run(root: Path, group: str, *, final_masks: bool = True) -> Non
         _save(arr, destination)
 
 
+def _write_unest_hpc_success_shape(root: Path, *, include_call_evidence: bool = True, include_artifact: bool = True) -> None:
+    case_id = "case_001"
+    group_root = root / "unest"
+    run_out = group_root / "run_loop"
+    ct = _save(np.zeros((3, 3, 3), dtype=np.int16), group_root / "case" / "ct.nii.gz")
+    ref = group_root / "ref"
+    ref.mkdir(parents=True, exist_ok=True)
+    (group_root / "selected_case_manifest.csv").write_text(
+        f"case_id,ct_path,annotation_folder\n{case_id},{ct},{ref}\n",
+        encoding="utf-8",
+    )
+    plan_path = run_out / "annotation_versions" / case_id / "case_execution_plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        json.dumps({
+            "ct_path": str(ct),
+            "teacher_run_list": ["unest"] if include_call_evidence else [],
+            "per_organ": {
+                target: {"primary_teacher": "unest", "eligible_teachers": ["unest"]}
+                for target in ["kidney_cortex", "kidney_medulla", "kidney_pelvicalyceal_system"]
+            },
+        }),
+        encoding="utf-8",
+    )
+    teacher_models = ["unest"] if include_call_evidence else []
+    run_summary = {
+        "status": "success",
+        "teacher_inference_models": teacher_models,
+        "teacher_inference_count": 1 if include_call_evidence else 0,
+        "inference_success_count": 1 if include_call_evidence else 0,
+        "candidate_generated_count": 3,
+        "valid_candidate_count": 3,
+        "strict_delivery_failure_count": 0,
+        "strict_delivery_failures": [],
+        "case_timing_breakdown": [{
+            "case_id": case_id,
+            "teacher_inference_models": teacher_models,
+            "teacher_inference_count": 1 if include_call_evidence else 0,
+        }],
+        "final_delivery_counts": {
+            "inference_success_count": 1 if include_call_evidence else 0,
+            "candidate_generated_count": 3,
+            "valid_candidate_count": 3,
+        },
+    }
+    (run_out / "run_summary.json").write_text(json.dumps(run_summary), encoding="utf-8")
+    (run_out / "final_delivery_status.json").write_text(
+        json.dumps({
+            "status": "success",
+            "rows": [
+                {
+                    "case_id": case_id,
+                    "organ": target,
+                    "final_status": "delivered_for_review",
+                    "delivery_status": "delivered_for_review",
+                }
+                for target in ["kidney_cortex", "kidney_medulla", "kidney_pelvicalyceal_system"]
+            ],
+        }),
+        encoding="utf-8",
+    )
+    if include_artifact:
+        (run_out / "inference_results.json").write_text(
+            json.dumps([{"case_id": case_id, "model_key": "unest", "status": "success"}]),
+            encoding="utf-8",
+        )
+        manifest_path = run_out / "cases" / case_id / "hierarchical_inference_plan.json"
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(
+            json.dumps({
+                "case_id": case_id,
+                "roi_tasks": [{"inference": {"model_key": "unest", "status": "success"}}],
+            }),
+            encoding="utf-8",
+        )
+    arr = np.zeros((3, 3, 3), dtype=np.uint8)
+    arr[1, 1, 1] = 1
+    for target in ["kidney_cortex", "kidney_medulla", "kidney_pelvicalyceal_system"]:
+        _save(arr, run_out / "annotation_versions" / case_id / "updated" / f"{target}.nii.gz")
+
+
 def test_smoke_validator_requires_formal_updated_layer(tmp_path: Path):
     from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
 
@@ -384,6 +465,63 @@ def test_smoke_validator_passes_all_formal_cads_masks(tmp_path: Path):
 
     assert report["status"] == "PASSED"
     assert len(report["groups"][0]["passed_targets"]) == 15
+
+
+def test_unest_validator_accepts_hierarchical_run_level_success_without_summary(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_unest_hpc_success_shape(tmp_path)
+    slurm_csv = tmp_path / "slurm_status.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\nunest,4440396,COMPLETED,0:0\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["unest"], slurm_status_csv=slurm_csv)
+
+    assert report["status"] == "PASSED"
+    check = report["groups"][0]["inference_checks"][0]
+    assert check["ok"] is True
+    assert check["summaries"] == []
+    assert report["groups"][0]["passed_targets"] == [
+        "kidney_cortex",
+        "kidney_medulla",
+        "kidney_pelvicalyceal_system",
+    ]
+
+
+def test_unest_validator_fails_without_inference_success_evidence_even_if_masks_valid(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_unest_hpc_success_shape(tmp_path, include_call_evidence=False, include_artifact=False)
+    slurm_csv = tmp_path / "slurm_status.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\nunest,4440396,COMPLETED,0:0\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["unest"], slurm_status_csv=slurm_csv)
+
+    assert report["status"] == "VALIDATION_FAILED"
+    assert "INFERENCE_EVIDENCE_INCOMPLETE:unest" in report["groups"][0]["failures"]
+
+
+def test_unest_validator_fails_when_model_never_called_with_valid_masks(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_unest_hpc_success_shape(tmp_path, include_call_evidence=False, include_artifact=True)
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["unest"])
+
+    assert report["status"] == "VALIDATION_FAILED"
+    assert "teacher_run_list_missing:unest" in report["groups"][0]["failures"]
+    assert "INFERENCE_EVIDENCE_INCOMPLETE:unest" in report["groups"][0]["failures"]
+
+
+def test_atm_and_airrc_inference_summary_checkers_still_pass(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_smoke_run(tmp_path, "atm", final_masks=True)
+    _write_smoke_run(tmp_path, "airrc", final_masks=True)
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["atm", "airrc"])
+
+    assert report["status"] == "PASSED"
+    assert all(check["ok"] for group in report["groups"] for check in group["inference_checks"])
 
 
 def test_unest_python_resolver_preserves_venv_symlink(monkeypatch, tmp_path: Path):

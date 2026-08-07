@@ -302,13 +302,134 @@ def validate_mask(mask_path: Path, ct_path: Path | None) -> dict[str, Any]:
     return result
 
 
-def _model_inference_ok(run_out: Path, case_id: str, model: str) -> dict[str, Any]:
-    summaries = sorted((run_out / "cases" / case_id / "raw_predictions").glob(f"**/{model}/{case_id}/inference_summary.json"))
+def _json_has_model_success(value: Any, model: str) -> bool:
+    if isinstance(value, dict):
+        model_key = str(value.get("model_key") or value.get("model") or "")
+        status = str(value.get("status") or "")
+        if model_key == model and status == "success":
+            return True
+        return any(_json_has_model_success(item, model) for item in value.values())
+    if isinstance(value, list):
+        return any(_json_has_model_success(item, model) for item in value)
+    return False
+
+
+def _case_timing_row(summary: dict[str, Any], case_id: str) -> dict[str, Any]:
+    for row in summary.get("case_timing_breakdown") or []:
+        if not isinstance(row, dict):
+            continue
+        if not row.get("case_id") or row.get("case_id") == case_id:
+            return dict(row)
+    return {}
+
+
+def _run_summary_count(summary: dict[str, Any], key: str, case_row: dict[str, Any]) -> int:
+    if summary.get(key) is not None:
+        return int(summary.get(key) or 0)
+    counts = summary.get("final_delivery_counts") or {}
+    if counts.get(key) is not None:
+        return int(counts.get(key) or 0)
+    if case_row.get(key) is not None:
+        return int(case_row.get(key) or 0)
+    return 0
+
+
+def _find_model_inference_summaries(run_out: Path, case_id: str, model: str) -> list[Path]:
+    raw_root = run_out / "cases" / case_id / "raw_predictions"
+    summaries = sorted(raw_root.glob(f"**/{model}/{case_id}/inference_summary.json"))
     if not summaries:
-        summaries = sorted((run_out / "cases" / case_id / "raw_predictions").glob(f"**/{model}*/**/inference_summary.json"))
+        summaries = sorted(raw_root.glob(f"**/{model}*/**/inference_summary.json"))
+    if not summaries:
+        candidates = sorted(raw_root.glob("**/inference_summary.json"))
+        summaries = [
+            path for path in candidates
+            if (_read_json(path).get("model_key") == model or f"/per_model/{model}/" in str(path))
+        ]
+    return summaries
+
+
+def _model_inference_ok(
+    run_out: Path,
+    case_id: str,
+    model: str,
+    *,
+    plan: dict[str, Any],
+    summary: dict[str, Any],
+    target_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    summaries = _find_model_inference_summaries(run_out, case_id, model)
     rows = [_read_json(path) | {"path": str(path)} for path in summaries]
     ok = any(row.get("status") == "success" and int(row.get("return_code") or 0) == 0 for row in rows)
-    return {"model": model, "ok": ok, "summaries": rows}
+    evidence: dict[str, Any] = {
+        "summary_paths": [str(path) for path in summaries],
+        "run_summary": str(run_out / "run_summary.json") if (run_out / "run_summary.json").exists() else "",
+    }
+    if ok:
+        return {"model": model, "ok": True, "evidence_status": "success", "summaries": rows, "evidence": evidence}
+    if model != "unest":
+        reason = "INFERENCE_EVIDENCE_INCOMPLETE" if not rows else "inference_summary_not_success"
+        return {"model": model, "ok": False, "reason": reason, "summaries": rows, "evidence": evidence}
+
+    case_row = _case_timing_row(summary, case_id)
+    teacher_models = {
+        str(item)
+        for item in [
+            *(summary.get("teacher_inference_models") or []),
+            *(case_row.get("teacher_inference_models") or []),
+        ]
+        if str(item)
+    }
+    teacher_count = _run_summary_count(summary, "teacher_inference_count", case_row)
+    inference_success_count = _run_summary_count(summary, "inference_success_count", case_row)
+    candidate_generated_count = _run_summary_count(summary, "candidate_generated_count", case_row)
+    valid_candidate_count = _run_summary_count(summary, "valid_candidate_count", case_row)
+    inference_results_path = run_out / "inference_results.json"
+    inference_results = _read_json(inference_results_path)
+    if not inference_results and inference_results_path.exists():
+        try:
+            inference_results = json.loads(inference_results_path.read_text(encoding="utf-8"))
+        except Exception:
+            inference_results = {}
+    hierarchical_manifest_path = run_out / "cases" / case_id / "hierarchical_inference_plan.json"
+    hierarchical_manifest = _read_json(hierarchical_manifest_path)
+    target_masks_valid = bool(target_rows) and all(bool(row.get("valid")) for row in target_rows)
+    artifact_model_success = _json_has_model_success(inference_results, model) or _json_has_model_success(hierarchical_manifest, model)
+    run_level_called = (
+        model in set(plan.get("teacher_run_list") or [])
+        and model in teacher_models
+        and teacher_count >= 1
+        and inference_success_count >= 1
+    )
+    run_level_masks_ok = (
+        target_masks_valid
+        and candidate_generated_count >= len(target_rows)
+        and valid_candidate_count >= len(target_rows)
+        and int(summary.get("strict_delivery_failure_count") or 0) == 0
+    )
+    evidence.update({
+        "teacher_inference_models": sorted(teacher_models),
+        "teacher_inference_count": teacher_count,
+        "inference_success_count": inference_success_count,
+        "candidate_generated_count": candidate_generated_count,
+        "valid_candidate_count": valid_candidate_count,
+        "target_masks_valid": target_masks_valid,
+        "inference_results": str(inference_results_path) if inference_results_path.exists() else "",
+        "hierarchical_inference_plan": str(hierarchical_manifest_path) if hierarchical_manifest_path.exists() else "",
+        "artifact_model_success": artifact_model_success,
+    })
+    if run_level_called and run_level_masks_ok and artifact_model_success:
+        return {
+            "model": model,
+            "ok": True,
+            "evidence_status": "success",
+            "summaries": rows,
+            "evidence": evidence,
+            "reason": "unest_run_level_success_evidence",
+        }
+    reason = "INFERENCE_EVIDENCE_INCOMPLETE" if not rows else "unest_inference_summary_not_success"
+    if model not in set(plan.get("teacher_run_list") or []) or model not in teacher_models:
+        reason = "INFERENCE_EVIDENCE_INCOMPLETE"
+    return {"model": model, "ok": False, "reason": reason, "summaries": rows, "evidence": evidence}
 
 
 def _contract_model_by_target(contract_path: Path = DEFAULT_CONTRACT) -> dict[str, str]:
@@ -366,10 +487,6 @@ def _validate_case_targets(
     for model in required_models:
         if model not in teacher_run_list:
             failures.append(f"teacher_run_list_missing:{model}")
-    inference_checks = [_model_inference_ok(run_out, case_id, model) for model in required_models]
-    for check in inference_checks:
-        if not check["ok"]:
-            failures.append(f"inference_not_success:{check['model']}")
     strict_failures = summary.get("strict_delivery_failures") or []
     for target in targets:
         mask = run_out / "annotation_versions" / case_id / "updated" / f"{target}.nii.gz"
@@ -410,6 +527,21 @@ def _validate_case_targets(
             failures.append(f"{target}:final_status:{final_status or 'missing'}")
         if failure_reasons:
             failures.append(f"{target}:strict_delivery_failure:{';'.join(failure_reasons)}")
+    inference_checks = [
+        _model_inference_ok(
+            run_out,
+            case_id,
+            model,
+            plan=plan,
+            summary=summary,
+            target_rows=target_rows,
+        )
+        for model in required_models
+    ]
+    for check in inference_checks:
+        if not check["ok"]:
+            reason = str(check.get("reason") or "inference_not_success")
+            failures.append(f"{reason}:{check['model']}")
     return {
         "case_id": case_id,
         "run_out": str(run_out),
