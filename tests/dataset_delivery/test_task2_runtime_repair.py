@@ -512,6 +512,34 @@ def test_unest_validator_fails_when_model_never_called_with_valid_masks(tmp_path
     assert "INFERENCE_EVIDENCE_INCOMPLETE:unest" in report["groups"][0]["failures"]
 
 
+def test_unest_validator_does_not_accept_stale_summary_without_run_call(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_unest_hpc_success_shape(tmp_path, include_call_evidence=False, include_artifact=False)
+    summary_path = (
+        tmp_path
+        / "unest"
+        / "run_loop"
+        / "cases"
+        / "case_001"
+        / "raw_predictions"
+        / "unest"
+        / "case_001"
+        / "inference_summary.json"
+    )
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps({"model_key": "unest", "status": "success", "return_code": 0}),
+        encoding="utf-8",
+    )
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["unest"])
+
+    assert report["status"] == "VALIDATION_FAILED"
+    assert "teacher_run_list_missing:unest" in report["groups"][0]["failures"]
+    assert "INFERENCE_EVIDENCE_INCOMPLETE:unest" in report["groups"][0]["failures"]
+
+
 def test_atm_and_airrc_inference_summary_checkers_still_pass(tmp_path: Path):
     from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
 

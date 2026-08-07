@@ -74,6 +74,13 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _read_json_any(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def _read_csv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
@@ -348,7 +355,17 @@ def _find_model_inference_summaries(run_out: Path, case_id: str, model: str) -> 
     return summaries
 
 
-def _model_inference_ok(
+def _summary_success_rows(summary_paths: list[Path]) -> list[dict[str, Any]]:
+    rows = [_read_json(path) | {"path": str(path)} for path in summary_paths]
+    for row in rows:
+        try:
+            row["return_code"] = int(row.get("return_code") or 0)
+        except Exception:
+            row["return_code"] = -1
+    return rows
+
+
+def _summary_backend_inference_ok(
     run_out: Path,
     case_id: str,
     model: str,
@@ -358,18 +375,39 @@ def _model_inference_ok(
     target_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     summaries = _find_model_inference_summaries(run_out, case_id, model)
-    rows = [_read_json(path) | {"path": str(path)} for path in summaries]
-    ok = any(row.get("status") == "success" and int(row.get("return_code") or 0) == 0 for row in rows)
+    rows = _summary_success_rows(summaries)
+    ok = any(row.get("status") == "success" and row.get("return_code") == 0 for row in rows)
     evidence: dict[str, Any] = {
+        "resolver": "summary_inference_summary",
         "summary_paths": [str(path) for path in summaries],
         "run_summary": str(run_out / "run_summary.json") if (run_out / "run_summary.json").exists() else "",
     }
     if ok:
         return {"model": model, "ok": True, "evidence_status": "success", "summaries": rows, "evidence": evidence}
-    if model != "unest":
-        reason = "INFERENCE_EVIDENCE_INCOMPLETE" if not rows else "inference_summary_not_success"
-        return {"model": model, "ok": False, "reason": reason, "summaries": rows, "evidence": evidence}
+    reason = "INFERENCE_EVIDENCE_INCOMPLETE" if not rows else "inference_summary_not_success"
+    return {"model": model, "ok": False, "reason": reason, "summaries": rows, "evidence": evidence}
 
+
+def _unest_inference_ok(
+    run_out: Path,
+    case_id: str,
+    model: str,
+    *,
+    plan: dict[str, Any],
+    summary: dict[str, Any],
+    target_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    summaries = _find_model_inference_summaries(run_out, case_id, model)
+    rows = _summary_success_rows(summaries)
+    summary_model_success = any(
+        row.get("model_key") == model and row.get("status") == "success" and row.get("return_code") == 0
+        for row in rows
+    )
+    evidence: dict[str, Any] = {
+        "resolver": "unest_hierarchical_run_level",
+        "summary_paths": [str(path) for path in summaries],
+        "run_summary": str(run_out / "run_summary.json") if (run_out / "run_summary.json").exists() else "",
+    }
     case_row = _case_timing_row(summary, case_id)
     teacher_models = {
         str(item)
@@ -384,16 +422,17 @@ def _model_inference_ok(
     candidate_generated_count = _run_summary_count(summary, "candidate_generated_count", case_row)
     valid_candidate_count = _run_summary_count(summary, "valid_candidate_count", case_row)
     inference_results_path = run_out / "inference_results.json"
-    inference_results = _read_json(inference_results_path)
-    if not inference_results and inference_results_path.exists():
-        try:
-            inference_results = json.loads(inference_results_path.read_text(encoding="utf-8"))
-        except Exception:
-            inference_results = {}
+    inference_results = _read_json_any(inference_results_path)
     hierarchical_manifest_path = run_out / "cases" / case_id / "hierarchical_inference_plan.json"
     hierarchical_manifest = _read_json(hierarchical_manifest_path)
     target_masks_valid = bool(target_rows) and all(bool(row.get("valid")) for row in target_rows)
-    artifact_model_success = _json_has_model_success(inference_results, model) or _json_has_model_success(hierarchical_manifest, model)
+    inference_results_model_success = _json_has_model_success(inference_results, model)
+    hierarchical_manifest_model_success = _json_has_model_success(hierarchical_manifest, model)
+    artifact_model_success = (
+        summary_model_success
+        or inference_results_model_success
+        or hierarchical_manifest_model_success
+    )
     run_level_called = (
         model in set(plan.get("teacher_run_list") or [])
         and model in teacher_models
@@ -416,6 +455,9 @@ def _model_inference_ok(
         "inference_results": str(inference_results_path) if inference_results_path.exists() else "",
         "hierarchical_inference_plan": str(hierarchical_manifest_path) if hierarchical_manifest_path.exists() else "",
         "artifact_model_success": artifact_model_success,
+        "summary_model_success": summary_model_success,
+        "inference_results_model_success": inference_results_model_success,
+        "hierarchical_manifest_model_success": hierarchical_manifest_model_success,
     })
     if run_level_called and run_level_masks_ok and artifact_model_success:
         return {
@@ -430,6 +472,36 @@ def _model_inference_ok(
     if model not in set(plan.get("teacher_run_list") or []) or model not in teacher_models:
         reason = "INFERENCE_EVIDENCE_INCOMPLETE"
     return {"model": model, "ok": False, "reason": reason, "summaries": rows, "evidence": evidence}
+
+
+INFERENCE_EVIDENCE_RESOLVERS = {
+    "airrc": _summary_backend_inference_ok,
+    "atm": _summary_backend_inference_ok,
+    "cads553": _summary_backend_inference_ok,
+    "cads557": _summary_backend_inference_ok,
+    "cads559": _summary_backend_inference_ok,
+    "unest": _unest_inference_ok,
+}
+
+
+def _model_inference_ok(
+    run_out: Path,
+    case_id: str,
+    model: str,
+    *,
+    plan: dict[str, Any],
+    summary: dict[str, Any],
+    target_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    resolver = INFERENCE_EVIDENCE_RESOLVERS.get(model, _summary_backend_inference_ok)
+    return resolver(
+        run_out,
+        case_id,
+        model,
+        plan=plan,
+        summary=summary,
+        target_rows=target_rows,
+    )
 
 
 def _contract_model_by_target(contract_path: Path = DEFAULT_CONTRACT) -> dict[str, str]:
