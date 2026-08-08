@@ -99,12 +99,17 @@ central-airway anchors.
 CPU-only FOV candidate search:
 
 ```bash
-python tools/dataset_delivery/task2_fov_candidate_search.py \
+bash scripts/task2/submit_fov_candidate_search.sh \
+  --python-executable /home/xhan74/envs/medical_agent/bin/python \
   --image-root /projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro \
   --mask-root /projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro \
   --output-root /projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/fov_candidate_search_$(date +%Y%m%d_%H%M%S) \
-  --progress-every 250
+  --progress-every 50
 ```
+
+The launcher runs a login-node dependency preflight before `sbatch`, writes the
+resolved Python into the generated Slurm script, and repeats the nibabel/numpy
+preflight on the compute node before scanning any case.
 
 Append newly qualified cases without disturbing existing indices:
 
