@@ -13,6 +13,7 @@ inputs.
 - `organ_gap_resolution.csv.example`: Task 2 template only; Teacher inference reads confirmed generate rows there when populated.
 - `cases_100_manifest.csv.example`: manifest schema example.
 - `task2_append_cases.csv`: append-only Task 2 FOV-extension cases. The current fixed working cohort is base 100 plus `BDMAP_00000424` at index 100 and `BDMAP_00078156` at index 101.
+- `task2_formal_append_cases.csv`: fixed formal-production append cases for the 103-case x 22-target run: `BDMAP_00000001`, `BDMAP_00000002`, and `BDMAP_00000006`.
 - `task2_qualification_registry.json`: current model/target qualification status from real smoke evidence and known blockers.
 
 The canonical 373 target source remains `configs/student_3d_prompt_target_organs.json`.
@@ -93,6 +94,54 @@ python tools/dataset_delivery/task2_working_cohort.py \
 Manifest membership is not target eligibility. `BDMAP_00000424` and
 `BDMAP_00078156` are thorax/pulmonary candidates, not head anchors and not
 central-airway anchors.
+
+## Task 2 Formal 103-Case Production
+
+The formal production run is manifest-driven and fixed to the four smoke-qualified
+model groups CADS, ATM, AirRC, and UNEST. TotalSegmentator `brain_ventricle`
+is intentionally excluded from this run until its separate blocker is resolved.
+
+Build and validate the 103-case manifest:
+
+```bash
+python tools/dataset_delivery/task2_formal_manifest.py \
+  --base-manifest /projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv \
+  --append-cases configs/dataset_delivery/task2_formal_append_cases.csv \
+  --output-manifest /projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_103cases_work/cases_103_manifest.csv \
+  --audit-json /projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_103cases_work/cases_103_manifest.audit.json \
+  --audit-csv /projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_103cases_work/cases_103_manifest.audit.csv
+```
+
+Dry-run the formal launcher without submitting GPU jobs:
+
+```bash
+DRY_RUN=1 bash scripts/task2/submit_task2_formal_103cases.sh
+```
+
+Submit after the dry run is READY:
+
+```bash
+DRY_RUN=0 bash scripts/task2/submit_task2_formal_103cases.sh
+```
+
+Resume the same output root without recomputing already valid case-group results:
+
+```bash
+RESUME=1 DRY_RUN=0 FORMAL_OUT_ROOT=/path/to/formal_task2_22targets_103cases_YYYYMMDD_HHMMSS \
+  bash scripts/task2/submit_task2_formal_103cases.sh
+```
+
+Validate final production status as a 103 x 22 case-target table:
+
+```bash
+bash scripts/task2/check_task2_formal_103cases.sh
+```
+
+The formal validator classifies every case-target record as one of:
+`generated_valid_mask`, `confirmed_absent`, `out_of_fov`, `not_applicable`,
+`expected_present_but_missing`, `runtime_failed`, or `validation_failed`.
+Missing canonical target reference masks are not launch blockers; only CT path
+and annotation directory validity are checked at manifest/preflight time.
 
 ## Task 2 FOV Search And Append
 

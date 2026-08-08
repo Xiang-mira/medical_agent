@@ -114,7 +114,7 @@ def _annotation_folder(row: dict[str, str]) -> str:
     return row.get("annotation_folder") or row.get("reference_mask_dir") or row.get("mask_dir") or ""
 
 
-def _repo_checks(repo_root: Path, canonical_code_root: Path, formal_mode: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _repo_checks(repo_root: Path, canonical_code_root: Path, formal_mode: bool, allow_dirty_tracked: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     rc, top, err = _run_git(["rev-parse", "--show-toplevel"], repo_root)
     git_repo_ok = rc == 0 and bool(top)
@@ -124,7 +124,7 @@ def _repo_checks(repo_root: Path, canonical_code_root: Path, formal_mode: bool) 
     rc_head, head, _ = _run_git(["rev-parse", "HEAD"], repo_root)
     checks.append({"name": "git_head", "ok": rc_head == 0 and bool(head), "commit": head})
     rc_status, status, _ = _run_git(["status", "--short", "--untracked-files=no"], repo_root)
-    checks.append({"name": "tracked_working_tree_clean", "ok": rc_status == 0 and status == "", "status_short": status})
+    checks.append({"name": "tracked_working_tree_clean", "ok": allow_dirty_tracked or (rc_status == 0 and status == ""), "status_short": status, "allow_dirty_tracked": allow_dirty_tracked})
     rc_common, common_dir, _ = _run_git(["rev-parse", "--path-format=absolute", "--git-common-dir"], repo_root)
     is_worktree = rc_common == 0 and common_dir and Path(common_dir).resolve() != (repo_root / ".git").resolve()
     checks.append({"name": "worktree_detected", "ok": True, "is_worktree": bool(is_worktree), "git_common_dir": common_dir})
@@ -147,7 +147,7 @@ def _repo_checks(repo_root: Path, canonical_code_root: Path, formal_mode: bool) 
     return checks, meta
 
 
-def _data_checks(case_list: Path, output_root: Path, formal_mode: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _data_checks(case_list: Path, output_root: Path, formal_mode: bool, resume: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     checks.append({"name": "case_manifest_exists", **_path_check(case_list, must_be_file=True)})
     cases: list[dict[str, Any]] = []
@@ -175,10 +175,11 @@ def _data_checks(case_list: Path, output_root: Path, formal_mode: bool) -> tuple
     preexisting = output_root.exists()
     checks.append({
         "name": "output_root_new",
-        "ok": (not formal_mode) or not preexisting,
+        "ok": (not formal_mode) or resume or not preexisting,
         "output_root": str(output_root),
         "preexisting": preexisting,
         "formal_mode": formal_mode,
+        "resume": resume,
     })
     return checks, {"cases": cases, "case_count": len(cases), "output_root": str(output_root)}
 
@@ -362,6 +363,8 @@ def build_preflight(
     unest_python_executable: str | None = None,
     run_predictor_help: bool = True,
     require_cuda: bool = False,
+    resume: bool = False,
+    allow_dirty_tracked: bool = False,
 ) -> dict[str, Any]:
     repo_root = REPO_ROOT.resolve()
     registry = load_registry(registry_path)
@@ -380,8 +383,8 @@ def build_preflight(
     unest_python = Path(unest_python_resolution.execution_path)
     resolved_outer_python = Path(outer_python or DEFAULT_OUTER_PYTHON).expanduser().resolve()
     checks: list[dict[str, Any]] = []
-    repo_checks, repo_meta = _repo_checks(repo_root, canonical_code_root, formal_mode)
-    data_checks, data_meta = _data_checks(case_list, output_root, formal_mode)
+    repo_checks, repo_meta = _repo_checks(repo_root, canonical_code_root, formal_mode, allow_dirty_tracked=allow_dirty_tracked)
+    data_checks, data_meta = _data_checks(case_list, output_root, formal_mode, resume=resume)
     checks.extend(repo_checks)
     checks.extend(data_checks)
     checks.append({"name": "target_config", **_path_check(target_config, must_be_file=True)})
