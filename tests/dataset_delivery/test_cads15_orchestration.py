@@ -268,6 +268,72 @@ def test_gpu_submission_rejected_is_specific_status(tmp_path: Path):
     assert smoke_status(smoke_root=root, use_sacct=False)["status"] == "GPU_SUBMISSION_REJECTED"
 
 
+def test_empty_sbatch_script_is_rejected(tmp_path: Path):
+    from tools.dataset_delivery.cads15_slurm_resources import SlurmResourceProfile, preflight_sbatch_script
+
+    sbatch = tmp_path / "empty.sbatch"
+    sbatch.write_text("", encoding="utf-8")
+    profile = SlurmResourceProfile(
+        stage="panel_preparation",
+        partition="cpu",
+        partition_source="test",
+        cpus_per_task=1,
+        cpus_source="test",
+        memory="1G",
+        memory_source="test",
+        time_limit="00:01:00",
+        time_source="test",
+    )
+
+    result = preflight_sbatch_script(
+        profile=profile,
+        sbatch_file=sbatch,
+        available=["cpu"],
+        available_query={"ok": True},
+    )
+
+    assert result["status"] == "PANEL_SCRIPT_INVALID"
+    assert result["reason"] == "empty_sbatch_script"
+    assert result["sbatch_test_only"]["skipped"] is True
+
+
+def test_malformed_panel_job_id_is_invalid_status(tmp_path: Path):
+    from tools.dataset_delivery.cads15_smoke_status import smoke_status
+
+    root = tmp_path / "smoke"
+    root.mkdir()
+    (root / "submission_manifest.json").write_text(
+        json.dumps({"status": "SUBMITTED", "panel": {"job_id": "abc"}, "gpu": {"job_ids": []}}),
+        encoding="utf-8",
+    )
+
+    status = smoke_status(smoke_root=root, use_sacct=False)
+
+    assert status["status"] == "PANEL_JOB_ID_INVALID"
+    assert status["reason"] == "malformed_job_id"
+
+
+def test_dependency_never_satisfied_is_specific_gpu_status(tmp_path: Path, monkeypatch):
+    from tools.dataset_delivery import cads15_smoke_status as status_mod
+
+    root = tmp_path / "smoke"
+    root.mkdir()
+    (root / "submission_manifest.json").write_text(
+        json.dumps({"panel": {"job_id": "1"}, "gpu": {"job_ids": ["2"]}}),
+        encoding="utf-8",
+    )
+    (root / "PANEL_COMPLETED").touch()
+
+    def fake_job_state(job_id: str, *, use_sacct: bool):
+        if job_id == "2":
+            return {"known": "true", "state": "DependencyNeverSatisfied", "exit_code": "0:0"}
+        return {"known": "true", "state": "COMPLETED", "exit_code": "0:0"}
+
+    monkeypatch.setattr(status_mod, "_job_state", fake_job_state)
+
+    assert status_mod.smoke_status(smoke_root=root, use_sacct=True)["status"] == "GPU_DEPENDENCY_UNSATISFIED"
+
+
 def test_panel_cache_reuses_completed_cases_without_reloading_reference(monkeypatch, tmp_path: Path):
     from tools.dataset_delivery import cads15_smoke_panel as panel
 
@@ -304,6 +370,78 @@ def test_ct_fingerprint_change_invalidates_only_case_cache(tmp_path: Path):
     panel.build_smoke_panel(case_manifest=manifest, output_root=tmp_path / "panel")
 
     assert json.loads((tmp_path / "panel" / "panel_progress.json").read_text())["panel_cases_reused_from_cache"] == 0
+
+
+def test_panel_missing_reference_with_fov_compatible_case_is_eligible(tmp_path: Path):
+    from tools.dataset_delivery import cads15_smoke_panel as panel
+
+    manifest = _write_manifest(tmp_path, count=1)
+    (tmp_path / "case_000" / "scan_coverage.json").write_text(
+        json.dumps({"scan_coverage": ["multi_region"], "coverage_regions": ["multi_region"]}),
+        encoding="utf-8",
+    )
+
+    result = panel.build_smoke_panel(case_manifest=manifest, output_root=tmp_path / "panel")
+
+    assert result["status"] == "READY_FOR_HPC_SMOKE"
+    assert all(row["eligible"] for row in result["audit_rows"])
+    assert {row["reason"] for row in result["audit_rows"]} == {"FOV_COMPATIBLE_NO_REFERENCE"}
+
+
+def test_panel_uses_historical_teacher_positive_as_selection_evidence(tmp_path: Path):
+    from tools.dataset_delivery import cads15_smoke_panel as panel
+
+    manifest = _write_manifest(tmp_path, count=1)
+    (tmp_path / "case_000" / "scan_coverage.json").write_text(
+        json.dumps({"scan_coverage": ["multi_region"], "coverage_regions": ["multi_region"]}),
+        encoding="utf-8",
+    )
+    ct = tmp_path / "case_000" / "ct.nii.gz"
+    arr = np.zeros((2, 2, 2), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    _save(
+        arr,
+        tmp_path / "old_run" / "annotation_versions" / "case_000" / "updated" / "blood.nii.gz",
+    )
+
+    result = panel.build_smoke_panel(
+        case_manifest=manifest,
+        output_root=tmp_path / "panel",
+        historical_teacher_roots=[tmp_path / "old_run"],
+    )
+
+    blood = [row for row in result["audit_rows"] if row["target"] == "blood"][0]
+    assert ct.exists()
+    assert blood["eligible"] is True
+    assert blood["selection_evidence"] == "historical_teacher_positive"
+    assert blood["reason"] == "historical_teacher_positive"
+
+
+def test_panel_rejects_historical_teacher_positive_when_current_fov_is_out(tmp_path: Path):
+    from tools.dataset_delivery import cads15_smoke_panel as panel
+
+    manifest = _write_manifest(tmp_path, count=1)
+    (tmp_path / "case_000" / "scan_coverage.json").write_text(
+        json.dumps({"scan_coverage": ["abdomen"], "coverage_regions": ["abdomen"]}),
+        encoding="utf-8",
+    )
+    arr = np.zeros((2, 2, 2), dtype=np.uint8)
+    arr[0, 0, 0] = 1
+    _save(
+        arr,
+        tmp_path / "old_run" / "annotation_versions" / "case_000" / "updated" / "gray_matter.nii.gz",
+    )
+
+    result = panel.build_smoke_panel(
+        case_manifest=manifest,
+        output_root=tmp_path / "panel",
+        historical_teacher_roots=[tmp_path / "old_run"],
+    )
+
+    gray = [row for row in result["audit_rows"] if row["target"] == "gray_matter"][0]
+    assert gray["eligible"] is False
+    assert gray["fov_status"] == "out_of_fov"
+    assert gray["selection_evidence"] == "historical_teacher_positive_rejected_by_current_fov"
 
 
 def test_formal_launcher_uses_case_by_model_not_case_by_target(tmp_path: Path):

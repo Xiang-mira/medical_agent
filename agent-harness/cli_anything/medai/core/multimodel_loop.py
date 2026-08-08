@@ -4265,14 +4265,21 @@ def _build_final_delivery_rows(
             for row in (meta_doc.get("selected_organs") or [])
             if isinstance(row, dict) and row.get("organ")
         }
+        selection_by_organ = {
+            str(row.get("organ")): row
+            for row in (meta_doc.get("selection_rows") or [])
+            if isinstance(row, dict) and row.get("organ")
+        }
         ct_path = Path(str(meta_doc.get("ct_path") or case.get("ct_path") or ""))
         for organ in organs:
             meta = selected_by_organ.get(organ, {})
+            selection = selection_by_organ.get(organ, {})
+            diagnostic_meta = {**selection, **meta}
             final_path = updated_dir / f"{organ}.nii.gz"
             hard = _delivery_hard_validation(final_path, ct_path, {**meta, "organ": organ})
             stored_status = str(meta.get("delivery_status") or "")
             target_type = str(meta.get("target_type") or "")
-            fov_status = str(meta.get("fov_status") or "")
+            fov_status = str(diagnostic_meta.get("fov_status") or "")
             if hard.get("valid") and stored_status in {"delivered", "delivered_for_review"}:
                 final_status = stored_status
             elif target_type in {"negative_absent", "absent_negative"}:
@@ -4285,11 +4292,84 @@ def _build_final_delivery_rows(
                 final_status = "delivered_for_review"
             else:
                 final_status = "failed"
+            route_ready = bool(
+                diagnostic_meta.get("route_primary_teacher")
+                or diagnostic_meta.get("selected_model")
+                or diagnostic_meta.get("source_model")
+                or diagnostic_meta.get("candidate_models")
+            )
+            route_status = "ready" if route_ready else "missing"
+            candidates = diagnostic_meta.get("candidate_predictions") or []
+            first_candidate = candidates[0] if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict) else {}
+            raw_prediction = (
+                diagnostic_meta.get("selected_candidate_raw_prediction")
+                or diagnostic_meta.get("selected_pre_shapekit_prediction")
+                or diagnostic_meta.get("selected_prediction")
+                or first_candidate.get("candidate_raw_prediction")
+                or first_candidate.get("pre_shapekit_prediction")
+                or first_candidate.get("prediction")
+            )
+            raw_path = Path(str(raw_prediction or ""))
+            raw_hard = _delivery_hard_validation(raw_path, ct_path, {"organ": organ}) if raw_prediction else {"valid": False, "errors": ["no_raw_output"], "foreground_voxels": 0}
+            candidate_qc_status = str(
+                diagnostic_meta.get("selected_candidate_qc_status")
+                or diagnostic_meta.get("candidate_qc_status")
+                or first_candidate.get("candidate_qc_status")
+                or ""
+            )
+            candidate_qc_flags = (
+                diagnostic_meta.get("selected_candidate_qc_flags")
+                or diagnostic_meta.get("candidate_qc_flags")
+                or first_candidate.get("candidate_qc_flags")
+                or []
+            )
+            if fov_status == "out_of_fov":
+                inference_status = "INFERENCE_NOT_CALLED"
+            elif candidates or raw_prediction or diagnostic_meta.get("selected_model"):
+                inference_status = "INFERENCE_SUCCEEDED"
+            elif route_ready:
+                inference_status = "INFERENCE_NOT_CALLED"
+            else:
+                inference_status = "UNKNOWN"
+            if not raw_prediction or not raw_path.exists():
+                raw_mask_status = "NO_RAW_OUTPUT"
+            elif raw_hard.get("valid"):
+                raw_mask_status = "RAW_OUTPUT_VALID"
+            else:
+                raw_mask_status = "RAW_OUTPUT_INVALID"
+            if final_status in {"delivered", "delivered_for_review", "confirmed_absent", "out_of_fov"}:
+                failure_stage = ""
+                failure_reason = ""
+            elif fov_status == "out_of_fov":
+                failure_stage = "fov"
+                failure_reason = "OUT_OF_FOV"
+            elif inference_status in {"INFERENCE_NOT_CALLED", "UNKNOWN"}:
+                failure_stage = "inference"
+                failure_reason = inference_status
+            elif raw_mask_status != "RAW_OUTPUT_VALID":
+                failure_stage = "raw_mask"
+                failure_reason = raw_mask_status
+            elif candidate_qc_status and candidate_qc_status != "pass":
+                failure_stage = "candidate_qc"
+                failure_reason = ";".join(str(x) for x in candidate_qc_flags) or candidate_qc_status
+            else:
+                failure_stage = "delivery"
+                failure_reason = "NOT_DELIVERED"
             rows.append({
                 "case_id": case_id,
                 "organ": organ,
                 "final_status": final_status,
-                "delivery_status": stored_status,
+                "route_status": route_status,
+                "fov_status": fov_status,
+                "inference_status": inference_status,
+                "raw_mask_status": raw_mask_status,
+                "raw_mask_path": str(raw_path) if raw_prediction else "",
+                "raw_foreground_voxels": raw_hard.get("foreground_voxels", 0),
+                "candidate_qc_status": candidate_qc_status,
+                "candidate_qc_flags": candidate_qc_flags,
+                "delivery_status": stored_status or ("out_of_fov" if final_status == "out_of_fov" else "not_delivered" if final_status == "failed" else final_status),
+                "failure_stage": failure_stage,
+                "failure_reason": failure_reason,
                 "publication_status": meta.get("publication_status"),
                 "student_training_status": meta.get("student_training_status"),
                 "training_weight": meta.get("training_weight"),
@@ -4301,7 +4381,6 @@ def _build_final_delivery_rows(
                 "grade": meta.get("grade"),
                 "review_flags": meta.get("review_flags", []),
                 "quality_flags": meta.get("quality_flags", []),
-                "fov_status": fov_status,
                 "target_type": target_type,
             })
     counts = {

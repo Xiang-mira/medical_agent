@@ -16,6 +16,7 @@ from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root  # 
 
 
 FAIL_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY", "BOOT_FAIL"}
+DEPENDENCY_UNSATISFIED_STATES = {"DependencyNeverSatisfied", "DEPENDENCYNEVERSATISFIED"}
 RUNNING_STATES = {"RUNNING", "CONFIGURING", "COMPLETING"}
 PENDING_STATES = {"PENDING", "REQUEUED", "SUSPENDED"}
 FAILED_WORKFLOW_STATUSES = {
@@ -27,6 +28,9 @@ FAILED_WORKFLOW_STATUSES = {
     "GPU_RESOURCE_INVALID",
     "GPU_SCRIPT_INVALID",
     "GPU_NOT_SUBMITTED",
+    "PANEL_JOB_ID_INVALID",
+    "GPU_JOB_ID_INVALID",
+    "GPU_DEPENDENCY_UNSATISFIED",
     "GPU_SUBMISSION_REJECTED",
     "GPU_SMOKE_FAILED",
     "VALIDATION_FAILED",
@@ -51,6 +55,8 @@ def _read_text(path: Path) -> str:
 def _sacct_state(job_id: str) -> dict[str, str]:
     if not job_id:
         return {"known": "false", "state": "", "exit_code": ""}
+    if not str(job_id).isdigit():
+        return {"known": "false", "state": "", "exit_code": "", "reason": "malformed_job_id"}
     try:
         proc = subprocess.run(
             ["sacct", "-j", job_id, "--format=JobIDRaw,State,ExitCode", "-n", "-P"],
@@ -71,6 +77,8 @@ def _sacct_state(job_id: str) -> dict[str, str]:
 
 
 def _job_state(job_id: str, *, use_sacct: bool) -> dict[str, str]:
+    if job_id and not str(job_id).isdigit():
+        return {"known": "false", "state": "", "exit_code": "", "reason": "malformed_job_id"}
     return _sacct_state(job_id) if use_sacct else {"known": "false", "state": "", "exit_code": ""}
 
 
@@ -113,6 +121,8 @@ def smoke_status(*, smoke_root: Path | None, use_sacct: bool = True) -> dict[str
         return {**base, "status": "NOT_SUBMITTED", "reason": "no_panel_job_id"}
     if not panel_job_id and panel_state_json.get("status") == "NOT_SUBMITTED":
         return {**base, "status": "NOT_SUBMITTED", "reason": "panel_not_submitted"}
+    if panel_job_id and not panel_job_id.isdigit():
+        return {**base, "status": "PANEL_JOB_ID_INVALID", "reason": "malformed_job_id"}
     if (smoke_root / "PANEL_FAILED").exists() or panel_state_json.get("status") == "PANEL_FAILED" or panel_job.get("state") in FAIL_STATES:
         return {**base, "status": "PANEL_FAILED"}
     panel_completed = (
@@ -126,10 +136,15 @@ def smoke_status(*, smoke_root: Path | None, use_sacct: bool = True) -> dict[str
         return {**base, "status": "PANEL_PENDING"}
     if not gpu_job_ids:
         return {**base, "status": "GPU_SMOKE_PENDING"}
+    invalid_gpu_job_ids = [str(job_id) for job_id in gpu_job_ids if not str(job_id).isdigit()]
+    if invalid_gpu_job_ids:
+        return {**base, "status": "GPU_JOB_ID_INVALID", "reason": "malformed_job_id", "invalid_gpu_job_ids": invalid_gpu_job_ids}
     gpu_states = [_job_state(str(job_id), use_sacct=use_sacct) for job_id in gpu_job_ids]
     gpu_progress = _read_json(smoke_root / "gpu_progress.json")
     gpu_state_json = _read_json(smoke_root / "gpu_state.json")
     gpu_base = {**base, "gpu_slurm": gpu_states, "gpu_progress": gpu_progress}
+    if any(row.get("state") in DEPENDENCY_UNSATISFIED_STATES for row in gpu_states):
+        return {**gpu_base, "status": "GPU_DEPENDENCY_UNSATISFIED"}
     if (smoke_root / "GPU_SMOKE_FAILED").exists() or gpu_state_json.get("status") == "GPU_SMOKE_FAILED" or any(row.get("state") in FAIL_STATES for row in gpu_states):
         return {**gpu_base, "status": "GPU_SMOKE_FAILED"}
     known_gpu_states = [row for row in gpu_states if row.get("known") == "true"]

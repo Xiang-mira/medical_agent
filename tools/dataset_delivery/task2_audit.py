@@ -252,8 +252,11 @@ def build_scope(output_dir: Path) -> list[dict[str, Any]]:
         current_status = "pending"
         if group == "TotalSegmentator":
             execution_status = "blocked"
-            current_status = "blocked"
-            blocked_reason = "TotalSegmentator target retained in 23-class scope but not runnable in current phase"
+            current_status = "blocked_asset"
+            blocked_reason = (
+                "TotalSegmentator brain_ventricle requires licensed brain_structures task409 "
+                "offline assets plus a strong-head FOV smoke case"
+            )
         elif organ in completed:
             execution_status = "completed_existing_cads_100"
             current_status = "completed"

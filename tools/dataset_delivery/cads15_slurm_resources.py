@@ -153,10 +153,25 @@ def preflight_sbatch_script(
 ) -> dict[str, Any]:
     if available is None or available_query is None:
         available, available_query = available_partitions()
-    shell_check = run_command(["bash", "-n", str(sbatch_file)])
+    try:
+        sbatch_text = sbatch_file.read_text(encoding="utf-8")
+    except Exception as exc:
+        sbatch_text = ""
+        read_error = f"{type(exc).__name__}:{exc}"
+    else:
+        read_error = ""
+    shell_check = (
+        {"command": ["bash", "-n", str(sbatch_file)], "return_code": None, "stdout": "", "stderr": "", "ok": False, "skipped": True}
+        if not sbatch_text.strip()
+        else run_command(["bash", "-n", str(sbatch_file)])
+    )
     partition_exists = bool(profile.partition and profile.partition in set(available))
     sbatch_test_only: dict[str, Any]
-    if not shell_check.get("ok"):
+    if not sbatch_text.strip():
+        status = "PANEL_SCRIPT_INVALID" if profile.stage == "panel_preparation" else "GPU_SCRIPT_INVALID"
+        reason = "empty_sbatch_script" if not read_error else f"sbatch_script_unreadable:{read_error}"
+        sbatch_test_only = {"skipped": True, "reason": reason, "command": ["sbatch", "--test-only", str(sbatch_file)], "return_code": None, "stdout": "", "stderr": ""}
+    elif not shell_check.get("ok"):
         status = "PANEL_SCRIPT_INVALID" if profile.stage == "panel_preparation" else "GPU_SCRIPT_INVALID"
         reason = "bash_syntax_failed"
         sbatch_test_only = {"skipped": True, "reason": reason, "command": ["sbatch", "--test-only", str(sbatch_file)], "return_code": None, "stdout": "", "stderr": ""}

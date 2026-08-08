@@ -260,10 +260,23 @@
         "kidney_right": "kidney"
       },
       "mapping_types": {
+        "ventricle": "exact_model_task_scoped_alias",
         "lung_arteries": "approved_union",
         "lung_veins": "approved_union",
         "kidney_left": "approved_union",
         "kidney_right": "approved_union"
+      },
+      "task_scoped_aliases": {
+        "brain_structures": {
+          "ventricle": {
+            "canonical_target": "brain_ventricle",
+            "source_model": "totalsegmentator",
+            "source_task": "brain_structures",
+            "source_label": "ventricle",
+            "source_label_id": 10,
+            "mapping_status": "exact_model_task_scoped_alias"
+          }
+        }
       },
       "_note": "costal_cartilages in TS(total) -> global rib_cartilage (global costal_cartilages is a separate organ covered by VISTA3D); lung_arteries + lung_veins union into global lung_vessels; kidney_left + kidney_right union into whole kidney"
     },

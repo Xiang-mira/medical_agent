@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "updated_utc": "2026-08-08T00:00:00Z",
+  "status_values": [
+    "QUALIFIED",
+    "NEEDS_CURRENT_MAIN_REGRESSION_CHECK",
+    "NEEDS_REAL_SMOKE",
+    "BLOCKED_FOV",
+    "BLOCKED_ASSET",
+    "BLOCKED_LICENSE"
+  ],
+  "entries": [
+    {
+      "model": "unest",
+      "targets": [
+        "kidney_cortex",
+        "kidney_medulla",
+        "kidney_pelvicalyceal_system"
+      ],
+      "case_id": "real_hpc_unest_smoke_job_4440396",
+      "commit": "d43241aa8b27ac018f0c1e635ebf5f1d26a5a0d1",
+      "fov_evidence": "kidney targets delivered with valid final masks",
+      "inference_evidence": "teacher_run_list contains unest; teacher_inference_models contains unest; teacher_inference_count>=1; inference_success_count>=1; final masks valid",
+      "candidate_evidence": "candidate_generated_count=3; valid_candidate_count=3",
+      "delivery_evidence": "strict_delivery_failure_count=0; all three kidney masks delivered_for_review",
+      "status": "QUALIFIED"
+    },
+    {
+      "model": "atm",
+      "targets": [
+        "airway_tree"
+      ],
+      "case_id": "BDMAP_00000424",
+      "commit": "",
+      "fov_evidence": "partial thorax candidate; central airway raw result was tiny and correctly rejected by hard QC",
+      "inference_evidence": "real HPC ATM invocation returned code 0 and produced readable binary geometry-matched raw mask",
+      "candidate_evidence": "3 foreground voxels; hard QC rejection intentionally preserved",
+      "delivery_evidence": "not delivered because candidate_qc_status=unusable",
+      "status": "QUALIFIED"
+    },
+    {
+      "model": "cads553,cads557,cads559",
+      "targets": "CADS abdomen/pelvis targets",
+      "case_id": "historical_task2_cads_outputs",
+      "commit": "",
+      "fov_evidence": "historical abdomen/pelvis smoke evidence plus current target-specific FOV panel",
+      "inference_evidence": "requires current main regression smoke before formal reuse",
+      "candidate_evidence": "historical positives are selection evidence only",
+      "delivery_evidence": "fresh smoke must deliver final masks",
+      "status": "NEEDS_CURRENT_MAIN_REGRESSION_CHECK"
+    },
+    {
+      "model": "cads557,cads559",
+      "targets": [
+        "cerebrospinal_fluid",
+        "gray_matter",
+        "white_matter",
+        "eyeball",
+        "face",
+        "muscle_of_head",
+        "scalp"
+      ],
+      "case_id": "",
+      "commit": "",
+      "fov_evidence": "needs strong head FOV case from candidate search",
+      "inference_evidence": "",
+      "candidate_evidence": "",
+      "delivery_evidence": "",
+      "status": "NEEDS_REAL_SMOKE"
+    },
+    {
+      "model": "airrc",
+      "targets": [
+        "airway_wall",
+        "lung_pulmonary_arteries",
+        "lung_pulmonary_veins"
+      ],
+      "case_id": "",
+      "commit": "",
+      "fov_evidence": "needs suitable central-airway/pulmonary real smoke case",
+      "inference_evidence": "",
+      "candidate_evidence": "",
+      "delivery_evidence": "",
+      "status": "NEEDS_REAL_SMOKE"
+    },
+    {
+      "model": "totalsegmentator",
+      "targets": [
+        "brain_ventricle"
+      ],
+      "case_id": "",
+      "commit": "",
+      "fov_evidence": "needs strong head FOV case; BDMAP_00000424 and BDMAP_00078156 are not head anchors",
+      "inference_evidence": "requires brain_structures offline asset preflight and real smoke",
+      "candidate_evidence": "",
+      "delivery_evidence": "",
+      "status": "BLOCKED_ASSET"
+    }
+  ]
+}

@@ -205,6 +205,52 @@ def test_rejected_and_negative_zero_masks_do_not_count_as_positive_delivery(tmp_
     assert counts["confirmed_absent_count"] == 1
 
 
+def test_final_delivery_distinguishes_raw_valid_candidate_qc_unusable(tmp_path: Path):
+    from cli_anything.medai.core.multimodel_loop import _build_final_delivery_rows
+
+    ct = _save(np.zeros((4, 4, 4), dtype=np.int16), tmp_path / "ct.nii.gz")
+    updated_root = tmp_path / "annotation_versions"
+    case_id = "case_001"
+    raw = np.zeros((4, 4, 4), dtype=np.uint8)
+    raw[0, 0, 0] = 1
+    raw[1, 1, 1] = 1
+    raw[2, 2, 2] = 1
+    raw_path = _save(raw, updated_root / case_id / "raw_predictions" / "atm" / "case_001" / "segmentations" / "airway_tree.nii.gz")
+    _write_selection_case(updated_root, case_id, ct, [])
+    meta = json.loads((updated_root / case_id / "selection_metadata.json").read_text(encoding="utf-8"))
+    meta["selection_rows"] = [{
+        "organ": "airway_tree",
+        "route_primary_teacher": "atm",
+        "fov_status": "partially_visible",
+        "candidate_predictions": [{
+            "model": "atm",
+            "candidate_raw_prediction": str(raw_path),
+            "candidate_qc_status": "unusable",
+            "candidate_qc_flags": ["too_few_foreground_voxels"],
+        }],
+        "candidate_models": ["atm"],
+        "selection_status": "unresolved",
+    }]
+    (updated_root / case_id / "selection_metadata.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    rows, counts = _build_final_delivery_rows(
+        cases=[{"case_id": case_id, "ct_path": str(ct)}],
+        organs=["airway_tree"],
+        updated_root=updated_root,
+    )
+
+    row = rows[0]
+    assert counts["failed_count"] == 1
+    assert row["route_status"] == "ready"
+    assert row["inference_status"] == "INFERENCE_SUCCEEDED"
+    assert row["raw_mask_status"] == "RAW_OUTPUT_VALID"
+    assert row["raw_foreground_voxels"] == 3
+    assert row["candidate_qc_status"] == "unusable"
+    assert row["delivery_status"] == "not_delivered"
+    assert row["failure_stage"] == "candidate_qc"
+    assert row["failure_reason"] == "too_few_foreground_voxels"
+
+
 def _write_case_with_coverage(tmp_path: Path, case_id: str, coverage: str) -> tuple[Path, Path]:
     case_root = tmp_path / case_id
     ct = _save(np.zeros((3, 3, 3), dtype=np.int16), case_root / "ct.nii.gz")

@@ -19,12 +19,14 @@ if str(REPO_ROOT / "agent-harness") not in sys.path:
 from cli_anything.medai.core.multimodel_loop import _fov_status_for_organ, _load_case_presence_context  # noqa: E402
 from tools.dataset_delivery.cads15_contract_audit import CADS15_TARGETS, DEFAULT_CONTRACT, contract_targets  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_csv, write_json  # noqa: E402
+from tools.dataset_delivery.task2_fov import collect_landmark_evidence, target_fov_eligibility  # noqa: E402
 
 
 DEFAULT_CASE_MANIFEST = Path(
     "/projects/bodymaps/users/xhan74/medical_agent/outputs/"
     "dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv"
 )
+CADS15_PANEL_CACHE_POLICY_VERSION = "target_fov_v2"
 
 REGION_TERM_MAP = {
     "abdomen": {"abdomen", "abdominal", "abdomen_pelvis", "abdominopelvic", "multi_region"},
@@ -297,11 +299,93 @@ def _target_positive_reference(
     return _mask_positive(ref_dir / f"{target}.nii.gz", inventory_row=inventory.get(target), allow_voxel_stats=False)
 
 
-def _cache_valid(cached: dict[str, Any], *, ct: Path, ref_paths: dict[str, list[dict[str, Any]]]) -> bool:
+def _historical_teacher_positive(
+    historical_roots: list[Path],
+    *,
+    case_id: str,
+    target: str,
+    ct: Path,
+) -> dict[str, Any]:
+    candidates: list[Path] = []
+    for root in historical_roots:
+        if not root:
+            continue
+        candidates.extend([
+            root / "annotation_versions" / case_id / "updated" / f"{target}.nii.gz",
+            root / "cases" / case_id / "hierarchical_predictions" / "cads553" / "segmentations" / f"{target}.nii.gz",
+            root / "cases" / case_id / "hierarchical_predictions" / "cads557" / "segmentations" / f"{target}.nii.gz",
+            root / "cases" / case_id / "hierarchical_predictions" / "cads559" / "segmentations" / f"{target}.nii.gz",
+        ])
+        candidates.extend(sorted((root / "cases" / case_id).glob(f"**/segmentations/{target}.nii.gz")))
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result = _mask_positive(path, allow_voxel_stats=True)
+        if not result["positive"]:
+            continue
+        geometry_ok = True
+        try:
+            import nibabel as nib
+            import numpy as np
+
+            mask_img = nib.load(str(path))
+            ct_img = nib.load(str(ct))
+            geometry_ok = bool(
+                tuple(mask_img.shape[:3]) == tuple(ct_img.shape[:3])
+                and np.allclose(mask_img.header.get_zooms()[:3], ct_img.header.get_zooms()[:3], rtol=0, atol=1e-5)
+                and np.allclose(mask_img.affine, ct_img.affine, rtol=0, atol=1e-5)
+            )
+        except Exception:
+            geometry_ok = False
+        if geometry_ok:
+            return {
+                **result,
+                "evidence_source": "historical_teacher_output",
+                "geometry_match": True,
+                "reason": "historical_teacher_positive",
+            }
+    return {
+        "path": "",
+        "exists": False,
+        "positive": False,
+        "foreground_voxels": 0,
+        "evidence_source": "historical_teacher_output",
+        "geometry_match": None,
+        "reason": "missing_historical_teacher_output",
+    }
+
+
+def _cache_config_fingerprint(
+    *,
+    targets: list[str],
+    allow_heavy_ct_fov: bool,
+    allow_reference_voxel_stats: bool,
+    historical_roots: list[Path] | None,
+) -> dict[str, Any]:
+    return {
+        "policy_version": CADS15_PANEL_CACHE_POLICY_VERSION,
+        "targets": sorted(targets),
+        "allow_heavy_ct_fov": bool(allow_heavy_ct_fov),
+        "allow_reference_voxel_stats": bool(allow_reference_voxel_stats),
+        "historical_teacher_roots": sorted(str(path.resolve()) for path in (historical_roots or [])),
+    }
+
+
+def _cache_valid(
+    cached: dict[str, Any],
+    *,
+    ct: Path,
+    ref_paths: dict[str, list[dict[str, Any]]],
+    cache_config: dict[str, Any],
+) -> bool:
     return (
         cached.get("processing_status") == "completed"
         and cached.get("ct_fingerprint") == _file_fingerprint(ct)
         and cached.get("reference_fingerprints") == ref_paths
+        and cached.get("cache_config") == cache_config
     )
 
 
@@ -320,6 +404,7 @@ def _process_case(
     context_root: Path,
     allow_heavy_ct_fov: bool,
     allow_reference_voxel_stats: bool,
+    historical_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
     case_id = _case_id(source_row, index)
     ct = Path(_ct_path(source_row))
@@ -327,8 +412,14 @@ def _process_case(
     case_root = context_root / case_id
     cache_path = case_root / "presence_context.json"
     ref_fps = _case_reference_fingerprints(ref_dir, targets) if ref_dir.exists() else {}
+    cache_config = _cache_config_fingerprint(
+        targets=targets,
+        allow_heavy_ct_fov=allow_heavy_ct_fov,
+        allow_reference_voxel_stats=allow_reference_voxel_stats,
+        historical_roots=historical_roots,
+    )
     cached = _read_json(cache_path)
-    if ct.exists() and ref_dir.exists() and _cache_valid(cached, ct=ct, ref_paths=ref_fps):
+    if ct.exists() and ref_dir.exists() and _cache_valid(cached, ct=ct, ref_paths=ref_fps, cache_config=cache_config):
         return {**cached, "cache_status": "reused"}
 
     record: dict[str, Any] = {
@@ -337,6 +428,7 @@ def _process_case(
         "annotation_folder": str(ref_dir),
         "ct_fingerprint": _file_fingerprint(ct),
         "reference_fingerprints": ref_fps,
+        "cache_config": cache_config,
         "processing_status": "running",
         "started_at": _utc_timestamp(),
         "cache_status": "computed",
@@ -359,6 +451,7 @@ def _process_case(
         needs_heavy_context = allow_heavy_ct_fov and not context.get("has_region_evidence")
         if needs_heavy_context:
             context = _load_case_presence_context(normalized, ct, case_id, case_root)
+        landmarks = collect_landmark_evidence(ref_dir, ct_path=ct)
         for target in targets:
             ref = _target_positive_reference(
                 ref_dir,
@@ -366,20 +459,53 @@ def _process_case(
                 inventory=inventory,
                 allow_reference_voxel_stats=allow_reference_voxel_stats,
             )
+            fallback_fov = _fov_status_for_organ(target, context)
+            target_fov = target_fov_eligibility(
+                target,
+                landmarks=landmarks,
+                coverage=context,
+                fallback_fov_status=fallback_fov,
+            )
+            historical = _historical_teacher_positive(
+                historical_roots or [],
+                case_id=case_id,
+                target=target,
+                ct=ct,
+            )
             if ref["positive"]:
                 fov_status = "fully_visible"
                 fov_evidence = ref.get("reason") or "positive_reference"
             else:
-                fov_status = _fov_status_for_organ(target, context)
-                fov_evidence = ";".join(context.get("coverage_evidence") or []) or "lightweight_context"
-            eligible = fov_status not in {"out_of_fov", "unknown"} and ref["positive"]
+                fov_status = str(target_fov["fov_status"])
+                fov_evidence = str(target_fov["reason"])
+            fov_compatible = fov_status not in {"out_of_fov", "unknown"}
+            evidence_source = (
+                "canonical_reference_positive" if ref["positive"]
+                else "historical_teacher_positive" if historical["positive"]
+                else "target_specific_fov_compatible" if fov_compatible
+                else "none"
+            )
+            eligible = bool(fov_compatible)
+            if historical["positive"] and not fov_compatible:
+                evidence_source = "historical_teacher_positive_rejected_by_current_fov"
             target_records[target] = {
                 "target": target,
                 "fov_status": fov_status,
                 "fov_evidence": fov_evidence,
                 "reference": ref,
+                "historical_teacher": historical,
+                "target_fov": target_fov,
                 "eligible": eligible,
-                "reason": "target_in_fov_and_positive_reference" if eligible else ref["reason"] or fov_status,
+                "selection_evidence": evidence_source,
+                "reason": (
+                    "canonical_reference_positive"
+                    if eligible and ref["positive"] else
+                    "historical_teacher_positive"
+                    if eligible and historical["positive"] else
+                    "FOV_COMPATIBLE_NO_REFERENCE"
+                    if eligible else
+                    fov_status
+                ),
             }
             if eligible:
                 positive_targets.append(target)
@@ -419,6 +545,7 @@ def build_smoke_panel(
     require_positive_reference: bool = True,
     allow_heavy_ct_fov: bool = False,
     allow_reference_voxel_stats: bool = True,
+    historical_teacher_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
     output_root.mkdir(parents=True, exist_ok=True)
     _atomic_write_json(output_root / "panel_state.json", {
@@ -444,6 +571,7 @@ def build_smoke_panel(
                 context_root=context_root,
                 allow_heavy_ct_fov=allow_heavy_ct_fov,
                 allow_reference_voxel_stats=allow_reference_voxel_stats,
+                historical_roots=historical_teacher_roots,
             )
             if case_record.get("cache_status") == "reused":
                 reused += 1
@@ -461,6 +589,9 @@ def build_smoke_panel(
                     "reference_path": ref.get("path", ""),
                     "reference_positive": ref.get("positive", False),
                     "reference_foreground_voxels": ref.get("foreground_voxels", 0),
+                    "historical_teacher_path": (target_record.get("historical_teacher") or {}).get("path", ""),
+                    "historical_teacher_positive": (target_record.get("historical_teacher") or {}).get("positive", False),
+                    "selection_evidence": target_record.get("selection_evidence", ""),
                     "eligible": eligible,
                     "reason": target_record.get("reason") or case_record.get("error") or "",
                 })
@@ -473,7 +604,7 @@ def build_smoke_panel(
                     "annotation_folder": case_record.get("annotation_folder", ""),
                     "targets": sorted(covered_targets),
                     "target_count": len(covered_targets),
-                    "selection_reason": "target_in_fov_and_positive_reference",
+                    "selection_reason": "target_specific_fov_compatible",
                 })
             _write_progress(output_root, index + 1, len(rows), "PANEL_RUNNING", reused=reused)
     except KeyboardInterrupt:
@@ -506,11 +637,11 @@ def build_smoke_panel(
             "ct_path": best["ct_path"],
             "annotation_folder": best["annotation_folder"],
             "targets": chosen_targets,
-            "selection_reason": "target_in_fov_and_positive_reference",
+            "selection_reason": "target_specific_fov_compatible",
         })
         uncovered_remaining -= set(chosen_targets)
 
-    status = "READY_FOR_HPC_SMOKE" if not uncovered_remaining and not uncovered else "BLOCKED_NO_POSITIVE_SMOKE_CASE"
+    status = "READY_FOR_HPC_SMOKE" if not uncovered_remaining and not uncovered else "NO_FOV_COMPATIBLE_SMOKE_CASE"
     panel = {
         "status": status,
         "read_only": True,
@@ -520,10 +651,12 @@ def build_smoke_panel(
         "panel_cache_root": str(context_root),
         "allow_heavy_ct_fov": allow_heavy_ct_fov,
         "allow_reference_voxel_stats": allow_reference_voxel_stats,
+        "historical_teacher_roots": [str(path) for path in (historical_teacher_roots or [])],
         "tie_break_rules": [
-            "eligible requires positive reference evidence for the canonical target",
-            "positive reference evidence qualifies the smoke target as in-FOV for case selection only",
-            "metadata/header/cache FOV is used before optional heavy CT inference",
+            "current target-specific FOV evidence is authoritative",
+            "canonical target reference is strong selection evidence but is not required for Task2 missing-GT smoke",
+            "historical Teacher output is selection evidence only and is rejected when current FOV is out-of-FOV",
+            "FOV_COMPATIBLE_NO_REFERENCE is eligible for fresh smoke generation",
             "greedy select max uncovered targets",
             "case_id ascending tie-break",
         ],
@@ -538,7 +671,8 @@ def build_smoke_panel(
         audit_rows,
         [
             "case_id", "target", "fov_status", "fov_evidence", "reference_path",
-            "reference_positive", "reference_foreground_voxels", "eligible", "reason",
+            "reference_positive", "reference_foreground_voxels", "historical_teacher_path",
+            "historical_teacher_positive", "selection_evidence", "eligible", "reason",
         ],
     )
     manifest_rows = [
@@ -575,7 +709,7 @@ def build_smoke_panel(
         lines.append(f"- `{case['case_id']}`: `{', '.join(case['targets'])}`")
     (output_root / "cads15_smoke_case_panel.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     _atomic_write_json(output_root / "panel_state.json", {
-        "status": "PANEL_COMPLETED" if status == "READY_FOR_HPC_SMOKE" else "PANEL_FAILED",
+        "status": "PANEL_COMPLETED" if status == "READY_FOR_HPC_SMOKE" else "PANEL_FAILED_NO_FOV_CASE",
         "panel_status": status,
         "panel_cases_completed": len(rows),
         "panel_cases_total": len(rows),
@@ -594,6 +728,7 @@ def main() -> int:
     parser.add_argument("--allow-missing-positive-reference", action="store_true", help="Test-only: allow in-FOV cases without positive reference.")
     parser.add_argument("--allow-heavy-ct-fov", action="store_true", help="Allow fallback CT voxel FOV inference when lightweight evidence is insufficient.")
     parser.add_argument("--no-reference-voxel-stats", action="store_true", help="Use only cached/inventory reference nonzero evidence.")
+    parser.add_argument("--historical-teacher-root", action="append", default=[], type=Path, help="Optional previous run root used only as smoke case-selection evidence.")
     args = parser.parse_args()
     panel = build_smoke_panel(
         case_manifest=args.case_manifest.resolve(),
@@ -602,6 +737,7 @@ def main() -> int:
         require_positive_reference=not args.allow_missing_positive_reference,
         allow_heavy_ct_fov=bool(args.allow_heavy_ct_fov),
         allow_reference_voxel_stats=not bool(args.no_reference_voxel_stats),
+        historical_teacher_roots=[path.resolve() for path in args.historical_teacher_root],
     )
     print(json.dumps({"status": panel["status"], "case_count": len(panel["cases"])}, indent=2))
     return 0 if panel["status"] == "READY_FOR_HPC_SMOKE" else 2

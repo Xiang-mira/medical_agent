@@ -49,6 +49,7 @@
     },
     "brain_structures": {
       "task": "brain_structures",
+      "task_id": 409,
       "routing_aliases": [
         "Totalsegmentator (brain_structures)"
       ],
@@ -71,6 +72,20 @@
         "venous_sinuses"
       ],
       "num_organs": 16,
+      "output_aliases": {
+        "ventricle": {
+          "canonical_target": "brain_ventricle",
+          "source_model": "totalsegmentator",
+          "source_task": "brain_structures",
+          "source_label": "ventricle",
+          "source_label_id": 10,
+          "mapping_status": "exact_model_task_scoped_alias"
+        }
+      },
+      "offline_required_datasets": [
+        "Dataset409_neuro_550subj",
+        "Dataset298_TotalSegmentator_total_6mm_1559subj"
+      ],
       "license_required": true,
       "license_note": "Academic license required. Register at https://backend.totalsegmentator.com/license-academic/ then run: totalseg_set_license -l <key>"
     },

@@ -124,6 +124,28 @@ PY
   echo "CADS15 panel submission did not return a job id; GPU smoke will not be submitted." >&2
   exit 2
 fi
+if ! [[ "$PANEL_JOB_ID" =~ ^[0-9]+$ ]]; then
+  "$PYTHON" - "$OUT_ROOT/submission_manifest.json" "$PANEL_JOB_ID" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+panel_job = sys.argv[2]
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+doc["status"] = "PANEL_JOB_ID_INVALID"
+doc["panel"]["job_id"] = panel_job
+doc["panel"]["state"] = "PANEL_JOB_ID_INVALID"
+tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, manifest_path)
+PY
+  echo "CADS15 panel sbatch returned malformed job id '$PANEL_JOB_ID'; GPU smoke will not be submitted." >&2
+  exit 2
+fi
 printf "%s\n" "$PANEL_JOB_ID" > "$OUT_ROOT/panel_job_id.txt"
 "$PYTHON" - "$OUT_ROOT/submission_manifest.json" "$PANEL_JOB_ID" <<'PY'
 from __future__ import annotations
@@ -169,6 +191,32 @@ tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 os.replace(tmp, manifest_path)
 PY
   echo "CADS15 GPU sbatch submission was rejected after panel job $PANEL_JOB_ID; dependency smoke was not submitted." >&2
+  exit 2
+fi
+if [ -z "$GPU_JOB_ID" ] || ! [[ "$GPU_JOB_ID" =~ ^[0-9]+$ ]]; then
+  "$PYTHON" - "$OUT_ROOT/submission_manifest.json" "$PANEL_JOB_ID" "$GPU_JOB_ID" <<'PY'
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+panel_job = sys.argv[2]
+gpu_job = sys.argv[3]
+doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+doc["status"] = "GPU_JOB_ID_INVALID"
+doc["panel"]["job_id"] = panel_job
+doc["panel"]["state"] = "PANEL_PENDING"
+doc["gpu"]["job_ids"] = [gpu_job] if gpu_job else []
+doc["gpu"]["dependency"] = f"afterok:{panel_job}"
+doc["gpu"]["state"] = "GPU_JOB_ID_INVALID"
+tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, manifest_path)
+PY
+  echo "CADS15 GPU sbatch returned malformed job id '$GPU_JOB_ID' after panel job $PANEL_JOB_ID." >&2
   exit 2
 fi
 printf "%s\n" "$GPU_JOB_ID" > "$OUT_ROOT/gpu_job_ids.txt"

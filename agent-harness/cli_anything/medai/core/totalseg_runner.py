@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -30,9 +31,88 @@ LICENSED_TASKS: frozenset[str] = frozenset({
     "coronary_arteries", "coronary_arteries_LEGACY", "aortic_sinuses", "vertebrae_body",
 })
 
+TASK_OFFLINE_REQUIREMENTS: dict[str, dict] = {
+    "brain_structures": {
+        "task": "brain_structures",
+        "task_id": 409,
+        "canonical_target": "brain_ventricle",
+        "source_output_name": "ventricle",
+        "source_class_id": 10,
+        "license_required": True,
+        "required_datasets": [
+            "Dataset409_neuro_550subj",
+            "Dataset298_TotalSegmentator_total_6mm_1559subj",
+        ],
+    },
+}
+
 
 def find_totalseg_executable() -> str | None:
     return shutil.which("TotalSegmentator") or shutil.which("totalsegmentator")
+
+
+def totalseg_offline_enabled() -> bool:
+    return str(os.getenv("MEDAI_TOTALSEG_OFFLINE", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_totalseg_home() -> Path:
+    configured = os.getenv("MEDAI_TOTALSEG_HOME") or os.getenv("TOTALSEG_HOME_DIR")
+    return Path(configured).expanduser().resolve() if configured else (Path.home() / ".totalsegmentator").resolve()
+
+
+def _totalseg_runtime_env() -> dict[str, str]:
+    env = os.environ.copy()
+    home = resolve_totalseg_home()
+    env["TOTALSEG_HOME_DIR"] = str(home)
+    if totalseg_offline_enabled():
+        env["MEDAI_TOTALSEG_OFFLINE"] = "1"
+    return env
+
+
+def preflight_totalseg_offline_assets(subtasks: list[str], *, home: Path | None = None) -> dict:
+    home = (home or resolve_totalseg_home()).resolve()
+    config = home / "config.json"
+    results_root = home / "nnunet" / "results"
+    requirements = [
+        TASK_OFFLINE_REQUIREMENTS[subtask]
+        for subtask in subtasks
+        if subtask in TASK_OFFLINE_REQUIREMENTS
+    ]
+    missing_datasets: list[str] = []
+    present_datasets: list[str] = []
+    for requirement in requirements:
+        for dataset in requirement.get("required_datasets", []):
+            dataset_path = results_root / dataset
+            if dataset_path.exists():
+                present_datasets.append(dataset)
+            else:
+                missing_datasets.append(dataset)
+    license_required = any(bool(item.get("license_required")) for item in requirements)
+    license_present = False
+    if config.exists():
+        try:
+            license_present = bool((json.loads(config.read_text(encoding="utf-8")) or {}).get("license_number"))
+        except Exception:
+            license_present = False
+    failures: list[str] = []
+    if license_required and not license_present:
+        failures.append("TOTALSEG_LICENSE_MISSING")
+    if missing_datasets:
+        failures.append("TOTALSEG_OFFLINE_ASSET_MISSING")
+    status = "ok" if not failures else "failed"
+    return {
+        "status": status,
+        "offline": totalseg_offline_enabled(),
+        "home": str(home),
+        "config_path": str(config),
+        "license_required": license_required,
+        "license_present": license_present,
+        "required_datasets": sorted(set(item for req in requirements for item in req.get("required_datasets", []))),
+        "present_datasets": sorted(set(present_datasets)),
+        "missing_datasets": sorted(set(missing_datasets)),
+        "failures": failures,
+        "requirements": requirements,
+    }
 
 
 def _timeout_text(value: str | bytes | None) -> str:
@@ -76,11 +156,24 @@ def run_totalsegmentator(image_path: str, output_folder: str, case_id: str | Non
     cmd = build_totalseg_command(image, seg_out, fast, task, roi_preset, roi_subset, device, statistics, preview)
     if dry_run:
         return {"stage": "infer", "backend": "TotalSegmentator", "status": "dry_run", "case_id": case_id, "command": cmd, "segmentation_output": str(seg_out)}
+    if totalseg_offline_enabled() and task:
+        preflight = preflight_totalseg_offline_assets([task])
+        if preflight["status"] != "ok":
+            return {
+                "stage": "infer",
+                "backend": "TotalSegmentator",
+                "status": "failed",
+                "case_id": case_id,
+                "reason": ";".join(preflight["failures"]),
+                "offline_preflight": preflight,
+                "command": cmd,
+                "segmentation_output": str(seg_out),
+            }
     seg_out.mkdir(parents=True, exist_ok=True)
     start = time.time()
     timed_out = False
     try:
-        completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec)
+        completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec, env=_totalseg_runtime_env())
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         completed = subprocess.CompletedProcess(cmd, returncode=124, stdout=_timeout_text(exc.stdout), stderr=_timeout_text(exc.stderr) + f"\n[totalseg_runner] Timeout after {timeout_sec}s.")
@@ -127,6 +220,19 @@ def run_totalseg_with_contract(
             "subtasks": subtasks_to_run, "per_model_dir": str(per_model_dir),
             "commands": [str(c) for c in cmds],
         }
+    if totalseg_offline_enabled():
+        preflight = preflight_totalseg_offline_assets(subtasks_to_run)
+        if preflight["status"] != "ok":
+            return {
+                "stage": "infer",
+                "backend": "TotalSegmentator",
+                "status": "failed",
+                "case_id": case_id,
+                "reason": ";".join(preflight["failures"]),
+                "offline_preflight": preflight,
+                "subtasks": subtasks_to_run,
+                "per_model_dir": str(per_model_dir),
+            }
 
     per_model_dir.mkdir(parents=True, exist_ok=True)
     start_total = time.time()
@@ -147,7 +253,7 @@ def run_totalseg_with_contract(
             st_masks = existing_masks
         else:
             try:
-                completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec)
+                completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=timeout_sec, env=_totalseg_runtime_env())
             except subprocess.TimeoutExpired as exc:
                 timed_out = True
                 completed = subprocess.CompletedProcess(cmd, 124, stdout=_timeout_text(exc.stdout), stderr=_timeout_text(exc.stderr) + f"\n[totalseg_runner] Subtask {subtask} timeout after {timeout_sec}s.")
@@ -173,15 +279,37 @@ def run_totalseg_with_contract(
         import nibabel as nib
         ref_img = nib.load(str(next(iter(all_organ_masks.values()))))
         combined_arr = np.zeros(ref_img.shape, dtype=np.int16)
+        identity_provenance: dict[str, dict] = {}
+        subtask_entries = (subtask_config or {}).get("subtasks", {}) if isinstance(subtask_config, dict) else {}
         for organ in sorted_organs:
             src_mask = all_organ_masks[organ]
             dst_mask = direct_seg_dir / f"{organ}.nii.gz"
             if src_mask.resolve() != dst_mask.resolve():
                 shutil.copy2(src_mask, dst_mask)
+            for subtask, entry in subtask_entries.items():
+                output_aliases = (entry or {}).get("output_aliases", {}) or {}
+                alias = output_aliases.get(organ)
+                if isinstance(alias, dict):
+                    canonical = str(alias.get("canonical_target") or "")
+                    if canonical:
+                        identity_provenance[canonical] = {
+                            "source_model": "totalsegmentator",
+                            "source_task": str(alias.get("source_task") or subtask),
+                            "source_local_label": organ,
+                            "source_local_labels": [organ],
+                            "source_label_id": alias.get("source_label_id"),
+                            "resolved_canonical_id": canonical,
+                            "mapping_type": str(alias.get("mapping_status") or "exact_model_task_scoped_alias"),
+                        }
             mask_arr = np.asanyarray(nib.load(str(src_mask)).dataobj).astype(bool)
             combined_arr[mask_arr] = local_labels[organ]
         nib.save(nib.Nifti1Image(combined_arr, ref_img.affine, ref_img.header), str(per_model_dir / "combined_labels.nii.gz"))
         (per_model_dir / "local_labels.json").write_text(json.dumps(local_labels, indent=2, sort_keys=True), encoding="utf-8")
+        if identity_provenance:
+            (direct_seg_dir / "identity_provenance.json").write_text(
+                json.dumps({"organs": identity_provenance}, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
     except Exception as exc:
         return {"stage": "infer", "backend": "TotalSegmentator", "status": "failed", "case_id": case_id, "reason": f"label map merge failed: {exc}", "subtask_results": subtask_results, "runtime_sec": round(elapsed, 3)}
 
