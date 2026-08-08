@@ -89,7 +89,7 @@
         "brain_ventricle"
       ],
       "case_id": "",
-      "commit": "de00279d032c04461ce22d0c9e57828bbd00f9b9",
+      "commit": "ea1a4bc4ea73a8de0f0205979c7976be6f444d47",
       "fov_evidence": "needs strong head FOV case; BDMAP_00000424 and BDMAP_00078156 are not head anchors",
       "inference_evidence": "offline asset preflight READY for TotalSegmentator 2.13.0 with Dataset409_neuro_550subj and Dataset298_TotalSegmentator_total_6mm_1559subj; real head smoke still required",
       "candidate_evidence": "canonical mapping brain_structures/ventricle label 10 -> brain_ventricle is configured and tested",
