@@ -57,7 +57,8 @@ def append_qualified_cases(
         case_id = str(row.get("case_id") or row.get("id") or "").strip()
         if not case_id:
             continue
-        groups = {item.strip() for item in str(row.get("candidate_target_group") or "").split(",") if item.strip()}
+        group_text = str(row.get("candidate_target_group") or row.get("targets") or row.get("target_name") or "")
+        groups = {item.strip() for chunk in group_text.split(";") for item in chunk.split(",") if item.strip()}
         if target_group and target_group not in groups:
             continue
         if case_id in seen:
@@ -69,7 +70,7 @@ def append_qualified_cases(
             "ct_path": row.get("ct_path", ""),
             "annotation_folder": row.get("annotation_folder", ""),
             "append_reason": "fov_candidate_search",
-            "candidate_target_group": row.get("candidate_target_group", ""),
+            "candidate_target_group": group_text,
             "fov_reason": row.get("reason", ""),
         }
         final_rows.append(out)
@@ -104,7 +105,7 @@ def main() -> int:
     parser.add_argument("--candidate-report", required=True, type=Path)
     parser.add_argument("--output-manifest", required=True, type=Path)
     parser.add_argument("--audit-json", type=Path)
-    parser.add_argument("--target-group", choices=["head", "thorax", "central_airway"])
+    parser.add_argument("--target-group")
     parser.add_argument("--max-cases", type=int)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

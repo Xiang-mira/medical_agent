@@ -927,7 +927,7 @@ def test_strict_fov_pruning_keeps_partial_airway_blocked_without_override(tmp_pa
     assert plan["fov_override"]["initial_pruned_organs"] == ["airway_tree"]
 
 
-def test_strict_fov_override_applies_for_partial_airway_tree_and_schedules_atm(tmp_path: Path, monkeypatch):
+def test_strict_fov_override_rejects_partial_thorax_airway_tree_without_central_airway(tmp_path: Path, monkeypatch):
     from cli_anything.medai.core import multimodel_loop as loop
 
     monkeypatch.setattr(
@@ -950,35 +950,24 @@ def test_strict_fov_override_applies_for_partial_airway_tree_and_schedules_atm(t
     )
 
     reasons = {row["reason"] for row in result["strict_delivery_failures"]}
-    assert "requested_organs_pruned_by_fov" not in reasons
-    assert "requested_teacher_not_scheduled" not in reasons
-    assert result["strict_delivery_fov_override_applied_count"] == 1
-    assert result["strict_delivery_fov_override_rejected_count"] == 0
+    assert "requested_organs_pruned_by_fov" in reasons
+    assert "requested_teacher_not_scheduled" in reasons
+    assert result["strict_delivery_fov_override_applied_count"] == 0
+    assert result["strict_delivery_fov_override_rejected_count"] == 1
     summary_row = result["strict_delivery_fov_override_rows"][0]
     assert summary_row["organ"] == "airway_tree"
-    assert summary_row["visibility"] == "partially_visible"
-    assert summary_row["original_visibility"] == "partially_visible"
-    assert summary_row["decision"] == "applied"
-    assert summary_row["effective_action"] == "allow_teacher_scheduling"
-    assert summary_row["model_key"] == "atm"
+    assert summary_row["visibility"] == "out_of_fov"
+    assert summary_row["decision"] == "rejected"
+    assert summary_row["reason"] == "visibility_out_of_fov"
 
     plan = _read_json(tmp_path / "out" / "annotation_versions" / "case_001" / "case_execution_plan.json")
-    assert "atm" in plan["teacher_run_list"]
+    assert "atm" not in plan["teacher_run_list"]
     assert plan["strict_delivery_fov_override_organs_requested"] == ["airway_tree"]
-    assert plan["fov_override_applied"] == [
-        {
-            "organ": "airway_tree",
-            "original_visibility": "partially_visible",
-            "effective_action": "allow_teacher_scheduling",
-            "reason": "explicit_strict_delivery_partial_visibility_override",
-            "model_key": "atm",
-            "eligible_teachers": ["atm"],
-        }
-    ]
-    assert plan["fov_override"]["applied_organs"] == ["airway_tree"]
+    assert plan["fov_override_applied"] == []
+    assert plan["fov_override"]["applied_organs"] == []
     assert plan["fov_override"]["initial_pruned_organs"] == ["airway_tree"]
     assert result["strict_delivery_fov_override_organs_requested"] == ["airway_tree"]
-    assert result["fov_override_applied"][0]["model_key"] == "atm"
+    assert result["fov_override_applied"] == []
 
 
 def test_strict_fov_override_rejects_out_of_fov_airway_tree(tmp_path: Path, monkeypatch):
@@ -1062,12 +1051,13 @@ def test_strict_fov_override_does_not_restore_unrequested_or_non_allowlisted_org
     )
 
     pruned = [row["organ"] for row in result["strict_delivery_failures"] if row["reason"] == "requested_organs_pruned_by_fov"]
-    assert pruned == ["airway_wall"]
+    assert pruned == ["airway_tree", "airway_wall"]
     plan = _read_json(tmp_path / "out" / "annotation_versions" / "case_001" / "case_execution_plan.json")
-    assert plan["fov_override"]["applied_organs"] == ["airway_tree"]
+    assert plan["fov_override"]["applied_organs"] == []
     assert "airway_wall" not in plan["fov_override"]["applied_organs"]
+    assert "airway_tree" not in plan["fov_override"]["applied_organs"]
     assert "airway_wall" not in plan["per_organ"]
-    assert "atm" in plan["teacher_run_list"]
+    assert "atm" not in plan["teacher_run_list"]
 
 
 def test_strict_fov_override_rejects_when_eligible_teacher_missing(tmp_path: Path, monkeypatch):
@@ -1094,7 +1084,7 @@ def test_strict_fov_override_rejects_when_eligible_teacher_missing(tmp_path: Pat
 
     assert result["strict_delivery_fov_override_applied_count"] == 0
     assert result["strict_delivery_fov_override_rejected_count"] == 1
-    assert result["strict_delivery_fov_override_rows"][0]["reason"] == "eligible_teacher_missing"
+    assert result["strict_delivery_fov_override_rows"][0]["reason"] == "visibility_out_of_fov"
     assert {row["reason"] for row in result["strict_delivery_failures"]} >= {
         "requested_organs_pruned_by_fov",
         "requested_teacher_not_scheduled",
@@ -1308,7 +1298,7 @@ def test_legacy_cache_without_override_is_not_compatible_with_override_key():
     assert not loop._hierarchical_cache_keys_equivalent(legacy_key, override_key)
 
 
-def test_strict_run_loop_hierarchical_atm_success_with_partial_override(tmp_path: Path, monkeypatch):
+def test_strict_run_loop_hierarchical_atm_rejects_partial_thorax_without_central_airway(tmp_path: Path, monkeypatch):
     from cli_anything.medai.core import multimodel_loop as loop
 
     ct = _save(np.zeros((8, 8, 8), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
@@ -1363,9 +1353,9 @@ def test_strict_run_loop_hierarchical_atm_success_with_partial_override(tmp_path
         strict_delivery_fov_override_organs=["airway_tree"],
     )
 
-    assert result["status"] == "success"
-    assert result["strict_delivery_failure_count"] == 0
-    assert result["total_updated"] == 1
+    assert result["status"] == "failed"
+    assert result["strict_delivery_failure_count"] > 0
+    assert result["total_updated"] == 0
     updated = (
         tmp_path
         / "out"
@@ -1376,16 +1366,13 @@ def test_strict_run_loop_hierarchical_atm_success_with_partial_override(tmp_path
         / "segmentations"
         / "airway_tree.nii.gz"
     )
-    assert updated.exists()
-    arr = np.asanyarray(nib.load(str(updated)).dataobj)
-    assert set(np.unique(arr).astype(int).tolist()).issubset({0, 1})
-    assert int((arr > 0).sum()) > 0
+    assert not updated.exists()
     plan = _read_json(tmp_path / "out" / "annotation_versions" / "case_001" / "case_execution_plan.json")
-    assert "atm" in plan["teacher_run_list"]
-    assert plan["fov_override_applied"][0]["original_visibility"] == "partially_visible"
+    assert "atm" not in plan["teacher_run_list"]
+    assert plan["fov_override_applied"] == []
 
 
-def test_task2_100case_preflight_marks_partial_atm_eligible_only_with_override(tmp_path: Path, monkeypatch):
+def test_task2_100case_preflight_rejects_partial_thorax_atm_even_with_override(tmp_path: Path, monkeypatch):
     from tools.dataset_delivery import audit_task2_100case_launch as audit
 
     targets = sorted({organ for values in audit.MODEL_GROUP_TARGETS.values() for organ in values})
@@ -1424,11 +1411,11 @@ def test_task2_100case_preflight_marks_partial_atm_eligible_only_with_override(t
     assert without_override["read_only"] is True
     assert without_override["source_data_mutation"] is False
     assert without_rows[0]["eligible_for_launch"] == "false"
-    assert without_rows[0]["reason"] == "partial_visibility_requires_explicit_airway_tree_override"
-    assert with_override["model_groups"]["atm"]["eligible_case_count"] == 1
-    assert with_rows[0]["eligible_for_launch"] == "true"
-    assert with_rows[0]["override_required"] == "true"
-    assert with_rows[0]["reason"] == "partial_visibility_allowed_by_explicit_airway_tree_override"
+    assert without_rows[0]["reason"] == "visibility_out_of_fov"
+    assert with_override["model_groups"]["atm"]["eligible_case_count"] == 0
+    assert with_rows[0]["eligible_for_launch"] == "false"
+    assert with_rows[0]["override_required"] == "false"
+    assert with_rows[0]["reason"] == "visibility_out_of_fov"
 
 
 def test_task2_100case_preflight_does_not_launch_unknown_atm_with_override(tmp_path: Path, monkeypatch):

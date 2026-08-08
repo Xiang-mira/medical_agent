@@ -372,7 +372,7 @@ def test_ct_fingerprint_change_invalidates_only_case_cache(tmp_path: Path):
     assert json.loads((tmp_path / "panel" / "panel_progress.json").read_text())["panel_cases_reused_from_cache"] == 0
 
 
-def test_panel_missing_reference_with_fov_compatible_case_is_eligible(tmp_path: Path):
+def test_panel_missing_reference_without_target_specific_landmarks_is_not_eligible(tmp_path: Path):
     from tools.dataset_delivery import cads15_smoke_panel as panel
 
     manifest = _write_manifest(tmp_path, count=1)
@@ -383,9 +383,7 @@ def test_panel_missing_reference_with_fov_compatible_case_is_eligible(tmp_path: 
 
     result = panel.build_smoke_panel(case_manifest=manifest, output_root=tmp_path / "panel")
 
-    assert result["status"] == "READY_FOR_HPC_SMOKE"
-    assert all(row["eligible"] for row in result["audit_rows"])
-    assert {row["reason"] for row in result["audit_rows"]} == {"FOV_COMPATIBLE_NO_REFERENCE"}
+    assert result["status"] == "NO_FOV_COMPATIBLE_SMOKE_CASE"
 
 
 def test_panel_uses_historical_teacher_positive_as_selection_evidence(tmp_path: Path):

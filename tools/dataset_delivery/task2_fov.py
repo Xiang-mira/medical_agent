@@ -13,7 +13,9 @@ HEAD_TARGETS = {
     "cerebrospinal_fluid",
     "gray_matter",
     "white_matter",
-    "eyeball",
+}
+EYEBALL_TARGETS = {"eyeball"}
+FACE_TARGETS = {
     "face",
     "muscle_of_head",
     "scalp",
@@ -125,18 +127,22 @@ def summarize_fov_evidence(landmarks: dict[str, dict[str, Any]], coverage: dict[
     aorta = int((landmarks.get("aorta") or {}).get("foreground_voxels") or 0)
     airway = max(int((landmarks.get(name) or {}).get("foreground_voxels") or 0) for name in CENTRAL_AIRWAY_LANDMARKS)
 
-    strong_head = bool(coverage.get("has_head_coverage")) or (
-        brain >= 10000 and skull >= 1000 and (eye_l > 0 or eye_r > 0)
-    )
+    brain_skull = brain > 10000 and skull > 1000
+    bilateral_eyeballs = eye_l > 0 and eye_r > 0
+    strong_head = bool(coverage.get("has_head_coverage")) or brain_skull
+    complete_head = bool(coverage.get("has_head_coverage")) or (brain_skull and bilateral_eyeballs)
     thorax = bool(coverage.get("has_thorax_coverage")) or (
-        lung_l >= 10000 and lung_r >= 10000 and (heart >= 1000 or aorta >= 1000)
+        lung_l > 10000 and lung_r > 10000 and heart > 10000 and aorta > 1000
     )
     partial_thorax = bool(coverage.get("has_partial_thorax_coverage")) or (
-        (lung_l >= 10000 or lung_r >= 10000) and (heart >= 1000 or aorta >= 1000)
+        (lung_l > 10000 or lung_r > 10000) and heart > 10000 and aorta > 1000
     )
-    central_airway = airway >= 100
+    central_airway = lung_l > 10000 and lung_r > 10000 and airway > 0
     return {
         "head_evidence": strong_head,
+        "brain_skull_evidence": brain_skull,
+        "bilateral_eyeball_evidence": bilateral_eyeballs and skull > 1000,
+        "complete_head_evidence": complete_head,
         "thorax_evidence": thorax,
         "partial_thorax_evidence": partial_thorax,
         "central_airway_evidence": central_airway,
@@ -162,7 +168,7 @@ def target_fov_eligibility(
     norm = str(target).strip()
     summary = summarize_fov_evidence(landmarks or {}, coverage or {})
     if norm in HEAD_TARGETS:
-        eligible = bool(summary["head_evidence"])
+        eligible = bool(summary["brain_skull_evidence"] or coverage and coverage.get("has_head_coverage"))
         return {
             **summary,
             "target": norm,
@@ -170,6 +176,26 @@ def target_fov_eligibility(
             "fov_status": "fully_visible" if eligible else "out_of_fov",
             "eligible": eligible,
             "reason": "strong_head_evidence" if eligible else "head_evidence_missing",
+        }
+    if norm in EYEBALL_TARGETS:
+        eligible = bool(summary["bilateral_eyeball_evidence"])
+        return {
+            **summary,
+            "target": norm,
+            "target_group": "eyeball",
+            "fov_status": "fully_visible" if eligible else "out_of_fov",
+            "eligible": eligible,
+            "reason": "bilateral_eyeball_skull_evidence" if eligible else "bilateral_eyeball_skull_evidence_missing",
+        }
+    if norm in FACE_TARGETS:
+        eligible = bool(summary["complete_head_evidence"])
+        return {
+            **summary,
+            "target": norm,
+            "target_group": "complete_head",
+            "fov_status": "fully_visible" if eligible else "out_of_fov",
+            "eligible": eligible,
+            "reason": "complete_head_evidence" if eligible else "complete_head_evidence_missing",
         }
     if norm in CENTRAL_AIRWAY_TARGETS:
         eligible = bool(summary["central_airway_evidence"])

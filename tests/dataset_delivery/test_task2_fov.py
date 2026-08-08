@@ -48,7 +48,7 @@ def test_bilateral_thorax_evidence_allows_pulmonary_vascular_targets():
 
     result = target_fov_eligibility(
         "lung_pulmonary_arteries",
-        landmarks=_landmarks(lung_left=50000, lung_right=50000, heart=2000),
+        landmarks=_landmarks(lung_left=50000, lung_right=50000, heart=50000, aorta=2000),
     )
 
     assert result["eligible"] is True

@@ -1,0 +1,108 @@
+{
+  "status": "READY",
+  "generated_at": "2026-08-08T03:11:46Z",
+  "totalsegmentator_version": "2.13.0",
+  "totalseg_home": "/home/teacher1/.totalsegmentator",
+  "canonical_target": "brain_ventricle",
+  "task_name": "brain_structures",
+  "task_id": 409,
+  "source_output_name": "ventricle",
+  "source_class_id": 10,
+  "license_required": true,
+  "license_present": true,
+  "download_method": "official_totalseg_download_weights_-t_brain_structures",
+  "required_datasets": [
+    "Dataset409_neuro_550subj",
+    "Dataset298_TotalSegmentator_total_6mm_1559subj"
+  ],
+  "missing_datasets": [],
+  "file_count": 14,
+  "total_size_bytes": 416922519,
+  "files": [
+    {
+      "dataset": "Dataset409_neuro_550subj",
+      "relative_path": "nnunet/results/Dataset409_neuro_550subj/nnUNetTrainer_DASegOrd0__nnUNetPlans__3d_fullres_high/dataset.json",
+      "size_bytes": 809,
+      "sha256": "50dbb3c30694dce75e6b08ef90529dd29c7b34c63d954cdfc1e5d511382234df"
+    },
+    {
+      "dataset": "Dataset409_neuro_550subj",
+      "relative_path": "nnunet/results/Dataset409_neuro_550subj/nnUNetTrainer_DASegOrd0__nnUNetPlans__3d_fullres_high/dataset_fingerprint.json",
+      "size_bytes": 90113,
+      "sha256": "657f416dcc125ef99be0cbf5eb58f0a5a4f9ae405e9a6c91e3f4eccdcadf414d"
+    },
+    {
+      "dataset": "Dataset409_neuro_550subj",
+      "relative_path": "nnunet/results/Dataset409_neuro_550subj/nnUNetTrainer_DASegOrd0__nnUNetPlans__3d_fullres_high/fold_0/checkpoint_final.pth",
+      "size_bytes": 250442413,
+      "sha256": "64f8ef8e15ea5187fc2f62a1d7f43a9946fe2099d13b5213352d3e15e7eb7275"
+    },
+    {
+      "dataset": "Dataset409_neuro_550subj",
+      "relative_path": "nnunet/results/Dataset409_neuro_550subj/nnUNetTrainer_DASegOrd0__nnUNetPlans__3d_fullres_high/fold_0/debug.json",
+      "size_bytes": 17655,
+      "sha256": "585beeef3a835f26611da0f3ebf832b4db42d4f36827c60d616ad4af5570df37"
+    },
+    {
+      "dataset": "Dataset409_neuro_550subj",
+      "relative_path": "nnunet/results/Dataset409_neuro_550subj/nnUNetTrainer_DASegOrd0__nnUNetPlans__3d_fullres_high/fold_0/progress.png",
+      "size_bytes": 579982,
+      "sha256": "be7f9dec82ff783d5e7db0dbc9466c03d18fe227bb6773fea3325dc466153b51"
+    },
+    {
+      "dataset": "Dataset409_neuro_550subj",
+      "relative_path": "nnunet/results/Dataset409_neuro_550subj/nnUNetTrainer_DASegOrd0__nnUNetPlans__3d_fullres_high/plans.json",
+      "size_bytes": 11443,
+      "sha256": "26b284b5f685bb82a2f133308df7ad18db2a38fa04e7e3c122336d1fe69958ab"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/.DS_Store",
+      "size_bytes": 10244,
+      "sha256": "da14f05b939aa2572d459b62d8da426ce7165bb15254b8cfb5320c10fa564fcf"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/._.DS_Store",
+      "size_bytes": 4096,
+      "sha256": "2728ba6baa6dafd20fa4621f02e03ba42e9fc0eb7897d03c54850e406d23d997"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres/dataset.json",
+      "size_bytes": 3796,
+      "sha256": "e804e08ad8912e3a6f541741c8c78799d75acbd3f4f3f18ff5f211bbd3da961a"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres/dataset_fingerprint.json",
+      "size_bytes": 229805,
+      "sha256": "703afc1b58d440a031f61ac61fd90d5672027fe531ea8ce7693a2a73bd041b1c"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres/fold_0/checkpoint_final.pth",
+      "size_bytes": 164951587,
+      "sha256": "3489323a4b759506ab46b489eb78b72142f2143aea6e6d828604d754bd7a9270"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres/fold_0/debug.json",
+      "size_bytes": 18718,
+      "sha256": "557737622576c6e067eead7c8499d965b1403742a6a0bd31ee37b1fec2464f58"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres/fold_0/progress.png",
+      "size_bytes": 554960,
+      "sha256": "6d4e0d701e0b74efe36a967d724e422d67d56e36c4fb04d5f113279f4be0006c"
+    },
+    {
+      "dataset": "Dataset298_TotalSegmentator_total_6mm_1559subj",
+      "relative_path": "nnunet/results/Dataset298_TotalSegmentator_total_6mm_1559subj/nnUNetTrainer_4000epochs_NoMirroring__nnUNetPlans__3d_fullres/plans.json",
+      "size_bytes": 6898,
+      "sha256": "bfd9ab6cfc0e094ced3aff7d7ad23e00e4d50376110b9fdfce0fbca5564c8ca8"
+    }
+  ],
+  "weight_storage_decision": "WEIGHTS_NOT_COMMITTED_LICENSE_RESTRICTION"
+}

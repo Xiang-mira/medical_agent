@@ -5,6 +5,8 @@ import os
 import shutil
 import subprocess
 import time
+import hashlib
+import importlib.metadata
 from pathlib import Path
 
 from .presets import parse_roi_subset
@@ -60,6 +62,77 @@ def resolve_totalseg_home() -> Path:
     return Path(configured).expanduser().resolve() if configured else (Path.home() / ".totalsegmentator").resolve()
 
 
+def _totalseg_version() -> str:
+    try:
+        return importlib.metadata.version("TotalSegmentator")
+    except Exception:
+        return ""
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manifest_preflight(home: Path, manifest_path: Path | None = None) -> dict:
+    manifest_path = manifest_path or (Path(os.getenv("MEDAI_TOTALSEG_MANIFEST", "")).expanduser() if os.getenv("MEDAI_TOTALSEG_MANIFEST") else None)
+    if not manifest_path:
+        return {"manifest_checked": False, "missing_files": [], "checksum_mismatches": [], "version_mismatch": False}
+    manifest_path = manifest_path.resolve()
+    if not manifest_path.exists():
+        return {
+            "manifest_checked": True,
+            "manifest_path": str(manifest_path),
+            "missing_files": [],
+            "checksum_mismatches": [],
+            "version_mismatch": False,
+            "failure": "TOTALSEG_OFFLINE_MANIFEST_MISSING",
+        }
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "manifest_checked": True,
+            "manifest_path": str(manifest_path),
+            "missing_files": [],
+            "checksum_mismatches": [],
+            "version_mismatch": False,
+            "failure": f"TOTALSEG_OFFLINE_MANIFEST_UNREADABLE:{type(exc).__name__}",
+        }
+    installed = _totalseg_version()
+    expected = str(manifest.get("totalsegmentator_version") or "")
+    version_mismatch = bool(expected and installed and expected != installed)
+    missing_files: list[str] = []
+    checksum_mismatches: list[str] = []
+    for row in manifest.get("files", []) or []:
+        rel = str(row.get("relative_path") or "")
+        if not rel:
+            continue
+        path = home / rel
+        if not path.exists():
+            missing_files.append(rel)
+            continue
+        size = row.get("size_bytes")
+        if size is not None and path.stat().st_size != int(size):
+            checksum_mismatches.append(rel)
+            continue
+        expected_hash = str(row.get("sha256") or "")
+        if expected_hash and _sha256(path) != expected_hash:
+            checksum_mismatches.append(rel)
+    return {
+        "manifest_checked": True,
+        "manifest_path": str(manifest_path),
+        "expected_version": expected,
+        "installed_version": installed,
+        "version_mismatch": version_mismatch,
+        "missing_files": missing_files,
+        "checksum_mismatches": checksum_mismatches,
+    }
+
+
 def _totalseg_runtime_env() -> dict[str, str]:
     env = os.environ.copy()
     home = resolve_totalseg_home()
@@ -69,7 +142,7 @@ def _totalseg_runtime_env() -> dict[str, str]:
     return env
 
 
-def preflight_totalseg_offline_assets(subtasks: list[str], *, home: Path | None = None) -> dict:
+def preflight_totalseg_offline_assets(subtasks: list[str], *, home: Path | None = None, manifest_path: Path | None = None) -> dict:
     home = (home or resolve_totalseg_home()).resolve()
     config = home / "config.json"
     results_root = home / "nnunet" / "results"
@@ -96,21 +169,32 @@ def preflight_totalseg_offline_assets(subtasks: list[str], *, home: Path | None 
             license_present = False
     failures: list[str] = []
     if license_required and not license_present:
-        failures.append("TOTALSEG_LICENSE_MISSING")
+        failures.append("BLOCKED_LICENSE_REQUIRED")
     if missing_datasets:
         failures.append("TOTALSEG_OFFLINE_ASSET_MISSING")
+    manifest = _manifest_preflight(home, manifest_path)
+    if manifest.get("failure"):
+        failures.append(str(manifest["failure"]))
+    if manifest.get("missing_files"):
+        failures.append("TOTALSEG_OFFLINE_ASSET_MISSING")
+    if manifest.get("checksum_mismatches"):
+        failures.append("TOTALSEG_OFFLINE_CHECKSUM_MISMATCH")
+    if manifest.get("version_mismatch"):
+        failures.append("TOTALSEG_VERSION_MISMATCH")
     status = "ok" if not failures else "failed"
     return {
         "status": status,
         "offline": totalseg_offline_enabled(),
         "home": str(home),
+        "totalsegmentator_version": _totalseg_version(),
         "config_path": str(config),
         "license_required": license_required,
         "license_present": license_present,
         "required_datasets": sorted(set(item for req in requirements for item in req.get("required_datasets", []))),
         "present_datasets": sorted(set(present_datasets)),
         "missing_datasets": sorted(set(missing_datasets)),
-        "failures": failures,
+        "manifest": manifest,
+        "failures": sorted(set(failures), key=failures.index),
         "requirements": requirements,
     }
 
@@ -292,6 +376,9 @@ def run_totalseg_with_contract(
                 if isinstance(alias, dict):
                     canonical = str(alias.get("canonical_target") or "")
                     if canonical:
+                        canonical_dst = direct_seg_dir / f"{canonical}.nii.gz"
+                        if src_mask.resolve() != canonical_dst.resolve():
+                            shutil.copy2(src_mask, canonical_dst)
                         identity_provenance[canonical] = {
                             "source_model": "totalsegmentator",
                             "source_task": str(alias.get("source_task") or subtask),

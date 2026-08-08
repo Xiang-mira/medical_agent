@@ -359,6 +359,34 @@ ABDOMEN_ORGAN_TOKENS = {
     "duodenum", "colon", "bowel", "intestine", "stomach", "gall",
     "bile", "portal", "mesenteric", "postcava", "vena_cava", "ivc",
 }
+TASK2_HEAD_TARGETS = {
+    "brain_ventricle",
+    "cerebrospinal_fluid",
+    "gray_matter",
+    "white_matter",
+}
+TASK2_EYEBALL_TARGETS = {"eyeball"}
+TASK2_COMPLETE_HEAD_TARGETS = {
+    "face",
+    "muscle_of_head",
+    "scalp",
+}
+TASK2_CENTRAL_AIRWAY_TARGETS = {"airway_tree", "airway_wall"}
+TASK2_PULMONARY_VASCULAR_TARGETS = {"lung_pulmonary_arteries", "lung_pulmonary_veins"}
+TASK2_FOV_LANDMARKS = {
+    "brain",
+    "skull",
+    "eyeball_left",
+    "eyeball_right",
+    "lung_left",
+    "lung_right",
+    "heart",
+    "aorta",
+    "airway",
+    "trachea",
+    "bronchus",
+    "lung_trachea_bronchia",
+}
 
 
 def _norm_organ_key(text: str) -> str:
@@ -597,6 +625,135 @@ def _load_case_presence_context(case: dict[str, str], ct: Path, case_id: str, ca
         "dataset_prior": dataset_prior,
         "excludes_head": excludes_head,
     }
+
+
+def _mask_landmark_row(path: Path, *, ct: Path | None = None) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "readable": False,
+        "foreground_voxels": 0,
+        "geometry_match": None,
+        "reason": "missing",
+    }
+    if not path.exists():
+        return row
+    try:
+        import nibabel as nib
+        import numpy as np
+
+        img = nib.load(str(path))
+        arr = np.asanyarray(img.dataobj)
+        row["readable"] = True
+        row["foreground_voxels"] = int((arr != 0).sum())
+        row["reason"] = "positive" if row["foreground_voxels"] > 0 else "zero"
+        if ct and ct.exists():
+            ct_img = nib.load(str(ct))
+            row["geometry_match"] = bool(
+                tuple(img.shape[:3]) == tuple(ct_img.shape[:3])
+                and np.allclose(img.header.get_zooms()[:3], ct_img.header.get_zooms()[:3], rtol=0, atol=1e-5)
+                and np.allclose(img.affine, ct_img.affine, rtol=0, atol=1e-5)
+            )
+    except Exception as exc:
+        row["reason"] = f"unreadable:{type(exc).__name__}"
+    return row
+
+
+def _reference_landmark_inventory(ref_dir: Path | None, *, ct: Path | None = None) -> dict[str, dict[str, Any]]:
+    if ref_dir is None:
+        return {}
+    roots = [ref_dir, ref_dir / "segmentations", ref_dir / "updated"]
+    inventory: dict[str, dict[str, Any]] = {}
+    for landmark in sorted(TASK2_FOV_LANDMARKS):
+        candidates = [root / f"{landmark}.nii.gz" for root in roots]
+        path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+        inventory[landmark] = _mask_landmark_row(path, ct=ct)
+    return inventory
+
+
+def _target_fov_landmark_summary(landmarks: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def voxels(name: str) -> int:
+        row = landmarks.get(name) or {}
+        if row.get("geometry_match") is False or not row.get("readable"):
+            return 0
+        return int(row.get("foreground_voxels") or 0)
+
+    brain = voxels("brain")
+    skull = voxels("skull")
+    eye_l = voxels("eyeball_left")
+    eye_r = voxels("eyeball_right")
+    lung_l = voxels("lung_left")
+    lung_r = voxels("lung_right")
+    heart = voxels("heart")
+    aorta = voxels("aorta")
+    central_airway = max(voxels("airway"), voxels("trachea"), voxels("bronchus"), voxels("lung_trachea_bronchia"))
+    brain_skull = brain > 10000 and skull > 1000
+    bilateral_eyeballs = eye_l > 0 and eye_r > 0
+    return {
+        "head_evidence": brain_skull,
+        "brain_skull_evidence": brain_skull,
+        "bilateral_eyeball_evidence": bilateral_eyeballs and skull > 1000,
+        "complete_head_evidence": brain_skull and bilateral_eyeballs,
+        "thorax_evidence": lung_l > 10000 and lung_r > 10000 and heart > 10000 and aorta > 1000,
+        "partial_thorax_evidence": (lung_l > 10000 or lung_r > 10000) and heart > 10000 and aorta > 1000,
+        "central_airway_evidence": lung_l > 10000 and lung_r > 10000 and central_airway > 0,
+        "brain_foreground_voxels": brain,
+        "skull_foreground_voxels": skull,
+        "eyeball_left_foreground_voxels": eye_l,
+        "eyeball_right_foreground_voxels": eye_r,
+        "lung_left_foreground_voxels": lung_l,
+        "lung_right_foreground_voxels": lung_r,
+        "heart_foreground_voxels": heart,
+        "aorta_foreground_voxels": aorta,
+        "central_airway_foreground_voxels": central_airway,
+    }
+
+
+def _augment_presence_from_reference_landmarks(
+    context: dict[str, Any],
+    ref_dir: Path | None,
+    *,
+    ct: Path,
+    case_out: Path,
+) -> dict[str, Any]:
+    landmarks = _reference_landmark_inventory(ref_dir, ct=ct)
+    if not landmarks:
+        return context
+    summary = _target_fov_landmark_summary(landmarks)
+    updated = dict(context)
+    evidence = list(updated.get("coverage_evidence", []) or [])
+    if summary["head_evidence"]:
+        updated["has_head_coverage"] = True
+        evidence.append("reference_landmarks:head")
+    if summary["thorax_evidence"]:
+        updated["has_thorax_coverage"] = True
+        evidence.append("reference_landmarks:thorax")
+    elif summary["partial_thorax_evidence"]:
+        updated["has_partial_thorax_coverage"] = True
+        evidence.append("reference_landmarks:partial_thorax")
+    if summary["central_airway_evidence"]:
+        updated["has_central_airway_coverage"] = True
+        evidence.append("reference_landmarks:central_airway")
+    updated["coverage_evidence"] = evidence
+    updated["has_region_evidence"] = bool(updated.get("has_region_evidence")) or any(
+        bool(updated.get(key))
+        for key in (
+            "has_head_coverage",
+            "has_thorax_coverage",
+            "has_partial_thorax_coverage",
+            "has_central_airway_coverage",
+        )
+    )
+    updated["target_fov_landmarks"] = landmarks
+    updated["target_fov_landmark_summary"] = summary
+    metadata = dict(updated.get("metadata") or {})
+    metadata["target_fov_landmark_summary"] = summary
+    updated["metadata"] = metadata
+    try:
+        write_json(case_out / "target_fov_landmarks.json", {"landmarks": landmarks, "summary": summary})
+    except Exception:
+        pass
+    return updated
 
 
 def _augment_presence_from_model_landmarks(
@@ -3594,6 +3751,32 @@ def _fov_status_for_organ(organ: str, presence_context: dict[str, Any] | None = 
     )
     if not context.get("has_region_evidence") and not has_any_region:
         return "unknown"
+    target_fov = context.get("target_fov_landmark_summary") or {}
+    if target_fov:
+        head_evidence = bool(target_fov.get("brain_skull_evidence") or target_fov.get("head_evidence"))
+        eyeball_evidence = bool(target_fov.get("bilateral_eyeball_evidence"))
+        complete_head_evidence = bool(target_fov.get("complete_head_evidence"))
+    else:
+        head_evidence = bool(context.get("has_head_coverage"))
+        eyeball_evidence = bool(context.get("has_head_coverage"))
+        complete_head_evidence = bool(context.get("has_head_coverage"))
+    thorax_evidence = bool(context.get("has_thorax_coverage") or target_fov.get("thorax_evidence"))
+    partial_thorax_evidence = bool(context.get("has_partial_thorax_coverage") or target_fov.get("partial_thorax_evidence"))
+    central_airway_evidence = bool(context.get("has_central_airway_coverage") or target_fov.get("central_airway_evidence"))
+    if norm in TASK2_HEAD_TARGETS:
+        return "fully_visible" if head_evidence else ("out_of_fov" if has_any_region else "unknown")
+    if norm in TASK2_EYEBALL_TARGETS:
+        return "fully_visible" if eyeball_evidence else ("out_of_fov" if has_any_region else "unknown")
+    if norm in TASK2_COMPLETE_HEAD_TARGETS:
+        return "fully_visible" if complete_head_evidence else ("out_of_fov" if has_any_region else "unknown")
+    if norm in TASK2_CENTRAL_AIRWAY_TARGETS:
+        return "fully_visible" if central_airway_evidence else ("out_of_fov" if has_any_region else "unknown")
+    if norm in TASK2_PULMONARY_VASCULAR_TARGETS:
+        if thorax_evidence:
+            return "fully_visible"
+        if partial_thorax_evidence:
+            return "partially_visible"
+        return "out_of_fov" if has_any_region else "unknown"
     if norm == "esophagus":
         if has_thorax:
             return "fully_visible"
@@ -5873,6 +6056,12 @@ def run_multimodel_annotation_loop(
         case_updated = updated_root / case_id / "updated"
         case_updated.mkdir(parents=True, exist_ok=True)
         presence_context = _load_case_presence_context(case, ct, case_id, case_out)
+        presence_context = _augment_presence_from_reference_landmarks(
+            presence_context,
+            ref_dir,
+            ct=ct,
+            case_out=case_out,
+        )
 
         import time as _time
         _case_start = _time.time()

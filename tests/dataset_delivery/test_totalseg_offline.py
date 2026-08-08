@@ -67,7 +67,7 @@ def test_totalseg_offline_preflight_reports_missing_license_and_assets(tmp_path:
     preflight = preflight_totalseg_offline_assets(["brain_structures"])
 
     assert preflight["status"] == "failed"
-    assert "TOTALSEG_LICENSE_MISSING" in preflight["failures"]
+    assert "BLOCKED_LICENSE_REQUIRED" in preflight["failures"]
     assert "TOTALSEG_OFFLINE_ASSET_MISSING" in preflight["failures"]
     assert "Dataset409_neuro_550subj" in preflight["missing_datasets"]
     assert "Dataset298_TotalSegmentator_total_6mm_1559subj" in preflight["missing_datasets"]
@@ -100,6 +100,35 @@ def test_totalseg_offline_mode_fails_fast_without_subprocess(tmp_path: Path, mon
     assert result["status"] == "failed"
     assert result["reason"] == "TOTALSEG_OFFLINE_ASSET_MISSING"
     assert result["offline_preflight"]["missing_datasets"] == ["Dataset409_neuro_550subj"]
+
+
+def test_totalseg_offline_mode_fails_fast_when_crop_dependency_missing(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import totalseg_runner
+
+    home = _write_totalseg_home(
+        tmp_path,
+        license_present=True,
+        datasets=["Dataset409_neuro_550subj"],
+    )
+    monkeypatch.setenv("MEDAI_TOTALSEG_HOME", str(home))
+    monkeypatch.setenv("MEDAI_TOTALSEG_OFFLINE", "1")
+    monkeypatch.setattr(
+        totalseg_runner.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("subprocess should not run when crop assets are incomplete")),
+    )
+
+    result = totalseg_runner.run_totalseg_with_contract(
+        tmp_path / "ct.nii.gz",
+        tmp_path / "case" / "per_model" / "totalsegmentator",
+        tmp_path / "case",
+        subtasks=["brain_structures"],
+        case_id="case_001",
+    )
+
+    assert result["status"] == "failed"
+    assert result["reason"] == "TOTALSEG_OFFLINE_ASSET_MISSING"
+    assert result["offline_preflight"]["missing_datasets"] == ["Dataset298_TotalSegmentator_total_6mm_1559subj"]
 
 
 def test_totalseg_valid_offline_cached_mask_writes_identity_provenance(tmp_path: Path, monkeypatch):
@@ -137,6 +166,8 @@ def test_totalseg_valid_offline_cached_mask_writes_identity_provenance(tmp_path:
     )
 
     assert result["status"] == "success"
+    assert (case_out / "segmentations" / "ventricle.nii.gz").exists()
+    assert (case_out / "segmentations" / "brain_ventricle.nii.gz").exists()
     provenance = json.loads((case_out / "segmentations" / "identity_provenance.json").read_text(encoding="utf-8"))
     item = provenance["organs"]["brain_ventricle"]
     assert item["source_task"] == "brain_structures"
@@ -175,3 +206,35 @@ def test_totalseg_offline_manifest_records_checksums_without_license_value(tmp_p
     assert manifest["license_present"] is True
     assert "configured" not in text
     assert verification["status"] == "READY"
+
+
+def test_totalseg_manifest_preflight_reports_version_and_checksum_mismatch(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core.totalseg_runner import preflight_totalseg_offline_assets
+    from tools.dataset_delivery.totalseg_brain_ventricle_offline import build_brain_ventricle_manifest
+
+    home = _write_totalseg_home(
+        tmp_path,
+        license_present=True,
+        datasets=[
+            "Dataset298_TotalSegmentator_total_6mm_1559subj",
+            "Dataset409_neuro_550subj",
+        ],
+    )
+    weight_file = home / "nnunet" / "results" / "Dataset409_neuro_550subj" / "fold_0" / "checkpoint_final.pth"
+    weight_file.parent.mkdir(parents=True, exist_ok=True)
+    weight_file.write_bytes(b"official-weight-placeholder")
+    manifest_path = tmp_path / "manifest.json"
+    build_brain_ventricle_manifest(home=home, output_manifest=manifest_path)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    data["totalsegmentator_version"] = "0.0.0"
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+    weight_file.write_bytes(b"changed")
+    monkeypatch.setenv("MEDAI_TOTALSEG_HOME", str(home))
+    monkeypatch.setenv("MEDAI_TOTALSEG_OFFLINE", "1")
+    monkeypatch.setenv("MEDAI_TOTALSEG_MANIFEST", str(manifest_path))
+
+    preflight = preflight_totalseg_offline_assets(["brain_structures"])
+
+    assert preflight["status"] == "failed"
+    assert "TOTALSEG_VERSION_MISMATCH" in preflight["failures"]
+    assert "TOTALSEG_OFFLINE_CHECKSUM_MISMATCH" in preflight["failures"]
