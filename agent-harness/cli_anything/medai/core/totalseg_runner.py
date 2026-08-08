@@ -7,6 +7,7 @@ import subprocess
 import time
 import hashlib
 import importlib.metadata
+import sys
 from pathlib import Path
 
 from .presets import parse_roi_subset
@@ -142,6 +143,10 @@ def _totalseg_runtime_env() -> dict[str, str]:
     return env
 
 
+def _offline_infer_script() -> Path:
+    return Path(__file__).resolve().parents[4] / "scripts" / "totalseg_offline_infer.py"
+
+
 def preflight_totalseg_offline_assets(subtasks: list[str], *, home: Path | None = None, manifest_path: Path | None = None) -> dict:
     home = (home or resolve_totalseg_home()).resolve()
     config = home / "config.json"
@@ -208,6 +213,34 @@ def _timeout_text(value: str | bytes | None) -> str:
 
 
 def build_totalseg_command(image_path: str | Path, output_dir: str | Path, fast: bool = True, task: str | None = None, roi_preset: str = "shapekit_abdomen", roi_subset: str | None = None, device: str | None = None, statistics: bool = False, preview: bool = False) -> list[str]:
+    if totalseg_offline_enabled() and task:
+        cmd = [
+            sys.executable,
+            str(_offline_infer_script()),
+            "--image",
+            str(image_path),
+            "--output",
+            str(output_dir),
+            "--task",
+            task,
+            "--quiet",
+        ]
+        task_no_fast = task in _NO_FAST_TASKS
+        if fast and not task_no_fast:
+            cmd.append("--fast")
+            if not roi_subset and roi_preset == "shapekit_abdomen":
+                roi_preset = "shapekit_abdomen_fast"
+        rois = parse_roi_subset(roi_preset, roi_subset)
+        if rois:
+            cmd += ["--roi-subset", *rois]
+        if device:
+            cmd += ["--device", device]
+        if statistics:
+            cmd.append("--statistics")
+        if preview:
+            cmd.append("--preview")
+        return cmd
+
     exe = find_totalseg_executable() or "TotalSegmentator"
     cmd = [exe, "-i", str(image_path), "-o", str(output_dir)]
     task_no_fast = task in _NO_FAST_TASKS if task else False

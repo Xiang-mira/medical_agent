@@ -386,6 +386,40 @@ def test_panel_missing_reference_without_target_specific_landmarks_is_not_eligib
     assert result["status"] == "NO_FOV_COMPATIBLE_SMOKE_CASE"
 
 
+def test_panel_missing_canonical_reference_with_head_fov_is_eligible_for_fresh_smoke(tmp_path: Path):
+    from tools.dataset_delivery import cads15_smoke_panel as panel
+
+    case_id = "case_head"
+    ct = _save(np.zeros((40, 40, 40), dtype=np.int16), tmp_path / case_id / "ct.nii.gz")
+    ref = tmp_path / case_id / "ref"
+    ref.mkdir()
+    brain = np.zeros((40, 40, 40), dtype=np.uint8)
+    brain.flat[:12000] = 1
+    skull = np.zeros((40, 40, 40), dtype=np.uint8)
+    skull.flat[:1200] = 1
+    eye = np.zeros((40, 40, 40), dtype=np.uint8)
+    eye[1, 1, 1] = 1
+    _save(brain, ref / "brain.nii.gz")
+    _save(skull, ref / "skull.nii.gz")
+    _save(eye, ref / "eyeball_left.nii.gz")
+    _save(eye, ref / "eyeball_right.nii.gz")
+    manifest = tmp_path / "cases.csv"
+    manifest.write_text(f"case_id,ct_path,annotation_folder\n{case_id},{ct},{ref}\n", encoding="utf-8")
+
+    result = panel.build_smoke_panel(case_manifest=manifest, output_root=tmp_path / "panel")
+    rows = {
+        row["target"]: row
+        for row in result["audit_rows"]
+        if row["case_id"] == case_id
+    }
+
+    assert rows["gray_matter"]["reference_positive"] is False
+    assert rows["gray_matter"]["eligible"] is True
+    assert rows["gray_matter"]["reason"] == "FOV_COMPATIBLE_NO_REFERENCE"
+    assert rows["face"]["eligible"] is True
+    assert rows["face"]["reason"] == "FOV_COMPATIBLE_NO_REFERENCE"
+
+
 def test_panel_uses_historical_teacher_positive_as_selection_evidence(tmp_path: Path):
     from tools.dataset_delivery import cads15_smoke_panel as panel
 

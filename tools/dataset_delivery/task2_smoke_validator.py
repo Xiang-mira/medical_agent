@@ -63,6 +63,10 @@ SMOKE_SPECS: dict[str, dict[str, Any]] = {
         "models": ["unest"],
         "targets": ["kidney_cortex", "kidney_medulla", "kidney_pelvicalyceal_system"],
     },
+    "totalsegmentator": {
+        "models": ["totalsegmentator"],
+        "targets": ["brain_ventricle"],
+    },
 }
 
 

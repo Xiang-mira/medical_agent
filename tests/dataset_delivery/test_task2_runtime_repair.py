@@ -627,12 +627,15 @@ def test_airrc_group_schema_and_parse_groups():
     from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS, parse_groups
 
     assert parse_groups("atm,airrc,unest") == ["atm", "airrc", "unest"]
+    assert parse_groups("totalsegmentator") == ["totalsegmentator"]
     assert SMOKE_SPECS["airrc"]["models"] == ["airrc"]
     assert SMOKE_SPECS["airrc"]["targets"] == [
         "airway_wall",
         "lung_pulmonary_arteries",
         "lung_pulmonary_veins",
     ]
+    assert SMOKE_SPECS["totalsegmentator"]["models"] == ["totalsegmentator"]
+    assert SMOKE_SPECS["totalsegmentator"]["targets"] == ["brain_ventricle"]
 
 
 def test_airrc_smoke_validation_requires_three_valid_masks(tmp_path: Path):
@@ -650,6 +653,19 @@ def test_airrc_smoke_validation_requires_three_valid_masks(tmp_path: Path):
         "lung_pulmonary_arteries",
         "lung_pulmonary_veins",
     ]
+
+
+def test_totalsegmentator_smoke_validation_requires_brain_ventricle_mask(tmp_path: Path):
+    from tools.dataset_delivery.task2_smoke_validator import validate_smoke_root
+
+    _write_smoke_run(tmp_path, "totalsegmentator", final_masks=True)
+    slurm_csv = tmp_path / "slurm_status.csv"
+    slurm_csv.write_text("group,job_id,state,exit_code\ntotalsegmentator,123,COMPLETED,0:0\n", encoding="utf-8")
+
+    report = validate_smoke_root(smoke_root=tmp_path, groups=["totalsegmentator"], slurm_status_csv=slurm_csv)
+
+    assert report["status"] == "PASSED"
+    assert report["groups"][0]["passed_targets"] == ["brain_ventricle"]
 
 
 def test_airrc_missing_or_zero_mask_fails_after_completed_job(tmp_path: Path):
@@ -718,6 +734,10 @@ def test_task2_smoke_launcher_preserves_t4_gres_and_records_test_only(monkeypatc
     sbatch_text = Path(summary["groups"][0]["sbatch_file"]).read_text(encoding="utf-8")
     assert "#SBATCH --gres=gpu:T4:1" in sbatch_text
     assert "gpu:t4:1" not in sbatch_text
+    assert "MEDAI_TOTALSEG_HOME" in sbatch_text
+    assert "TOTALSEG_HOME_DIR" in sbatch_text
+    assert "MEDAI_TOTALSEG_OFFLINE=${MEDAI_TOTALSEG_OFFLINE:-1}" in sbatch_text
+    assert "totalsegmentator_brain_ventricle_offline_manifest.json" in sbatch_text
     assert summary["groups"][0]["status"] == "READY_TO_SUBMIT"
     assert summary["groups"][0]["resources"]["configured_gres"] == "gpu:T4:1"
     assert any(command[:2] == ["sbatch", "--test-only"] for command in calls)

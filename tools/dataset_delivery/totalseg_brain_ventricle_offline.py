@@ -4,6 +4,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -41,6 +44,38 @@ def _totalseg_version() -> str:
         return importlib.metadata.version("TotalSegmentator")
     except Exception:
         return ""
+
+
+def download_brain_ventricle_assets(*, home: Path | None = None, timeout_sec: int = 7200) -> dict[str, Any]:
+    home = (home or resolve_totalseg_home()).resolve()
+    exe = shutil.which("totalseg_download_weights")
+    if exe:
+        cmd = [exe, "-t", "brain_structures"]
+    else:
+        cmd = [sys.executable, "-m", "totalsegmentator.bin.totalseg_download_weights", "-t", "brain_structures"]
+    env = {**os.environ, "TOTALSEG_HOME_DIR": str(home)}
+    started = time.time()
+    completed = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+        timeout=timeout_sec,
+        env=env,
+    )
+    preflight = preflight_totalseg_offline_assets(["brain_structures"], home=home)
+    return {
+        "status": "READY" if completed.returncode == 0 and preflight["status"] == "ok" else "FAILED",
+        "download_method": "official_totalseg_download_weights_-t_brain_structures",
+        "command": cmd,
+        "home": str(home),
+        "return_code": completed.returncode,
+        "runtime_sec": round(time.time() - started, 3),
+        "stdout_tail": completed.stdout[-4000:],
+        "stderr_tail": completed.stderr[-4000:],
+        "offline_preflight": preflight,
+    }
 
 
 def build_brain_ventricle_manifest(
@@ -125,10 +160,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Audit/verify the licensed TotalSegmentator brain_ventricle offline bundle.")
     parser.add_argument("--home", type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--download", action="store_true", help="Use the official TotalSegmentator downloader for brain_structures before writing the manifest.")
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--no-sha256", action="store_true", help="Record sizes only; not recommended for final bundle manifests.")
+    parser.add_argument("--timeout-sec", default=7200, type=int)
     args = parser.parse_args()
-    if args.verify:
+    if args.download:
+        download = download_brain_ventricle_assets(home=args.home, timeout_sec=args.timeout_sec)
+        if download["status"] != "READY":
+            print(json.dumps({k: v for k, v in download.items() if k not in {"stdout_tail", "stderr_tail"}}, indent=2))
+            return 2
+        result = build_brain_ventricle_manifest(
+            home=args.home,
+            output_manifest=args.manifest,
+            include_sha256=not bool(args.no_sha256),
+        )
+        result["download_result"] = {k: v for k, v in download.items() if k not in {"stdout_tail", "stderr_tail"}}
+    elif args.verify:
         result = verify_brain_ventricle_manifest(home=args.home, manifest_path=args.manifest)
     else:
         result = build_brain_ventricle_manifest(

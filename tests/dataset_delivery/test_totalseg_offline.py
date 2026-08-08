@@ -57,6 +57,19 @@ def test_totalseg_brain_structures_contract_records_task409_label10():
     assert "Dataset298_TotalSegmentator_total_6mm_1559subj" in brain["offline_required_datasets"]
 
 
+def test_totalseg_qualification_registry_no_longer_blocks_on_assets():
+    registry = json.loads((REPO_ROOT / "configs" / "dataset_delivery" / "task2_qualification_registry.json").read_text(encoding="utf-8"))
+    rows = [
+        row for row in registry["entries"]
+        if row.get("model") == "totalsegmentator" and row.get("targets") == ["brain_ventricle"]
+    ]
+
+    assert rows
+    assert rows[0]["status"] == "NEEDS_REAL_SMOKE"
+    assert "Dataset409_neuro_550subj" in rows[0]["inference_evidence"]
+    assert "Dataset298_TotalSegmentator_total_6mm_1559subj" in rows[0]["inference_evidence"]
+
+
 def test_totalseg_offline_preflight_reports_missing_license_and_assets(tmp_path: Path, monkeypatch):
     from cli_anything.medai.core.totalseg_runner import preflight_totalseg_offline_assets
 
@@ -129,6 +142,28 @@ def test_totalseg_offline_mode_fails_fast_when_crop_dependency_missing(tmp_path:
     assert result["status"] == "failed"
     assert result["reason"] == "TOTALSEG_OFFLINE_ASSET_MISSING"
     assert result["offline_preflight"]["missing_datasets"] == ["Dataset298_TotalSegmentator_total_6mm_1559subj"]
+
+
+def test_totalseg_offline_command_uses_guarded_python_api(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core.totalseg_runner import build_totalseg_command
+
+    monkeypatch.setenv("MEDAI_TOTALSEG_OFFLINE", "1")
+
+    cmd = build_totalseg_command(
+        tmp_path / "ct.nii.gz",
+        tmp_path / "out",
+        fast=False,
+        task="brain_structures",
+        roi_preset="none",
+        device="cpu",
+    )
+
+    assert cmd[0] == sys.executable
+    assert cmd[1].endswith("scripts/totalseg_offline_infer.py")
+    assert "--task" in cmd
+    assert "brain_structures" in cmd
+    assert "--device" in cmd
+    assert "cpu" in cmd
 
 
 def test_totalseg_valid_offline_cached_mask_writes_identity_provenance(tmp_path: Path, monkeypatch):
@@ -206,6 +241,32 @@ def test_totalseg_offline_manifest_records_checksums_without_license_value(tmp_p
     assert manifest["license_present"] is True
     assert "configured" not in text
     assert verification["status"] == "READY"
+
+
+def test_totalseg_download_uses_official_downloader_and_home(tmp_path: Path, monkeypatch):
+    from tools.dataset_delivery import totalseg_brain_ventricle_offline as offline
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append({"cmd": cmd, "env": kwargs.get("env")})
+        return subprocess.CompletedProcess(cmd, 0, stdout="downloaded", stderr="")
+
+    home = tmp_path / "totalseg_home"
+    monkeypatch.setattr(offline.shutil, "which", lambda name: "/usr/bin/totalseg_download_weights" if name == "totalseg_download_weights" else None)
+    monkeypatch.setattr(offline.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        offline,
+        "preflight_totalseg_offline_assets",
+        lambda subtasks, home=None: {"status": "ok", "failures": [], "home": str(home)},
+    )
+
+    result = offline.download_brain_ventricle_assets(home=home)
+
+    assert result["status"] == "READY"
+    assert calls[0]["cmd"] == ["/usr/bin/totalseg_download_weights", "-t", "brain_structures"]
+    assert calls[0]["env"]["TOTALSEG_HOME_DIR"] == str(home.resolve())
+    assert result["download_method"] == "official_totalseg_download_weights_-t_brain_structures"
 
 
 def test_totalseg_manifest_preflight_reports_version_and_checksum_mismatch(tmp_path: Path, monkeypatch):

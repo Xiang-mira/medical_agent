@@ -18,6 +18,23 @@
   "missing_datasets": [],
   "file_count": 14,
   "total_size_bytes": 416922519,
+  "local_offline_smoke": {
+    "status": "TOTALSEG_OFFLINE_BUNDLE_VALIDATED",
+    "validated_at": "2026-08-08T04:00:00Z",
+    "input": "TotalSegmentator package resource ct_brain_atlas_1mm.nii.gz",
+    "runner": "medical_agent run_totalseg_with_contract",
+    "offline_home_mode": "clean TOTALSEG_HOME_DIR with symlinked manifest datasets and copied license config",
+    "network_guard": "strace confirmed inet_connect_count=0 with MEDAI_TOTALSEG_OFFLINE=1 guarded Python API",
+    "task_executed": "brain_structures",
+    "raw_output": "ventricle.nii.gz",
+    "canonical_output": "brain_ventricle.nii.gz",
+    "raw_foreground_voxels": 27795,
+    "canonical_foreground_voxels": 27795,
+    "binary": true,
+    "shape_matches_ct": true,
+    "spacing_matches_ct": true,
+    "affine_matches_ct": true
+  },
   "files": [
     {
       "dataset": "Dataset409_neuro_550subj",
