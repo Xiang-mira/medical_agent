@@ -278,6 +278,7 @@ def test_formal_launcher_command_keeps_shapekit_and_labelcritic_enabled(tmp_path
     assert "--debug-allow-no-shapekit" not in command
     assert "--no-enable-critic" not in command
     assert command[command.index("--critic-vlm-model") + 1] == "Qwen/Qwen2-VL-72B-Instruct-AWQ"
+    assert "--no-use-annotation-folder-reference" in command
     assert "--strict-delivery-targets" in command
 
 

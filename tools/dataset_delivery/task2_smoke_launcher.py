@@ -104,6 +104,7 @@ def _command_for_group(
         "--unest-python-executable", str(unest_python_executable),
         "--timeout-sec", str(timeout_sec),
         "--teacher-inference-mode", "hierarchical_roi" if group in {"atm", "unest"} else "full_volume",
+        "--no-use-annotation-folder-reference",
         "--strict-delivery-targets",
     ]
     if not enable_shapekit:
