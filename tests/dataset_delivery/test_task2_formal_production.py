@@ -43,6 +43,17 @@ def _write_manifest(path: Path, case_ids: list[str], image_root: Path, mask_root
     return path
 
 
+def _write_legacy_base_manifest_without_annotation_folder(path: Path, case_ids: list[str], image_root: Path, mask_root: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["index", "case_id", "image_path", "reference_mask_dir"])
+        writer.writeheader()
+        for index, case_id in enumerate(case_ids):
+            ct, ann = _write_case_roots(image_root, mask_root, case_id)
+            writer.writerow({"index": index, "case_id": case_id, "image_path": ct, "reference_mask_dir": ann})
+    return path
+
+
 def _append_cases(path: Path) -> Path:
     path.write_text(
         "case_id,reason\n"
@@ -107,6 +118,54 @@ def test_formal_manifest_builds_exact_103_and_rejects_duplicate_append(tmp_path:
             image_root=image_root,
             mask_root=mask_root,
         )
+
+
+def test_formal_manifest_materializes_annotation_folder_for_legacy_base_rows(tmp_path: Path):
+    from tools.dataset_delivery.task2_formal_manifest import (
+        FORMAL_APPEND_CASE_IDS,
+        build_formal_manifest,
+        validate_formal_manifest,
+    )
+
+    image_root = tmp_path / "images"
+    mask_root = tmp_path / "masks"
+    base_ids = [f"BDMAP_BASE_{index:05d}" for index in range(100)]
+    base = _write_legacy_base_manifest_without_annotation_folder(
+        tmp_path / "cases_100_legacy_manifest.csv",
+        base_ids,
+        image_root,
+        mask_root,
+    )
+    for case_id in FORMAL_APPEND_CASE_IDS:
+        _write_case_roots(image_root, mask_root, case_id)
+    append = _append_cases(tmp_path / "formal_append_cases.csv")
+    out = tmp_path / "cases_103_manifest.csv"
+
+    audit = build_formal_manifest(
+        base_manifest=base,
+        append_cases=append,
+        output_manifest=out,
+        image_root=image_root,
+        mask_root=mask_root,
+    )
+    rows = _read_rows(out)
+    validation = validate_formal_manifest(manifest=out, base_manifest=base)
+
+    assert audit["status"] == "READY"
+    assert audit["base_count"] == 100
+    assert audit["append_count"] == 3
+    assert audit["final_count"] == 103
+    assert audit["final_unique_count"] == 103
+    assert audit["base_case_ids"] == base_ids
+    assert audit["appended_case_ids"] == list(FORMAL_APPEND_CASE_IDS)
+    assert validation["rows"] == 103
+    assert validation["unique_case_count"] == 103
+    assert [row["case_id"] for row in rows[:100]] == base_ids
+    assert [row["case_id"] for row in rows[-3:]] == list(FORMAL_APPEND_CASE_IDS)
+    assert all("annotation_folder" in row and row["annotation_folder"] for row in rows)
+    assert all(Path(row["annotation_folder"]).is_dir() for row in rows)
+    assert all("ct_path" in row and Path(row["ct_path"]).is_file() for row in rows)
+    assert rows[0]["annotation_folder"] == rows[0]["reference_mask_dir"]
 
 
 def test_formal_group_target_mapping_is_exact_22_and_excludes_totalsegmentator():

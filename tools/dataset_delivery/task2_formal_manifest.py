@@ -81,6 +81,8 @@ FORMAL_TARGET_TO_GROUP = {
 }
 FORMAL_TARGETS = tuple(FORMAL_TARGET_TO_GROUP)
 FORMAL_MODEL_KEYS = tuple(model for models in FORMAL_GROUP_MODELS.values() for model in models)
+FORMAL_REQUIRED_COLUMNS = ("index", "case_id", "annotation_folder")
+FORMAL_IMAGE_COLUMNS = ("ct_path", "image_path")
 
 
 def _read_manifest(path: Path) -> list[dict[str, str]]:
@@ -122,6 +124,37 @@ def _ordered_fieldnames(base_rows: list[dict[str, str]]) -> list[str]:
     return fields
 
 
+def _materialize_formal_row(
+    row: dict[str, str],
+    *,
+    index: int,
+    image_root: Path | None = None,
+    mask_root: Path | None = None,
+    append_reason: str = "",
+) -> dict[str, Any]:
+    """Return one row with the canonical formal manifest columns present.
+
+    Existing source paths win.  The root-based fallback is used only when a
+    compatible legacy column is absent or empty.
+    """
+    case_id = _case_id(row, index)
+    ct_path = _ct_path(row)
+    annotation_folder = _annotation_folder(row)
+    resolved: dict[str, Any] = dict(row)
+    resolved["index"] = index
+    resolved["case_id"] = case_id
+    if not ct_path and image_root is not None and case_id:
+        ct_path = str(image_root / case_id / "ct.nii.gz")
+    if not annotation_folder and mask_root is not None and case_id:
+        annotation_folder = str(mask_root / case_id / "segmentations")
+    if not str(resolved.get("ct_path") or "").strip():
+        resolved["ct_path"] = ct_path
+    if not str(resolved.get("annotation_folder") or "").strip():
+        resolved["annotation_folder"] = annotation_folder
+    resolved.setdefault("append_reason", append_reason)
+    return resolved
+
+
 def _normalize_manifest_row(row: dict[str, str]) -> dict[str, str]:
     return {
         "case_id": _case_id(row),
@@ -130,13 +163,17 @@ def _normalize_manifest_row(row: dict[str, str]) -> dict[str, str]:
     }
 
 
-def _append_row(case_id: str, reason: str, *, image_root: Path, mask_root: Path) -> dict[str, str]:
-    return {
-        "case_id": case_id,
-        "ct_path": str(image_root / case_id / "ct.nii.gz"),
-        "annotation_folder": str(mask_root / case_id / "segmentations"),
-        "append_reason": reason,
-    }
+def _append_row(case_id: str, reason: str, *, image_root: Path, mask_root: Path, source_row: dict[str, str] | None = None) -> dict[str, Any]:
+    row = dict(source_row or {})
+    row["case_id"] = case_id
+    row.setdefault("append_reason", reason)
+    return _materialize_formal_row(
+        row,
+        index=0,
+        image_root=image_root,
+        mask_root=mask_root,
+        append_reason=reason,
+    )
 
 
 def _validate_rows(
@@ -147,12 +184,11 @@ def _validate_rows(
     check_exists: bool,
 ) -> list[dict[str, Any]]:
     errors: list[dict[str, Any]] = []
-    required = {"index", "case_id", "annotation_folder"}
-    columns = set(final_rows[0]) if final_rows else set()
-    missing_cols = sorted(required - columns)
+    columns = {key for row in final_rows for key in row}
+    missing_cols = sorted(set(FORMAL_REQUIRED_COLUMNS) - columns)
     if missing_cols:
         errors.append({"type": "missing_columns", "columns": missing_cols})
-    if final_rows and not ({"ct_path", "image_path"} & columns):
+    if final_rows and not (set(FORMAL_IMAGE_COLUMNS) & columns):
         errors.append({"type": "missing_columns", "columns": ["ct_path_or_image_path"]})
     if len(final_rows) != FORMAL_CASE_COUNT:
         errors.append({"type": "row_count", "actual": len(final_rows), "expected": FORMAL_CASE_COUNT})
@@ -171,6 +207,15 @@ def _validate_rows(
     for index, row in enumerate(final_rows):
         case_id = _case_id(row, index)
         seen[case_id] = seen.get(case_id, 0) + 1
+        index_value = row.get("index")
+        if "index" not in row or index_value is None or not str(index_value).strip():
+            errors.append({"row": index + 2, "type": "missing_required_value", "case_id": case_id, "column": "index"})
+        if not case_id:
+            errors.append({"row": index + 2, "type": "missing_required_value", "case_id": case_id, "column": "case_id"})
+        if not _ct_path(row):
+            errors.append({"row": index + 2, "type": "missing_required_value", "case_id": case_id, "column": "ct_path_or_image_path"})
+        if not _annotation_folder(row):
+            errors.append({"row": index + 2, "type": "missing_required_value", "case_id": case_id, "column": "annotation_folder"})
         if check_exists:
             ct_path = Path(_ct_path(row))
             ann_dir = Path(_annotation_folder(row))
@@ -210,7 +255,7 @@ def build_formal_manifest(
     append_rows = _read_manifest(append_cases)
     image_root = image_root or Path("/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro")
     mask_root = mask_root or Path("/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro")
-    fieldnames = _ordered_fieldnames(base_rows)
+    fieldnames = _ordered_fieldnames(base_rows + append_rows)
     seen: set[str] = set()
     final_rows: list[dict[str, Any]] = []
     duplicate_skipped: list[str] = []
@@ -225,9 +270,7 @@ def build_formal_manifest(
             continue
         seen.add(case_id)
         base_case_ids.append(case_id)
-        resolved = dict(row)
-        resolved["index"] = index
-        resolved.setdefault("append_reason", "")
+        resolved = _materialize_formal_row(row, index=index, image_root=image_root, mask_root=mask_root)
         final_rows.append(resolved)
 
     append_audit_rows: list[dict[str, Any]] = []
@@ -257,7 +300,7 @@ def build_formal_manifest(
                 "annotation_folder_exists": "",
             })
             continue
-        resolved = _append_row(case_id, reason, image_root=image_root, mask_root=mask_root)
+        resolved = _append_row(case_id, reason, image_root=image_root, mask_root=mask_root, source_row=row)
         ct_path = Path(resolved["ct_path"])
         ann_dir = Path(resolved["annotation_folder"])
         ct_exists = ct_path.is_file() and ct_path.stat().st_size > 0 if ct_path.exists() else False
