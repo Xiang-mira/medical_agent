@@ -30,6 +30,17 @@ LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE"}
 ACTIVE_STATES = {"PENDING", "CONFIGURING", "COMPLETING", "RUNNING", "REQUEUED", "RESIZING", "SUSPENDED"}
 SUCCESS_STATES = {"COMPLETED"}
+LABELCRITIC_JOB_NAME = "labelcritic_72b_service"
+STATIC_TEST_ENV_DROP = {
+    "LABELCRITIC_JOB_ID",
+    "RETRY_FAILED",
+    "EXPECTED_GIT_COMMIT",
+    "RUNTIME_NO_GIT",
+    "SKIP_GIT_SYNC",
+    "GPU_TARGET_WORKERS",
+    "GPU_OVERREQUEST_WORKERS",
+    "GPU_PROFILE_SPECS",
+}
 ONE_BY_ONE_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
@@ -70,6 +81,13 @@ def _run(command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | Non
         return {"command": command, "return_code": 127, "stdout": "", "stderr": str(exc), "ok": False}
     except subprocess.TimeoutExpired as exc:
         return {"command": command, "return_code": 124, "stdout": exc.stdout or "", "stderr": exc.stderr or "timeout", "ok": False}
+
+
+def sanitized_static_test_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in STATIC_TEST_ENV_DROP:
+        env.pop(key, None)
+    return env
 
 
 def normalize_labelcritic_endpoint(base_url: str, port: int) -> tuple[str, int]:
@@ -166,15 +184,121 @@ def slurm_job_state(job_id: str) -> dict[str, Any]:
     return {"state": "UNKNOWN", "job_id": job_id, "source": "unknown", "squeue": squeue, "sacct": sacct}
 
 
+def _current_user() -> str:
+    return os.getenv("USER") or os.getenv("LOGNAME") or ""
+
+
+def slurm_job_record(job_id: str) -> dict[str, Any]:
+    if not job_id:
+        return {"status": "INVALID", "state": "UNKNOWN", "job_id": job_id, "source": "none"}
+    squeue = _run(["squeue", "-h", "-j", str(job_id), "-o", "%i|%T|%u|%j"])
+    if squeue["ok"] and squeue["stdout"].strip():
+        parts = squeue["stdout"].splitlines()[0].split("|")
+        return {
+            "status": "FOUND",
+            "job_id": parts[0].strip() if len(parts) > 0 else str(job_id),
+            "state": parts[1].strip() if len(parts) > 1 else "UNKNOWN",
+            "user": parts[2].strip() if len(parts) > 2 else "",
+            "name": parts[3].strip() if len(parts) > 3 else "",
+            "source": "squeue",
+        }
+    sacct = _run(["sacct", "-n", "-j", str(job_id), "--format=JobIDRaw,State,User,JobName", "-P"])
+    if sacct["ok"] and sacct["stdout"].strip():
+        for line in sacct["stdout"].splitlines():
+            parts = line.split("|")
+            if parts and parts[0].strip() == str(job_id):
+                return {
+                    "status": "FOUND",
+                    "job_id": parts[0].strip(),
+                    "state": parts[1].strip().split()[0] if len(parts) > 1 else "UNKNOWN",
+                    "user": parts[2].strip() if len(parts) > 2 else "",
+                    "name": parts[3].strip() if len(parts) > 3 else "",
+                    "source": "sacct",
+                }
+    state = slurm_job_state(job_id)
+    return {"status": "FOUND" if state.get("state") != "UNKNOWN" else "NOT_FOUND", **state, "user": "", "name": ""}
+
+
+def validate_labelcritic_job(job_id: str, *, require_identity: bool = True) -> dict[str, Any]:
+    record = slurm_job_record(job_id)
+    user = _current_user()
+    active = record.get("state") in ACTIVE_STATES
+    user_ok = not user or record.get("user") == user
+    name_ok = not require_identity or record.get("name") == LABELCRITIC_JOB_NAME
+    ok = bool(record.get("status") == "FOUND" and active and user_ok and name_ok)
+    reasons = []
+    if record.get("status") != "FOUND":
+        reasons.append("not_found")
+    if not active:
+        reasons.append(f"non_active_state:{record.get('state')}")
+    if not user_ok:
+        reasons.append(f"user_mismatch:{record.get('user')}!={user}")
+    if not name_ok:
+        reasons.append(f"name_mismatch:{record.get('name')}!={LABELCRITIC_JOB_NAME}")
+    return {
+        "status": "VALID" if ok else "INVALID",
+        "job_id": str(job_id or ""),
+        "record": record,
+        "failure_reason": ",".join(reasons),
+    }
+
+
+def _job_id_sort_key(job: dict[str, Any]) -> tuple[int, str]:
+    value = str(job.get("job_id") or "")
+    return (int(value) if value.isdigit() else sys.maxsize, value)
+
+
+def select_labelcritic_job(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    valid = [job for job in candidates if validate_labelcritic_job(str(job.get("job_id") or ""))["status"] == "VALID"]
+    if not valid:
+        return {"status": "NONE"}
+    running = [job for job in valid if str(job.get("state") or "").upper() == "RUNNING"]
+    pool = running or valid
+    selected = sorted(pool, key=_job_id_sort_key)[0]
+    return {"status": "SELECTED", "job_id": str(selected.get("job_id")), "candidates": valid}
+
+
 def find_labelcritic_job_by_name() -> str:
-    result = _run(["squeue", "-h", "-n", "labelcritic_72b_service", "-o", "%i %T"])
+    command = ["squeue", "-h"]
+    user = _current_user()
+    if user:
+        command.extend(["-u", user])
+    command.extend(["-n", LABELCRITIC_JOB_NAME, "-o", "%i|%T|%u|%j"])
+    result = _run(command)
     if not result["ok"]:
         return ""
+    candidates = []
     for line in result["stdout"].splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] in ACTIVE_STATES:
-            return parts[0]
+        parts = line.split("|")
+        if len(parts) >= 2:
+            candidates.append({
+                "job_id": parts[0].strip(),
+                "state": parts[1].strip(),
+                "user": parts[2].strip() if len(parts) > 2 else "",
+                "name": parts[3].strip() if len(parts) > 3 else LABELCRITIC_JOB_NAME,
+            })
+    selected = select_labelcritic_job(candidates)
+    return str(selected.get("job_id") or "") if selected["status"] == "SELECTED" else ""
+
+
+def _job_id_from_labelcritic_state(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("job_id", "labelcritic_job_id"):
+            if str(value.get(key) or "").strip():
+                return str(value[key]).strip()
+        for key in ("service", "labelcritic"):
+            nested = _job_id_from_labelcritic_state(value.get(key))
+            if nested:
+                return nested
     return ""
+
+
+def _write_labelcritic_service_state(state_root: Path, payload: dict[str, Any]) -> None:
+    service = _service_paths(state_root)
+    service["root"].mkdir(parents=True, exist_ok=True)
+    if payload.get("job_id"):
+        service["job"].write_text(str(payload["job_id"]) + "\n", encoding="utf-8")
+    _write_json(service["root"] / "service_state.json", payload)
 
 
 def _state_paths(state_root: Path) -> dict[str, Path]:
@@ -369,7 +493,7 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
             "tests/dataset_delivery/test_task2_formal_production.py",
             "tests/dataset_delivery/test_task2_dynamic_gpu_submitter.py",
         ]
-        result = _run([str(args.python), "-m", "pytest", "-q", *tests], timeout=int(args.static_tests_timeout_sec))
+        result = _run([str(args.python), "-m", "pytest", "-q", *tests], env=sanitized_static_test_env(), timeout=int(args.static_tests_timeout_sec))
         add("task1_task2_scheduler_regression_tests", result["ok"], result)
     controller = render_controller_sbatch(args, paths["controller_sbatch"])
     add("controller_sbatch_rendered", paths["controller_sbatch"].exists(), controller)
@@ -539,24 +663,40 @@ def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
         health = labelcritic_health(base, port)
         if health["status"] == "READY":
             return {"status": "REUSED_HEALTHY", "base_url": health["base_url"], "port": health["port"], "health": health}
-    job_id = service["job"].read_text(encoding="utf-8").strip() if service["job"].exists() else ""
-    job_id = os.getenv("LABELCRITIC_JOB_ID", "").strip() or job_id
-    if job_id and slurm_job_state(job_id).get("state") in ACTIVE_STATES:
-        service["root"].mkdir(parents=True, exist_ok=True)
-        service["job"].write_text(job_id + "\n", encoding="utf-8")
-        return {"status": "REUSED_ACTIVE_JOB", "job_id": job_id}
+    ignored: list[dict[str, Any]] = []
+    state_job_id = _job_id_from_labelcritic_state(_load_state(state_root).get("labelcritic"))
+    service_job_id = service["job"].read_text(encoding="utf-8").strip() if service["job"].exists() else ""
+    env_job_id = os.getenv("LABELCRITIC_JOB_ID", "").strip()
+    for source, job_id in (
+        ("current_attempt_state", state_job_id),
+        ("labelcritic_service_state", service_job_id),
+        ("LABELCRITIC_JOB_ID", env_job_id),
+    ):
+        if not job_id:
+            continue
+        validation = validate_labelcritic_job(job_id)
+        if validation["status"] == "VALID":
+            reused = {"status": "REUSED_ACTIVE_JOB", "job_id": job_id, "source": source, "validation": validation}
+            _write_labelcritic_service_state(state_root, reused)
+            return reused
+        ignored.append({"source": source, "job_id": job_id, "validation": validation})
     named = find_labelcritic_job_by_name()
     if named:
-        service["root"].mkdir(parents=True, exist_ok=True)
-        service["job"].write_text(named + "\n", encoding="utf-8")
-        return {"status": "REUSED_ACTIVE_JOB", "job_id": named}
+        validation = validate_labelcritic_job(named)
+        if validation["status"] == "VALID":
+            reused = {"status": "REUSED_ACTIVE_JOB", "job_id": named, "source": "slurm_name_discovery", "validation": validation, "ignored_jobs": ignored}
+            _write_labelcritic_service_state(state_root, reused)
+            return reused
+        ignored.append({"source": "slurm_name_discovery", "job_id": named, "validation": validation})
     result = _run(["bash", "scripts/task2/submit_labelcritic_72b_service.sh"], env=os.environ.copy())
     if not result["ok"]:
         log_failure(state_root, stage="labelcritic_submit", failure_reason=result["stderr"] or result["stdout"] or "labelcritic_submit_failed", details=result)
         return {"status": "SUBMIT_FAILED", "failure_reason": result["stderr"], "submit": result}
     job_id_match = re.search(r"LABELCRITIC_JOB_ID=([^\s]+)", result["stdout"])
     job_id = job_id_match.group(1) if job_id_match else (service["job"].read_text(encoding="utf-8").strip() if service["job"].exists() else "")
-    return {"status": "SUBMITTED", "job_id": job_id, "submit": result}
+    submitted = {"status": "SUBMITTED", "job_id": job_id, "submit": result, "ignored_jobs": ignored}
+    _write_labelcritic_service_state(state_root, submitted)
+    return submitted
 
 
 def wait_for_labelcritic_runtime(state_root: Path, *, poll_sec: int) -> dict[str, Any]:
