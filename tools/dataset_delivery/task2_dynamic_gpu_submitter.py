@@ -19,6 +19,15 @@ if str(REPO_ROOT) not in sys.path:
 from scheduler.resource_recommender import adaptive_overrequest_count  # noqa: E402
 from scheduler.resource_discovery import discover_resource_snapshot  # noqa: E402
 from tools.dataset_delivery.delivery_lib import read_csv_fieldnames, read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
+from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
+    append_submission_attempt,
+    classify_sbatch_failure,
+    existing_active_logical_keys,
+    parse_sbatch_job_id,
+    persist_submitted_job,
+    record_job_lifecycle,
+    slurm_comment,
+)
 
 
 DEFAULT_GROUP_WEIGHTS = {
@@ -251,6 +260,9 @@ def _rewrite_sbatch(
     profile: GpuSubmitProfile,
     task_manifest: Path,
     output_root: Path,
+    state_root: Path,
+    run_id: str,
+    submission_id: str,
 ) -> None:
     lines = source.read_text(encoding="utf-8").splitlines()
     lines = _replace_directive(lines, "#SBATCH --job-name=", f"task2_{group}_{profile.name}")
@@ -261,15 +273,39 @@ def _rewrite_sbatch(
     lines = _replace_directive(lines, "#SBATCH --time=", profile.time_limit)
     lines = _replace_directive(lines, "#SBATCH --output=", str(output_root / "slurm" / f"{group}_{profile.name}_%A_%a.out"))
     lines = _replace_directive(lines, "#SBATCH --error=", str(output_root / "slurm" / f"{group}_{profile.name}_%A_%a.err"))
+    lines = _replace_directive(lines, "#SBATCH --signal=", "B:USR1@900")
     rewritten: list[str] = []
+    inserted_guard = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("--task-manifest "):
             indent = line[: len(line) - len(line.lstrip())]
             suffix = " \\" if stripped.endswith("\\") else ""
             rewritten.append(f"{indent}--task-manifest {task_manifest}{suffix}")
+        elif not inserted_guard and "task2_formal_launcher.py" in stripped:
+            logical_task = f"{run_id}:{submission_id}:{group}:{profile.name}"
+            rewritten.append(
+                "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout "
+                f"--state-root {state_root} "
+                f"--logical-task-id {logical_task} "
+                "--job-id \"${SLURM_JOB_ID:-}\" "
+                f"--task-manifest {task_manifest} "
+                "--task-index \"${SLURM_ARRAY_TASK_ID:-}\"' USR1"
+            )
+            rewritten.append(line)
+            inserted_guard = True
         else:
             rewritten.append(line)
+    if not inserted_guard:
+        logical_task = f"{run_id}:{submission_id}:{group}:{profile.name}"
+        rewritten.append(
+            "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout "
+            f"--state-root {state_root} "
+            f"--logical-task-id {logical_task} "
+            "--job-id \"${SLURM_JOB_ID:-}\" "
+            f"--task-manifest {task_manifest} "
+            "--task-index \"${SLURM_ARRAY_TASK_ID:-}\"' USR1"
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     destination.chmod(0o755)
@@ -342,6 +378,8 @@ def build_dynamic_submission_plan(
     run_sbatch_test_only: bool = True,
     submission_id: str = "",
     append_submitted_jobs: bool = False,
+    run_id: str = "",
+    git_commit: str = "",
 ) -> dict[str, Any]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("status") != "READY":
@@ -372,8 +410,10 @@ def build_dynamic_submission_plan(
     output_root.mkdir(parents=True, exist_ok=True)
     slurm_root = output_root / "slurm"
     safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(submission_id or "").strip()).strip("_")
+    safe_run_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(run_id or os.getenv("ROUND1_RUN_ID") or state_root.name or "round1").strip()).strip("_")
     dynamic_root = slurm_root / "dynamic" / safe_submission_id if safe_submission_id else slurm_root / "dynamic"
     dynamic_root.mkdir(parents=True, exist_ok=True)
+    active_logical_keys = existing_active_logical_keys(slurm_root)
 
     shard_rows: list[dict[str, Any]] = []
     jobs: list[dict[str, Any]] = []
@@ -414,6 +454,9 @@ def build_dynamic_submission_plan(
                 profile=profile,
                 task_manifest=manifest_for_profile,
                 output_root=output_root,
+                state_root=state_root,
+                run_id=safe_run_id,
+                submission_id=safe_submission_id or "default",
             )
             concurrency = max(1, min(int(profile_slots.get(profile.name) or 1), len(rows_for_profile)))
             row = {
@@ -433,6 +476,14 @@ def build_dynamic_submission_plan(
                 "preflight_status": "",
                 "preflight_stderr": "",
                 "stderr": "",
+                "run_id": safe_run_id,
+                "submission_id": safe_submission_id,
+                "array_range": f"0-{len(rows_for_profile) - 1}",
+                "comment": slurm_comment(run_id=safe_run_id, submission_id=safe_submission_id or "default", group=group, profile=profile.name),
+                "formal_root": str(output_root),
+                "state_root": str(state_root),
+                "git_commit": git_commit,
+                "scheduler_status": "PLANNED",
             }
             shard_rows.append(row)
 
@@ -463,15 +514,50 @@ def build_dynamic_submission_plan(
             )
             raise RuntimeError(f"Dynamic GPU sbatch preflight failed for {len(preflight_failures)} shard(s); no jobs were submitted")
 
+    csv_fields = [
+        "model_group", "profile", "partition", "gres", "cpus_per_task", "mem", "time_limit",
+        "job_id", "task_count", "array_concurrency", "task_manifest", "sbatch_file",
+        "submission_status", "preflight_status", "preflight_stderr", "stderr",
+    ]
+    backpressured: list[dict[str, Any]] = []
+    fatal_failures: list[dict[str, Any]] = []
+    reused: list[dict[str, Any]] = []
     for row in shard_rows:
         if dry_run:
             continue
+        logical_key = (str(row.get("submission_id") or ""), str(row["model_group"]), str(row["profile"]))
+        fallback_key = ("", str(row["model_group"]), str(row["profile"]))
+        if logical_key in active_logical_keys or fallback_key in active_logical_keys:
+            row["submission_status"] = "reused"
+            row["scheduler_status"] = "ADOPTED_ACTIVE_JOB"
+            row["status"] = "ADOPTED_ACTIVE_JOB"
+            row["submitted_at"] = utc_now()
+            persist_submitted_job(slurm_root, row)
+            record_job_lifecycle(
+                state_root,
+                {
+                    "status": "ADOPTED_ACTIVE_JOB",
+                    "logical_task_id": f"{safe_run_id}:{safe_submission_id}:{row['model_group']}:{row['profile']}",
+                    "submission_id": safe_submission_id,
+                    "group": row["model_group"],
+                    "profile": row["profile"],
+                    "partition": row["partition"],
+                    "gres": row["gres"],
+                    "task_manifest": row["task_manifest"],
+                    "attempt": "reuse_existing_active",
+                },
+            )
+            reused.append(dict(row))
+            jobs.append(dict(row))
+            continue
         task_count = int(row["task_count"])
         concurrency = int(row["array_concurrency"])
+        comment = str(row["comment"])
         proc = subprocess.run(
             [
                 "sbatch",
                 "--parsable",
+                "--comment", comment,
                 f"--array=0-{task_count - 1}%{concurrency}",
                 str(row["sbatch_file"]),
             ],
@@ -480,31 +566,95 @@ def build_dynamic_submission_plan(
             stderr=subprocess.PIPE,
             check=False,
         )
-        row["job_id"] = proc.stdout.strip()
+        parsed_job = parse_sbatch_job_id(proc.stdout)
+        row["job_id"] = parsed_job["job_id"]
+        row["array_job_id"] = parsed_job["array_job_id"]
         row["submission_status"] = "submitted" if proc.returncode == 0 else "failed"
         row["stderr"] = proc.stderr.strip()
+        row["stdout"] = proc.stdout.strip()
+        row["submitted_at"] = utc_now()
+        attempt = {
+            **row,
+            "return_code": int(proc.returncode),
+            "command": [
+                "sbatch",
+                "--parsable",
+                "--comment", comment,
+                f"--array=0-{task_count - 1}%{concurrency}",
+                str(row["sbatch_file"]),
+            ],
+        }
+        append_submission_attempt(slurm_root, attempt)
         if proc.returncode != 0:
-            plan_path = output_root / "slurm" / (f"dynamic_gpu_submission_plan_{safe_submission_id}.json" if safe_submission_id else "dynamic_gpu_submission_plan.json")
-            write_json(plan_path, {"status": "SUBMISSION_FAILED", "submission_id": safe_submission_id, "jobs": jobs, "failed_job": row})
-            raise RuntimeError(f"sbatch failed for {row['model_group']}:{row['profile']}: {proc.stderr.strip()}")
+            classification = classify_sbatch_failure(proc.stderr or proc.stdout)
+            row["failure_reason"] = classification["reason"]
+            row["scheduler_status"] = "BACKPRESSURED" if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE" else "FATAL"
+            if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE":
+                backpressured.append(dict(row))
+                continue
+            fatal_failures.append(dict(row))
+            continue
+        row["status"] = "SUBMITTED"
+        row["scheduler_status"] = "ACTIVE"
+        row["slurm_state"] = "PENDING"
+        persist_submitted_job(slurm_root, row)
+        record_job_lifecycle(
+            state_root,
+            {
+                "status": "SUBMITTED",
+                "scheduler_state": "ACTIVE",
+                "job_id": row["job_id"],
+                "array_job_id": row["array_job_id"],
+                "logical_task_id": f"{safe_run_id}:{safe_submission_id}:{row['model_group']}:{row['profile']}",
+                "submission_id": safe_submission_id,
+                "group": row["model_group"],
+                "profile": row["profile"],
+                "partition": row["partition"],
+                "gres": row["gres"],
+                "task_manifest": row["task_manifest"],
+                "time_limit": row["time_limit"],
+                "formal_root": str(output_root),
+                "git_commit": git_commit,
+            },
+        )
         jobs.append(dict(row))
-
-    csv_fields = [
-        "model_group", "profile", "partition", "gres", "cpus_per_task", "mem", "time_limit",
-        "job_id", "task_count", "array_concurrency", "task_manifest", "sbatch_file",
-        "submission_status", "preflight_status", "preflight_stderr", "stderr",
-    ]
+    if fatal_failures:
+        plan_path = output_root / "slurm" / (f"dynamic_gpu_submission_plan_{safe_submission_id}.json" if safe_submission_id else "dynamic_gpu_submission_plan.json")
+        write_json(
+            plan_path,
+            {
+                "status": "SUBMISSION_FAILED",
+                "scheduler_status": "FATAL",
+                "submission_id": safe_submission_id,
+                "jobs": jobs,
+                "backpressured_jobs": backpressured,
+                "failed_jobs": fatal_failures,
+            },
+        )
+        raise RuntimeError(f"sbatch fatal failure for {len(fatal_failures)} shard(s): {fatal_failures[0].get('stderr')}")
+    if not dry_run and not jobs and not (slurm_root / "submitted_jobs.csv").exists():
+        write_csv(slurm_root / "submitted_jobs.csv", [], csv_fields)
+        write_json(slurm_root / "submitted_jobs.json", {"updated_at": utc_now(), "jobs": []})
     jobs_csv = slurm_root / "submitted_jobs.csv"
-    csv_rows = shard_rows
-    if append_submitted_jobs and jobs_csv.exists():
-        csv_rows = read_csv_rows(jobs_csv) + shard_rows
-    write_csv(jobs_csv, csv_rows, csv_fields)
+    if dry_run:
+        csv_rows = shard_rows
+        if append_submitted_jobs and jobs_csv.exists():
+            csv_rows = read_csv_rows(jobs_csv) + shard_rows
+        write_csv(jobs_csv, csv_rows, csv_fields)
+
+    scheduler_status = "ACTIVE"
+    status = "DRY_RUN" if dry_run else "SUBMITTED"
+    if not dry_run and backpressured:
+        scheduler_status = "BACKPRESSURED"
+        status = "PARTIALLY_SUBMITTED" if jobs else "WAITING_FOR_SUBMISSION_CAPACITY"
 
     plan = {
-        "status": "DRY_RUN" if dry_run else "SUBMITTED",
+        "status": status,
+        "scheduler_status": scheduler_status,
         "scheduler_mode": "dynamic_gpu_overrequest",
         "created_at": utc_now(),
         "submission_id": safe_submission_id,
+        "run_id": safe_run_id,
         "summary_path": str(summary_path),
         "output_root": str(output_root),
         "state_root": str(state_root),
@@ -517,6 +667,12 @@ def build_dynamic_submission_plan(
         "resource_inventory": resource_inventory,
         "worker_sizing": worker_sizing,
         "jobs": shard_rows,
+        "submitted_jobs": jobs,
+        "reused_jobs": reused,
+        "backpressured_jobs": backpressured,
+        "submitted_job_count": len([job for job in jobs if str(job.get("submission_status")) == "submitted"]),
+        "reused_job_count": len(reused),
+        "backpressured_count": len(backpressured),
         "dependency_policy": {
             "parallel": [
                 "cads/atm/airrc/unest teacher arrays are independent after manifest/preflight",
@@ -570,6 +726,8 @@ def main() -> int:
     parser.add_argument("--skip-sbatch-test-only", action="store_true")
     parser.add_argument("--submission-id", default="")
     parser.add_argument("--append-submitted-jobs", action="store_true")
+    parser.add_argument("--run-id", default=os.getenv("ROUND1_RUN_ID", ""))
+    parser.add_argument("--git-commit", default=os.getenv("EXPECTED_GIT_COMMIT", ""))
     args = parser.parse_args()
     groups = [item.strip() for item in args.groups.replace(";", ",").split(",") if item.strip()] or None
     plan = build_dynamic_submission_plan(
@@ -585,8 +743,10 @@ def main() -> int:
         run_sbatch_test_only=not bool(args.skip_sbatch_test_only),
         submission_id=args.submission_id,
         append_submitted_jobs=bool(args.append_submitted_jobs),
+        run_id=args.run_id,
+        git_commit=args.git_commit,
     )
-    print(json.dumps({k: plan[k] for k in ("status", "planned_target_workers", "planned_overrequest_workers", "total_array_concurrency")}, indent=2))
+    print(json.dumps({k: plan[k] for k in ("status", "scheduler_status", "planned_target_workers", "planned_overrequest_workers", "total_array_concurrency")}, indent=2))
     return 0
 
 

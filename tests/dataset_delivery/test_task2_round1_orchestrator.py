@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import csv
 import json
 import subprocess
 from pathlib import Path
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.dataset_delivery import task2_round1_orchestrator as orch
+from tools.dataset_delivery import slurm_reliability as reliability
 from tools.dataset_delivery import task2_workspace_staging as staging
 
 
@@ -457,7 +459,12 @@ def test_ready_teacher_submit_sets_no_git_runtime_env_without_display_or_github_
     captured_envs: list[dict[str, str]] = []
 
     def fake_run(command, **kwargs):
-        captured_envs.append(kwargs["env"])
+        if command[:2] == ["squeue", "-h"]:
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "41f8fad", "stderr": "", "return_code": 0}
+        if "env" in kwargs:
+            captured_envs.append(kwargs["env"])
         if any(str(part).endswith("task2_formal_launcher.py") for part in command):
             formal_root = Path(command[command.index("--output-root") + 1])
             formal_root.mkdir(parents=True, exist_ok=True)
@@ -860,3 +867,136 @@ def test_no_production_code_contains_concrete_historical_slurm_job_ids():
                     if job_id in text:
                         offenders.append(f"{path.relative_to(repo)}:{job_id}")
     assert offenders == []
+
+
+def test_teacher_submit_backpressure_is_not_round1_failure_and_keeps_submission_id(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001"])
+    _stage_ready_case(args.workspace_root, "CASE001")
+    formal_root = tmp_path / "formal"
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="run_bp")
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["squeue", "-h"]:
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_formal_launcher.py") for part in command):
+            formal_root.mkdir(parents=True, exist_ok=True)
+            (formal_root / "formal_task2_submission_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "status": "READY",
+                        "task_count": 1,
+                        "groups": {
+                            "cads": {
+                                "task_count": 1,
+                                "task_manifest": str(formal_root / "slurm" / "cads_task_manifest.csv"),
+                                "sbatch_file": str(formal_root / "slurm" / "cads_task2_array.sbatch"),
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command):
+            (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+            (formal_root / "slurm" / "dynamic_gpu_submission_plan_ready_batch_001.json").write_text(
+                '{"status":"WAITING_FOR_SUBMISSION_CAPACITY","scheduler_status":"BACKPRESSURED"}\n',
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": '{"status":"WAITING_FOR_SUBMISSION_CAPACITY"}', "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
+
+    assert result["status"] == "WAITING_FOR_SUBMISSION_CAPACITY"
+    state = orch._load_state(args.state_root)
+    assert state["scheduler_status"] == "BACKPRESSURED"
+    assert state["teacher_active_submission_id"] == "ready_batch_001"
+    assert state.get("teacher_submitted_case_ids") in (None, [])
+
+
+def test_reconcile_active_teacher_jobs_adopts_matching_slurm_job_without_hardcoded_id(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="run_reconcile")
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["squeue", "-h"]:
+            return {
+                "ok": True,
+                "stdout": f"91919|RUNNING|{os.getenv('USER') or ''}|task2_cads_gpu_t4|/repo|medical_agent:run_reconcile:ready_batch_001:cads:gpu_t4|{formal_root}/slurm/dynamic/ready_batch_001/cads_gpu_t4_task2_array.sbatch\n",
+                "stderr": "",
+                "return_code": 0,
+            }
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+    result = orch.reconcile_active_teacher_jobs(args, formal_root)
+
+    assert result["adopted_count"] == 1
+    rows = list(csv.DictReader((formal_root / "slurm" / "submitted_jobs.csv").open("r", encoding="utf-8")))
+    assert rows[0]["job_id"] == "91919"
+    assert rows[0]["submission_status"] == "adopted"
+
+
+def test_running_job_disappears_and_sacct_timeout_records_retry_pending_not_failed(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    (formal_root / "slurm").mkdir(parents=True)
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "job_id,model_group,profile,submission_status,scheduler_status\n91920,cads,gpu_t4,submitted,ACTIVE\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root))
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["bash", "scripts/task2/check_task2_formal_103cases.sh"]:
+            return {"ok": False, "stdout": "", "stderr": "not ready", "return_code": 2}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "TIMEOUT", "job_id": job_id, "source": "sacct"})
+    monkeypatch.setattr(orch, "slurm_job_timing", lambda job_id: {"state": "TIMEOUT", "job_id": job_id, "elapsed": "06:00:00", "time_limit": "06:00:00", "time_left": "00:00:00"})
+
+    result = orch.check_estep(args)
+
+    assert result["status"] == "RUNNING"
+    assert result["scheduler_status"] == "RETRY_PENDING"
+    assert orch._load_state(args.state_root)["walltime_recovery_status"] == "RETRY_PENDING"
+    assert (orch._state_paths(args.state_root)["job_lifecycle"]).is_file()
+
+
+def test_worker_pretimeout_marks_retry_pending_without_partial_publish(tmp_path):
+    event = reliability.worker_pretimeout(
+        tmp_path / "state",
+        logical_task_id="run:batch:cads:gpu",
+        job_id="91921",
+        task_manifest="/tmp/tasks.csv",
+        task_index="7",
+    )
+
+    assert event["status"] == "RETRY_PENDING"
+    assert event["partial_publish_allowed"] is False
+    assert (tmp_path / "state" / "round1_orchestrated" / "walltime_guard_last.json").is_file()
+
+
+def test_student_pretimeout_writes_checkpoint_request_for_resume(tmp_path):
+    event = reliability.student_pretimeout(tmp_path / "state", tmp_path / "ckpt", job_id="91922")
+
+    assert event["status"] == "CHECKPOINTED_FOR_WALLTIME"
+    assert Path(event["checkpoint_path"]).is_file()
+    assert json.loads(Path(event["checkpoint_path"]).read_text(encoding="utf-8"))["resume_required"] is True
+
+
+def test_time_limit_extension_denied_is_recorded_not_fatal(tmp_path):
+    event = reliability.time_extension_denied(tmp_path / "state", job_id="91923", reason="scontrol_denied")
+
+    assert event["status"] == "TIME_EXTENSION_UNAVAILABLE"
+    assert event["scheduler_state"] == "RETRY_PENDING"

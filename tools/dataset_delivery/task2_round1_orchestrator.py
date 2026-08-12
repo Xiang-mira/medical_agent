@@ -23,6 +23,14 @@ if str(REPO_ROOT / "agent-harness") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "agent-harness"))
 
 from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
+from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
+    RETRYABLE_TERMINAL_STATES,
+    classify_sbatch_failure,
+    persist_submitted_job,
+    record_job_lifecycle,
+    slurm_comment,
+    student_pretimeout,
+)
 from tools.dataset_delivery.task2_formal_manifest import FORMAL_CASE_COUNT, build_formal_manifest, validate_formal_manifest  # noqa: E402
 from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
 
@@ -31,6 +39,8 @@ LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE"}
 ACTIVE_STATES = {"PENDING", "CONFIGURING", "COMPLETING", "RUNNING", "REQUEUED", "RESIZING", "SUSPENDED"}
 SUCCESS_STATES = {"COMPLETED"}
+BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY"}
+TEACHER_JOB_GROUPS = {"cads", "atm", "airrc", "unest"}
 LABELCRITIC_JOB_NAME = "labelcritic_72b_service"
 STATIC_TEST_ENV_DROP = {
     "LABELCRITIC_JOB_ID",
@@ -237,6 +247,147 @@ def slurm_job_record(job_id: str) -> dict[str, Any]:
     return {"status": "FOUND" if state.get("state") != "UNKNOWN" else "NOT_FOUND", **state, "user": "", "name": ""}
 
 
+def slurm_job_timing(job_id: str) -> dict[str, Any]:
+    if not job_id:
+        return {"job_id": job_id, "state": "UNKNOWN"}
+    squeue = _run(["squeue", "-h", "-j", str(job_id), "-o", "%i|%T|%M|%l|%L|%e|%N"])
+    if squeue["ok"] and squeue["stdout"].strip():
+        parts = squeue["stdout"].splitlines()[0].split("|")
+        return {
+            "job_id": parts[0].strip() if len(parts) > 0 else str(job_id),
+            "state": parts[1].strip() if len(parts) > 1 else "UNKNOWN",
+            "elapsed": parts[2].strip() if len(parts) > 2 else "",
+            "time_limit": parts[3].strip() if len(parts) > 3 else "",
+            "time_left": parts[4].strip() if len(parts) > 4 else "",
+            "end_time": parts[5].strip() if len(parts) > 5 else "",
+            "node": parts[6].strip() if len(parts) > 6 else "",
+            "source": "squeue",
+        }
+    state = slurm_job_state(job_id)
+    return {"job_id": str(job_id), **state}
+
+
+def _parse_teacher_job_name(name: str) -> tuple[str, str]:
+    value = str(name or "")
+    if not value.startswith("task2_"):
+        return "", ""
+    body = value[len("task2_") :]
+    for group in TEACHER_JOB_GROUPS:
+        prefix = f"{group}_"
+        if body == group:
+            return group, "default"
+        if body.startswith(prefix):
+            return group, body[len(prefix) :]
+    return "", ""
+
+
+def discover_active_medical_agent_teacher_jobs(*, formal_root: Path, state_root: Path, run_id: str = "") -> list[dict[str, Any]]:
+    user = _current_user()
+    command = ["squeue", "-h"]
+    if user:
+        command.extend(["-u", user])
+    command.extend(["-o", "%i|%T|%u|%j|%Z|%k|%o"])
+    result = _run(command)
+    if not result["ok"] or not result["stdout"].strip():
+        return []
+    matches: list[dict[str, Any]] = []
+    for line in result["stdout"].splitlines():
+        parts = line.split("|")
+        job_id = parts[0].strip() if len(parts) > 0 else ""
+        state = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+        job_user = parts[2].strip() if len(parts) > 2 else ""
+        name = parts[3].strip() if len(parts) > 3 else ""
+        workdir = parts[4].strip() if len(parts) > 4 else ""
+        comment = parts[5].strip() if len(parts) > 5 else ""
+        command_text = parts[6].strip() if len(parts) > 6 else ""
+        group, profile = _parse_teacher_job_name(name)
+        combined = "\n".join([workdir, comment, command_text])
+        comment_match = bool(run_id and comment.startswith(f"medical_agent:{run_id}:"))
+        root_match = str(formal_root) in combined or str(state_root) in combined
+        if state not in ACTIVE_STATES or not group or (not comment_match and not root_match):
+            continue
+        matches.append(
+            {
+                "job_id": job_id,
+                "array_job_id": job_id.split("_", 1)[0],
+                "slurm_state": state,
+                "user": job_user,
+                "job_name": name,
+                "model_group": group,
+                "group": group,
+                "profile": profile or "default",
+                "workdir": workdir,
+                "comment": comment,
+                "command": command_text,
+                "scheduler_status": "ADOPTED_ACTIVE_JOB",
+                "submission_status": "adopted",
+                "status": "ADOPTED_ACTIVE_JOB",
+                "formal_root": str(formal_root),
+                "state_root": str(state_root),
+                "updated_at": utc_now(),
+            }
+        )
+    return sorted(matches, key=lambda row: (str(row["model_group"]), str(row["profile"]), str(row["job_id"])))
+
+
+def reconcile_active_teacher_jobs(args: argparse.Namespace, formal_root: Path | None = None) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    state = _load_state(state_root)
+    run_id = state.get("run_id") or _run_id(state_root)
+    resolved_formal_root = Path(str(formal_root or state.get("formal_root") or (_state_paths(state_root)["root"] / "formal_task2_round1"))).resolve()
+    rows = discover_active_medical_agent_teacher_jobs(formal_root=resolved_formal_root, state_root=state_root, run_id=str(run_id))
+    slurm_root = resolved_formal_root / "slurm"
+    for row in rows:
+        persist_submitted_job(slurm_root, {**row, "run_id": run_id, "git_commit": _git_commit()})
+        record_job_lifecycle(
+            state_root,
+            {
+                **row,
+                "logical_task_id": f"{run_id}:adopted:{row['model_group']}:{row['profile']}",
+                "scheduler_state": "ADOPTED_ACTIVE_JOB",
+                "attempt": "slurm_reconcile",
+            },
+        )
+    if rows:
+        _save_state(state_root, formal_root=str(resolved_formal_root), reconciled_teacher_jobs=rows, scheduler_status="ACTIVE")
+    return {"status": "RECONCILED", "adopted_count": len(rows), "jobs": rows}
+
+
+def refresh_lifecycle_for_submitted_jobs(args: argparse.Namespace, formal_root: Path) -> dict[str, Any]:
+    jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
+    rows = read_csv_rows(jobs_csv) if jobs_csv.exists() else []
+    refreshed = []
+    retryable = []
+    fatal = []
+    active = []
+    for row in rows:
+        job_id = str(row.get("job_id") or "")
+        if not job_id:
+            continue
+        timing = slurm_job_timing(job_id)
+        state = str(timing.get("state") or "UNKNOWN")
+        payload = {
+            **row,
+            "job_id": job_id,
+            "slurm_state": state,
+            "elapsed": timing.get("elapsed", ""),
+            "time_limit": timing.get("time_limit", ""),
+            "time_left": timing.get("time_left", ""),
+            "end_time": timing.get("end_time", ""),
+            "node": timing.get("node", ""),
+            "status": "SLURM_STATE_REFRESH",
+        }
+        record_job_lifecycle(args.state_root.resolve(), payload)
+        refreshed.append(payload)
+        if state in ACTIVE_STATES or state == "UNKNOWN":
+            active.append(payload)
+        elif state in RETRYABLE_TERMINAL_STATES:
+            retryable.append(payload)
+        elif state in TERMINAL_FAILURE_STATES:
+            fatal.append(payload)
+    return {"status": "REFRESHED", "jobs": refreshed, "active": active, "retryable": retryable, "fatal": fatal}
+
+
 def validate_labelcritic_job(job_id: str, *, require_identity: bool = True) -> dict[str, Any]:
     record = slurm_job_record(job_id)
     user = _current_user()
@@ -411,6 +562,9 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
         "mstep_manifest": root / "round1" / "mstep" / "voxtell_prompt_student_manifest.json",
         "mstep_output": root / "round1" / "mstep",
         "final": root / "round1_final_status.json",
+        "job_lifecycle": root / "job_lifecycle.jsonl",
+        "job_lifecycle_current": root / "job_lifecycle_current.json",
+        "walltime_guard": root / "walltime_guard.jsonl",
     }
 
 
@@ -503,6 +657,17 @@ def log_failure(state_root: Path, *, stage: str, failure_reason: str, details: A
 def _git_commit() -> str:
     result = _run(["git", "rev-parse", "HEAD"])
     return result["stdout"] if result["ok"] else ""
+
+
+def _run_id(state_root: Path) -> str:
+    state = _load_state(state_root)
+    existing = str(state.get("run_id") or os.getenv("ROUND1_RUN_ID") or "").strip()
+    if existing:
+        return re.sub(r"[^A-Za-z0-9_.:-]+", "_", existing)
+    seed = f"round1_{utc_now()}_{state_root}"
+    run_id = "round1_" + str(abs(hash(seed)))
+    _save_state(state_root, run_id=run_id)
+    return run_id
 
 
 def verify_expected_git_commit(state_root: Path, expected_commit: str) -> dict[str, Any]:
@@ -637,6 +802,7 @@ def render_labelcritic_preview_sbatch(args: argparse.Namespace, path: Path) -> d
 
 
 def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, Any]:
+    run_id = _run_id(args.state_root.resolve())
     command = [
         str(args.python),
         "tools/dataset_delivery/task2_round1_orchestrator.py",
@@ -661,6 +827,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "CODE_ROOT": str(REPO_ROOT),
         "STATE_ROOT": str(args.state_root),
         "WORKSPACE_ROOT": str(args.workspace_root),
+        "ROUND1_RUN_ID": run_id,
         "LABELCRITIC_PARTITION": args.labelcritic_partition,
         "LABELCRITIC_GRES": args.labelcritic_gres,
         "LABELCRITIC_TENSOR_PARALLEL_SIZE": str(args.labelcritic_tensor_parallel_size),
@@ -678,6 +845,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         f"#SBATCH --cpus-per-task={args.controller_cpus}",
         f"#SBATCH --mem={args.controller_mem}",
         f"#SBATCH --time={args.controller_time}",
+        "#SBATCH --signal=B:USR1@900",
         f"#SBATCH --output={_state_paths(args.state_root)['root'] / 'controller_%j.out'}",
         f"#SBATCH --error={_state_paths(args.state_root)['root'] / 'controller_%j.err'}",
         "#SBATCH --export=ALL",
@@ -686,6 +854,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS",
         f"cd {shlex.quote(str(REPO_ROOT))}",
         *[f"export {key}={shlex.quote(value)}" for key, value in env_exports.items()],
+        "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout --state-root \"$STATE_ROOT\" --logical-task-id controller --job-id \"${SLURM_JOB_ID:-}\"' USR1",
         " ".join(shlex.quote(part) for part in command),
         "",
     ]
@@ -717,7 +886,8 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
     existing = str(state.get("controller_job_id") or "").strip()
     if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
         return {"status": "CONTROLLER_ALREADY_ACTIVE", "controller_job_id": existing, "state_root": str(paths["root"])}
-    result = _run(["sbatch", "--parsable", str(paths["controller_sbatch"])])
+    run_id = _run_id(args.state_root.resolve())
+    result = _run(["sbatch", "--parsable", "--comment", slurm_comment(run_id=run_id, submission_id="controller", group="controller", profile="cpu"), str(paths["controller_sbatch"])])
     if not result["ok"]:
         log_failure(args.state_root.resolve(), stage="controller_submit", failure_reason=result["stderr"] or "controller_submit_failed", details=result)
         _save_state(args.state_root.resolve(), terminal_state="ROUND1_FAILED", stage="controller_submit", failure_reason=result["stderr"], controller_submit=result)
@@ -725,6 +895,7 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
     job_id = result["stdout"].splitlines()[-1].strip()
     paths["controller_job"].write_text(job_id + "\n", encoding="utf-8")
     _save_state(args.state_root.resolve(), status="CONTROLLER_SUBMITTED", controller_job_id=job_id, git_commit=_git_commit(), static_preflight_path=str(paths["root"] / "static_preflight.json"))
+    record_job_lifecycle(args.state_root.resolve(), {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:controller", "stage": "controller", "profile": "cpu"})
     return {"status": "CONTROLLER_SUBMITTED", "controller_job_id": job_id, "state_root": str(paths["root"])}
 
 
@@ -901,6 +1072,7 @@ def render_staging_sbatch(args: argparse.Namespace, source_manifest: Path, path:
         f"#SBATCH --cpus-per-task={os.getenv('STAGING_CPUS', '2')}",
         f"#SBATCH --mem={os.getenv('STAGING_MEM', '12G')}",
         f"#SBATCH --time={os.getenv('STAGING_TIME', '04:00:00')}",
+        "#SBATCH --signal=B:USR1@900",
         f"#SBATCH --output={_state_paths(args.state_root)['root'] / 'staging_%A_%a.out'}",
         f"#SBATCH --error={_state_paths(args.state_root)['root'] / 'staging_%A_%a.err'}",
         "#SBATCH --export=ALL",
@@ -908,9 +1080,11 @@ def render_staging_sbatch(args: argparse.Namespace, source_manifest: Path, path:
         "set -euo pipefail",
         "unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS",
         f"cd {shlex.quote(str(REPO_ROOT))}",
+        f"export STATE_ROOT={shlex.quote(str(args.state_root))}",
         "export RUNTIME_NO_GIT=1",
         "export SKIP_GIT_SYNC=1",
         "export GIT_TERMINAL_PROMPT=0",
+        "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout --state-root \"$STATE_ROOT\" --logical-task-id staging --job-id \"${SLURM_JOB_ID:-}\" --task-index \"${SLURM_ARRAY_TASK_ID:-}\"' USR1",
         f"{shlex.quote(str(args.python))} tools/dataset_delivery/task2_workspace_staging.py \\",
         f"  --cases-manifest {shlex.quote(str(source_manifest))} \\",
         f"  --workspace-root {shlex.quote(str(args.workspace_root))} \\",
@@ -944,13 +1118,32 @@ def submit_staging_workers(args: argparse.Namespace, source_manifest: Path) -> d
             log_failure(state_root, stage="staging_sbatch_preflight", failure_reason="staging_sbatch_preflight_failed", details=result)
             return {"status": "FAILED", "failure_reason": "staging_sbatch_preflight_failed", "preflight": result}
     concurrency = max(1, int(os.getenv("STAGING_CONCURRENCY", "12")))
-    result = _run(["sbatch", "--parsable", f"--array=0-{len(statuses) - 1}%{concurrency}", str(paths["staging_sbatch"])])
+    run_id = _run_id(state_root)
+    result = _run([
+        "sbatch",
+        "--parsable",
+        "--comment", slurm_comment(run_id=run_id, submission_id="staging", group="staging", profile="cpu"),
+        f"--array=0-{len(statuses) - 1}%{concurrency}",
+        str(paths["staging_sbatch"]),
+    ])
     if not result["ok"]:
+        classification = classify_sbatch_failure(result["stderr"] or result["stdout"])
+        if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE":
+            _save_state(state_root, staging_status="WAITING_FOR_SUBMISSION_CAPACITY", scheduler_status="BACKPRESSURED", staging_submit=result)
+            return {
+                "status": "WAITING_FOR_SUBMISSION_CAPACITY",
+                "scheduler_status": "BACKPRESSURED",
+                "failure_reason": classification["reason"],
+                "ready_count": ready_count,
+                "case_count": len(statuses),
+                "submit": result,
+            }
         log_failure(state_root, stage="staging_submit", failure_reason=result["stderr"] or "staging_submit_failed", details=result)
         return {"status": "FAILED", "failure_reason": result["stderr"] or "staging_submit_failed", "submit": result}
     job_id = result["stdout"].splitlines()[-1].strip()
     paths["staging_job"].write_text(job_id + "\n", encoding="utf-8")
     _save_state(state_root, staging_job_id=job_id, staging_status="SUBMITTED", staging_sbatch=rendered)
+    record_job_lifecycle(state_root, {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:staging", "stage": "staging", "profile": "cpu", "task_count": len(statuses), "array_concurrency": concurrency})
     return {"status": "SUBMITTED", "job_id": job_id, "ready_count": ready_count, "case_count": len(statuses), "concurrency": concurrency}
 
 
@@ -964,6 +1157,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     state_root = args.state_root.resolve()
     paths = _state_paths(state_root)
     state = _load_state(state_root)
+    run_id = _run_id(state_root)
     submitted_cases = set(str(case_id) for case_id in state.get("teacher_submitted_case_ids") or [])
     statuses = _staging_status_rows(args, source_manifest)
     ready_cases = [row["case_id"] for row in statuses if row["status"] == "INPUT_READY" and row["case_id"] not in submitted_cases]
@@ -974,9 +1168,16 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
             "submitted_case_count": len(submitted_cases),
             "staging_failed_count": sum(1 for row in statuses if row["status"] == "STAGING_FAILED"),
         }
-    batch_index = int(state.get("teacher_batch_index") or 0) + 1
-    submission_id = f"ready_batch_{batch_index:03d}"
+    active_submission_id = str(state.get("teacher_active_submission_id") or "").strip()
+    if active_submission_id and state.get("scheduler_status") in {"BACKPRESSURED", "WAITING_FOR_SUBMISSION_CAPACITY", "PARTIALLY_SUBMITTED"}:
+        submission_id = active_submission_id
+        match = re.search(r"ready_batch_(\d+)", submission_id)
+        batch_index = int(match.group(1)) if match else int(state.get("teacher_batch_index") or 0)
+    else:
+        batch_index = int(state.get("teacher_batch_index") or 0) + 1
+        submission_id = f"ready_batch_{batch_index:03d}"
     formal_root = Path(str(state.get("formal_root") or (paths["root"] / "formal_task2_round1"))).resolve()
+    reconcile_active_teacher_jobs(args, formal_root)
     endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
     env = runtime_no_git_env()
     env.update({
@@ -1030,6 +1231,8 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "--group-weights", os.getenv("GPU_GROUP_WEIGHTS", "cads=0.45,atm=0.15,airrc=0.20,unest=0.20"),
         "--submission-id", submission_id,
         "--append-submitted-jobs",
+        "--run-id", run_id,
+        "--git-commit", _git_commit(),
     ]
     if os.getenv("DYNAMIC_SBATCH_TEST_ONLY", "1") != "1":
         dynamic_cmd.append("--skip-sbatch-test-only")
@@ -1037,8 +1240,18 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     if not dynamic_result["ok"]:
         log_failure(state_root, stage="teacher_batch_submit", failure_reason=dynamic_result["stderr"] or "teacher_batch_submit_failed", details=dynamic_result)
         return {"status": "FAILED", "failure_reason": dynamic_result["stderr"] or "teacher_batch_submit_failed", "dynamic": dynamic_result}
+    safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", submission_id).strip("_")
+    dynamic_plan = _read_json(formal_root / "slurm" / f"dynamic_gpu_submission_plan_{safe_submission_id}.json", {})
+    if not dynamic_plan:
+        try:
+            dynamic_plan = json.loads(str(dynamic_result.get("stdout") or "{}"))
+        except Exception:
+            dynamic_plan = {}
+    dynamic_status = str(dynamic_plan.get("status") or "SUBMITTED")
+    scheduler_status = str(dynamic_plan.get("scheduler_status") or ("BACKPRESSURED" if dynamic_status in BACKPRESSURE_STATUSES else "ACTIVE"))
     batch = {
-        "status": "SUBMITTED",
+        "status": dynamic_status if dynamic_status in BACKPRESSURE_STATUSES else "SUBMITTED",
+        "scheduler_status": scheduler_status,
         "submission_id": submission_id,
         "case_ids": ready_cases,
         "case_count": len(ready_cases),
@@ -1046,11 +1259,30 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "formal_root": str(formal_root),
         "plan": plan_result,
         "dynamic": dynamic_result,
+        "dynamic_plan": dynamic_plan,
         "created_at": utc_now(),
     }
     _append_teacher_batch(paths, batch)
+    if batch["status"] in BACKPRESSURE_STATUSES:
+        _save_state(
+            state_root,
+            teacher_batch_index=batch_index,
+            teacher_active_submission_id=submission_id,
+            formal_root=str(formal_root),
+            last_teacher_batch=batch,
+            scheduler_status=scheduler_status,
+        )
+        return batch
     updated = sorted(submitted_cases | set(ready_cases))
-    _save_state(state_root, teacher_submitted_case_ids=updated, teacher_batch_index=batch_index, formal_root=str(formal_root), last_teacher_batch=batch)
+    _save_state(
+        state_root,
+        teacher_submitted_case_ids=updated,
+        teacher_batch_index=batch_index,
+        teacher_active_submission_id="",
+        formal_root=str(formal_root),
+        last_teacher_batch=batch,
+        scheduler_status=scheduler_status,
+    )
     return batch
 
 
@@ -1108,17 +1340,37 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
     jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
     active = []
     failed = []
+    retryable = []
     if jobs_csv.exists():
+        lifecycle = refresh_lifecycle_for_submitted_jobs(args, formal_root)
         for row in read_csv_rows(jobs_csv):
             job_id = str(row.get("job_id") or "")
             state = slurm_job_state(job_id)
             if state.get("state") in ACTIVE_STATES or state.get("state") == "UNKNOWN":
                 active.append(state)
-            if state.get("state") in TERMINAL_FAILURE_STATES:
+            if state.get("state") in RETRYABLE_TERMINAL_STATES:
+                retryable.append(state)
+            elif state.get("state") in TERMINAL_FAILURE_STATES:
                 failed.append(state)
+    else:
+        lifecycle = {"status": "NO_SUBMITTED_JOBS"}
     if failed and not active:
         log_failure(args.state_root.resolve(), stage="e_step", failure_reason="e_step_jobs_terminal_failed", details={"failed_jobs": failed, "check": result})
         return {"status": "FAILED", "failure_reason": "e_step_jobs_terminal_failed", "failed_jobs": failed, "check": result}
+    if retryable and not active:
+        _save_state(
+            args.state_root.resolve(),
+            scheduler_status="RETRY_PENDING",
+            walltime_recovery_status="RETRY_PENDING",
+            e_step_retryable_terminal_jobs=retryable,
+        )
+        return {
+            "status": "RUNNING",
+            "scheduler_status": "RETRY_PENDING",
+            "retryable_terminal_jobs": retryable,
+            "lifecycle": lifecycle,
+            "check": result,
+        }
     source_manifest = _state_paths(args.state_root.resolve())["source_manifest"]
     if source_manifest.exists():
         staging_rows = _staging_status_rows(args, source_manifest)
@@ -1131,7 +1383,7 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
             return {"status": "FAILED", "failure_reason": "one_or_more_case_staging_failed", "staging_failed_count": staging_failed_count, "ready_count": ready_count, "check": result}
         if staging_job.get("state") in ACTIVE_STATES:
             active.append({"stage": "staging", **staging_job})
-    return {"status": "RUNNING", "active_jobs": active, "check": result}
+    return {"status": "RUNNING", "active_jobs": active, "lifecycle": lifecycle, "check": result}
 
 
 def build_mstep_manifest(args: argparse.Namespace) -> dict[str, Any]:
@@ -1239,12 +1491,14 @@ def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
         f"#SBATCH --cpus-per-task={os.getenv('MSTEP_CPUS', '12')}",
         f"#SBATCH --mem={os.getenv('MSTEP_MEM', '96G')}",
         f"#SBATCH --time={os.getenv('MSTEP_TIME', '10:00:00')}",
+        "#SBATCH --signal=B:USR1@900",
         f"#SBATCH --output={paths['root'] / 'mstep_%j.out'}",
         f"#SBATCH --error={paths['root'] / 'mstep_%j.err'}",
         "#SBATCH --export=ALL",
         "",
         "set -euo pipefail",
         f"cd {shlex.quote(str(REPO_ROOT))}",
+        f"export STATE_ROOT={shlex.quote(str(state_root))}",
         f"export MEDAI_OUTPUT_ROOT={shlex.quote(str(paths['root']))}",
         f"export MEDAI_VOXTELL_MODEL_DIR={shlex.quote(str(os.getenv('MEDAI_VOXTELL_MODEL_DIR', '/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/VoxTell/voxtell_v1.1')))}",
         "export MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt",
@@ -1252,6 +1506,7 @@ def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
         "export MEDAI_VOXTELL_TRAINING_PROFILE=quality_weighted_ablation",
         "export MEDAI_MSTEP_BATCH_SIZE=1",
         "export MEDAI_FORMAL_STATE_MACHINE=1",
+        f"trap 'python tools/dataset_delivery/slurm_reliability.py student-pretimeout --state-root {shlex.quote(str(state_root))} --checkpoint-dir {shlex.quote(str(paths['mstep_output'] / 'walltime_checkpoints'))} --job-id \"${{SLURM_JOB_ID:-}}\"' USR1",
         f"{shlex.quote(str(args.python))} - <<'PY'",
         "from pathlib import Path",
         "from scripts import run_em_training as em",
@@ -1267,13 +1522,19 @@ def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
         if not result["ok"]:
             log_failure(state_root, stage="m_step_sbatch_preflight", failure_reason="mstep_sbatch_preflight_failed", details=result)
             return {"status": "FAILED", "failure_reason": "mstep_sbatch_preflight_failed", "preflight": result}
-    result = _run(["sbatch", "--parsable", str(paths["mstep_sbatch"])])
+    run_id = _run_id(state_root)
+    result = _run(["sbatch", "--parsable", "--comment", slurm_comment(run_id=run_id, submission_id="mstep", group="student", profile=os.getenv("MSTEP_PARTITION", "gpua100")), str(paths["mstep_sbatch"])])
     if not result["ok"]:
+        classification = classify_sbatch_failure(result["stderr"] or result["stdout"])
+        if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE":
+            _save_state(state_root, mstep_status="WAITING_FOR_SUBMISSION_CAPACITY", scheduler_status="BACKPRESSURED", mstep_submit=result)
+            return {"status": "WAITING_FOR_SUBMISSION_CAPACITY", "scheduler_status": "BACKPRESSURED", "failure_reason": classification["reason"], "submit": result}
         log_failure(state_root, stage="m_step_submit", failure_reason=result["stderr"] or "mstep_submit_failed", details=result)
         return {"status": "FAILED", "failure_reason": result["stderr"], "submit": result}
     job_id = result["stdout"].splitlines()[-1].strip()
     paths["mstep_job"].write_text(job_id + "\n", encoding="utf-8")
     _save_state(state_root, mstep_status="SUBMITTED", mstep_job_id=job_id, mstep_manifest=manifest)
+    record_job_lifecycle(state_root, {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:mstep", "stage": "mstep", "profile": os.getenv("MSTEP_PARTITION", "gpua100")})
     return {"status": "SUBMITTED", "job_id": job_id, "manifest": manifest}
 
 
@@ -1292,6 +1553,11 @@ def check_mstep(args: argparse.Namespace) -> dict[str, Any]:
     job_id = str(state.get("mstep_job_id") or "")
     job_state = slurm_job_state(job_id) if job_id else {"state": "UNKNOWN"}
     if job_state.get("state") in TERMINAL_FAILURE_STATES:
+        if job_state.get("state") in RETRYABLE_TERMINAL_STATES:
+            checkpoint = paths["mstep_output"] / "walltime_checkpoints"
+            marker = student_pretimeout(args.state_root.resolve(), checkpoint, job_id=job_id)
+            _save_state(args.state_root.resolve(), mstep_status="RETRY_PENDING", walltime_recovery_status="RETRY_PENDING", mstep_walltime_guard=marker)
+            return {"status": "RUNNING", "scheduler_status": "RETRY_PENDING", "job": job_state, "walltime_guard": marker}
         log_failure(args.state_root.resolve(), stage="m_step", failure_reason=f"mstep_job_terminal:{job_state.get('state')}", details=job_state)
         return {"status": "FAILED", "failure_reason": f"mstep_job_terminal:{job_state.get('state')}", "job": job_state}
     return {"status": "RUNNING", "job": job_state}
@@ -1341,7 +1607,8 @@ def _controller_main(args: argparse.Namespace) -> int:
         return 0
     if current.get("terminal_state") == "ROUND1_FAILED":
         return 2
-    _save_state(state_root, status="CONTROLLER_RUNNING", terminal_state="", stage="start", git_commit=_git_commit(), started_at=utc_now())
+    run_id = _run_id(state_root)
+    _save_state(state_root, status="CONTROLLER_RUNNING", terminal_state="", stage="start", git_commit=_git_commit(), run_id=run_id, started_at=utc_now())
     commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
     _save_state(state_root, stage="git_commit_pin", expected_git_commit=commit_pin)
     if commit_pin["status"] != "PASSED":
@@ -1353,6 +1620,7 @@ def _controller_main(args: argparse.Namespace) -> int:
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
         return 2
     _save_state(state_root, stage="labelcritic_submitted_or_reused", labelcritic=labelcritic)
+    reconcile_active_teacher_jobs(args)
     estep_submit = submit_estep(args, labelcritic)
     if estep_submit["status"] == "FAILED":
         log_failure(state_root, stage="e_step_submit", failure_reason=estep_submit.get("failure_reason", "e_step_submit_failed"), details=estep_submit)
@@ -1368,6 +1636,7 @@ def _controller_main(args: argparse.Namespace) -> int:
                 return 2
             if labelcritic_gate["status"] == "PASSED":
                 _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic_gate)
+        reconcile_active_teacher_jobs(args)
         progress = advance_estep(args, labelcritic_gate)
         if progress["status"] == "FAILED":
             log_failure(state_root, stage="e_step_submit", failure_reason=progress.get("failure_reason", "e_step_submit_failed"), details=progress)
@@ -1386,11 +1655,17 @@ def _controller_main(args: argparse.Namespace) -> int:
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step", failure_reason=estep.get("failure_reason"), e_step=estep)
             return 2
         time.sleep(max(10, args.poll_sec))
-    mstep_submit = submit_mstep(args)
-    if mstep_submit["status"] == "FAILED":
-        log_failure(state_root, stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason", "m_step_submit_failed"), details=mstep_submit)
-        _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason"), m_step=mstep_submit)
-        return 2
+    while True:
+        mstep_submit = submit_mstep(args)
+        if mstep_submit["status"] == "FAILED":
+            log_failure(state_root, stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason", "m_step_submit_failed"), details=mstep_submit)
+            _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason"), m_step=mstep_submit)
+            return 2
+        if mstep_submit["status"] in BACKPRESSURE_STATUSES:
+            _save_state(state_root, stage="m_step_submit_backpressured", m_step=mstep_submit, scheduler_status="BACKPRESSURED")
+            time.sleep(max(10, args.poll_sec))
+            continue
+        break
     while True:
         mstep = check_mstep(args)
         _save_state(state_root, stage="m_step_wait", m_step=mstep, mstep_status=mstep["status"])
@@ -1447,6 +1722,11 @@ def status(args: argparse.Namespace) -> dict[str, Any]:
         "failure_reason": state.get("failure_reason", "") or last_failure.get("failure_reason", ""),
         "last_failure": last_failure,
         "formal_root": state.get("formal_root", ""),
+        "scheduler_status": state.get("scheduler_status", ""),
+        "walltime_recovery_status": state.get("walltime_recovery_status", ""),
+        "job_lifecycle": str(paths["job_lifecycle"]),
+        "job_lifecycle_current": str(paths["job_lifecycle_current"]),
+        "walltime_guard": str(paths["walltime_guard"]),
         "updated_at": state.get("updated_at", ""),
     }
 

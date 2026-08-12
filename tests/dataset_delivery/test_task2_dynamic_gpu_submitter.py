@@ -168,3 +168,211 @@ def test_dynamic_submitter_auto_profiles_use_cluster_inventory_without_fixed_30_
     for path in shard_paths:
         source_indices.extend(row["source_task_index"] for row in _rows(path))
     assert sorted(source_indices, key=int) == [str(index) for index in range(80)]
+
+
+def test_dynamic_submitter_partial_sbatch_success_persists_before_qos_backpressure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 2, "atm": 2})
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(item) for item in command])
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "--parsable" in command and "cads" in str(command[-1]):
+            return subprocess.CompletedProcess(command, 0, "91001\n", "")
+        if "--parsable" in command and "atm" in str(command[-1]):
+            return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: Job violates accounting/QOS policy")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=2,
+        overrequest_workers=2,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads", "atm"],
+        dry_run=False,
+        run_id="run_a",
+        submission_id="batch_a",
+    )
+
+    assert plan["status"] == "PARTIALLY_SUBMITTED"
+    assert plan["scheduler_status"] == "BACKPRESSURED"
+    rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
+    assert [row["job_id"] for row in rows] == ["91001"]
+    assert (tmp_path / "slurm" / "submitted_jobs.json").is_file()
+    attempts = (tmp_path / "slurm" / "submission_attempts.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(attempts) == 2
+    assert any("--comment" in call for call in calls if "--parsable" in call)
+
+
+def test_dynamic_submitter_all_profiles_backpressured_waits_without_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 2})
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "--parsable" in command:
+            return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: QOSMaxSubmitJobPerUserLimit")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=2,
+        overrequest_workers=2,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=False,
+        run_id="run_b",
+        submission_id="batch_b",
+    )
+
+    assert plan["status"] == "WAITING_FOR_SUBMISSION_CAPACITY"
+    assert plan["backpressured_count"] == 1
+    assert _rows(tmp_path / "slurm" / "submitted_jobs.csv") == []
+    assert json.loads((tmp_path / "slurm" / "submitted_jobs.json").read_text(encoding="utf-8"))["jobs"] == []
+
+
+def test_dynamic_submitter_continues_other_profile_after_one_backpressured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 4})
+    submitted: list[str] = []
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "--parsable" in command:
+            sbatch_file = str(command[-1])
+            submitted.append(sbatch_file)
+            if "gpu_t4" in sbatch_file:
+                return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: QOSMaxJobsPerUserLimit")
+            return subprocess.CompletedProcess(command, 0, "91002\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=2,
+        overrequest_workers=2,
+        profile_specs="gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00,gpu_a100|gpua100|gpu:A100:1|8|80G|06:00:00",
+        groups=["cads"],
+        dry_run=False,
+        run_id="run_c",
+        submission_id="batch_c",
+    )
+
+    assert plan["status"] == "PARTIALLY_SUBMITTED"
+    assert len(submitted) == 2
+    assert [row["profile"] for row in _rows(tmp_path / "slurm" / "submitted_jobs.csv")] == ["gpu_a100"]
+
+
+def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_submit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.slurm_reliability import persist_submitted_job
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 2, "atm": 2})
+    persist_submitted_job(
+        tmp_path / "slurm",
+        {
+            "run_id": "run_d",
+            "submission_id": "batch_d",
+            "job_id": "91003",
+            "model_group": "cads",
+            "group": "cads",
+            "profile": "generic_gpu",
+            "submission_status": "submitted",
+            "scheduler_status": "ACTIVE",
+            "slurm_state": "RUNNING",
+        },
+    )
+    submitted: list[str] = []
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "--parsable" in command:
+            submitted.append(str(command[-1]))
+            return subprocess.CompletedProcess(command, 0, "91004\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=2,
+        overrequest_workers=2,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads", "atm"],
+        dry_run=False,
+        run_id="run_d",
+        submission_id="batch_d",
+    )
+
+    assert plan["status"] == "SUBMITTED"
+    assert len(submitted) == 1
+    assert "atm" in submitted[0]
+    rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
+    assert {row["model_group"] for row in rows} == {"cads", "atm"}
+
+
+def test_dynamic_submitter_qos_slot_later_frees_and_remaining_workers_submit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 2})
+    attempt = {"count": 0}
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "--parsable" in command:
+            attempt["count"] += 1
+            if attempt["count"] == 1:
+                return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: JobArrayTaskLimit")
+            return subprocess.CompletedProcess(command, 0, "91005\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    first = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=1,
+        overrequest_workers=1,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=False,
+        run_id="run_e",
+        submission_id="batch_e",
+    )
+    second = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=1,
+        overrequest_workers=1,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=False,
+        run_id="run_e",
+        submission_id="batch_e",
+    )
+
+    assert first["status"] == "WAITING_FOR_SUBMISSION_CAPACITY"
+    assert second["status"] == "SUBMITTED"
+    assert _rows(tmp_path / "slurm" / "submitted_jobs.csv")[0]["job_id"] == "91005"
