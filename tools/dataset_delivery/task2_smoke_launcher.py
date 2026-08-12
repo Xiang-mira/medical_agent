@@ -112,6 +112,10 @@ def _command_for_group(
         command.append("--no-enable-critic")
     if critic_vlm_model:
         command.extend(["--critic-vlm-model", critic_vlm_model])
+    command.extend([
+        "--critic-base-url", os.getenv("LABELCRITIC_BASE_URL", "http://localhost"),
+        "--critic-port", os.getenv("LABELCRITIC_PORT", "8000"),
+    ])
     if group == "atm":
         command.extend(["--strict-delivery-fov-override-organs", "airway_tree"])
     command.extend(["--log-file", str(run_out / "run_loop.log")])
@@ -204,6 +208,10 @@ export MEDAI_TOTALSEG_HOME=${{MEDAI_TOTALSEG_HOME:-{shlex.quote(str(checkpoint_r
 export TOTALSEG_HOME_DIR="$MEDAI_TOTALSEG_HOME"
 export MEDAI_TOTALSEG_OFFLINE=${{MEDAI_TOTALSEG_OFFLINE:-1}}
 export MEDAI_TOTALSEG_MANIFEST=${{MEDAI_TOTALSEG_MANIFEST:-{shlex.quote(str(code_root / 'configs' / 'dataset_delivery' / 'totalsegmentator_brain_ventricle_offline_manifest.json'))}}}
+export LABELCRITIC_BASE_URL=${{LABELCRITIC_BASE_URL:-http://localhost}}
+export LABELCRITIC_PORT=${{LABELCRITIC_PORT:-8000}}
+export LABELCRITIC_MODEL_ID=${{LABELCRITIC_MODEL_ID:-Qwen/Qwen2-VL-72B-Instruct-AWQ}}
+export MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY=${{MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY:-1}}
 export nnUNet_raw={shlex.quote(str(run_out.parent / 'nnUNet_raw'))}
 export nnUNet_preprocessed={shlex.quote(str(run_out.parent / 'nnUNet_preprocessed'))}
 export nnUNet_results={shlex.quote(str(checkpoint_root))}

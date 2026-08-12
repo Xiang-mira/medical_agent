@@ -10,6 +10,10 @@ CASE_MANIFEST=${CASE_MANIFEST:-$WORKSPACE_ROOT/manifests/cases_103_manifest.csv}
 CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints}
 NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict}
 UNEST_PYTHON_EXECUTABLE=${UNEST_PYTHON_EXECUTABLE:-/home/xhan74/envs/medical_agent_train_py311/bin/python}
+LABELCRITIC_BASE_URL=${LABELCRITIC_BASE_URL:-http://localhost}
+LABELCRITIC_PORT=${LABELCRITIC_PORT:-8000}
+LABELCRITIC_MODEL_ID=${LABELCRITIC_MODEL_ID:-Qwen/Qwen2-VL-72B-Instruct-AWQ}
+MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY=${MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY:-1}
 OUT_PARENT=${OUT_PARENT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373}
 STATE_ROOT=${STATE_ROOT:-$OUT_PARENT/runtime_state}
 FORMAL_OUT_ROOT=${FORMAL_OUT_ROOT:-$WORKSPACE_ROOT/teacher/formal_task2_22targets_103cases_$(date +%Y%m%d_%H%M%S)}
@@ -39,6 +43,7 @@ MASK_ROOT=${MASK_ROOT:-/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/Abdomen
 if [ -f "$HOME/.bodymaps_env" ]; then
   source "$HOME/.bodymaps_env"
 fi
+export LABELCRITIC_BASE_URL LABELCRITIC_PORT LABELCRITIC_MODEL_ID MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY
 
 cd "$CODE_ROOT"
 git fetch origin
