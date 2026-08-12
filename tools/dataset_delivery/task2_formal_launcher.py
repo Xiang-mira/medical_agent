@@ -108,6 +108,24 @@ def _group_task_manifest(output_root: Path, group: str) -> Path:
     return _group_root(output_root, group) / f"{group}_task_manifest.csv"
 
 
+def _safe_submission_tag(submission_tag: str | None) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(submission_tag or "").strip())
+
+
+def _tagged_group_task_manifest(output_root: Path, group: str, submission_tag: str | None) -> Path:
+    tag = _safe_submission_tag(submission_tag)
+    if not tag:
+        return _group_task_manifest(output_root, group)
+    return output_root / "slurm" / "submissions" / tag / f"{group}_task_manifest.csv"
+
+
+def _tagged_group_sbatch(output_root: Path, group: str, submission_tag: str | None) -> Path:
+    tag = _safe_submission_tag(submission_tag)
+    if not tag:
+        return output_root / "slurm" / f"{group}_task2_array.sbatch"
+    return output_root / "slurm" / "submissions" / tag / f"{group}_task2_array.sbatch"
+
+
 def _group_run_out(output_root: Path, case_id: str, group: str) -> Path:
     return output_root / "cases" / case_id / group / "run_loop"
 
@@ -176,6 +194,10 @@ set -euo pipefail
 if [ -f "$HOME/.bodymaps_env" ]; then
   source "$HOME/.bodymaps_env"
 fi
+unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS
+export RUNTIME_NO_GIT=1
+export SKIP_GIT_SYNC=1
+export GIT_TERMINAL_PROMPT=0
 {env_block}
 cd {code_root}
 {python} tools/dataset_delivery/task2_formal_launcher.py \\
@@ -322,6 +344,9 @@ def build_formal_plan(
     expected_case_count: int = FORMAL_CASE_COUNT,
     groups: list[str] | None = None,
     case_id: str | None = None,
+    ready_case_ids: list[str] | None = None,
+    staged_workspace_root: Path | None = None,
+    submission_tag: str | None = None,
     resume: bool = False,
     retry_failed: bool = False,
     dry_run: bool = False,
@@ -430,6 +455,8 @@ def build_formal_plan(
             "submission_manifest": "",
             "task_registry": "",
             "git_commit": _git_commit(code_root),
+            "submission_tag": submission_tag or "",
+            "ready_case_ids": sorted(str(item).strip() for item in (ready_case_ids or []) if str(item).strip()),
         }
         write_json(output_root / "formal_task2_preflight.json", summary)
         write_json(task_manifest_report, manifest_audit)
@@ -450,11 +477,21 @@ def build_formal_plan(
     selected_rows = case_rows
     if case_id:
         selected_rows = [row for index, row in enumerate(case_rows) if _case_id(row, index) == case_id]
+    ready_set = {str(item).strip() for item in (ready_case_ids or []) if str(item).strip()}
+    if ready_set:
+        selected_rows = [row for index, row in enumerate(case_rows) if _case_id(row, index) in ready_set]
 
-    for index, row in enumerate(selected_rows):
-        cid = _case_id(row, index)
-        ct_path = _ct_path(row)
-        ann = _annotation_folder(row)
+    for fallback_index, row in enumerate(selected_rows):
+        raw_index = str(row.get("index") or "").strip()
+        manifest_index = int(raw_index) if raw_index.isdigit() else fallback_index
+        cid = _case_id(row, manifest_index)
+        if staged_workspace_root is not None:
+            staged_root = staged_workspace_root.resolve()
+            ct_path = str(staged_root / "inputs" / "images" / cid / "ct.nii.gz")
+            ann = str(staged_root / "inputs" / "masks_original" / cid / "segmentations")
+        else:
+            ct_path = _ct_path(row)
+            ann = _annotation_folder(row)
         for group in groups:
             group_targets = FORMAL_MODEL_TARGETS[group]
             group_state = _task_state_path(output_root, cid, group)
@@ -495,8 +532,9 @@ def build_formal_plan(
     total_task_count = 0
     for group, task_rows in tasks_by_group.items():
         group_root = _group_root(output_root, group)
-        manifest_path = _group_task_manifest(output_root, group)
+        manifest_path = _tagged_group_task_manifest(output_root, group, submission_tag)
         group_root.mkdir(parents=True, exist_ok=True)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
         write_csv(
             manifest_path,
             task_rows,
@@ -507,7 +545,7 @@ def build_formal_plan(
                 "unest_python_executable", "unest_python_sha256", "status",
             ],
         )
-        sbatch_path = output_root / "slurm" / f"{group}_task2_array.sbatch"
+        sbatch_path = _tagged_group_sbatch(output_root, group, submission_tag)
         _write_array_sbatch(
             sbatch_path,
             code_root=code_root,
@@ -560,6 +598,8 @@ def build_formal_plan(
         "target_config": str(target_config),
         "registry_path": str(registry_path),
         "git_commit": _git_commit(code_root),
+        "submission_tag": submission_tag or "",
+        "ready_case_ids": sorted(ready_set),
         "checks": checks,
         "blocked_checks": blocked_checks,
         "preflight": preflight,
@@ -587,6 +627,9 @@ def main() -> int:
     parser.add_argument("--expected-case-count", default=FORMAL_CASE_COUNT, type=int)
     parser.add_argument("--groups", default="")
     parser.add_argument("--case-id", default="")
+    parser.add_argument("--ready-case-ids", default="")
+    parser.add_argument("--staged-workspace-root", default=None, type=Path)
+    parser.add_argument("--submission-tag", default="")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -632,6 +675,9 @@ def main() -> int:
         expected_case_count=args.expected_case_count,
         groups=groups,
         case_id=args.case_id or None,
+        ready_case_ids=[item.strip() for item in args.ready_case_ids.replace(";", ",").split(",") if item.strip()] or None,
+        staged_workspace_root=args.staged_workspace_root.resolve() if args.staged_workspace_root else None,
+        submission_tag=args.submission_tag or None,
         resume=bool(args.resume),
         retry_failed=bool(args.retry_failed),
         dry_run=bool(args.dry_run),

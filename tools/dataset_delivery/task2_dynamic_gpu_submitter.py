@@ -340,6 +340,8 @@ def build_dynamic_submission_plan(
     group_weights: dict[str, float] | None = None,
     dry_run: bool = False,
     run_sbatch_test_only: bool = True,
+    submission_id: str = "",
+    append_submitted_jobs: bool = False,
 ) -> dict[str, Any]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("status") != "READY":
@@ -369,7 +371,8 @@ def build_dynamic_submission_plan(
 
     output_root.mkdir(parents=True, exist_ok=True)
     slurm_root = output_root / "slurm"
-    dynamic_root = slurm_root / "dynamic"
+    safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(submission_id or "").strip()).strip("_")
+    dynamic_root = slurm_root / "dynamic" / safe_submission_id if safe_submission_id else slurm_root / "dynamic"
     dynamic_root.mkdir(parents=True, exist_ok=True)
 
     shard_rows: list[dict[str, Any]] = []
@@ -443,13 +446,15 @@ def build_dynamic_submission_plan(
             if report["status"] != "READY":
                 preflight_failures.append({"job": row, "preflight": report})
         if preflight_failures:
+            plan_path = output_root / "slurm" / (f"dynamic_gpu_submission_plan_{safe_submission_id}.json" if safe_submission_id else "dynamic_gpu_submission_plan.json")
             write_json(
-                output_root / "slurm" / "dynamic_gpu_submission_plan.json",
+                plan_path,
                 {
                     "status": "PREFLIGHT_FAILED",
                     "scheduler_mode": "dynamic_gpu_overrequest",
                     "planned_target_workers": int(target_workers),
                     "planned_overrequest_workers": planned_overrequest,
+                    "submission_id": safe_submission_id,
                     "resource_inventory": resource_inventory,
                     "worker_sizing": worker_sizing,
                     "failures": preflight_failures,
@@ -479,7 +484,8 @@ def build_dynamic_submission_plan(
         row["submission_status"] = "submitted" if proc.returncode == 0 else "failed"
         row["stderr"] = proc.stderr.strip()
         if proc.returncode != 0:
-            write_json(output_root / "slurm" / "dynamic_gpu_submission_plan.json", {"status": "SUBMISSION_FAILED", "jobs": jobs, "failed_job": row})
+            plan_path = output_root / "slurm" / (f"dynamic_gpu_submission_plan_{safe_submission_id}.json" if safe_submission_id else "dynamic_gpu_submission_plan.json")
+            write_json(plan_path, {"status": "SUBMISSION_FAILED", "submission_id": safe_submission_id, "jobs": jobs, "failed_job": row})
             raise RuntimeError(f"sbatch failed for {row['model_group']}:{row['profile']}: {proc.stderr.strip()}")
         jobs.append(dict(row))
 
@@ -488,12 +494,17 @@ def build_dynamic_submission_plan(
         "job_id", "task_count", "array_concurrency", "task_manifest", "sbatch_file",
         "submission_status", "preflight_status", "preflight_stderr", "stderr",
     ]
-    write_csv(slurm_root / "submitted_jobs.csv", shard_rows, csv_fields)
+    jobs_csv = slurm_root / "submitted_jobs.csv"
+    csv_rows = shard_rows
+    if append_submitted_jobs and jobs_csv.exists():
+        csv_rows = read_csv_rows(jobs_csv) + shard_rows
+    write_csv(jobs_csv, csv_rows, csv_fields)
 
     plan = {
         "status": "DRY_RUN" if dry_run else "SUBMITTED",
         "scheduler_mode": "dynamic_gpu_overrequest",
         "created_at": utc_now(),
+        "submission_id": safe_submission_id,
         "summary_path": str(summary_path),
         "output_root": str(output_root),
         "state_root": str(state_root),
@@ -513,7 +524,8 @@ def build_dynamic_submission_plan(
                 "LabelCritic candidate selection can run per case/target once candidate masks exist",
             ],
             "serial": [
-                "workspace staging, Task1 rename, manifest build, and formal preflight precede GPU arrays",
+                "per-case workspace staging and Task1 rename/materialization precede that case's teacher task",
+                "global manifest/config/model preflight precedes Slurm submissions",
                 "within one case/group: teacher inference -> recovery -> ShapeKit -> LabelCritic selection -> delivery validation",
                 "M-step student training waits for E-step selected pseudo labels to be READY",
             ],
@@ -532,7 +544,10 @@ def build_dynamic_submission_plan(
             ],
         },
     }
-    write_json(slurm_root / "dynamic_gpu_submission_plan.json", plan)
+    plan_name = f"dynamic_gpu_submission_plan_{safe_submission_id}.json" if safe_submission_id else "dynamic_gpu_submission_plan.json"
+    write_json(slurm_root / plan_name, plan)
+    if safe_submission_id:
+        write_json(slurm_root / "dynamic_gpu_submission_plan.json", plan)
     if not dry_run:
         state_root.mkdir(parents=True, exist_ok=True)
         tmp_last = state_root / f".last_task2_formal.tmp.{os.getpid()}"
@@ -553,6 +568,8 @@ def main() -> int:
     parser.add_argument("--group-weights", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-sbatch-test-only", action="store_true")
+    parser.add_argument("--submission-id", default="")
+    parser.add_argument("--append-submitted-jobs", action="store_true")
     args = parser.parse_args()
     groups = [item.strip() for item in args.groups.replace(";", ",").split(",") if item.strip()] or None
     plan = build_dynamic_submission_plan(
@@ -566,6 +583,8 @@ def main() -> int:
         group_weights=parse_group_weights(args.group_weights),
         dry_run=bool(args.dry_run),
         run_sbatch_test_only=not bool(args.skip_sbatch_test_only),
+        submission_id=args.submission_id,
+        append_submitted_jobs=bool(args.append_submitted_jobs),
     )
     print(json.dumps({k: plan[k] for k in ("status", "planned_target_workers", "planned_overrequest_workers", "total_array_concurrency")}, indent=2))
     return 0

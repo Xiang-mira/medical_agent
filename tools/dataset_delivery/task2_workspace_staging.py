@@ -87,6 +87,127 @@ def _copy_mask_dir(src: Path, dst: Path, *, resume: bool) -> dict[str, Any]:
     return {"ok": not errors, "source": str(src), "destination": str(dst), "files": copied, "errors": errors}
 
 
+def _basic_nifti_ok(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0 and (path.name.endswith(".nii.gz") or path.name.endswith(".nii"))
+
+
+def _staged_paths(workspace_root: Path, case_id: str) -> tuple[Path, Path]:
+    return (
+        workspace_root / "inputs" / "images" / case_id / "ct.nii.gz",
+        workspace_root / "inputs" / "masks_original" / case_id / "segmentations",
+    )
+
+
+def staged_case_status(*, workspace_root: Path, case_id: str) -> dict[str, Any]:
+    dst_ct, dst_mask = _staged_paths(workspace_root.resolve(), case_id)
+    mask_files = sorted(dst_mask.glob("*.nii.gz")) if dst_mask.is_dir() else []
+    errors = []
+    if not _basic_nifti_ok(dst_ct):
+        errors.append({"type": "ct_missing_or_empty", "path": str(dst_ct)})
+    if not dst_mask.is_dir():
+        errors.append({"type": "annotation_folder_missing", "path": str(dst_mask)})
+    if not mask_files:
+        errors.append({"type": "annotation_folder_has_no_nifti", "path": str(dst_mask)})
+    empty_masks = [str(path) for path in mask_files if path.stat().st_size <= 0]
+    if empty_masks:
+        errors.append({"type": "empty_mask_files", "paths": empty_masks[:20], "count": len(empty_masks)})
+    return {
+        "status": "INPUT_READY" if not errors else "STAGING_PENDING",
+        "case_id": case_id,
+        "ct_path": str(dst_ct),
+        "annotation_folder": str(dst_mask),
+        "mask_file_count": len(mask_files),
+        "errors": errors,
+    }
+
+
+def stage_workspace_case(
+    *,
+    cases_manifest: Path,
+    case_index: int,
+    workspace_root: Path,
+    image_root: Path | None = None,
+    mask_root: Path | None = None,
+    resume: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    rows = read_csv_rows(cases_manifest)
+    if case_index < 0 or case_index >= len(rows):
+        raise DeliveryError(f"case_index out of range: {case_index} for {len(rows)} rows")
+    workspace_root = workspace_root.resolve()
+    row = rows[case_index]
+    case_id = _case_id(row, case_index)
+    state_dir = workspace_root / "manifests" / "staging_cases"
+    state_path = state_dir / f"{case_id}.json"
+    status_before = staged_case_status(workspace_root=workspace_root, case_id=case_id)
+    if status_before["status"] == "INPUT_READY" and resume:
+        report = {
+            **status_before,
+            "stage": "case_workspace_staging",
+            "case_index": case_index,
+            "action": "reused_existing",
+            "source_manifest": str(cases_manifest),
+        }
+        if not dry_run:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            write_json(state_path, report)
+        return report
+    src_ct = _ct_path(row, image_root, case_id)
+    src_mask = _mask_dir(row, mask_root, case_id)
+    dst_ct, dst_mask = _staged_paths(workspace_root, case_id)
+    if dry_run:
+        ct_result = {"ok": src_ct.is_file(), "action": "dry_run", "source": str(src_ct), "destination": str(dst_ct)}
+        mask_result = {"ok": src_mask.is_dir(), "action": "dry_run", "source": str(src_mask), "destination": str(dst_mask), "files": []}
+    else:
+        for rel in WORKSPACE_DIRS:
+            (workspace_root / rel).mkdir(parents=True, exist_ok=True)
+        write_json(
+            state_path,
+            {
+                "status": "STAGING_RUNNING",
+                "stage": "case_workspace_staging",
+                "case_id": case_id,
+                "case_index": case_index,
+                "source_manifest": str(cases_manifest),
+                "source_ct_path": str(src_ct),
+                "source_annotation_folder": str(src_mask),
+                "ct_path": str(dst_ct),
+                "annotation_folder": str(dst_mask),
+            },
+        )
+        ct_result = _copy_file(src_ct, dst_ct, resume=resume)
+        mask_result = _copy_mask_dir(src_mask, dst_mask, resume=resume)
+    status_after = staged_case_status(workspace_root=workspace_root, case_id=case_id)
+    errors: list[dict[str, Any]] = []
+    if not ct_result.get("ok"):
+        errors.append({"type": "ct_copy_failed", **ct_result})
+    if not mask_result.get("ok"):
+        errors.append({"type": "mask_copy_failed", **mask_result})
+    errors.extend(status_after.get("errors") or [])
+    report = {
+        **status_after,
+        "status": "INPUT_READY" if not errors else "STAGING_FAILED",
+        "stage": "case_workspace_staging",
+        "case_index": case_index,
+        "source_manifest": str(cases_manifest),
+        "source_ct_path": str(src_ct),
+        "source_annotation_folder": str(src_mask),
+        "ct_copy": ct_result,
+        "mask_copy": {
+            key: value
+            for key, value in mask_result.items()
+            if key != "files"
+        },
+        "resume": resume,
+        "dry_run": dry_run,
+        "errors": errors,
+    }
+    if not dry_run:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        write_json(state_path, report)
+    return report
+
+
 def _assert_not_same_or_child(dst: Path, forbidden: Path, label: str) -> None:
     try:
         dst.relative_to(forbidden.resolve())
@@ -204,9 +325,22 @@ def main() -> int:
     parser.add_argument("--mask-root", type=Path)
     parser.add_argument("--expected-case-count", default=FORMAL_CASE_COUNT, type=int)
     parser.add_argument("--base-manifest", type=Path)
+    parser.add_argument("--case-index", default=None, type=int)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.case_index is not None:
+        report = stage_workspace_case(
+            cases_manifest=args.cases_manifest.resolve(),
+            case_index=int(args.case_index),
+            workspace_root=args.workspace_root,
+            image_root=args.image_root.resolve() if args.image_root else None,
+            mask_root=args.mask_root.resolve() if args.mask_root else None,
+            resume=bool(args.resume),
+            dry_run=bool(args.dry_run),
+        )
+        print(json.dumps({"status": report["status"], "case_id": report["case_id"], "case_index": report["case_index"]}, indent=2))
+        return 0 if report["status"] == "INPUT_READY" else 2
     report = stage_workspace(
         cases_manifest=args.cases_manifest.resolve(),
         workspace_root=args.workspace_root,

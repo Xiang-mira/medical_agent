@@ -22,8 +22,9 @@ if str(REPO_ROOT) not in sys.path:
 if str(REPO_ROOT / "agent-harness") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "agent-harness"))
 
-from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_json  # noqa: E402
+from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.task2_formal_manifest import FORMAL_CASE_COUNT, build_formal_manifest, validate_formal_manifest  # noqa: E402
+from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
 
 
 LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
@@ -40,6 +41,13 @@ STATIC_TEST_ENV_DROP = {
     "GPU_TARGET_WORKERS",
     "GPU_OVERREQUEST_WORKERS",
     "GPU_PROFILE_SPECS",
+}
+RUNTIME_GIT_ENV_DROP = {
+    "DISPLAY",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
 }
 ONE_BY_ONE_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
@@ -87,6 +95,16 @@ def sanitized_static_test_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in STATIC_TEST_ENV_DROP:
         env.pop(key, None)
+    return env
+
+
+def runtime_no_git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for key in RUNTIME_GIT_ENV_DROP:
+        env.pop(key, None)
+    env["RUNTIME_NO_GIT"] = "1"
+    env["SKIP_GIT_SYNC"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
     return env
 
 
@@ -301,6 +319,78 @@ def _write_labelcritic_service_state(state_root: Path, payload: dict[str, Any]) 
     _write_json(service["root"] / "service_state.json", payload)
 
 
+def _case_id(row: dict[str, Any], index: int) -> str:
+    return str(row.get("case_id") or row.get("id") or f"case_{index:03d}").strip()
+
+
+def _staged_row(row: dict[str, Any], *, case_id: str, index: int, workspace_root: Path) -> dict[str, Any]:
+    updated = dict(row)
+    updated["index"] = index
+    updated["case_id"] = case_id
+    updated["ct_path"] = str(workspace_root.resolve() / "inputs" / "images" / case_id / "ct.nii.gz")
+    updated["image_path"] = updated["ct_path"]
+    updated["annotation_folder"] = str(workspace_root.resolve() / "inputs" / "masks_original" / case_id / "segmentations")
+    updated["reference_mask_dir"] = updated["annotation_folder"]
+    return updated
+
+
+def _path_is_within(path_text: str, root: Path) -> bool:
+    if not path_text:
+        return False
+    try:
+        Path(path_text).resolve().relative_to(root.resolve())
+        return True
+    except Exception:
+        return False
+
+
+def _source_manifest_needs_rebuild(path: Path, *, workspace_root: Path) -> bool:
+    if not path.exists():
+        return True
+    rows = read_csv_rows(path)
+    if len(rows) != FORMAL_CASE_COUNT or len({_case_id(row, idx) for idx, row in enumerate(rows)}) != FORMAL_CASE_COUNT:
+        return True
+    for row in rows:
+        for key in ("ct_path", "image_path", "annotation_folder", "reference_mask_dir", "mask_dir"):
+            if _path_is_within(str(row.get(key) or ""), workspace_root):
+                return True
+    return False
+
+
+def ensure_case_level_manifests(args: argparse.Namespace) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    paths = _state_paths(state_root)
+    source_manifest = paths["source_manifest"]
+    if _source_manifest_needs_rebuild(source_manifest, workspace_root=args.workspace_root):
+        source_manifest.parent.mkdir(parents=True, exist_ok=True)
+        build_formal_manifest(
+            base_manifest=args.base_manifest.resolve(),
+            output_manifest=source_manifest,
+            audit_json=paths["root"] / "cases_103_source_manifest_build_audit.json",
+        )
+    rows = read_csv_rows(source_manifest)
+    staged_rows = [
+        _staged_row(row, case_id=_case_id(row, index), index=index, workspace_root=args.workspace_root)
+        for index, row in enumerate(rows)
+    ]
+    fieldnames: list[str] = []
+    for row in staged_rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    paths["staged_manifest"].parent.mkdir(parents=True, exist_ok=True)
+    write_csv(paths["staged_manifest"], staged_rows, fieldnames)
+    if args.case_manifest != paths["staged_manifest"]:
+        args.case_manifest.parent.mkdir(parents=True, exist_ok=True)
+        write_csv(args.case_manifest, staged_rows, fieldnames)
+    return {
+        "source_manifest": str(source_manifest),
+        "staged_manifest": str(paths["staged_manifest"]),
+        "case_count": len(rows),
+        "unique_case_count": len({_case_id(row, idx) for idx, row in enumerate(rows)}),
+    }
+
+
 def _state_paths(state_root: Path) -> dict[str, Path]:
     root = state_root / "round1_orchestrated"
     return {
@@ -311,6 +401,11 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
         "last_failure": root / "last_failure.json",
         "controller_sbatch": root / "controller.sbatch",
         "controller_job": root / "controller_job_id.txt",
+        "staging_sbatch": root / "staging_array.sbatch",
+        "staging_job": root / "staging_job_id.txt",
+        "source_manifest": state_root / "case_level_manifests" / "cases_103_source_manifest.csv",
+        "staged_manifest": root / "cases_103_staged_manifest.csv",
+        "teacher_batches": root / "teacher_batches.jsonl",
         "mstep_sbatch": root / "round1_mstep_student.sbatch",
         "mstep_job": root / "round1_mstep_job_id.txt",
         "mstep_manifest": root / "round1" / "mstep" / "voxtell_prompt_student_manifest.json",
@@ -439,18 +534,15 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
     add("git_main_clean", status["ok"] and not status["stdout"] and branch["stdout"] == "main", {"status": status, "branch": branch["stdout"]})
     commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
     add("expected_git_commit", commit_pin["status"] == "PASSED", commit_pin)
-    if not args.case_manifest.exists():
-        try:
-            generated = build_formal_manifest(
-                base_manifest=args.base_manifest.resolve(),
-                output_manifest=args.case_manifest.resolve(),
-                audit_json=paths["root"] / "cases_103_manifest_build_audit.json",
-            )
-            add("cases_103_manifest_generated", generated.get("status") == "READY", generated)
-        except Exception as exc:
-            add("cases_103_manifest_generated", False, f"{type(exc).__name__}: {exc}")
     try:
-        manifest = validate_formal_manifest(manifest=args.case_manifest.resolve(), base_manifest=args.base_manifest.resolve())
+        manifest_setup = ensure_case_level_manifests(args)
+        add("case_level_manifests_ready", manifest_setup.get("case_count") == FORMAL_CASE_COUNT and manifest_setup.get("unique_case_count") == FORMAL_CASE_COUNT, manifest_setup)
+        manifest_for_preflight = Path(str(manifest_setup["source_manifest"]))
+    except Exception as exc:
+        add("case_level_manifests_ready", False, f"{type(exc).__name__}: {exc}")
+        manifest_for_preflight = args.case_manifest.resolve()
+    try:
+        manifest = validate_formal_manifest(manifest=manifest_for_preflight.resolve(), base_manifest=args.base_manifest.resolve())
         add("cases_103_manifest", manifest.get("rows") == FORMAL_CASE_COUNT and manifest.get("unique_case_count") == FORMAL_CASE_COUNT, manifest)
     except Exception as exc:
         add("cases_103_manifest", False, f"{type(exc).__name__}: {exc}")
@@ -577,6 +669,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
         "RUNTIME_NO_GIT": "1",
         "SKIP_GIT_SYNC": "1",
+        "GIT_TERMINAL_PROMPT": "0",
     }
     lines = [
         "#!/usr/bin/env bash",
@@ -590,6 +683,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "#SBATCH --export=ALL",
         "",
         "set -euo pipefail",
+        "unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS",
         f"cd {shlex.quote(str(REPO_ROOT))}",
         *[f"export {key}={shlex.quote(value)}" for key, value in env_exports.items()],
         " ".join(shlex.quote(part) for part in command),
@@ -688,7 +782,7 @@ def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
             _write_labelcritic_service_state(state_root, reused)
             return reused
         ignored.append({"source": "slurm_name_discovery", "job_id": named, "validation": validation})
-    result = _run(["bash", "scripts/task2/submit_labelcritic_72b_service.sh"], env=os.environ.copy())
+    result = _run(["bash", "scripts/task2/submit_labelcritic_72b_service.sh"], env=runtime_no_git_env())
     if not result["ok"]:
         log_failure(state_root, stage="labelcritic_submit", failure_reason=result["stderr"] or result["stdout"] or "labelcritic_submit_failed", details=result)
         return {"status": "SUBMIT_FAILED", "failure_reason": result["stderr"], "submit": result}
@@ -781,6 +875,208 @@ def _labelcritic_endpoint_hint(state_root: Path, labelcritic: dict[str, Any] | N
     }
 
 
+def _staging_status_rows(args: argparse.Namespace, source_manifest: Path) -> list[dict[str, Any]]:
+    rows = read_csv_rows(source_manifest)
+    statuses = []
+    for index, row in enumerate(rows):
+        case_id = _case_id(row, index)
+        state_path = args.workspace_root.resolve() / "manifests" / "staging_cases" / f"{case_id}.json"
+        state = _read_json(state_path, {})
+        status = staged_case_status(workspace_root=args.workspace_root.resolve(), case_id=case_id)
+        state_status = str(state.get("status") or "")
+        if status["status"] != "INPUT_READY" and state_status in {"STAGING_PENDING", "STAGING_RUNNING", "STAGING_FAILED"}:
+            status["status"] = state_status
+            status["errors"] = state.get("errors") or status.get("errors") or []
+        statuses.append({"case_index": index, **status, "state_path": str(state_path)})
+    return statuses
+
+
+def render_staging_sbatch(args: argparse.Namespace, source_manifest: Path, path: Path) -> dict[str, Any]:
+    image_root = Path(os.getenv("IMAGE_ROOT", "/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro"))
+    mask_root = Path(os.getenv("MASK_ROOT", "/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro"))
+    lines = [
+        "#!/usr/bin/env bash",
+        "#SBATCH --job-name=task2_case_staging",
+        f"#SBATCH --partition={os.getenv('STAGING_PARTITION', 'cpu')}",
+        f"#SBATCH --cpus-per-task={os.getenv('STAGING_CPUS', '2')}",
+        f"#SBATCH --mem={os.getenv('STAGING_MEM', '12G')}",
+        f"#SBATCH --time={os.getenv('STAGING_TIME', '04:00:00')}",
+        f"#SBATCH --output={_state_paths(args.state_root)['root'] / 'staging_%A_%a.out'}",
+        f"#SBATCH --error={_state_paths(args.state_root)['root'] / 'staging_%A_%a.err'}",
+        "#SBATCH --export=ALL",
+        "",
+        "set -euo pipefail",
+        "unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS",
+        f"cd {shlex.quote(str(REPO_ROOT))}",
+        "export RUNTIME_NO_GIT=1",
+        "export SKIP_GIT_SYNC=1",
+        "export GIT_TERMINAL_PROMPT=0",
+        f"{shlex.quote(str(args.python))} tools/dataset_delivery/task2_workspace_staging.py \\",
+        f"  --cases-manifest {shlex.quote(str(source_manifest))} \\",
+        f"  --workspace-root {shlex.quote(str(args.workspace_root))} \\",
+        f"  --image-root {shlex.quote(str(image_root))} \\",
+        f"  --mask-root {shlex.quote(str(mask_root))} \\",
+        f"  --case-index \"${{SLURM_ARRAY_TASK_ID}}\" \\",
+        "  --resume",
+        "",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    path.chmod(0o755)
+    return {"path": str(path)}
+
+
+def submit_staging_workers(args: argparse.Namespace, source_manifest: Path) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    paths = _state_paths(state_root)
+    statuses = _staging_status_rows(args, source_manifest)
+    ready_count = sum(1 for row in statuses if row["status"] == "INPUT_READY")
+    if ready_count == len(statuses):
+        return {"status": "ALL_INPUT_READY", "ready_count": ready_count, "case_count": len(statuses)}
+    state = _load_state(state_root)
+    existing = str(state.get("staging_job_id") or "").strip()
+    if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
+        return {"status": "REUSED_ACTIVE_STAGING", "job_id": existing, "ready_count": ready_count, "case_count": len(statuses)}
+    rendered = render_staging_sbatch(args, source_manifest, paths["staging_sbatch"])
+    for command in (["bash", "-n", str(paths["staging_sbatch"])], ["sbatch", "--test-only", str(paths["staging_sbatch"])]):
+        result = _run(command)
+        if not result["ok"]:
+            log_failure(state_root, stage="staging_sbatch_preflight", failure_reason="staging_sbatch_preflight_failed", details=result)
+            return {"status": "FAILED", "failure_reason": "staging_sbatch_preflight_failed", "preflight": result}
+    concurrency = max(1, int(os.getenv("STAGING_CONCURRENCY", "12")))
+    result = _run(["sbatch", "--parsable", f"--array=0-{len(statuses) - 1}%{concurrency}", str(paths["staging_sbatch"])])
+    if not result["ok"]:
+        log_failure(state_root, stage="staging_submit", failure_reason=result["stderr"] or "staging_submit_failed", details=result)
+        return {"status": "FAILED", "failure_reason": result["stderr"] or "staging_submit_failed", "submit": result}
+    job_id = result["stdout"].splitlines()[-1].strip()
+    paths["staging_job"].write_text(job_id + "\n", encoding="utf-8")
+    _save_state(state_root, staging_job_id=job_id, staging_status="SUBMITTED", staging_sbatch=rendered)
+    return {"status": "SUBMITTED", "job_id": job_id, "ready_count": ready_count, "case_count": len(statuses), "concurrency": concurrency}
+
+
+def _append_teacher_batch(paths: dict[str, Path], payload: dict[str, Any]) -> None:
+    paths["teacher_batches"].parent.mkdir(parents=True, exist_ok=True)
+    with paths["teacher_batches"].open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    paths = _state_paths(state_root)
+    state = _load_state(state_root)
+    submitted_cases = set(str(case_id) for case_id in state.get("teacher_submitted_case_ids") or [])
+    statuses = _staging_status_rows(args, source_manifest)
+    ready_cases = [row["case_id"] for row in statuses if row["status"] == "INPUT_READY" and row["case_id"] not in submitted_cases]
+    if not ready_cases:
+        return {
+            "status": "NO_NEW_READY_CASES",
+            "ready_count": sum(1 for row in statuses if row["status"] == "INPUT_READY"),
+            "submitted_case_count": len(submitted_cases),
+            "staging_failed_count": sum(1 for row in statuses if row["status"] == "STAGING_FAILED"),
+        }
+    batch_index = int(state.get("teacher_batch_index") or 0) + 1
+    submission_id = f"ready_batch_{batch_index:03d}"
+    formal_root = Path(str(state.get("formal_root") or (paths["root"] / "formal_task2_round1"))).resolve()
+    endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
+    env = runtime_no_git_env()
+    env.update({
+        "LABELCRITIC_SERVICE_ROOT": str(_service_paths(state_root)["root"]),
+        "LABELCRITIC_BASE_URL": str(endpoint["base_url"]),
+        "LABELCRITIC_PORT": str(endpoint["port"]),
+        "LABELCRITIC_MODEL_ID": LABELCRITIC_MODEL_ID,
+        "MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY": "1",
+        "MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC": str(os.getenv("MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC", os.getenv("WAIT_LABELCRITIC_SEC", "14400"))),
+        "WAIT_LABELCRITIC_SEC": str(os.getenv("WAIT_LABELCRITIC_SEC", "14400")),
+        "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
+    })
+    plan_cmd = [
+        str(args.python),
+        "tools/dataset_delivery/task2_formal_launcher.py",
+        "--output-root", str(formal_root),
+        "--case-manifest", str(source_manifest),
+        "--base-manifest", str(args.base_manifest),
+        "--code-root", str(REPO_ROOT),
+        "--python", str(args.python),
+        "--registry", str(args.registry),
+        "--target-config", str(args.target_config),
+        "--checkpoint-root", str(args.checkpoint_root),
+        "--nnunet-predict-executable", str(args.nnunet_predict_executable),
+        "--unest-python-executable", str(args.unest_python_executable),
+        "--groups", os.getenv("GROUPS", "cads,atm,airrc,unest"),
+        "--ready-case-ids", ",".join(ready_cases),
+        "--staged-workspace-root", str(args.workspace_root),
+        "--submission-tag", submission_id,
+        "--resume",
+    ]
+    plan_result = _run(plan_cmd, env=env, timeout=600)
+    if not plan_result["ok"]:
+        log_failure(state_root, stage="teacher_batch_plan", failure_reason=plan_result["stderr"] or "teacher_batch_plan_failed", details=plan_result)
+        return {"status": "FAILED", "failure_reason": plan_result["stderr"] or "teacher_batch_plan_failed", "plan": plan_result}
+    summary = _read_json(formal_root / "formal_task2_submission_manifest.json", {})
+    if int(summary.get("task_count") or 0) <= 0:
+        updated = sorted(submitted_cases | set(ready_cases))
+        _save_state(state_root, teacher_submitted_case_ids=updated, teacher_batch_index=batch_index, formal_root=str(formal_root))
+        return {"status": "NO_TASKS_AFTER_RESUME", "submission_id": submission_id, "ready_cases": ready_cases}
+    dynamic_cmd = [
+        str(args.python),
+        "tools/dataset_delivery/task2_dynamic_gpu_submitter.py",
+        "--summary", str(formal_root / "formal_task2_submission_manifest.json"),
+        "--output-root", str(formal_root),
+        "--state-root", str(state_root),
+        "--target-workers", str(args.gpu_target_workers),
+        "--overrequest-workers", str(args.gpu_overrequest_workers),
+        "--profile-specs", args.gpu_profile_specs,
+        "--groups", os.getenv("GROUPS", "cads,atm,airrc,unest"),
+        "--group-weights", os.getenv("GPU_GROUP_WEIGHTS", "cads=0.45,atm=0.15,airrc=0.20,unest=0.20"),
+        "--submission-id", submission_id,
+        "--append-submitted-jobs",
+    ]
+    if os.getenv("DYNAMIC_SBATCH_TEST_ONLY", "1") != "1":
+        dynamic_cmd.append("--skip-sbatch-test-only")
+    dynamic_result = _run(dynamic_cmd, env=env, timeout=600)
+    if not dynamic_result["ok"]:
+        log_failure(state_root, stage="teacher_batch_submit", failure_reason=dynamic_result["stderr"] or "teacher_batch_submit_failed", details=dynamic_result)
+        return {"status": "FAILED", "failure_reason": dynamic_result["stderr"] or "teacher_batch_submit_failed", "dynamic": dynamic_result}
+    batch = {
+        "status": "SUBMITTED",
+        "submission_id": submission_id,
+        "case_ids": ready_cases,
+        "case_count": len(ready_cases),
+        "planned_task_count": int(summary.get("task_count") or 0),
+        "formal_root": str(formal_root),
+        "plan": plan_result,
+        "dynamic": dynamic_result,
+        "created_at": utc_now(),
+    }
+    _append_teacher_batch(paths, batch)
+    updated = sorted(submitted_cases | set(ready_cases))
+    _save_state(state_root, teacher_submitted_case_ids=updated, teacher_batch_index=batch_index, formal_root=str(formal_root), last_teacher_batch=batch)
+    return batch
+
+
+def advance_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
+    manifests = ensure_case_level_manifests(args)
+    source_manifest = Path(str(manifests["source_manifest"]))
+    staging = submit_staging_workers(args, source_manifest)
+    if staging["status"] == "FAILED":
+        return {"status": "FAILED", "failure_reason": staging.get("failure_reason", "staging_failed"), "staging": staging, "manifests": manifests}
+    teachers = submit_ready_teacher_batch(args, source_manifest, labelcritic)
+    if teachers["status"] == "FAILED":
+        return {"status": "FAILED", "failure_reason": teachers.get("failure_reason", "teacher_submit_failed"), "staging": staging, "teachers": teachers, "manifests": manifests}
+    statuses = _staging_status_rows(args, source_manifest)
+    return {
+        "status": "SUBMITTED",
+        "manifests": manifests,
+        "staging": staging,
+        "teachers": teachers,
+        "ready_count": sum(1 for row in statuses if row["status"] == "INPUT_READY"),
+        "staging_pending_count": sum(1 for row in statuses if row["status"] == "STAGING_PENDING"),
+        "staging_running_count": sum(1 for row in statuses if row["status"] == "STAGING_RUNNING"),
+        "staging_failed_count": sum(1 for row in statuses if row["status"] == "STAGING_FAILED"),
+        "case_count": len(statuses),
+    }
+
+
 def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
     state_root = args.state_root.resolve()
     state = _load_state(state_root)
@@ -791,37 +1087,10 @@ def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = 
         or formal_summary.get("status") == "PASSED"
     ):
         return {"status": "REUSED", "formal_root": str(formal_root), "e_step_status": state.get("e_step_status")}
-    endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
-    service_root = _service_paths(state_root)["root"]
-    env = os.environ.copy()
-    env.update({
-        "DRY_RUN": "0",
-        "RESUME": "1",
-        "STAGE_WORKSPACE": "1",
-        "RUNTIME_NO_GIT": "1",
-        "SKIP_GIT_SYNC": "1",
-        "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
-        "DYNAMIC_GPU_SCHEDULER": "1",
-        "GPU_TARGET_WORKERS": str(args.gpu_target_workers),
-        "GPU_OVERREQUEST_WORKERS": str(args.gpu_overrequest_workers),
-        "GPU_PROFILE_SPECS": args.gpu_profile_specs,
-        "FORMAL_OUT_ROOT": str(formal_root),
-        "STATE_ROOT": str(state_root),
-        "WORKSPACE_ROOT": str(args.workspace_root),
-        "CASE_MANIFEST": str(args.case_manifest),
-        "BASE_MANIFEST": str(args.base_manifest),
-        "LABELCRITIC_SERVICE_ROOT": str(service_root),
-        "LABELCRITIC_BASE_URL": str(endpoint["base_url"]),
-        "LABELCRITIC_PORT": str(endpoint["port"]),
-        "LABELCRITIC_MODEL_ID": LABELCRITIC_MODEL_ID,
-        "REQUIRE_LABELCRITIC_HEALTH": "0",
-        "WAIT_LABELCRITIC_SEC": str(os.getenv("WAIT_LABELCRITIC_SEC", "14400")),
-        "MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC": str(os.getenv("MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC", os.getenv("WAIT_LABELCRITIC_SEC", "14400"))),
-    })
-    result = _run(["bash", "scripts/task2/submit_task2_formal_103cases.sh"], env=env, timeout=None)
-    if not result["ok"]:
-        log_failure(state_root, stage="e_step_submit", failure_reason=result["stderr"] or result["stdout"] or "e_step_submit_failed", details=result)
-        return {"status": "FAILED", "failure_reason": result["stderr"] or result["stdout"], "submit": result, "formal_root": str(formal_root)}
+    result = advance_estep(args, labelcritic)
+    if result["status"] == "FAILED":
+        log_failure(state_root, stage="e_step_submit", failure_reason=result.get("failure_reason", "e_step_submit_failed"), details=result)
+        return {"status": "FAILED", "failure_reason": result.get("failure_reason"), "submit": result, "formal_root": str(formal_root)}
     _save_state(state_root, e_step_status="SUBMITTED", formal_root=str(formal_root), e_step_submit=result)
     return {"status": "SUBMITTED", "formal_root": str(formal_root), "submit": result}
 
@@ -831,7 +1100,7 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
     formal_root = Path(str(state.get("formal_root") or ""))
     if not formal_root.exists():
         return {"status": "PENDING", "reason": "formal_root_missing"}
-    env = os.environ.copy()
+    env = runtime_no_git_env()
     env.update({"FORMAL_ROOT": str(formal_root), "CASE_MANIFEST": str(args.case_manifest), "BASE_MANIFEST": str(args.base_manifest), "STATE_ROOT": str(args.state_root)})
     result = _run(["bash", "scripts/task2/check_task2_formal_103cases.sh"], env=env, timeout=600)
     if result["ok"]:
@@ -850,6 +1119,18 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
     if failed and not active:
         log_failure(args.state_root.resolve(), stage="e_step", failure_reason="e_step_jobs_terminal_failed", details={"failed_jobs": failed, "check": result})
         return {"status": "FAILED", "failure_reason": "e_step_jobs_terminal_failed", "failed_jobs": failed, "check": result}
+    source_manifest = _state_paths(args.state_root.resolve())["source_manifest"]
+    if source_manifest.exists():
+        staging_rows = _staging_status_rows(args, source_manifest)
+        ready_count = sum(1 for row in staging_rows if row["status"] == "INPUT_READY")
+        staging_failed_count = sum(1 for row in staging_rows if row["status"] == "STAGING_FAILED")
+        staging_job_id = str(_load_state(args.state_root.resolve()).get("staging_job_id") or "")
+        staging_job = slurm_job_state(staging_job_id) if staging_job_id else {"state": "UNKNOWN"}
+        if staging_failed_count and ready_count + staging_failed_count >= len(staging_rows) and not active:
+            log_failure(args.state_root.resolve(), stage="staging", failure_reason="one_or_more_case_staging_failed", details={"staging_failed_count": staging_failed_count, "ready_count": ready_count})
+            return {"status": "FAILED", "failure_reason": "one_or_more_case_staging_failed", "staging_failed_count": staging_failed_count, "ready_count": ready_count, "check": result}
+        if staging_job.get("state") in ACTIVE_STATES:
+            active.append({"stage": "staging", **staging_job})
     return {"status": "RUNNING", "active_jobs": active, "check": result}
 
 
@@ -1087,9 +1368,14 @@ def _controller_main(args: argparse.Namespace) -> int:
                 return 2
             if labelcritic_gate["status"] == "PASSED":
                 _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic_gate)
+        progress = advance_estep(args, labelcritic_gate)
+        if progress["status"] == "FAILED":
+            log_failure(state_root, stage="e_step_submit", failure_reason=progress.get("failure_reason", "e_step_submit_failed"), details=progress)
+            _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=progress.get("failure_reason"), e_step=progress)
+            return 2
         estep = check_estep(args)
         wait_stage = "e_step_wait" if labelcritic_gate.get("status") == "PASSED" else "e_step_and_labelcritic_wait"
-        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate)
+        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate, e_step_progress=progress)
         if estep["status"] == "PASSED":
             if labelcritic_gate.get("status") == "PASSED":
                 break

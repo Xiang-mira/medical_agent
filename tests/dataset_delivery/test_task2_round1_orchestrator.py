@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.dataset_delivery import task2_round1_orchestrator as orch
+from tools.dataset_delivery import task2_workspace_staging as staging
 
 
 @pytest.fixture(autouse=True)
@@ -63,6 +65,56 @@ def _labelcritic_record(job_id: str, *, state: str = "PENDING", user: str | None
         "user": user if user is not None else (os.getenv("USER") or os.getenv("LOGNAME") or ""),
         "name": name if name is not None else orch.LABELCRITIC_JOB_NAME,
     }
+
+
+def _write_source_manifest(path: Path, case_ids: list[str]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["index,case_id,ct_path,annotation_folder"]
+    for index, case_id in enumerate(case_ids):
+        lines.append(f"{index},{case_id},/source/{case_id}/ct.nii.gz,/source/{case_id}/segmentations")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _stage_ready_case(workspace_root: Path, case_id: str) -> None:
+    ct = workspace_root / "inputs" / "images" / case_id / "ct.nii.gz"
+    mask = workspace_root / "inputs" / "masks_original" / case_id / "segmentations" / "liver.nii.gz"
+    ct.parent.mkdir(parents=True, exist_ok=True)
+    mask.parent.mkdir(parents=True, exist_ok=True)
+    ct.write_bytes(b"ct")
+    mask.write_bytes(b"mask")
+
+
+def _fake_teacher_submitter(monkeypatch, *, submitted_commands: list[list[str]] | None = None, captured_ready_ids: list[list[str]] | None = None):
+    def fake_run(command, **kwargs):
+        if submitted_commands is not None:
+            submitted_commands.append(command)
+        if any(str(part).endswith("task2_formal_launcher.py") for part in command):
+            formal_root = Path(command[command.index("--output-root") + 1])
+            ready_ids = command[command.index("--ready-case-ids") + 1].split(",")
+            if captured_ready_ids is not None:
+                captured_ready_ids.append([item for item in ready_ids if item])
+            formal_root.mkdir(parents=True, exist_ok=True)
+            groups = {
+                group: {
+                    "task_count": len([item for item in ready_ids if item]),
+                    "task_manifest": str(formal_root / "slurm" / "submissions" / "ready_batch_001" / f"{group}_task_manifest.csv"),
+                    "sbatch_file": str(formal_root / "slurm" / "submissions" / "ready_batch_001" / f"{group}_task2_array.sbatch"),
+                }
+                for group in ("cads", "atm", "airrc", "unest")
+            }
+            (formal_root / "formal_task2_submission_manifest.json").write_text(
+                '{"status":"READY","task_count":4,"groups":' + json.dumps(groups) + "}\n",
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command):
+            return {"ok": True, "stdout": '{"status":"SUBMITTED"}', "stderr": "", "return_code": 0}
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
 
 
 def test_existing_pending_labelcritic_not_resubmitted(tmp_path, monkeypatch):
@@ -253,6 +305,7 @@ def test_pending_labelcritic_submits_estep_before_runtime_ready(tmp_path, monkey
     ])
     monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: calls.append("poll_labelcritic") or next(poll_results))
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic=None: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: calls.append("advance_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or next(estep_results))
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
     monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
@@ -269,6 +322,7 @@ def test_service_runtime_validation_failure_blocks_mstep_not_estep(tmp_path, mon
     calls: list[str] = []
     monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_ACTIVE_JOB", "job_id": "111111"})
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic=None: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: calls.append("advance_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: {"status": "FAILED", "failure_reason": "bad_runtime"})
 
     def fail_mstep(*args, **kwargs):
@@ -295,13 +349,14 @@ def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_HEALTHY", "base_url": "http://node", "port": 8000})
     monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: calls.append("poll_labelcritic") or {"status": "PASSED", "base_url": "http://node", "port": 8000})
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: calls.append("advance_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
     monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
 
     assert orch.controller(args) == 0
-    assert calls == ["submit_estep", "poll_labelcritic", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
+    assert calls == ["submit_estep", "poll_labelcritic", "advance_estep", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
     assert orch._load_state(args.state_root)["terminal_state"] == "ROUND1_PASSED"
 
 
@@ -315,6 +370,7 @@ def test_estep_passed_waits_for_labelcritic_gate_before_mstep(tmp_path, monkeypa
     ])
     monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: calls.append("poll_labelcritic") or next(poll_results))
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: calls.append("advance_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
     monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
@@ -325,9 +381,11 @@ def test_estep_passed_waits_for_labelcritic_gate_before_mstep(tmp_path, monkeypa
     assert calls == [
         "submit_estep",
         "poll_labelcritic",
+        "advance_estep",
         "check_estep",
         "sleep",
         "poll_labelcritic",
+        "advance_estep",
         "check_estep",
         "submit_mstep",
         "check_mstep",
@@ -379,26 +437,49 @@ def test_resume_does_not_resubmit_estep(tmp_path, monkeypatch):
     assert result["status"] == "REUSED"
 
 
-def test_submit_estep_sets_no_git_runtime_env_without_display_or_github_credentials(tmp_path, monkeypatch):
+def test_ready_teacher_submit_sets_no_git_runtime_env_without_display_or_github_credentials(tmp_path, monkeypatch):
     args = _args(tmp_path)
     args.expected_git_commit = "41f8fad"
-    monkeypatch.delenv("DISPLAY", raising=False)
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    captured: dict[str, str] = {}
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setenv("GITHUB_TOKEN", "secret")
+    monkeypatch.setenv("GH_TOKEN", "secret")
+    monkeypatch.setenv("GIT_ASKPASS", "askpass")
+    monkeypatch.setenv("SSH_ASKPASS", "askpass")
+    source_manifest = tmp_path / "source.csv"
+    source_manifest.write_text("index,case_id,ct_path,annotation_folder\n0,CASE001,/src/ct.nii.gz,/src/segmentations\n", encoding="utf-8")
+    ct = args.workspace_root / "inputs" / "images" / "CASE001" / "ct.nii.gz"
+    mask = args.workspace_root / "inputs" / "masks_original" / "CASE001" / "segmentations" / "liver.nii.gz"
+    ct.parent.mkdir(parents=True, exist_ok=True)
+    mask.parent.mkdir(parents=True, exist_ok=True)
+    ct.write_bytes(b"ct")
+    mask.write_bytes(b"mask")
+    orch._save_state(args.state_root, formal_root=str(tmp_path / "formal"))
+    captured_envs: list[dict[str, str]] = []
 
     def fake_run(command, **kwargs):
-        assert command == ["bash", "scripts/task2/submit_task2_formal_103cases.sh"]
-        captured.update(kwargs["env"])
+        captured_envs.append(kwargs["env"])
+        if any(str(part).endswith("task2_formal_launcher.py") for part in command):
+            formal_root = Path(command[command.index("--output-root") + 1])
+            formal_root.mkdir(parents=True, exist_ok=True)
+            (formal_root / "formal_task2_submission_manifest.json").write_text('{"status":"READY","task_count":4,"groups":{}}\n', encoding="utf-8")
+        if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command):
+            return {"ok": True, "stdout": '{"status":"SUBMITTED"}', "stderr": "", "return_code": 0}
         return {"ok": True, "stdout": "TASK2_FORMAL_ROOT=/tmp/formal", "stderr": "", "return_code": 0}
 
     monkeypatch.setattr(orch, "_run", fake_run)
-    result = orch.submit_estep(args, {"status": "REUSED_ACTIVE_JOB", "job_id": "111111"})
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "REUSED_ACTIVE_JOB", "job_id": "111111"})
     assert result["status"] == "SUBMITTED"
-    assert captured["RUNTIME_NO_GIT"] == "1"
-    assert captured["SKIP_GIT_SYNC"] == "1"
-    assert captured["EXPECTED_GIT_COMMIT"] == "41f8fad"
-    assert "DISPLAY" not in captured
-    assert "GITHUB_TOKEN" not in captured
+    assert captured_envs
+    for captured in captured_envs:
+        assert captured["RUNTIME_NO_GIT"] == "1"
+        assert captured["SKIP_GIT_SYNC"] == "1"
+        assert captured["EXPECTED_GIT_COMMIT"] == "41f8fad"
+        assert captured["GIT_TERMINAL_PROMPT"] == "0"
+        assert "DISPLAY" not in captured
+        assert "GITHUB_TOKEN" not in captured
+        assert "GH_TOKEN" not in captured
+        assert "GIT_ASKPASS" not in captured
+        assert "SSH_ASKPASS" not in captured
 
 
 def test_formal_submitter_runtime_no_git_skips_remote_sync_without_display_or_credentials(tmp_path, monkeypatch):
@@ -479,6 +560,16 @@ def test_static_preflight_pytest_uses_sanitized_environment(tmp_path, monkeypatc
     for key in orch.STATIC_TEST_ENV_DROP:
         monkeypatch.setenv(key, f"runtime_{key}")
     captured_env: dict[str, str] = {}
+    monkeypatch.setattr(
+        orch,
+        "ensure_case_level_manifests",
+        lambda args: {
+            "source_manifest": str(args.case_manifest),
+            "staged_manifest": str(args.case_manifest),
+            "case_count": orch.FORMAL_CASE_COUNT,
+            "unique_case_count": orch.FORMAL_CASE_COUNT,
+        },
+    )
     monkeypatch.setattr(orch, "validate_formal_manifest", lambda **kwargs: {"rows": orch.FORMAL_CASE_COUNT, "unique_case_count": orch.FORMAL_CASE_COUNT})
 
     def fake_run(command, **kwargs):
@@ -591,6 +682,166 @@ def test_retry_attempt_dynamically_reuses_active_labelcritic_service(tmp_path, m
     assert result["status"] == "REUSED_ACTIVE_JOB"
     assert result["job_id"] == "111111"
     assert result["source"] == "labelcritic_service_state"
+
+
+def test_case_input_ready_submits_teacher_while_other_case_staging_running(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001", "CASE002"])
+    _stage_ready_case(args.workspace_root, "CASE001")
+    state_dir = args.workspace_root / "manifests" / "staging_cases"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "CASE002.json").write_text('{"status":"STAGING_RUNNING","case_id":"CASE002"}\n', encoding="utf-8")
+    captured_ready: list[list[str]] = []
+    _fake_teacher_submitter(monkeypatch, captured_ready_ids=captured_ready)
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
+
+    assert result["status"] == "SUBMITTED"
+    assert result["case_ids"] == ["CASE001"]
+    assert captured_ready == [["CASE001"]]
+    assert orch._load_state(args.state_root)["teacher_submitted_case_ids"] == ["CASE001"]
+
+
+def test_seventy_of_103_staged_allows_gpu_teacher_workers(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    case_ids = [f"CASE{i:03d}" for i in range(103)]
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", case_ids)
+    for case_id in case_ids[:70]:
+        _stage_ready_case(args.workspace_root, case_id)
+    commands: list[list[str]] = []
+    captured_ready: list[list[str]] = []
+    _fake_teacher_submitter(monkeypatch, submitted_commands=commands, captured_ready_ids=captured_ready)
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
+
+    assert result["status"] == "SUBMITTED"
+    assert result["case_count"] == 70
+    assert captured_ready == [case_ids[:70]]
+    assert any(any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command) for command in commands)
+
+
+def test_existing_staged_case_resume_does_not_recopied(tmp_path, monkeypatch):
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001"])
+    _stage_ready_case(tmp_path / "workspace", "CASE001")
+    monkeypatch.setattr(staging, "_copy_file", lambda *args, **kwargs: pytest.fail("ready case must be reused without copying"))
+    monkeypatch.setattr(staging, "_copy_mask_dir", lambda *args, **kwargs: pytest.fail("ready case must be reused without copying"))
+
+    result = staging.stage_workspace_case(
+        cases_manifest=source_manifest,
+        case_index=0,
+        workspace_root=tmp_path / "workspace",
+        image_root=tmp_path / "public_images",
+        mask_root=tmp_path / "public_masks",
+        resume=True,
+    )
+
+    assert result["status"] == "INPUT_READY"
+    assert result["action"] == "reused_existing"
+
+
+def test_one_staging_failure_does_not_block_other_ready_case_teacher_submit(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001", "CASE002"])
+    _stage_ready_case(args.workspace_root, "CASE001")
+    state_dir = args.workspace_root / "manifests" / "staging_cases"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "CASE002.json").write_text(
+        '{"status":"STAGING_FAILED","case_id":"CASE002","errors":[{"type":"source_file_missing"}]}\n',
+        encoding="utf-8",
+    )
+    captured_ready: list[list[str]] = []
+    _fake_teacher_submitter(monkeypatch, captured_ready_ids=captured_ready)
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
+
+    assert result["status"] == "SUBMITTED"
+    assert result["case_ids"] == ["CASE001"]
+    assert captured_ready == [["CASE001"]]
+
+
+def test_cpu_staging_gpu_teacher_and_labelcritic_tracks_are_started_together(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001", "CASE002"])
+    calls: list[str] = []
+    monkeypatch.setattr(
+        orch,
+        "ensure_case_level_manifests",
+        lambda args: calls.append("manifests") or {
+            "source_manifest": str(source_manifest),
+            "staged_manifest": str(args.case_manifest),
+            "case_count": 103,
+            "unique_case_count": 103,
+        },
+    )
+    monkeypatch.setattr(orch, "submit_staging_workers", lambda args, source: calls.append("cpu_staging") or {"status": "SUBMITTED", "job_id": "222222", "ready_count": 70, "case_count": 103})
+    monkeypatch.setattr(orch, "submit_ready_teacher_batch", lambda args, source, labelcritic=None: calls.append("gpu_teacher") or {"status": "SUBMITTED", "case_count": 70})
+
+    result = orch.submit_estep(args, {"status": "REUSED_ACTIVE_JOB", "job_id": "111111"})
+
+    assert result["status"] == "SUBMITTED"
+    assert calls == ["manifests", "cpu_staging", "gpu_teacher"]
+
+
+def test_submit_estep_no_longer_waits_on_whole_batch_staging_shell(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        orch,
+        "advance_estep",
+        lambda args, labelcritic=None: calls.append("advance_estep") or {
+            "status": "SUBMITTED",
+            "staging": {"status": "SUBMITTED", "job_id": "222222"},
+            "teachers": {"status": "SUBMITTED", "case_count": 70},
+        },
+    )
+
+    result = orch.submit_estep(args, {"status": "WAITING", "job_id": "111111"})
+
+    assert result["status"] == "SUBMITTED"
+    assert calls == ["advance_estep"]
+
+
+def test_case_level_source_manifest_preserves_valid_source_paths(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    paths = orch._state_paths(args.state_root)
+    case_ids = [f"CASE{i:03d}" for i in range(103)]
+    source_manifest = _write_source_manifest(paths["source_manifest"], case_ids)
+    calls: list[str] = []
+    monkeypatch.setattr(orch, "build_formal_manifest", lambda **kwargs: calls.append("build"))
+
+    result = orch.ensure_case_level_manifests(args)
+
+    assert result["source_manifest"] == str(source_manifest)
+    assert calls == []
+    rows = source_manifest.read_text(encoding="utf-8")
+    assert "/source/CASE000/ct.nii.gz" in rows
+
+
+def test_case_level_source_manifest_rebuilds_stale_staged_paths(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    paths = orch._state_paths(args.state_root)
+    case_ids = [f"CASE{i:03d}" for i in range(103)]
+    paths["source_manifest"].parent.mkdir(parents=True, exist_ok=True)
+    lines = ["index,case_id,ct_path,annotation_folder"]
+    for index, case_id in enumerate(case_ids):
+        lines.append(
+            f"{index},{case_id},{args.workspace_root}/inputs/images/{case_id}/ct.nii.gz,"
+            f"{args.workspace_root}/inputs/masks_original/{case_id}/segmentations"
+        )
+    paths["source_manifest"].write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def fake_build_formal_manifest(*, output_manifest, **kwargs):
+        _write_source_manifest(Path(output_manifest), case_ids)
+        return {"status": "READY"}
+
+    monkeypatch.setattr(orch, "build_formal_manifest", fake_build_formal_manifest)
+
+    result = orch.ensure_case_level_manifests(args)
+
+    assert result["case_count"] == 103
+    rebuilt = paths["source_manifest"].read_text(encoding="utf-8")
+    assert "/source/CASE000/ct.nii.gz" in rebuilt
+    assert str(args.workspace_root) not in rebuilt
 
 
 def test_no_production_code_contains_concrete_historical_slurm_job_ids():
