@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -144,6 +145,19 @@ def _write_array_sbatch(
     mem: str,
     time_limit: str,
 ) -> None:
+    env_lines = []
+    for key in (
+        "LABELCRITIC_BASE_URL",
+        "LABELCRITIC_PORT",
+        "LABELCRITIC_MODEL_ID",
+        "MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY",
+        "NO_PROXY",
+        "no_proxy",
+    ):
+        value = os.getenv(key)
+        if value:
+            env_lines.append(f"export {key}={shlex.quote(value)}")
+    env_block = "\n".join(env_lines)
     content = f"""#!/usr/bin/env bash
 #SBATCH --job-name=task2_{group}
 #SBATCH --partition={partition}
@@ -151,6 +165,7 @@ def _write_array_sbatch(
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --mem={mem}
 #SBATCH --time={time_limit}
+#SBATCH --export=ALL
 #SBATCH --output={output_root / 'slurm' / (group + '_%A_%a.out')}
 #SBATCH --error={output_root / 'slurm' / (group + '_%A_%a.err')}
 
@@ -158,6 +173,7 @@ set -euo pipefail
 if [ -f "$HOME/.bodymaps_env" ]; then
   source "$HOME/.bodymaps_env"
 fi
+{env_block}
 cd {code_root}
 {python} tools/dataset_delivery/task2_formal_launcher.py \\
   --execute-task-index "$SLURM_ARRAY_TASK_ID" \\

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def _write_group_plan(root: Path, group: str, count: int) -> dict[str, str | int]:
@@ -95,3 +98,37 @@ def test_dynamic_submitter_profile_shards_do_not_duplicate_source_task_indices(t
         assert [row["task_index"] for row in rows] == [str(index) for index in range(len(rows))]
         source_indices.extend(row["source_task_index"] for row in rows)
     assert sorted(source_indices, key=int) == [str(index) for index in range(8)]
+
+
+def test_dynamic_submitter_preflight_failure_submits_no_partial_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 2, "atm": 2})
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(item) for item in command])
+        if command[:2] == ["bash", "-n"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 1, "", "invalid gres")
+        if "--parsable" in command:
+            return subprocess.CompletedProcess(command, 0, "999", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="no jobs were submitted"):
+        build_dynamic_submission_plan(
+            summary_path=summary,
+            output_root=tmp_path,
+            state_root=tmp_path / "state",
+            target_workers=2,
+            overrequest_workers=3,
+            profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+            groups=["cads", "atm"],
+            dry_run=False,
+        )
+
+    assert not any("--parsable" in call for call in calls)
+    plan = json.loads((tmp_path / "slurm" / "dynamic_gpu_submission_plan.json").read_text(encoding="utf-8"))
+    assert plan["status"] == "PREFLIGHT_FAILED"

@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ -f "$HOME/.bodymaps_env" ]; then
+  source "$HOME/.bodymaps_env"
+fi
+
 CODE_ROOT=${CODE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/code/medical_agent}
 STATE_ROOT=${STATE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/runtime_state}
 LABELCRITIC_SERVICE_ROOT=${LABELCRITIC_SERVICE_ROOT:-$STATE_ROOT/labelcritic_72b_service}
 LABELCRITIC_PARTITION=${LABELCRITIC_PARTITION:-gpuh100}
 LABELCRITIC_GRES=${LABELCRITIC_GRES:-gpu:H100:2}
+LABELCRITIC_ACCOUNT=${LABELCRITIC_ACCOUNT:-}
+LABELCRITIC_QOS=${LABELCRITIC_QOS:-}
 LABELCRITIC_CPUS=${LABELCRITIC_CPUS:-16}
 LABELCRITIC_MEM=${LABELCRITIC_MEM:-192G}
 LABELCRITIC_TIME=${LABELCRITIC_TIME:-08:00:00}
@@ -16,19 +22,31 @@ LABELCRITIC_MODEL_DIR=${LABELCRITIC_MODEL_DIR:-/projects/bodymaps/users/xhan74/m
 VLLM_CONTAINER=${VLLM_CONTAINER:-/home/xhan74/containers/vllm-openai-v0.19.1.sif}
 VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-0.88}
 VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-8192}
-WAIT_READY=${WAIT_READY:-1}
+WAIT_READY=${WAIT_READY:-0}
 WAIT_READY_SEC=${WAIT_READY_SEC:-900}
 
 mkdir -p "$LABELCRITIC_SERVICE_ROOT/logs"
 SBATCH_FILE="$LABELCRITIC_SERVICE_ROOT/labelcritic_72b_service.sbatch"
 ENDPOINT_URL_FILE="$LABELCRITIC_SERVICE_ROOT/endpoint.url"
+ENDPOINT_BASE_URL_FILE="$LABELCRITIC_SERVICE_ROOT/base_url.txt"
+ENDPOINT_PORT_FILE="$LABELCRITIC_SERVICE_ROOT/port.txt"
 ENDPOINT_HOST_FILE="$LABELCRITIC_SERVICE_ROOT/endpoint.host"
 JOB_ID_FILE="$LABELCRITIC_SERVICE_ROOT/job_id.txt"
+rm -f "$ENDPOINT_URL_FILE" "$ENDPOINT_BASE_URL_FILE" "$ENDPOINT_PORT_FILE" "$ENDPOINT_HOST_FILE" "$JOB_ID_FILE"
+
+ACCOUNT_LINE=""
+QOS_LINE=""
+[ -n "$LABELCRITIC_ACCOUNT" ] && ACCOUNT_LINE="#SBATCH --account=$LABELCRITIC_ACCOUNT"
+[ -n "$LABELCRITIC_QOS" ] && QOS_LINE="#SBATCH --qos=$LABELCRITIC_QOS"
 
 cat > "$SBATCH_FILE" <<EOF
 #!/usr/bin/env bash
 #SBATCH --job-name=labelcritic_72b_service
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --partition=$LABELCRITIC_PARTITION
+$ACCOUNT_LINE
+$QOS_LINE
 #SBATCH --gres=$LABELCRITIC_GRES
 #SBATCH --cpus-per-task=$LABELCRITIC_CPUS
 #SBATCH --mem=$LABELCRITIC_MEM
@@ -41,6 +59,8 @@ cd "$CODE_ROOT"
 host=\$(hostname -f 2>/dev/null || hostname)
 printf "%s\n" "\$host" > "$ENDPOINT_HOST_FILE"
 printf "http://%s:%s\n" "\$host" "$LABELCRITIC_PORT" > "$ENDPOINT_URL_FILE"
+printf "http://%s\n" "\$host" > "$ENDPOINT_BASE_URL_FILE"
+printf "%s\n" "$LABELCRITIC_PORT" > "$ENDPOINT_PORT_FILE"
 export NO_PROXY="\${NO_PROXY:-},127.0.0.1,localhost,\$host"
 export no_proxy="\${no_proxy:-},127.0.0.1,localhost,\$host"
 echo "[labelcritic] job=\${SLURM_JOB_ID:-local} host=\$host port=$LABELCRITIC_PORT model=$LABELCRITIC_MODEL_ID"

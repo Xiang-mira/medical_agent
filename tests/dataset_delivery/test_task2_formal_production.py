@@ -123,6 +123,9 @@ def test_formal_launcher_plans_teacher_tasks_without_target_reference_masks(tmp_
     from tools.dataset_delivery import task2_formal_launcher as launcher
 
     base, manifest, _, _, _ = _formal_manifest(tmp_path)
+    monkeypatch.setenv("LABELCRITIC_BASE_URL", "http://labelcritic-node")
+    monkeypatch.setenv("LABELCRITIC_PORT", "8123")
+    monkeypatch.setenv("LABELCRITIC_MODEL_ID", "Qwen/Qwen2-VL-72B-Instruct-AWQ")
     monkeypatch.setattr(launcher, "build_preflight", lambda **kwargs: {"status": "READY", "blocked_checks": [], "runtime_manifest": {}})
     monkeypatch.setattr(launcher, "preflight_sbatch_script", lambda **kwargs: {"status": "READY", "reason": "test"})
     checkpoint_root = tmp_path / "checkpoints"
@@ -147,6 +150,11 @@ def test_formal_launcher_plans_teacher_tasks_without_target_reference_masks(tmp_
     assert summary["target_count"] == 22
     assert summary["task_count"] == 103 * 4
     assert (tmp_path / "formal" / "cads" / "cads_task_manifest.csv").exists()
+    sbatch_text = (tmp_path / "formal" / "slurm" / "cads_task2_array.sbatch").read_text(encoding="utf-8")
+    assert "#SBATCH --export=ALL" in sbatch_text
+    assert "export LABELCRITIC_BASE_URL=http://labelcritic-node" in sbatch_text
+    assert "export LABELCRITIC_PORT=8123" in sbatch_text
+    assert "export LABELCRITIC_MODEL_ID=Qwen/Qwen2-VL-72B-Instruct-AWQ" in sbatch_text
 
 
 def test_formal_resume_skips_existing_valid_group_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

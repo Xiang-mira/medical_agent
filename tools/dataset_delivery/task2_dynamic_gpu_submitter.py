@@ -189,6 +189,47 @@ def _write_shard_manifest(source_manifest: Path, destination: Path, rows: list[d
     write_csv(destination, shard_rows, fieldnames)
 
 
+def _preflight_sbatch(row: dict[str, Any], *, run_sbatch_test_only: bool) -> dict[str, Any]:
+    sbatch_file = str(row["sbatch_file"])
+    shell_proc = subprocess.run(
+        ["bash", "-n", sbatch_file],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    report: dict[str, Any] = {
+        "status": "READY" if shell_proc.returncode == 0 else "SHELL_INVALID",
+        "bash_n_return_code": int(shell_proc.returncode),
+        "bash_n_stdout": shell_proc.stdout.strip(),
+        "bash_n_stderr": shell_proc.stderr.strip(),
+        "sbatch_test_only_return_code": None,
+        "sbatch_test_only_stdout": "",
+        "sbatch_test_only_stderr": "",
+        "sbatch_test_only_skipped": not run_sbatch_test_only,
+    }
+    if shell_proc.returncode != 0:
+        return report
+    if run_sbatch_test_only:
+        sbatch_proc = subprocess.run(
+            ["sbatch", "--test-only", sbatch_file],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        report.update(
+            {
+                "status": "READY" if sbatch_proc.returncode == 0 else "SBATCH_INVALID",
+                "sbatch_test_only_return_code": int(sbatch_proc.returncode),
+                "sbatch_test_only_stdout": sbatch_proc.stdout.strip(),
+                "sbatch_test_only_stderr": sbatch_proc.stderr.strip(),
+                "sbatch_test_only_skipped": False,
+            }
+        )
+    return report
+
+
 def build_dynamic_submission_plan(
     *,
     summary_path: Path,
@@ -200,6 +241,7 @@ def build_dynamic_submission_plan(
     groups: list[str] | None = None,
     group_weights: dict[str, float] | None = None,
     dry_run: bool = False,
+    run_sbatch_test_only: bool = True,
 ) -> dict[str, Any]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("status") != "READY":
@@ -280,9 +322,34 @@ def build_dynamic_submission_plan(
                 "sbatch_file": str(sbatch_for_profile),
                 "job_id": "",
                 "submission_status": "dry_run" if dry_run else "pending",
+                "preflight_status": "",
+                "preflight_stderr": "",
                 "stderr": "",
             }
             shard_rows.append(row)
+
+    if not dry_run:
+        preflight_failures = []
+        for row in shard_rows:
+            report = _preflight_sbatch(row, run_sbatch_test_only=run_sbatch_test_only)
+            row["preflight_status"] = report["status"]
+            row["preflight_stderr"] = report.get("sbatch_test_only_stderr") or report.get("bash_n_stderr") or ""
+            row["preflight"] = report
+            if report["status"] != "READY":
+                preflight_failures.append({"job": row, "preflight": report})
+        if preflight_failures:
+            write_json(
+                output_root / "slurm" / "dynamic_gpu_submission_plan.json",
+                {
+                    "status": "PREFLIGHT_FAILED",
+                    "scheduler_mode": "dynamic_gpu_overrequest",
+                    "planned_target_workers": int(target_workers),
+                    "planned_overrequest_workers": planned_overrequest,
+                    "failures": preflight_failures,
+                    "jobs": shard_rows,
+                },
+            )
+            raise RuntimeError(f"Dynamic GPU sbatch preflight failed for {len(preflight_failures)} shard(s); no jobs were submitted")
 
     for row in shard_rows:
         if dry_run:
@@ -312,7 +379,7 @@ def build_dynamic_submission_plan(
     csv_fields = [
         "model_group", "profile", "partition", "gres", "cpus_per_task", "mem", "time_limit",
         "job_id", "task_count", "array_concurrency", "task_manifest", "sbatch_file",
-        "submission_status", "stderr",
+        "submission_status", "preflight_status", "preflight_stderr", "stderr",
     ]
     write_csv(slurm_root / "submitted_jobs.csv", shard_rows, csv_fields)
 
@@ -376,6 +443,7 @@ def main() -> int:
     parser.add_argument("--groups", default="")
     parser.add_argument("--group-weights", default="")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--skip-sbatch-test-only", action="store_true")
     args = parser.parse_args()
     groups = [item.strip() for item in args.groups.replace(";", ",").split(",") if item.strip()] or None
     plan = build_dynamic_submission_plan(
@@ -388,6 +456,7 @@ def main() -> int:
         groups=groups,
         group_weights=parse_group_weights(args.group_weights),
         dry_run=bool(args.dry_run),
+        run_sbatch_test_only=not bool(args.skip_sbatch_test_only),
     )
     print(json.dumps({k: plan[k] for k in ("status", "planned_target_workers", "planned_overrequest_workers", "total_array_concurrency")}, indent=2))
     return 0
