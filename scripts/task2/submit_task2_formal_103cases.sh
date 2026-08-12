@@ -20,7 +20,7 @@ FORMAL_OUT_ROOT=${FORMAL_OUT_ROOT:-$WORKSPACE_ROOT/teacher/formal_task2_22target
 REGISTRY=${REGISTRY:-configs/model_registry.yaml}
 TARGET_CONFIG=${TARGET_CONFIG:-configs/student_3d_prompt_target_organs.json}
 PARTITION=${PARTITION:-gpu}
-GRES=${GRES:-gpu:T4:1}
+GRES=${GRES:-gpu:1}
 CPUS_PER_TASK=${CPUS_PER_TASK:-8}
 MEM=${MEM:-64G}
 TIME_LIMIT=${TIME_LIMIT:-06:00:00}
@@ -35,10 +35,17 @@ RESUME=${RESUME:-0}
 RETRY_FAILED=${RETRY_FAILED:-0}
 CASE_ID=${CASE_ID:-}
 RUN_TESTS_BEFORE_LAUNCH=${RUN_TESTS_BEFORE_LAUNCH:-0}
+DYNAMIC_GPU_SCHEDULER=${DYNAMIC_GPU_SCHEDULER:-1}
+GPU_TARGET_WORKERS=${GPU_TARGET_WORKERS:-30}
+GPU_OVERREQUEST_WORKERS=${GPU_OVERREQUEST_WORKERS:-}
+GPU_GROUP_WEIGHTS=${GPU_GROUP_WEIGHTS:-cads=0.45,atm=0.15,airrc=0.20,unest=0.20}
 STAGE_WORKSPACE=${STAGE_WORKSPACE:-0}
 SOURCE_CASE_MANIFEST=${SOURCE_CASE_MANIFEST:-}
 IMAGE_ROOT=${IMAGE_ROOT:-/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro}
 MASK_ROOT=${MASK_ROOT:-/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro}
+if [ -z "${GPU_PROFILE_SPECS:-}" ]; then
+  GPU_PROFILE_SPECS='generic_gpu|gpu|gpu:1|8|64G|06:00:00'
+fi
 
 if [ -f "$HOME/.bodymaps_env" ]; then
   source "$HOME/.bodymaps_env"
@@ -96,6 +103,7 @@ fi
   tools/dataset_delivery/task2_preflight.py \
   tools/dataset_delivery/task2_recovery.py \
   tools/dataset_delivery/task2_workspace_staging.py \
+  tools/dataset_delivery/task2_dynamic_gpu_submitter.py \
   tools/dataset_delivery/formal_round1_preflight.py \
   tools/dataset_delivery/labelcritic_resource_preflight.py \
   tools/dataset_delivery/task2_smoke_validator.py \
@@ -166,6 +174,24 @@ fi
 
 mkdir -p "$FORMAL_OUT_ROOT/slurm"
 echo "model_group,job_id,task_count,sbatch_file" > "$FORMAL_OUT_ROOT/slurm/submitted_jobs.csv"
+
+if [ "$DYNAMIC_GPU_SCHEDULER" = "1" ]; then
+  DYNAMIC_ARGS=(
+    --summary "$SUMMARY"
+    --output-root "$FORMAL_OUT_ROOT"
+    --state-root "$STATE_ROOT"
+    --target-workers "$GPU_TARGET_WORKERS"
+    --profile-specs "$GPU_PROFILE_SPECS"
+    --groups "$GROUPS"
+    --group-weights "$GPU_GROUP_WEIGHTS"
+  )
+  [ -n "$GPU_OVERREQUEST_WORKERS" ] && DYNAMIC_ARGS+=(--overrequest-workers "$GPU_OVERREQUEST_WORKERS")
+  "$PYTHON" tools/dataset_delivery/task2_dynamic_gpu_submitter.py "${DYNAMIC_ARGS[@]}"
+  echo "TASK2_FORMAL_ROOT=$FORMAL_OUT_ROOT"
+  echo "TASK2_FORMAL_JOBS=$FORMAL_OUT_ROOT/slurm/submitted_jobs.csv"
+  echo "TASK2_FORMAL_DYNAMIC_GPU_PLAN=$FORMAL_OUT_ROOT/slurm/dynamic_gpu_submission_plan.json"
+  exit 0
+fi
 
 submit_group() {
   local group=$1
