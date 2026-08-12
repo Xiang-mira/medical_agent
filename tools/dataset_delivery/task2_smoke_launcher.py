@@ -89,6 +89,7 @@ def _command_for_group(
     unest_python_executable: Path,
     enable_shapekit: bool = False,
     enable_critic: bool = False,
+    critic_vlm_model: str | None = None,
 ) -> list[str]:
     spec = SMOKE_SPECS[group]
     command = [
@@ -109,6 +110,8 @@ def _command_for_group(
         command.extend(["--no-enable-shapekit", "--debug-allow-no-shapekit"])
     if not enable_critic:
         command.append("--no-enable-critic")
+    if critic_vlm_model:
+        command.extend(["--critic-vlm-model", critic_vlm_model])
     if group == "atm":
         command.extend(["--strict-delivery-fov-override-organs", "airway_tree"])
     command.extend(["--log-file", str(run_out / "run_loop.log")])

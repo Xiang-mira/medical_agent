@@ -271,12 +271,89 @@ def test_formal_launcher_command_keeps_shapekit_and_labelcritic_enabled(tmp_path
         unest_python_executable=Path("/usr/bin/python"),
         enable_shapekit=True,
         enable_critic=True,
+        critic_vlm_model="Qwen/Qwen2-VL-72B-Instruct-AWQ",
     )
 
     assert "--no-enable-shapekit" not in command
     assert "--debug-allow-no-shapekit" not in command
     assert "--no-enable-critic" not in command
+    assert command[command.index("--critic-vlm-model") + 1] == "Qwen/Qwen2-VL-72B-Instruct-AWQ"
     assert "--strict-delivery-targets" in command
+
+
+def test_formal_72b_labelcritic_selects_without_legacy_benchmark_artifact(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as mm
+
+    ct = _save(np.zeros((4, 4, 4), dtype=np.int16), tmp_path / "ct.nii.gz")
+    mask_a = _save(np.eye(4, dtype=np.uint8).reshape(4, 4, 1).repeat(4, axis=2), tmp_path / "a.nii.gz")
+    mask_b_data = np.zeros((4, 4, 4), dtype=np.uint8)
+    mask_b_data[2:, 2:, 2:] = 1
+    mask_b = _save(mask_b_data, tmp_path / "b.nii.gz")
+
+    def fake_compare(*args, **kwargs):
+        output_json = Path(args[4])
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        result = {"status": "success", "decision": {"winner": "b", "reason": "better boundary"}}
+        output_json.write_text(json.dumps(result), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(mm, "run_labelcritic_compare", fake_compare)
+    selected, selection = mm._select_candidate(
+        ct=ct,
+        organ="liver",
+        candidates=[
+            {"case_id": "case01", "organ": "liver", "model": "teacher_a", "prediction": str(mask_a), "candidate_id": "a", "eligible_for_labelcritic": True, "candidate_qc_score": 1.0},
+            {"case_id": "case01", "organ": "liver", "model": "teacher_b", "prediction": str(mask_b), "candidate_id": "b", "eligible_for_labelcritic": True, "candidate_qc_score": 1.0},
+        ],
+        out=tmp_path / "out",
+        case_id="case01",
+        enable_critic=True,
+        critic_backend="labelcritic",
+        critic_base_url="http://localhost",
+        critic_port=8000,
+        timeout_sec=60,
+        dry_run=False,
+        use_official_pairwise=True,
+        formal_72b_selection_ready=True,
+    )
+
+    assert selected["model"] == "teacher_b"
+    assert selection["selection_method"] == "label_critic"
+    assert selection["selection_status"] == "selected"
+    assert selection["formal_winner"] == "teacher_b"
+    assert selection["audit_winner"] is None
+
+
+def test_em_gate_accepts_labelcritic_selected_teacher_against_student_candidate():
+    from cli_anything.medai.core import multimodel_loop as mm
+
+    selected = {
+        "model": "teacher_a",
+        "prediction": "/tmp/teacher_a.nii.gz",
+        "candidate_qc_status": "pass",
+        "eligible_for_labelcritic": True,
+    }
+    gated_selected, gated = mm._apply_em_student_vs_previous_gate(
+        selected=selected,
+        selection={
+            "selection_method": "label_critic",
+            "selection_status": "selected",
+            "selected_model": "teacher_a",
+            "labelcritic_decisive": True,
+            "quality_flags": [],
+            "review_flags": [],
+        },
+        candidates=[
+            {"model": "round_prev_selected", "candidate_exists": True, "prediction": "/tmp/prev.nii.gz"},
+            {"model": "student_prev", "candidate_exists": True, "candidate_qc_status": "pass"},
+            selected,
+        ],
+    )
+
+    assert gated_selected is selected
+    assert gated["source_model"] == "teacher_a"
+    assert gated["em_student_vs_previous_gate"]["status"] == "teacher_or_model_replacement_accepted"
+    assert gated["should_enter_student_training"] is True
 
 
 def test_hierarchy_validation_cycle_and_multiple_roots(tmp_path: Path):

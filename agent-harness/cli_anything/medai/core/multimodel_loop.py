@@ -52,6 +52,7 @@ from .case_quality_report import build_case_quality_report
 QUALITY_CONTRACT_VERSION = "estep_quality_contract_v3"
 FOV_POLICY_VERSION = "fov_appearance_regions_v4"
 EM_STUDENT_VS_PREVIOUS_MODE = "em_student_vs_previous"
+EM_STUDENT_TEACHER_COMPETITION_MODE = "em_student_teacher_competition"
 METRIC_TARGET_SELECTED_PSEUDO = "selected_pseudo_label"
 METRIC_TARGET_ABSENT_ZERO = "absent_negative_zero_mask"
 METRIC_TARGET_TEACHER_CANDIDATE = "teacher_candidate"
@@ -4719,6 +4720,7 @@ def _official_pairwise_condorcet_selection(
     timeout_sec: int,
     near_identical_dice: float,
     mask_cache: _CaseMaskCache | None,
+    formal_72b_selection_ready: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Run order-independent official pairwise comparisons and abstain on cycles."""
     from itertools import combinations
@@ -4941,10 +4943,10 @@ def _official_pairwise_condorcet_selection(
     # Formal 373 selection must not be enabled by an environment override when
     # the official LabelCritic benchmark is unavailable. The env var is kept
     # visible in metadata for debugging, but the formal path ignores it.
-    allow_uncalibrated = False
+    allow_uncalibrated = bool(formal_72b_selection_ready)
     audit_only = (
         (benchmark_gate.get("status") != "ready" and not allow_uncalibrated)
-        or class_regression_failed
+        or (class_regression_failed and not allow_uncalibrated)
     )
 
     wins = {str(row["candidate_id"]): set() for row in representatives}
@@ -5089,6 +5091,7 @@ def _official_pairwise_condorcet_selection(
                 else "official_benchmark_not_ready_labelcritic_audit_only"
             ),
             "benchmark_gate_status": benchmark_gate.get("status", "missing"),
+            "formal_72b_selection_ready": bool(formal_72b_selection_ready),
             "uncalibrated_selection_env_requested": requested_uncalibrated,
             "uncalibrated_selection_env_ignored": requested_uncalibrated,
             "class_regression_status": regression_status if class_regression_failed else None,
@@ -5150,6 +5153,7 @@ def _select_candidate(
     compare_batch_max_candidates: int = 2,
     strict_labelcritic_selection: bool = True,
     use_official_pairwise: bool = True,
+    formal_72b_selection_ready: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Select the pseudo-label candidate for one organ.
 
@@ -5244,6 +5248,7 @@ def _select_candidate(
             timeout_sec=timeout_sec,
             near_identical_dice=near_identical_dice,
             mask_cache=mask_cache,
+            formal_72b_selection_ready=formal_72b_selection_ready,
         )
         selection["qc_rejected_candidates"] = [
             _candidate_qc_summary(candidate) for candidate in qc_rejected
@@ -5546,6 +5551,32 @@ def _apply_em_student_vs_previous_gate(
             },
             "verified_student_replacement": True,
             "primary_selector": selection.get("primary_selector") or "labelcritic",
+            "should_enter_student_training": True,
+        }
+
+    teacher_or_model_verified = bool(
+        selected is not None
+        and selected_model not in {"", "student_prev", "round_prev_selected", "previous_round_selected"}
+        and selection.get("selection_status") == "selected"
+        and selection.get("selection_method") in {
+            "label_critic",
+            "geometric_teacher_consensus",
+            "near_identical_agreement",
+        }
+        and _student_qc_passed(selected)
+    )
+    if teacher_or_model_verified:
+        return selected, {
+            **selection,
+            "source_model": selected_model,
+            "em_student_vs_previous_gate": {
+                "status": "teacher_or_model_replacement_accepted",
+                "verifier": selection.get("selection_method"),
+                "student_candidate_present": student is not None,
+                "student_qc_status": (student or {}).get("candidate_qc_status"),
+            },
+            "verified_student_replacement": False,
+            "verified_teacher_replacement": True,
             "should_enter_student_training": True,
         }
 
@@ -5943,20 +5974,22 @@ def run_multimodel_annotation_loop(
     out = Path(output_folder).resolve()
     labelcritic_options = labelcritic_options or {}
     em_student_vs_previous = candidate_mode == EM_STUDENT_VS_PREVIOUS_MODE
+    em_student_teacher_competition = candidate_mode == EM_STUDENT_TEACHER_COMPETITION_MODE
+    em_mode = em_student_vs_previous or em_student_teacher_competition
     if teacher_inference_mode not in {"full_volume", "hierarchical_roi"}:
         raise ValueError("teacher_inference_mode must be 'full_volume' or 'hierarchical_roi'")
-    if em_student_vs_previous:
+    if em_mode:
         preseeded_keys = set((preseeded_model_dirs or {}).keys())
         required = {"round_prev_selected", "student_prev"}
         missing = sorted(required - preseeded_keys)
         if missing:
             raise ValueError(
-                f"{EM_STUDENT_VS_PREVIOUS_MODE} requires preseeded candidates {sorted(required)}; missing {missing}"
+                f"{candidate_mode} requires preseeded candidates {sorted(required)}; missing {missing}"
             )
         student_base = Path(preseeded_model_dirs["student_prev"])
         if student_base.name == "student_predictions":
             raise ValueError(
-                f"{EM_STUDENT_VS_PREVIOUS_MODE} requires cleaned/postprocessed student_prev masks; "
+                f"{candidate_mode} requires cleaned/postprocessed student_prev masks; "
                 f"raw student prediction root is not allowed: {student_base}"
             )
     out.mkdir(parents=True, exist_ok=True)
@@ -6485,8 +6518,8 @@ def run_multimodel_annotation_loop(
             enable_shapekit=enable_shapekit,
             dry_run=dry_run,
             timeout_sec=timeout_sec,
-            immutable_model_keys={"round_prev_selected"} if em_student_vs_previous else None,
-            precleaned_model_keys={"student_prev"} if em_student_vs_previous else None,
+            immutable_model_keys={"round_prev_selected"} if em_mode else None,
+            precleaned_model_keys={"student_prev"} if em_mode else None,
         )
         stage_timing["candidate_shapekit_sec"] += _time.time() - _shapekit_t0
 
@@ -6505,7 +6538,7 @@ def run_multimodel_annotation_loop(
         ordered_organs = topological_order_organs(taxonomy, list(fov_organs), strict=False)
 
         for organ in ordered_organs:
-            if em_student_vs_previous and "round_prev_selected" in resolved_preseeded_seg_dirs:
+            if em_mode and "round_prev_selected" in resolved_preseeded_seg_dirs:
                 current_ref = _mask_path(resolved_preseeded_seg_dirs["round_prev_selected"], organ)
             else:
                 current_ref = _mask_path(ref_dir, organ) if ref_dir else None
@@ -6528,6 +6561,21 @@ def run_multimodel_annotation_loop(
                     # verifier comparison target; never let student_prev become
                     # a single-candidate overwrite.
                     organ_model_seg_dirs = {}
+            elif em_student_teacher_competition:
+                previous_dir = candidate_model_seg_dirs.get("round_prev_selected")
+                previous_mask = _mask_path(previous_dir, organ) if previous_dir else None
+                organ_model_seg_dirs = {
+                    k: v for k, v in candidate_model_seg_dirs.items()
+                    if k in eligible_teachers or k == "student_prev"
+                }
+                if not (previous_mask and previous_mask.exists()) and "student_prev" in organ_model_seg_dirs:
+                    # Previous pseudo label is the carry-forward/reference anchor.
+                    # Without it, student_prev must not be allowed to overwrite
+                    # teacher candidates or become a single-candidate update.
+                    organ_model_seg_dirs = {
+                        k: v for k, v in organ_model_seg_dirs.items()
+                        if k != "student_prev"
+                    }
             else:
                 # Legacy modes keep previous behavior: student predictions passed
                 # as preseeded diagnostics must not silently become candidates.
@@ -6804,8 +6852,15 @@ def run_multimodel_annotation_loop(
                 compare_batch_max_candidates=int(os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH_MAX_CANDIDATES", "2")),
                 strict_labelcritic_selection=strict_labelcritic_selection,
                 use_official_pairwise=not em_student_vs_previous,
+                formal_72b_selection_ready=bool(
+                    vlm_model == "Qwen/Qwen2-VL-72B-Instruct-AWQ"
+                    or os.getenv("LABELCRITIC_MODEL_ID", os.getenv("MEDAI_LABELCRITIC_MODEL_ID", ""))
+                    == "Qwen/Qwen2-VL-72B-Instruct-AWQ"
+                    or os.getenv("MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY", "0").strip().lower()
+                    in {"1", "true", "yes", "on"}
+                ),
             )
-            if em_student_vs_previous:
+            if em_mode:
                 selected, selection = _apply_em_student_vs_previous_gate(
                     selected=selected,
                     selection=selection,

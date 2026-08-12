@@ -239,7 +239,7 @@ DEBUG_ALLOW_NO_SHAPEKIT = (
     or env_bool("MEDAI_FAST_SMOKE", default=False)
 )
 
-# LabelCritic：Qwen2-VL-7B @ vLLM server
+# LabelCritic：formal mainline uses Qwen2-VL-72B-AWQ @ vLLM server.
 ENABLE_CRITIC = env_bool("MEDAI_ENABLE_CRITIC", default=True)
 DEBUG_ALLOW_NO_LABELCRITIC = (
     env_bool("MEDAI_DEBUG_ALLOW_NO_LABELCRITIC", default=False)
@@ -247,6 +247,8 @@ DEBUG_ALLOW_NO_LABELCRITIC = (
 )
 CANDIDATE_MODE = os.getenv("MEDAI_CANDIDATE_MODE", "route_pruned_with_competition").strip() or "route_pruned_with_competition"
 EM_STUDENT_VS_PREVIOUS_MODE = "em_student_vs_previous"
+EM_STUDENT_TEACHER_COMPETITION_MODE = "em_student_teacher_competition"
+ROUND2_REPLAY_TEACHERS_WITH_STUDENT = env_bool("MEDAI_ROUND2_REPLAY_TEACHERS_WITH_STUDENT", default=True)
 TEACHER_INFERENCE_MODE = os.getenv("MEDAI_TEACHER_INFERENCE_MODE", "hierarchical_roi").strip() or "hierarchical_roi"
 ROI_MARGIN_MM = float(os.getenv("MEDAI_ROI_MARGIN_MM", "20"))
 
@@ -2677,8 +2679,9 @@ def run_estep(round_idx: int) -> dict:
     - 直接调用 Python 函数，无 subprocess timeout
     - 断点续跑：跳过已完成的 case
     - Round 1 bootstrap 使用 teacher candidates
-    - Round 2+ 使用上一轮 selected pseudo label 和上一轮 cleaned student prediction
-      做 verifier/LabelCritic 竞争；teacher cache 只保留为 bootstrap/debug artifact
+    - Round 2+ 默认重新生成 routed teacher candidates，并把上一轮 cleaned
+      student prediction 一起放入 LabelCritic 竞争；上一轮 selected pseudo label
+      仅作为 carry-forward/reference，不是人工真值。
     """
     log(f"=== Round {round_idx} E-step 开始 ===")
     out_dir = OUTPUT_ROOT / f"round{round_idx}" / "estep"
@@ -2726,9 +2729,15 @@ def run_estep(round_idx: int) -> dict:
     if round_idx > 1:
         # EM-style Round2+: the student prediction from the previous M-step is
         # a formal candidate only after the dedicated postprocess/QC handoff.
-        # Fresh teacher replay is intentionally excluded from this path.
-        models_to_run = []
-        candidate_mode_for_call = EM_STUDENT_VS_PREVIOUS_MODE
+        # By default, replay the routed teacher pool so LabelCritic compares
+        # student-vs-teacher for each anatomy; the old student-vs-previous-only
+        # mode remains available for constrained recovery/debug runs.
+        models_to_run = list(ALL_TEACHERS) if ROUND2_REPLAY_TEACHERS_WITH_STUDENT else []
+        candidate_mode_for_call = (
+            EM_STUDENT_TEACHER_COMPETITION_MODE
+            if ROUND2_REPLAY_TEACHERS_WITH_STUDENT
+            else EM_STUDENT_VS_PREVIOUS_MODE
+        )
 
         prev_selected_dir = _round_selected_pseudo_label_root(round_idx - 1)
         if prev_selected_dir.exists() and any(prev_selected_dir.iterdir()):
@@ -2801,7 +2810,7 @@ def run_estep(round_idx: int) -> dict:
         candidate_mode=candidate_mode_for_call,
         teacher_inference_mode=TEACHER_INFERENCE_MODE,
         roi_margin_mm=ROI_MARGIN_MM,
-        reuse_preseeded_only=round_idx > 1,
+        reuse_preseeded_only=round_idx > 1 and not ROUND2_REPLAY_TEACHERS_WITH_STUDENT,
         use_annotation_folder_reference=False,
     )
 

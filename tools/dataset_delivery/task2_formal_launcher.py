@@ -39,6 +39,7 @@ from tools.dataset_delivery.task2_recovery import recover_case_group  # noqa: E4
 from tools.dataset_delivery.task2_smoke_launcher import _command_for_group  # noqa: E402
 
 
+LABELCRITIC_72B_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 DEFAULT_CODE_ROOT = Path("/projects/bodymaps/users/xhan74/medical_agent/code/medical_agent")
 DEFAULT_PYTHON = Path("/home/xhan74/envs/medical_agent/bin/python")
 DEFAULT_TARGET_CONFIG = REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json"
@@ -245,6 +246,7 @@ def execute_task_index(
         unest_python_executable=unest_python_executable or DEFAULT_UNEST_PYTHON,
         enable_shapekit=True,
         enable_critic=True,
+        critic_vlm_model=LABELCRITIC_72B_MODEL_ID,
     )
     task_root.mkdir(parents=True, exist_ok=True)
     (task_root / "command.txt").write_text(" ".join(str(part) for part in command) + "\n", encoding="utf-8")
