@@ -71,10 +71,12 @@ def test_dynamic_submitter_overrequests_target_30_to_40_and_uses_generic_gpu(tmp
     assert plan["planned_target_workers"] == 30
     assert plan["planned_overrequest_workers"] == 40
     assert plan["total_array_concurrency"] == 40
+    assert plan["task_ownership"] == "shared_queue"
+    assert plan["profile_binding"] is False
     assert plan["group_concurrency"] == {"cads": 18, "atm": 6, "airrc": 8, "unest": 8}
     rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
     assert {row["gres"] for row in rows} == {"gpu:1"}
-    assert "gpu:T4:1" not in (tmp_path / "slurm" / "dynamic" / "cads_generic_gpu_shard_000_task2_array.sbatch").read_text(encoding="utf-8")
+    assert "gpu:T4:1" not in (tmp_path / "slurm" / "dynamic" / "full373_generic_gpu_worker_shard_000_queue_worker.sbatch").read_text(encoding="utf-8")
 
 
 def test_dynamic_submitter_profile_shards_do_not_duplicate_source_task_indices(tmp_path: Path):
@@ -93,13 +95,13 @@ def test_dynamic_submitter_profile_shards_do_not_duplicate_source_task_indices(t
     )
 
     assert plan["total_array_concurrency"] == 6
-    shard_paths = [Path(row["task_manifest"]) for row in plan["jobs"]]
-    source_indices: list[str] = []
-    for path in shard_paths:
-        rows = _rows(path)
-        assert [row["task_index"] for row in rows] == [str(index) for index in range(len(rows))]
-        source_indices.extend(row["source_task_index"] for row in rows)
-    assert sorted(source_indices, key=int) == [str(index) for index in range(8)]
+    assert plan["task_ownership"] == "shared_queue"
+    assert plan["profile_binding"] is False
+    assert plan["t4_only_reachability_logical_task_count"] == 8
+    manifest_paths = {Path(row["task_manifest"]) for row in plan["jobs"]}
+    assert len(manifest_paths) == 1
+    rows = _rows(next(iter(manifest_paths)))
+    assert sorted((row["source_task_index"] for row in rows), key=int) == [str(index) for index in range(8)]
 
 
 def test_dynamic_submitter_preflight_failure_submits_no_partial_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -166,10 +168,11 @@ def test_dynamic_submitter_auto_profiles_use_cluster_inventory_without_fixed_30_
     assert plan["worker_sizing"]["fixed_30_ceiling"] is False
     assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu", "gpua100", "spare_l40", "gpuh100"}
     assert [profile["resource_class"] for profile in plan["profile_specs"]][0] == "GPU_LIGHT_T4"
-    shard_paths = [Path(row["task_manifest"]) for row in plan["jobs"]]
-    source_indices: list[str] = []
-    for path in shard_paths:
-        source_indices.extend(row["source_task_index"] for row in _rows(path))
+    assert plan["task_ownership"] == "shared_queue"
+    assert plan["profile_binding"] is False
+    manifest_paths = {Path(row["task_manifest"]) for row in plan["jobs"]}
+    assert len(manifest_paths) == 1
+    source_indices = [row["source_task_index"] for row in _rows(next(iter(manifest_paths)))]
     assert sorted(source_indices, key=int) == [str(index) for index in range(80)]
 
 
@@ -212,13 +215,14 @@ def test_dynamic_submitter_partial_sbatch_success_persists_before_qos_backpressu
         calls.append([str(item) for item in command])
         if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
             return subprocess.CompletedProcess(command, 0, "", "")
-        if "--parsable" in command and "cads" in str(command[-1]):
+        if "--parsable" in command and "worker_shard_000" in str(command[-1]):
             return subprocess.CompletedProcess(command, 0, "91001\n", "")
-        if "--parsable" in command and "atm" in str(command[-1]):
+        if "--parsable" in command and "worker_shard_001" in str(command[-1]):
             return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: Job violates accounting/QOS policy")
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setenv("TASK2_GPU_T4_MAX_ARRAY_TASKS", "1")
 
     plan = build_dynamic_submission_plan(
         summary_path=summary,
@@ -294,6 +298,7 @@ def test_dynamic_submitter_continues_other_profile_after_one_backpressured(tmp_p
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setenv("TASK2_GPU_T4_MAX_ARRAY_TASKS", "1")
 
     plan = build_dynamic_submission_plan(
         summary_path=summary,
@@ -325,11 +330,12 @@ def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_s
             "submission_id": "batch_d",
             "execution_schema_version": CANDIDATE_TASK_V1,
             "job_id": "91003",
-            "model_group": "cads",
-            "group": "cads",
+            "model_group": "full373",
+            "group": "full373",
             "profile": "generic_gpu",
-            "shard_id": "shard_000",
-            "logical_task_id": "run_d:batch_d:candidate_task_v1:cads:generic_gpu:shard_000",
+            "shard_id": "worker_shard_existing",
+            "logical_task_id": "run_d:batch_d:candidate_task_v1:full373:generic_gpu:worker_shard_existing",
+            "task_count": "1",
             "submission_status": "submitted",
             "scheduler_status": "ACTIVE",
             "slurm_state": "RUNNING",
@@ -361,9 +367,9 @@ def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_s
 
     assert plan["status"] == "SUBMITTED"
     assert len(submitted) == 1
-    assert "atm" in submitted[0]
+    assert "worker_shard_000" in submitted[0]
     rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
-    assert {row["model_group"] for row in rows} == {"cads", "atm"}
+    assert {row["model_group"] for row in rows} == {"full373"}
 
 
 def test_dynamic_submitter_qos_slot_later_frees_and_remaining_workers_submit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -440,23 +446,24 @@ def test_dynamic_submitter_shards_by_detected_max_array_size_and_conserves_logic
     assert all(int(row["local_end"]) <= 3999 for row in plan["jobs"])
 
 
-def test_dynamic_submitter_4001_tasks_split_into_4000_and_1(tmp_path: Path):
+def test_dynamic_submitter_worker_arrays_split_at_max_array_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
 
     summary = _summary(tmp_path, {"cads": 4001})
+    monkeypatch.setenv("TASK2_GPU_WORKER_SAFETY_CAP", "5000")
     plan = build_dynamic_submission_plan(
         summary_path=summary,
         output_root=tmp_path,
         state_root=tmp_path / "state",
-        target_workers=1,
-        overrequest_workers=1,
+        target_workers=4001,
+        overrequest_workers=4001,
         profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
         groups=["cads"],
         dry_run=True,
         max_array_size=4000,
     )
 
-    assert [row["array_spec"] for row in plan["jobs"]] == ["0-3999%1", "0-0%1"]
+    assert [row["array_spec"] for row in plan["jobs"]] == ["0-3999%4000", "0-0%1"]
 
 
 def test_dynamic_submitter_test_only_uses_real_array_argument(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -474,12 +481,13 @@ def test_dynamic_submitter_test_only_uses_real_array_argument(tmp_path: Path, mo
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setenv("TASK2_GPU_WORKER_SAFETY_CAP", "5000")
     build_dynamic_submission_plan(
         summary_path=summary,
         output_root=tmp_path,
         state_root=tmp_path / "state",
-        target_workers=1,
-        overrequest_workers=1,
+        target_workers=4001,
+        overrequest_workers=4001,
         profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
         groups=["cads"],
         dry_run=False,
@@ -487,5 +495,5 @@ def test_dynamic_submitter_test_only_uses_real_array_argument(tmp_path: Path, mo
     )
 
     test_only_calls = [call for call in calls if call[:2] == ["sbatch", "--test-only"]]
-    assert any("--array=0-3999%1" in call for call in test_only_calls)
+    assert any("--array=0-3999%4000" in call for call in test_only_calls)
     assert any("--array=0-0%1" in call for call in test_only_calls)

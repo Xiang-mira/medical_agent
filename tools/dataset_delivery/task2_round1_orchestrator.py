@@ -51,8 +51,8 @@ LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE"}
 ACTIVE_STATES = {"PENDING", "CONFIGURING", "COMPLETING", "RUNNING", "REQUEUED", "RESIZING", "SUSPENDED"}
 SUCCESS_STATES = {"COMPLETED"}
-BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY"}
-TEACHER_JOB_GROUPS = {"cads", "atm", "airrc", "unest"}
+BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY", "READY_WORKER_QUEUE"}
+TEACHER_JOB_GROUPS = {"cads", "atm", "airrc", "unest", "full373"}
 LABELCRITIC_JOB_NAME = "labelcritic_72b_service"
 STATIC_TEST_ENV_DROP = {
     "LABELCRITIC_JOB_ID",
@@ -2028,26 +2028,60 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
     state = _load_state(state_root)
     formal_root = Path(str(state.get("formal_root") or ""))
     jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
-    teacher_t4 = teacher_a100 = teacher_h100 = 0
+    worker_counts = {
+        "t4_running": 0,
+        "t4_pending": 0,
+        "interactive_running": 0,
+        "interactive_pending": 0,
+        "a100_running": 0,
+        "a100_pending": 0,
+        "h100_running": 0,
+        "h100_pending": 0,
+    }
     if jobs_csv.exists():
         for row in read_csv_rows(jobs_csv):
             job_state = slurm_job_state(str(row.get("job_id") or ""))
             if job_state.get("state") not in ACTIVE_STATES:
                 continue
             gres = str(row.get("gres") or row.get("profile") or "").upper()
-            if "T4" in gres or row.get("profile") == "generic_gpu":
-                teacher_t4 += 1
-            elif "A100" in gres:
-                teacher_a100 += 1
-            elif "H100" in gres:
-                teacher_h100 += 1
+            profile = str(row.get("profile") or "").lower()
+            is_running = str(job_state.get("state") or "") == "RUNNING"
+            suffix = "running" if is_running else "pending"
+            if "INTERACTIVE" in gres or "interactive" in profile:
+                worker_counts[f"interactive_{suffix}"] += 1
+            elif "A100" in gres or "a100" in profile:
+                worker_counts[f"a100_{suffix}"] += 1
+            elif "H100" in gres or "h100" in profile:
+                worker_counts[f"h100_{suffix}"] += 1
+            else:
+                worker_counts[f"t4_{suffix}"] += 1
     labelcritic = state.get("labelcritic") or {}
     label_job = slurm_job_state(str(labelcritic.get("job_id") or "")) if isinstance(labelcritic, dict) else {"state": "UNKNOWN"}
     mstep_job = slurm_job_state(str(state.get("mstep_job_id") or "")) if state.get("mstep_job_id") else {"state": "NOT_SUBMITTED"}
+    qos_cache = _read_json(formal_root / "slurm" / "qos_capacity_cache.json", {}) if formal_root.exists() else {}
+    dynamic_plan = _read_json(formal_root / "slurm" / "dynamic_gpu_submission_plan.json", {}) if formal_root.exists() else {}
     return {
-        "teacher_t4_running": teacher_t4,
-        "teacher_a100_running": teacher_a100,
-        "teacher_h100_running": teacher_h100,
+        "teacher_workers": worker_counts,
+        "task_ownership": dynamic_plan.get("task_ownership", ""),
+        "profile_binding": dynamic_plan.get("profile_binding"),
+        "primary_teacher_profile": dynamic_plan.get("primary_teacher_profile", ""),
+        "teacher_h100_deferred_for_labelcritic": dynamic_plan.get("teacher_h100_deferred_for_labelcritic"),
+        "qos": {
+            "per_profile_known_good": {
+                str(name): int((doc or {}).get("known_good_size") or 0)
+                for name, doc in ((qos_cache.get("profiles") or {}) if isinstance(qos_cache, dict) else {}).items()
+            },
+            "per_profile_known_bad": {
+                str(name): int((doc or {}).get("known_bad_size") or 0)
+                for name, doc in ((qos_cache.get("profiles") or {}) if isinstance(qos_cache, dict) else {}).items()
+                if (doc or {}).get("known_bad_size") is not None
+            },
+            "last_backpressure": {
+                str(name): (doc or {}).get("last_backpressure") or {}
+                for name, doc in ((qos_cache.get("profiles") or {}) if isinstance(qos_cache, dict) else {}).items()
+                if (doc or {}).get("last_backpressure")
+            },
+        },
         "labelcritic_h100_state": label_job.get("state"),
         "student_state": mstep_job.get("state"),
     }

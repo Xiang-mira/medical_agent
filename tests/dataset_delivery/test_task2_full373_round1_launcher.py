@@ -362,6 +362,94 @@ def test_same_logical_candidate_cannot_be_claimed_twice(tmp_path: Path):
     assert second["status"] == "BUSY"
 
 
+def test_shared_ready_queue_claim_is_not_profile_bound(tmp_path: Path):
+    manifest = tmp_path / "shared.csv"
+    manifest.write_text(
+        "task_index,case_id,target,teacher,candidate_id,ct_path,annotation_folder\n"
+        "0,CASE001,organ_a,teacher1,cand_a,/ct,/ann\n"
+        "1,CASE001,organ_a,teacher2,cand_b,/ct,/ann\n",
+        encoding="utf-8",
+    )
+    full373.write_json(
+        tmp_path / "full_round1_scope.json",
+        {
+            "case_count": 1,
+            "canonical_target_count": 1,
+            "routes": {"organ_a": ["teacher1", "teacher2"]},
+            "task_rows": [
+                {"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a"},
+                {"case_id": "CASE001", "target": "organ_a", "teacher": "teacher2", "candidate_id": "cand_b"},
+            ],
+            "total_logical_candidate_tasks": 2,
+        },
+    )
+    claim = full373.claim_next_ready_candidate(
+        tmp_path,
+        task_manifest=manifest,
+        worker_id="gpu_a100_worker",
+        profile="gpu_a100",
+        resource_class="GPU_HIGH_MEMORY_A100",
+    )
+
+    assert claim["status"] == "CLAIMED"
+    assert claim["candidate"]["profile"] == "gpu_a100"
+    assert claim["candidate"]["status"] == "CLAIMED"
+
+
+def test_expired_candidate_claim_returns_to_retry_pending_and_reclaims(tmp_path: Path):
+    manifest = tmp_path / "shared.csv"
+    manifest.write_text(
+        "task_index,case_id,target,teacher,candidate_id,ct_path,annotation_folder\n"
+        "0,CASE001,organ_a,teacher1,cand_a,/ct,/ann\n",
+        encoding="utf-8",
+    )
+    full373.write_json(
+        tmp_path / "full_round1_scope.json",
+        {
+            "case_count": 1,
+            "canonical_target_count": 1,
+            "routes": {"organ_a": ["teacher1"]},
+            "task_rows": [{"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a"}],
+            "total_logical_candidate_tasks": 1,
+        },
+    )
+    full373.publish_candidate_state(
+        tmp_path,
+        {
+            "status": "RUNNING",
+            "case_id": "CASE001",
+            "target": "organ_a",
+            "teacher": "teacher1",
+            "candidate_id": "cand_a",
+        },
+    )
+    full373.claim_work(
+        tmp_path,
+        claim_kind="candidate",
+        claim_key="cand_a",
+        worker_id="dead_worker",
+        lease_sec=1,
+    )
+    claim_path = tmp_path / "queues" / "candidate_claims" / "cand_a.json"
+    claim_doc = json.loads(claim_path.read_text(encoding="utf-8"))
+    claim_doc["heartbeat_time"] = -100
+    claim_doc["created_time"] = -100
+    full373.atomic_write_json(claim_path, claim_doc)
+
+    claim = full373.claim_next_ready_candidate(
+        tmp_path,
+        task_manifest=manifest,
+        worker_id="replacement_worker",
+        profile="gpu_t4",
+        resource_class="GPU_LIGHT_T4",
+        lease_sec=1,
+    )
+
+    assert claim["status"] == "CLAIMED"
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+    assert state["status"] == "CLAIMED"
+
+
 def test_same_case_target_cannot_be_selected_by_two_workers(tmp_path: Path):
     _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
     _candidate(tmp_path, "CASE001", "organ_a", "teacher1")

@@ -27,6 +27,7 @@ from cli_anything.medai.core.continual_learning import TRAINING_CONTRACT_VERSION
 from cli_anything.medai.core.multimodel_loop import _select_candidate  # noqa: E402
 from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_binary_mask_nifti_from_source  # noqa: E402
+from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1  # noqa: E402
 
 
 FULL373_GROUP = "full373"
@@ -147,31 +148,70 @@ def _claim_path(output_root: Path, *, claim_kind: str, claim_key: str) -> Path:
     raise ValueError(f"unknown claim kind: {claim_kind}")
 
 
-def claim_work(output_root: Path, *, claim_kind: str, claim_key: str, worker_id: str, lease_sec: int = 7200) -> dict[str, Any]:
+def _claim_expired(existing: dict[str, Any], *, now: float, lease_sec: int) -> bool:
+    try:
+        heartbeat_time = float(existing.get("heartbeat_time") or existing.get("created_time") or 0.0)
+    except Exception:
+        heartbeat_time = 0.0
+    ttl = int(existing.get("lease_sec") or lease_sec or 0)
+    if heartbeat_time <= 0 or ttl <= 0:
+        return True
+    return now - heartbeat_time >= ttl
+
+
+def heartbeat_claim(output_root: Path, *, claim_kind: str, claim_key: str, worker_id: str) -> dict[str, Any]:
+    path = _claim_path(output_root, claim_kind=claim_kind, claim_key=claim_key)
+    if not path.exists():
+        return {"status": "MISSING", "claim_path": str(path)}
+    existing = _read_json(path, {})
+    if str(existing.get("worker_id") or "") != str(worker_id or ""):
+        return {"status": "NOT_OWNER", "claim_path": str(path), "claim": existing}
+    now = time.time()
+    existing["heartbeat_at"] = utc_now()
+    existing["heartbeat_time"] = now
+    existing["lease_expiry"] = now + int(existing.get("lease_sec") or 0)
+    atomic_write_json(path, existing)
+    return {"status": "HEARTBEAT", "claim_path": str(path), "claim": existing}
+
+
+def claim_work(
+    output_root: Path,
+    *,
+    claim_kind: str,
+    claim_key: str,
+    worker_id: str,
+    lease_sec: int = 7200,
+    execution_id: str = "",
+    profile: str = "",
+    resource_class: str = "",
+) -> dict[str, Any]:
     path = _claim_path(output_root, claim_kind=claim_kind, claim_key=claim_key)
     path.parent.mkdir(parents=True, exist_ok=True)
     now = time.time()
     if path.exists():
         existing = _read_json(path, {})
-        try:
-            created = float(existing.get("created_time") or 0.0)
-        except Exception:
-            created = 0.0
-        if created and now - created < lease_sec:
+        if not _claim_expired(existing, now=now, lease_sec=lease_sec):
             return {"status": "BUSY", "claim_path": str(path), "claim": existing}
         try:
             path.unlink()
         except FileNotFoundError:
             pass
+    execution = str(execution_id or f"{re_safe(worker_id)}_{_sha(str(now), 12)}")
     payload = {
         "status": "CLAIMED",
         "claim_kind": claim_kind,
         "claim_key": claim_key,
         "worker_id": worker_id,
-        "claim_id": f"{re_safe(worker_id)}_{_sha(str(now), 10)}",
-        "created_at": utc_now(),
+        "claim_id": execution,
+        "execution_id": execution,
+        "profile": str(profile or ""),
+        "resource_class": str(resource_class or ""),
+        "claimed_at": utc_now(),
         "created_time": now,
+        "heartbeat_at": utc_now(),
+        "heartbeat_time": now,
         "lease_sec": int(lease_sec),
+        "lease_expiry": now + int(lease_sec),
     }
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -187,6 +227,13 @@ def release_claim(output_root: Path, *, claim_kind: str, claim_key: str) -> None
         _claim_path(output_root, claim_kind=claim_kind, claim_key=claim_key).unlink()
     except FileNotFoundError:
         pass
+
+
+def _candidate_id_from_row(row: dict[str, Any]) -> str:
+    case_id = str(row.get("case_id") or "")
+    target = _norm(str(row.get("target") or ""))
+    teacher = str(row.get("teacher") or "")
+    return str(row.get("candidate_id") or f"cand_{_sha(case_id + '|' + target + '|' + teacher)}")
 
 
 def _cache_rows_from_formal_status(root: Path) -> list[dict[str, Any]]:
@@ -362,6 +409,22 @@ def _write_case_manifest(path: Path, row: dict[str, str]) -> None:
     write_csv(path, [row], fieldnames)
 
 
+def _candidate_queue_manifest(output_root: Path) -> Path:
+    return _queue_paths(output_root)["root"] / "shared_ready_candidate_manifest.csv"
+
+
+def _candidate_queue_rows(output_root: Path, *, task_manifest: Path | None = None) -> list[dict[str, Any]]:
+    manifest = task_manifest or _candidate_queue_manifest(output_root)
+    if manifest.exists():
+        return read_csv_rows(manifest)
+    scope = _read_json(output_root / "full_round1_scope.json", {}) or _read_json(output_root / "full_round1_submission_scope.json", {})
+    rows = []
+    for row in scope.get("task_rows") or []:
+        if isinstance(row, dict):
+            rows.append(dict(row))
+    return rows
+
+
 def _write_array_sbatch(path: Path, *, python: Path, output_root: Path, task_manifest: Path, state_root: Path | None = None) -> None:
     state_arg = f"  --state-root {shlex.quote(str(state_root))} \\\n" if state_root else ""
     content = f"""#!/usr/bin/env bash
@@ -444,8 +507,7 @@ def build_submission_manifest(
             }
         )
     slurm_root = output_root / "slurm"
-    batch_key = _sha("|".join(row["candidate_id"] for row in rows), 12)
-    task_manifest = slurm_root / f"full373_task_manifest_{batch_key}.csv"
+    task_manifest = _candidate_queue_manifest(output_root)
     write_csv(task_manifest, rows, list(rows[0].keys()) if rows else ["task_index", "case_id", "target", "teacher", "candidate_id"])
     sbatch = slurm_root / "full373_multiteacher_array.sbatch"
     _write_array_sbatch(sbatch, python=python, output_root=output_root, task_manifest=task_manifest, state_root=state_root)
@@ -457,7 +519,7 @@ def build_submission_manifest(
         "scope_status": scope,
         "task_count": len(rows),
         "scientific_task_unit": "case_id x canonical_target x eligible_teacher",
-        "scheduler_array_unit": "case_id x canonical_target x eligible_teacher candidate shard",
+        "scheduler_array_unit": "generic GPU worker array consuming shared READY candidate queue",
         "groups": {
             FULL373_GROUP: {
                 "task_count": len(rows),
@@ -550,6 +612,126 @@ def publish_candidate_state(output_root: Path, state: dict[str, Any]) -> dict[st
     return state
 
 
+def _candidate_terminal(state: dict[str, Any]) -> bool:
+    return str(state.get("status") or "") in TERMINAL_CANDIDATE_STATES
+
+
+def _candidate_pending_like(state: dict[str, Any]) -> bool:
+    return str(state.get("status") or "") in {"", "PENDING", "READY", "RETRY_PENDING", "BACKPRESSURED"}
+
+
+def seed_candidate_states(output_root: Path, *, task_manifest: Path | None = None) -> dict[str, Any]:
+    rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    seeded = 0
+    retained = 0
+    for row in rows:
+        case_id = str(row.get("case_id") or "").strip()
+        target = _norm(str(row.get("target") or ""))
+        teacher = str(row.get("teacher") or "").strip()
+        if not case_id or not target or not teacher:
+            continue
+        existing = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+        if existing:
+            retained += 1
+            continue
+        seeded += 1
+        publish_candidate_state(
+            output_root,
+            {
+                "status": "READY",
+                "case_id": case_id,
+                "target": target,
+                "teacher": teacher,
+                "model": teacher,
+                "teacher_family": str(row.get("teacher_family") or teacher),
+                "candidate_id": _candidate_id_from_row(row),
+                "execution_schema_version": CANDIDATE_TASK_V1,
+                "logical_task_id": f"{case_id}|{target}|{teacher}",
+                "updated_at": utc_now(),
+                "published_at": utc_now(),
+            },
+        )
+    return {"status": "READY", "seeded": seeded, "retained": retained, "total": len(rows)}
+
+
+def claim_next_ready_candidate(
+    output_root: Path,
+    *,
+    task_manifest: Path | None = None,
+    worker_id: str,
+    profile: str,
+    resource_class: str = "GPU_INFERENCE_COMPATIBLE",
+    lease_sec: int = 7200,
+) -> dict[str, Any]:
+    seed_candidate_states(output_root, task_manifest=task_manifest)
+    manifest_rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    row_by_candidate_id: dict[str, dict[str, Any]] = {}
+    candidates: list[dict[str, Any]] = []
+    now = time.time()
+    for row in manifest_rows:
+        case_id = str(row.get("case_id") or "").strip()
+        target = _norm(str(row.get("target") or ""))
+        teacher = str(row.get("teacher") or "").strip()
+        if not case_id or not target or not teacher:
+            continue
+        candidate_id = _candidate_id_from_row(row)
+        row_by_candidate_id[candidate_id] = row
+        state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+        if _candidate_terminal(state):
+            continue
+        claim_path = _claim_path(output_root, claim_kind="candidate", claim_key=candidate_id)
+        claim_doc = _read_json(claim_path, {}) if claim_path.exists() else {}
+        state_status = str(state.get("status") or "READY")
+        if state_status in {"CLAIMED", "RUNNING"} and _claim_expired(claim_doc, now=now, lease_sec=int(claim_doc.get("lease_sec") or lease_sec)):
+            state = {
+                **state,
+                "status": "RETRY_PENDING",
+                "failure_reason": str(state.get("failure_reason") or "lease_expired_requeued"),
+                "updated_at": utc_now(),
+            }
+            publish_candidate_state(output_root, state)
+        if not _candidate_pending_like(state):
+            continue
+        candidates.append(
+            {
+                "case_id": case_id,
+                "target": target,
+                "teacher": teacher,
+                "candidate_id": candidate_id,
+                "state": state,
+                "row": row,
+            }
+        )
+    if not candidates:
+        return {"status": "NO_READY_CANDIDATES"}
+    candidates.sort(key=lambda item: (str(item["case_id"]), str(item["target"]), str(item["teacher"])))
+    for item in candidates:
+        claim = claim_work(
+            output_root,
+            claim_kind="candidate",
+            claim_key=str(item["candidate_id"]),
+            worker_id=worker_id,
+            lease_sec=lease_sec,
+            execution_id=f"{re_safe(worker_id)}_{_sha(str(time.time()), 12)}",
+            profile=profile,
+            resource_class=resource_class,
+        )
+        if claim["status"] != "CLAIMED":
+            continue
+        claimed_state = {
+            **item["state"],
+            "status": "CLAIMED",
+            "claim": claim["claim"],
+            "worker_id": worker_id,
+            "profile": profile,
+            "resource_class": resource_class,
+            "updated_at": utc_now(),
+        }
+        publish_candidate_state(output_root, claimed_state)
+        return {"status": "CLAIMED", "candidate": claimed_state, "claim": claim, "row": row_by_candidate_id.get(str(item["candidate_id"]), item["row"])}
+    return {"status": "NO_CLAIMABLE_READY_CANDIDATES", "queue_depth": len(candidates)}
+
+
 def recompute_case_target_readiness(output_root: Path, *, case_id: str, target: str) -> dict[str, Any]:
     scope = _read_json(output_root / "full_round1_submission_scope.json", {}) or _read_json(output_root / "full_round1_scope.json", {})
     routes = scope.get("routes") or {}
@@ -589,23 +771,31 @@ def recompute_case_target_readiness(output_root: Path, *, case_id: str, target: 
     return target_state
 
 
-def execute_task_index(task_index: int, task_manifest: Path, output_root: Path, *, worker_id: str = "", state_root: Path | None = None) -> dict[str, Any]:
-    rows = read_csv_rows(task_manifest)
-    row = next((item for item in rows if int(item.get("task_index") or -1) == int(task_index)), None)
-    if row is None:
-        raise IndexError(f"task index not found: {task_index}")
+def _execute_candidate_row(
+    row: dict[str, Any],
+    output_root: Path,
+    *,
+    worker_id: str = "",
+    state_root: Path | None = None,
+    already_claimed: bool = False,
+) -> dict[str, Any]:
     case_id = str(row["case_id"])
     target = _norm(str(row.get("target") or ""))
     teacher = str(row.get("teacher") or "")
-    candidate_id = str(row.get("candidate_id") or f"cand_{_sha(case_id + '|' + target + '|' + teacher)}")
+    task_index = int(row.get("task_index") or 0)
+    candidate_id = _candidate_id_from_row(row)
     existing = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
     if existing.get("status") in TERMINAL_CANDIDATE_STATES:
         return {"status": "REUSED_TERMINAL_CANDIDATE", "candidate": existing}
-    claim = claim_work(output_root, claim_kind="candidate", claim_key=candidate_id, worker_id=worker_id or f"pid_{os.getpid()}")
-    if claim["status"] != "CLAIMED":
-        return {"status": "CLAIM_BUSY", "candidate_id": candidate_id, "claim": claim}
+    if not already_claimed:
+        claim = claim_work(output_root, claim_kind="candidate", claim_key=candidate_id, worker_id=worker_id or f"pid_{os.getpid()}")
+        if claim["status"] != "CLAIMED":
+            return {"status": "CLAIM_BUSY", "candidate_id": candidate_id, "claim": claim}
+    else:
+        claim = {"status": "CLAIMED", "claim": _read_json(_claim_path(output_root, claim_kind="candidate", claim_key=candidate_id), {})}
     case_csv = output_root / "case_manifests" / f"{case_id}.csv"
     try:
+        heartbeat_claim(output_root, claim_kind="candidate", claim_key=candidate_id, worker_id=worker_id or f"pid_{os.getpid()}")
         _write_case_manifest(
             case_csv,
             {
@@ -644,7 +834,21 @@ def execute_task_index(task_index: int, task_manifest: Path, output_root: Path, 
         for key in ("DISPLAY", "GITHUB_TOKEN", "GH_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS"):
             env.pop(key, None)
         task_state_path = output_root / "task_states" / f"{candidate_id}.json"
-        state = {"status": "RUNNING", "case_id": case_id, "target": target, "teacher": teacher, "candidate_id": candidate_id, "task_index": task_index, "command": command, "started_at": utc_now()}
+        state = {
+            "status": "RUNNING",
+            "case_id": case_id,
+            "target": target,
+            "teacher": teacher,
+            "candidate_id": candidate_id,
+            "task_index": task_index,
+            "worker_id": worker_id or f"pid_{os.getpid()}",
+            "profile": str((claim.get("claim") or {}).get("profile") or row.get("profile") or ""),
+            "resource_class": str((claim.get("claim") or {}).get("resource_class") or row.get("resource_class") or ""),
+            "claim": claim.get("claim") or {},
+            "command": command,
+            "started_at": utc_now(),
+        }
+        publish_candidate_state(output_root, state)
         atomic_write_json(task_state_path, state)
         proc = subprocess.run(command, cwd=REPO_ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         candidate_state = _candidate_from_single_teacher_run(case_output, case_id=case_id, target=target, teacher=teacher)
@@ -668,6 +872,79 @@ def execute_task_index(task_index: int, task_manifest: Path, output_root: Path, 
         return final
     finally:
         release_claim(output_root, claim_kind="candidate", claim_key=candidate_id)
+
+
+def execute_task_index(task_index: int, task_manifest: Path, output_root: Path, *, worker_id: str = "", state_root: Path | None = None) -> dict[str, Any]:
+    rows = read_csv_rows(task_manifest)
+    row = next((item for item in rows if int(item.get("task_index") or -1) == int(task_index)), None)
+    if row is None:
+        raise IndexError(f"task index not found: {task_index}")
+    return _execute_candidate_row(row, output_root, worker_id=worker_id, state_root=state_root, already_claimed=False)
+
+
+def run_candidate_queue_worker(
+    output_root: Path,
+    *,
+    task_manifest: Path,
+    worker_id: str,
+    profile: str,
+    resource_class: str,
+    state_root: Path | None = None,
+    poll_sec: int = 15,
+    max_idle_sec: int = 180,
+    max_tasks: int = 8,
+    lease_sec: int = 7200,
+) -> dict[str, Any]:
+    started = time.time()
+    completed = 0
+    idle_since: float | None = None
+    while True:
+        claim = claim_next_ready_candidate(
+            output_root,
+            task_manifest=task_manifest,
+            worker_id=worker_id,
+            profile=profile,
+            resource_class=resource_class,
+            lease_sec=lease_sec,
+        )
+        if claim["status"] == "CLAIMED":
+            idle_since = None
+            result = _execute_candidate_row(
+                claim["row"],
+                output_root,
+                worker_id=worker_id,
+                state_root=state_root,
+                already_claimed=True,
+            )
+            completed += 1
+            if max_tasks > 0 and completed >= max_tasks:
+                telemetry = build_estep_telemetry(output_root)
+                return {
+                    "status": "MAX_TASKS_REACHED",
+                    "worker_id": worker_id,
+                    "profile": profile,
+                    "resource_class": resource_class,
+                    "completed": completed,
+                    "runtime_sec": round(time.time() - started, 3),
+                    "last_result": result,
+                    "telemetry": telemetry,
+                }
+            continue
+        telemetry = build_estep_telemetry(output_root)
+        if idle_since is None:
+            idle_since = time.time()
+        if time.time() - idle_since >= max_idle_sec:
+            return {
+                "status": "IDLE_EXIT",
+                "worker_id": worker_id,
+                "profile": profile,
+                "resource_class": resource_class,
+                "completed": completed,
+                "runtime_sec": round(time.time() - started, 3),
+                "last_claim_status": claim["status"],
+                "telemetry": telemetry,
+            }
+        time.sleep(max(1, int(poll_sec)))
 
 
 def _case_rows_from_scope(scope: dict[str, Any]) -> list[str]:
@@ -908,8 +1185,14 @@ def build_estep_telemetry(output_root: Path) -> dict[str, Any]:
     telemetry = {
         "status": "READY",
         "updated_at": utc_now(),
+        "task_ownership": "shared_queue",
+        "profile_binding": False,
         "teacher_candidate": {
             "total": candidate_total,
+            "ready_candidates": candidate_counts.get("READY", 0),
+            "claimed_candidates": candidate_counts.get("CLAIMED", 0),
+            "running_candidates": candidate_counts.get("RUNNING", 0),
+            "terminal_candidates": sum(candidate_counts.get(state, 0) for state in TERMINAL_CANDIDATE_STATES),
             "success": candidate_counts.get("SUCCESS", 0),
             "running": candidate_counts.get("RUNNING", 0) + candidate_counts.get("CLAIMED", 0),
             "pending": max(0, candidate_total - sum(candidate_counts.values())),
@@ -1135,6 +1418,13 @@ def main() -> int:
     parser.add_argument("--state-root", type=Path)
     parser.add_argument("--worker-id", default="")
     parser.add_argument("--selection-worker", action="store_true")
+    parser.add_argument("--queue-worker", action="store_true")
+    parser.add_argument("--worker-profile", default="")
+    parser.add_argument("--worker-resource-class", default="GPU_INFERENCE_COMPATIBLE")
+    parser.add_argument("--queue-poll-sec", default=int(os.getenv("TEACHER_QUEUE_POLL_SEC", "15")), type=int)
+    parser.add_argument("--queue-max-idle-sec", default=int(os.getenv("TEACHER_QUEUE_MAX_IDLE_SEC", "180")), type=int)
+    parser.add_argument("--queue-max-tasks", default=int(os.getenv("TEACHER_QUEUE_MAX_TASKS_PER_WORKER", "8")), type=int)
+    parser.add_argument("--claim-lease-sec", default=int(os.getenv("TEACHER_QUEUE_CLAIM_LEASE_SEC", "7200")), type=int)
     parser.add_argument("--critic-base-url", default=os.getenv("LABELCRITIC_BASE_URL", "http://localhost"))
     parser.add_argument("--critic-port", default=int(os.getenv("LABELCRITIC_PORT", "8000")), type=int)
     parser.add_argument("--selection-poll-sec", default=int(os.getenv("LABELCRITIC_SELECTION_POLL_SEC", "30")), type=int)
@@ -1146,6 +1436,22 @@ def main() -> int:
         if not args.task_manifest:
             raise SystemExit("--task-manifest is required with --execute-task-index")
         print(json.dumps(execute_task_index(args.execute_task_index, args.task_manifest.resolve(), output_root, worker_id=args.worker_id, state_root=args.state_root), indent=2, default=str))
+        return 0
+    if args.queue_worker:
+        if not args.task_manifest:
+            raise SystemExit("--task-manifest is required with --queue-worker")
+        print(json.dumps(run_candidate_queue_worker(
+            output_root,
+            task_manifest=args.task_manifest.resolve(),
+            worker_id=args.worker_id or f"queue_{os.getpid()}",
+            profile=args.worker_profile or "generic_gpu",
+            resource_class=args.worker_resource_class,
+            state_root=args.state_root,
+            poll_sec=args.queue_poll_sec,
+            max_idle_sec=args.queue_max_idle_sec,
+            max_tasks=args.queue_max_tasks,
+            lease_sec=args.claim_lease_sec,
+        ), indent=2, default=str))
         return 0
     if args.selection_worker:
         print(json.dumps(run_labelcritic_selection_worker(

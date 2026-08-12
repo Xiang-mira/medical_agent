@@ -1092,3 +1092,55 @@ def test_time_limit_extension_denied_is_recorded_not_fatal(tmp_path):
 
     assert event["status"] == "TIME_EXTENSION_UNAVAILABLE"
     assert event["scheduler_state"] == "RETRY_PENDING"
+
+
+def test_status_reports_shared_queue_worker_and_qos_telemetry(tmp_path):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+    (formal_root / "slurm" / "dynamic_gpu_submission_plan.json").write_text(
+        json.dumps(
+            {
+                "task_ownership": "shared_queue",
+                "profile_binding": False,
+                "primary_teacher_profile": "gpu_t4",
+                "teacher_h100_deferred_for_labelcritic": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (formal_root / "slurm" / "qos_capacity_cache.json").write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "gpu_t4": {"known_good_size": 4000},
+                    "gpu_a100": {"known_good_size": 500, "known_bad_size": 1000, "last_backpressure": {"reason": "QOSMaxSubmitJobPerUserLimit"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "job_id,profile,gres,submission_status,scheduler_status\n"
+        "91001,gpu_t4,gpu:T4:1,submitted,ACTIVE\n"
+        "91002,gpu_a100,gpu:A100:1,submitted,ACTIVE\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root), labelcritic={"job_id": "777777"})
+
+    state_map = {
+        "91001": {"state": "RUNNING", "job_id": "91001"},
+        "91002": {"state": "PENDING", "job_id": "91002"},
+        "777777": {"state": "RUNNING", "job_id": "777777"},
+    }
+    orch.slurm_job_state = lambda job_id: state_map.get(str(job_id), {"state": "UNKNOWN", "job_id": str(job_id)})  # type: ignore[assignment]
+    payload = orch.status(args)
+
+    assert payload["resources"]["task_ownership"] == "shared_queue"
+    assert payload["resources"]["profile_binding"] is False
+    assert payload["resources"]["primary_teacher_profile"] == "gpu_t4"
+    assert payload["resources"]["teacher_h100_deferred_for_labelcritic"] is True
+    assert payload["resources"]["teacher_workers"]["t4_running"] == 1
+    assert payload["resources"]["teacher_workers"]["a100_pending"] == 1
+    assert payload["resources"]["qos"]["per_profile_known_good"]["gpu_t4"] == 4000
+    assert payload["resources"]["qos"]["per_profile_known_bad"]["gpu_a100"] == 1000
