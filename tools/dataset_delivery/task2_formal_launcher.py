@@ -87,6 +87,10 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _absolute_no_symlink(path: str | Path) -> Path:
+    return Path(os.path.abspath(os.path.expanduser(str(path))))
+
+
 def _resolve_groups(groups: list[str] | None) -> list[str]:
     if groups is None:
         return list(FORMAL_MODEL_TARGETS)
@@ -468,11 +472,15 @@ def build_formal_plan(
     manifest_sha256 = sha256_file(case_manifest)
     target_config_sha256 = sha256_file(target_config)
     registry_sha256 = sha256_file(registry_path)
-    python_sha256 = sha256_file(python.resolve()) if python.exists() else ""
+    python_execution = _absolute_no_symlink(python)
+    python_binary_realpath = Path(os.path.realpath(str(python_execution)))
+    python_sha256 = sha256_file(python_binary_realpath) if python_execution.exists() else ""
     predictor_sha256 = sha256_file(nnunet_predict_executable.resolve()) if nnunet_predict_executable.exists() else ""
+    unest_python_execution = _absolute_no_symlink(unest_python_executable) if unest_python_executable else None
+    unest_python_binary_realpath = Path(os.path.realpath(str(unest_python_execution))) if unest_python_execution else None
     unest_python_sha256 = ""
-    if unest_python_executable and unest_python_executable.exists():
-        unest_python_sha256 = sha256_file(unest_python_executable.resolve())
+    if unest_python_execution and unest_python_execution.exists():
+        unest_python_sha256 = sha256_file(unest_python_binary_realpath or unest_python_execution)
     tasks_by_group: dict[str, list[dict[str, Any]]] = {group: [] for group in groups}
     selected_rows = case_rows
     if case_id:
@@ -512,11 +520,14 @@ def build_formal_plan(
                 "target_config_sha256": target_config_sha256,
                 "model_registry_sha256": registry_sha256,
                 "registry_path": str(registry_path),
-                "runtime_python": str(python.resolve()),
+                "runtime_python": str(python_execution),
+                "runtime_python_binary_realpath": str(python_binary_realpath),
                 "runtime_python_sha256": python_sha256,
                 "nnunet_predict_executable": str(nnunet_predict_executable.resolve()),
                 "nnunet_predict_sha256": predictor_sha256,
-                "unest_python_executable": str(unest_python_executable.resolve()) if unest_python_executable else "",
+                "unest_python_executable": str(unest_python_execution) if unest_python_execution else "",
+                "unest_python_execution_path": str(unest_python_execution) if unest_python_execution else "",
+                "unest_python_binary_realpath": str(unest_python_binary_realpath) if unest_python_binary_realpath else "",
                 "unest_python_sha256": unest_python_sha256,
                 "status": "planned",
             })
@@ -541,8 +552,10 @@ def build_formal_plan(
             [
                 "task_index", "case_id", "model_group", "models", "targets", "ct_path", "annotation_folder",
                 "task_state_path", "case_manifest_sha256", "target_config_sha256", "model_registry_sha256",
-                "registry_path", "runtime_python", "runtime_python_sha256", "nnunet_predict_executable", "nnunet_predict_sha256",
-                "unest_python_executable", "unest_python_sha256", "status",
+                "registry_path", "runtime_python", "runtime_python_binary_realpath", "runtime_python_sha256",
+                "nnunet_predict_executable", "nnunet_predict_sha256",
+                "unest_python_executable", "unest_python_execution_path", "unest_python_binary_realpath",
+                "unest_python_sha256", "status",
             ],
         )
         sbatch_path = _tagged_group_sbatch(output_root, group, submission_tag)
@@ -592,7 +605,11 @@ def build_formal_plan(
         "target_config_sha256": target_config_sha256,
         "model_registry_sha256": registry_sha256,
         "runtime_python_sha256": python_sha256,
+        "runtime_python_execution_path": str(python_execution),
+        "runtime_python_binary_realpath": str(python_binary_realpath),
         "nnunet_predict_sha256": predictor_sha256,
+        "unest_python_execution_path": str(unest_python_execution) if unest_python_execution else "",
+        "unest_python_binary_realpath": str(unest_python_binary_realpath) if unest_python_binary_realpath else "",
         "unest_python_sha256": unest_python_sha256,
         "case_manifest": str(case_manifest),
         "target_config": str(target_config),
@@ -671,7 +688,7 @@ def main() -> int:
         target_config=args.target_config.resolve(),
         checkpoint_root=args.checkpoint_root,
         nnunet_predict_executable=args.nnunet_predict_executable,
-        unest_python_executable=args.unest_python_executable.resolve() if args.unest_python_executable else None,
+        unest_python_executable=_absolute_no_symlink(args.unest_python_executable) if args.unest_python_executable else None,
         expected_case_count=args.expected_case_count,
         groups=groups,
         case_id=args.case_id or None,

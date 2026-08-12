@@ -92,6 +92,13 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _write_executable_body(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 def test_formal_manifest_builds_exact_103_and_rejects_duplicate_append(tmp_path: Path):
     from tools.dataset_delivery.delivery_lib import DeliveryError
     from tools.dataset_delivery.task2_formal_manifest import build_formal_manifest
@@ -214,6 +221,54 @@ def test_formal_launcher_plans_teacher_tasks_without_target_reference_masks(tmp_
     assert "export LABELCRITIC_BASE_URL=http://labelcritic-node" in sbatch_text
     assert "export LABELCRITIC_PORT=8123" in sbatch_text
     assert "export LABELCRITIC_MODEL_ID=Qwen/Qwen2-VL-72B-Instruct-AWQ" in sbatch_text
+
+
+def test_formal_launcher_preserves_python_venv_symlink_execution_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery import task2_formal_launcher as launcher
+
+    base, manifest, _, _, _ = _formal_manifest(tmp_path)
+    monkeypatch.setattr(launcher, "build_preflight", lambda **kwargs: {"status": "READY", "blocked_checks": [], "runtime_manifest": {}})
+    monkeypatch.setattr(launcher, "preflight_sbatch_script", lambda **kwargs: {"status": "READY", "reason": "test"})
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_root.mkdir()
+    base_unest = _write_executable_body(tmp_path / "base" / "python3.11", "#!/usr/bin/env bash\nexit 0\n")
+    unest_middle = tmp_path / "unest_env" / "bin" / "python3.11"
+    unest_python = tmp_path / "unest_env" / "bin" / "python"
+    unest_middle.parent.mkdir(parents=True)
+    unest_middle.symlink_to(base_unest)
+    unest_python.symlink_to("python3.11")
+    base_outer = _write_executable_body(tmp_path / "base_outer" / "python3.11", "#!/usr/bin/env bash\nexit 0\n")
+    outer_python = tmp_path / "outer_env" / "bin" / "python"
+    outer_python.parent.mkdir(parents=True)
+    outer_python.symlink_to(base_outer)
+
+    summary = launcher.build_formal_plan(
+        output_root=tmp_path / "formal",
+        case_manifest=manifest,
+        base_manifest=base,
+        code_root=REPO_ROOT,
+        python=outer_python,
+        checkpoint_root=checkpoint_root,
+        nnunet_predict_executable=_write_executable(tmp_path / "bin" / "nnUNetv2_predict"),
+        unest_python_executable=unest_python,
+        groups=["unest"],
+        dry_run=True,
+        allow_dirty_tracked=True,
+        run_slurm_test_only=False,
+    )
+
+    assert summary["status"] == "READY"
+    assert summary["runtime_python_execution_path"] == str(outer_python.absolute())
+    assert summary["runtime_python_binary_realpath"] == str(base_outer)
+    assert summary["unest_python_execution_path"] == str(unest_python.absolute())
+    assert summary["unest_python_binary_realpath"] == str(base_unest)
+    rows = _read_rows(Path(summary["groups"]["unest"]["task_manifest"]))
+    assert rows
+    assert {row["unest_python_executable"] for row in rows} == {str(unest_python.absolute())}
+    assert {row["unest_python_execution_path"] for row in rows} == {str(unest_python.absolute())}
+    assert {row["unest_python_binary_realpath"] for row in rows} == {str(base_unest)}
+    assert {row["runtime_python"] for row in rows} == {str(outer_python.absolute())}
+    assert {row["runtime_python_binary_realpath"] for row in rows} == {str(base_outer)}
 
 
 def test_formal_resume_skips_existing_valid_group_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

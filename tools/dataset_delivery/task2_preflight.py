@@ -82,6 +82,10 @@ def _sha256_file(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def _absolute_no_symlink(path: str | Path) -> Path:
+    return Path(os.path.abspath(os.path.expanduser(str(path))))
+
+
 def _path_check(path: Path, *, must_be_file: bool | None = None, sha256: bool = False) -> dict[str, Any]:
     exists = path.exists()
     result: dict[str, Any] = {
@@ -318,15 +322,16 @@ def _unest_checks(
                 pass
         checks.append({"name": "unest_import_monai_torch", "ok": bool(import_probe.get("ok")), **import_probe})
         try:
+            monai_command = [str(unest_python), "-m", "monai.bundle", "--help"]
             proc = subprocess.run(
-                [str(unest_python), "-m", "monai.bundle", "--help"],
+                monai_command,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=False,
                 timeout=60,
             )
-            monai_help = {"return_code": proc.returncode, "stdout_tail": (proc.stdout or "")[-1000:], "stderr_tail": (proc.stderr or "")[-1000:], "ok": proc.returncode == 0}
+            monai_help = {"command": monai_command, "return_code": proc.returncode, "stdout_tail": (proc.stdout or "")[-1000:], "stderr_tail": (proc.stderr or "")[-1000:], "ok": proc.returncode == 0}
         except Exception as exc:
             monai_help = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         checks.append({"name": "unest_monai_bundle_help", "ok": bool(monai_help.get("ok")), **monai_help})
@@ -381,7 +386,8 @@ def build_preflight(
         require_exists=False,
     )
     unest_python = Path(unest_python_resolution.execution_path)
-    resolved_outer_python = Path(outer_python or DEFAULT_OUTER_PYTHON).expanduser().resolve()
+    resolved_outer_python = _absolute_no_symlink(outer_python or DEFAULT_OUTER_PYTHON)
+    outer_python_binary_realpath = os.path.realpath(str(resolved_outer_python))
     checks: list[dict[str, Any]] = []
     repo_checks, repo_meta = _repo_checks(repo_root, canonical_code_root, formal_mode, allow_dirty_tracked=allow_dirty_tracked)
     data_checks, data_meta = _data_checks(case_list, output_root, formal_mode, resume=resume)
@@ -456,6 +462,8 @@ def build_preflight(
         "checkpoint_root": str(checkpoint_root),
         "default_hpc_checkpoint_root": str(DEFAULT_HPC_CHECKPOINT_ROOT),
         "outer_python": str(resolved_outer_python),
+        "outer_python_execution_path": str(resolved_outer_python),
+        "outer_python_binary_realpath": outer_python_binary_realpath,
         "outer_python_default": str(DEFAULT_OUTER_PYTHON),
         "nnunet_predictor": str(predictor),
         "nnunet_predictor_default": str(DEFAULT_NNUNETV2_PREDICT),

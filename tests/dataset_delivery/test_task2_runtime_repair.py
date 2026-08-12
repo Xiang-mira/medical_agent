@@ -623,6 +623,117 @@ def test_preflight_manifest_records_unest_execution_and_realpath(tmp_path: Path)
     assert resolution["real_path"] == str(real_python)
 
 
+def test_preflight_unest_smoke_uses_venv_execution_path_not_binary_realpath(tmp_path: Path, monkeypatch):
+    from tools.dataset_delivery.task2_preflight import build_preflight
+
+    log = tmp_path / "python_invocations.log"
+    base_python = _write_executable(
+        tmp_path / "base" / "python3.11",
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$0|$*\" >> {log}\n"
+        "if [ \"$0\" != \"$EXPECTED_UNEST_PYTHON\" ]; then echo wrong-python >&2; exit 9; fi\n"
+        "if [ \"$1\" = \"-c\" ]; then\n"
+        "  echo '{\"sys_executable\":\"venv-python\",\"sys_prefix\":\"venv\",\"sys_base_prefix\":\"base\",\"monai_version\":\"1.4.0\",\"torch_version\":\"2.2.0+cu121\",\"cuda_available\":false,\"cuda_version\":\"12.1\"}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"-m\" ] && [ \"$2\" = \"monai.bundle\" ] && [ \"$3\" = \"--help\" ]; then echo monai-help; exit 0; fi\n"
+        "exit 0\n",
+    )
+    link_middle = tmp_path / "venv" / "bin" / "python3.11"
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    link_middle.parent.mkdir(parents=True)
+    link_middle.symlink_to(base_python)
+    venv_python.symlink_to("python3.11")
+    monkeypatch.setenv("EXPECTED_UNEST_PYTHON", str(venv_python.absolute()))
+    checkpoint_root = tmp_path / "checkpoints"
+    unest_root = checkpoint_root / "UNEST" / "renalStructures_UNEST_segmentation"
+    for rel in ["models/model.pt", "configs/metadata.json", "configs/inference.json", "configs/logging.conf"]:
+        path = unest_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n", encoding="utf-8")
+    registry = tmp_path / "registry.yaml"
+    registry.write_text(
+        f"""
+checkpoint_root: {checkpoint_root}
+models:
+  unest:
+    enabled: true
+    runner: command_template
+    checkpoint_path: UNEST/renalStructures_UNEST_segmentation
+    source_code_path: UNEST/renalStructures_UNEST_segmentation
+    unest_python_executable: {base_python}
+""",
+        encoding="utf-8",
+    )
+    ct = _save(np.zeros((2, 2, 2), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    ref = tmp_path / "ref"
+    ref.mkdir()
+    case_csv = tmp_path / "cases.csv"
+    case_csv.write_text(f"case_id,ct_path,annotation_folder\ncase,{ct},{ref}\n", encoding="utf-8")
+
+    report = build_preflight(
+        models=["unest"],
+        case_list=case_csv,
+        output_root=tmp_path / "out",
+        registry_path=registry,
+        target_config=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json",
+        checkpoint_root_arg=checkpoint_root,
+        json_output=tmp_path / "preflight.json",
+        canonical_code_root=REPO_ROOT,
+        formal_mode=True,
+        outer_python=Path(sys.executable),
+        unest_python_executable=str(venv_python),
+        run_predictor_help=False,
+        allow_dirty_tracked=True,
+    )
+
+    assert report["status"] == "READY"
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["unest_import_monai_torch"]["command"][0] == str(venv_python.absolute())
+    assert checks["unest_monai_bundle_help"]["command"][0] == str(venv_python.absolute())
+    assert checks["unest_import_monai_torch"]["parsed"]["monai_version"] == "1.4.0"
+    assert checks["unest_import_monai_torch"]["parsed"]["torch_version"] == "2.2.0+cu121"
+    resolution = report["runtime_manifest"]["unest_python_resolution"]
+    assert resolution["execution_path"] == str(venv_python.absolute())
+    assert resolution["real_path"] == str(base_python)
+    assert all(line.startswith(str(venv_python.absolute()) + "|") for line in log.read_text(encoding="utf-8").splitlines())
+
+
+def test_outer_python_manifest_preserves_venv_execution_path(tmp_path: Path):
+    from tools.dataset_delivery.task2_preflight import build_preflight
+
+    real_python = _write_executable(tmp_path / "base" / "python3.11")
+    outer_python = tmp_path / "outer" / "bin" / "python"
+    outer_python.parent.mkdir(parents=True)
+    outer_python.symlink_to(real_python)
+    ct = _save(np.zeros((2, 2, 2), dtype=np.int16), tmp_path / "case" / "ct.nii.gz")
+    ref = tmp_path / "ref"
+    ref.mkdir()
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_root.mkdir()
+    case_csv = tmp_path / "cases.csv"
+    case_csv.write_text(f"case_id,ct_path,annotation_folder\ncase,{ct},{ref}\n", encoding="utf-8")
+
+    report = build_preflight(
+        models=[],
+        case_list=case_csv,
+        output_root=tmp_path / "out",
+        registry_path=REPO_ROOT / "configs" / "model_registry.yaml",
+        target_config=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json",
+        checkpoint_root_arg=checkpoint_root,
+        json_output=tmp_path / "preflight.json",
+        canonical_code_root=REPO_ROOT,
+        formal_mode=False,
+        outer_python=outer_python,
+        run_predictor_help=False,
+    )
+
+    manifest = report["runtime_manifest"]
+    assert manifest["outer_python"] == str(outer_python.absolute())
+    assert manifest["outer_python_execution_path"] == str(outer_python.absolute())
+    assert manifest["outer_python_binary_realpath"] == str(real_python)
+
+
 def test_airrc_group_schema_and_parse_groups():
     from tools.dataset_delivery.task2_smoke_validator import SMOKE_SPECS, parse_groups
 
