@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1
+
 
 def _write_group_plan(root: Path, group: str, count: int) -> dict[str, str | int]:
     manifest = root / group / f"{group}_task_manifest.csv"
@@ -72,7 +74,7 @@ def test_dynamic_submitter_overrequests_target_30_to_40_and_uses_generic_gpu(tmp
     assert plan["group_concurrency"] == {"cads": 18, "atm": 6, "airrc": 8, "unest": 8}
     rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
     assert {row["gres"] for row in rows} == {"gpu:1"}
-    assert "gpu:T4:1" not in (tmp_path / "slurm" / "dynamic" / "cads_generic_gpu_task2_array.sbatch").read_text(encoding="utf-8")
+    assert "gpu:T4:1" not in (tmp_path / "slurm" / "dynamic" / "cads_generic_gpu_shard_000_task2_array.sbatch").read_text(encoding="utf-8")
 
 
 def test_dynamic_submitter_profile_shards_do_not_duplicate_source_task_indices(tmp_path: Path):
@@ -321,10 +323,13 @@ def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_s
         {
             "run_id": "run_d",
             "submission_id": "batch_d",
+            "execution_schema_version": CANDIDATE_TASK_V1,
             "job_id": "91003",
             "model_group": "cads",
             "group": "cads",
             "profile": "generic_gpu",
+            "shard_id": "shard_000",
+            "logical_task_id": "run_d:batch_d:candidate_task_v1:cads:generic_gpu:shard_000",
             "submission_status": "submitted",
             "scheduler_status": "ACTIVE",
             "slurm_state": "RUNNING",
@@ -406,3 +411,81 @@ def test_dynamic_submitter_qos_slot_later_frees_and_remaining_workers_submit(tmp
     assert first["status"] == "WAITING_FOR_SUBMISSION_CAPACITY"
     assert second["status"] == "SUBMITTED"
     assert _rows(tmp_path / "slurm" / "submitted_jobs.csv")[0]["job_id"] == "91005"
+
+
+def test_dynamic_submitter_shards_by_detected_max_array_size_and_conserves_logical_tasks(tmp_path: Path):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 61697})
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=4,
+        overrequest_workers=4,
+        profile_specs="p0|gpu|gpu:1|8|64G|06:00:00,p1|gpu|gpu:1|8|64G|06:00:00,p2|gpu|gpu:1|8|64G|06:00:00,p3|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=True,
+        max_array_size=4000,
+    )
+
+    assert plan["execution_schema_version"] == CANDIDATE_TASK_V1
+    assert plan["max_array_size"] == 4000
+    assert plan["logical_task_count"] == 61697
+    assert plan["sharded_task_count"] == 61697
+    assert plan["unique_logical_task_count"] == 61697
+    assert plan["duplicate_logical_task_count"] == 0
+    assert plan["missing_logical_task_count"] == 0
+    assert plan["sharding_audit"]["all_array_specs_valid"] is True
+    assert all(int(row["local_end"]) <= 3999 for row in plan["jobs"])
+
+
+def test_dynamic_submitter_4001_tasks_split_into_4000_and_1(tmp_path: Path):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 4001})
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=1,
+        overrequest_workers=1,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=True,
+        max_array_size=4000,
+    )
+
+    assert [row["array_spec"] for row in plan["jobs"]] == ["0-3999%1", "0-0%1"]
+
+
+def test_dynamic_submitter_test_only_uses_real_array_argument(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 4001})
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(item) for item in command])
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if "--parsable" in command:
+            return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: QOSMaxSubmitJobPerUserLimit")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=1,
+        overrequest_workers=1,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=False,
+        max_array_size=4000,
+    )
+
+    test_only_calls = [call for call in calls if call[:2] == ["sbatch", "--test-only"]]
+    assert any("--array=0-3999%1" in call for call in test_only_calls)
+    assert any("--array=0-0%1" in call for call in test_only_calls)

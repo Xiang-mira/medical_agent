@@ -5,9 +5,20 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import nibabel as nib
+import numpy as np
 
 from tools.dataset_delivery import task2_full373_round1_launcher as full373
 from tools.dataset_delivery import task2_round1_orchestrator as orch
+
+
+def _save_mask(path: Path, *, value: int = 1) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = np.zeros((2, 2, 2), dtype=np.uint8)
+    if value:
+        data[0, 0, 0] = 1
+    nib.save(nib.Nifti1Image(data, np.eye(4)), str(path))
+    return path
 
 
 def _case_manifest(path: Path, case_ids: list[str], *, with_source_mask: bool = False) -> Path:
@@ -16,7 +27,7 @@ def _case_manifest(path: Path, case_ids: list[str], *, with_source_mask: bool = 
         ann = path.parent / "ann" / case_id
         ann.mkdir(parents=True, exist_ok=True)
         if with_source_mask:
-            (ann / "organ_a.nii.gz").write_bytes(b"source-mask")
+            _save_mask(ann / "organ_a.nii.gz")
         lines.append(f"{case_id},{path.parent / case_id / 'ct.nii.gz'},{ann}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
@@ -107,8 +118,7 @@ def test_task2_outputs_can_be_reused_as_exact_candidate_cache(monkeypatch, tmp_p
     _patch_routes(monkeypatch, {"organ_a": ["teacher1", "teacher2"]})
     cache = tmp_path / "task2_cache"
     mask = cache / "masks" / "CASE001" / "organ_a.nii.gz"
-    mask.parent.mkdir(parents=True, exist_ok=True)
-    mask.write_bytes(b"mask")
+    _save_mask(mask)
     (cache / "task2_formal_case_target_status.json").write_text(
         json.dumps(
             {
@@ -152,8 +162,7 @@ def test_full373_execute_runs_one_teacher_target_candidate_without_labelcritic(m
         captured.extend([str(part) for part in command])
         case_output = tmp_path / "out" / "candidate_runs" / "CASE001" / "organ_a" / "teacher1"
         mask = case_output / "annotation_versions" / "CASE001" / "updated" / "organ_a.nii.gz"
-        mask.parent.mkdir(parents=True, exist_ok=True)
-        mask.write_bytes(b"mask")
+        _save_mask(mask)
         full373.write_json(
             case_output / "annotation_versions" / "CASE001" / "selection_metadata.json",
             {
@@ -244,8 +253,7 @@ def _write_scope(root: Path, *, cases: list[str], routes: dict[str, list[str]]) 
 def _candidate(root: Path, case_id: str, target: str, teacher: str, status: str = "SUCCESS") -> dict:
     mask = root / "masks" / case_id / target / f"{teacher}.nii.gz"
     if status == "SUCCESS":
-        mask.parent.mkdir(parents=True, exist_ok=True)
-        mask.write_bytes(b"mask")
+        _save_mask(mask)
     state = {
         "status": status,
         "case_id": case_id,

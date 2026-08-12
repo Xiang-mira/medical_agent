@@ -26,6 +26,7 @@ from cli_anything.medai.core.model_registry import candidate_models_for_organs, 
 from cli_anything.medai.core.continual_learning import TRAINING_CONTRACT_VERSION, canonicalize_training_record  # noqa: E402
 from cli_anything.medai.core.multimodel_loop import _select_candidate  # noqa: E402
 from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
+from tools.dataset_delivery.delivery_lib import write_binary_mask_nifti_from_source  # noqa: E402
 
 
 FULL373_GROUP = "full373"
@@ -807,13 +808,12 @@ def select_case_target(
         return state
     terminal_state = _terminal_from_selection(selection, selected, len(candidates))
     final_mask = ""
+    normalization = {}
     if selected and selected.get("prediction") and Path(str(selected["prediction"])).is_file():
         final_dir = output_root / "annotation_versions" / case_id / "updated"
         final_dir.mkdir(parents=True, exist_ok=True)
         final_path = final_dir / f"{target}.nii.gz"
-        tmp = final_path.with_name(f".{final_path.name}.tmp.{os.getpid()}")
-        shutil.copy2(str(selected["prediction"]), str(tmp))
-        tmp.replace(final_path)
+        normalization = write_binary_mask_nifti_from_source(Path(str(selected["prediction"])), final_path)
         final_mask = str(final_path)
     result = {
         "status": terminal_state,
@@ -832,6 +832,7 @@ def select_case_target(
         "teacher_names": [candidate["model"] for candidate in candidates],
         "labelcritic_compare_used": bool(selection.get("labelcritic_records") or selection.get("critic_records")),
         "labelcritic_records": selection.get("labelcritic_records") or selection.get("critic_records") or [],
+        "formal_mask_contract": normalization,
         "updated_at": utc_now(),
     }
     atomic_write_json(_state_path(output_root, case_id, target, kind="selection"), result)

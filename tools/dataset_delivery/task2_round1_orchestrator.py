@@ -24,6 +24,11 @@ if str(REPO_ROOT / "agent-harness") not in sys.path:
 
 from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
+    CANDIDATE_TASK_V1,
+    LEGACY_CASE_FULL373_V1,
+    job_query_id,
+    normalize_slurm_job_identifier,
+    parse_slurm_comment,
     RETRYABLE_TERMINAL_STATES,
     classify_sbatch_failure,
     persist_submitted_job,
@@ -207,16 +212,53 @@ def labelcritic_runtime_preflight(base_url: str, port: int, *, expected_model: s
 
 
 def slurm_job_state(job_id: str) -> dict[str, Any]:
-    if not job_id:
-        return {"state": "UNKNOWN", "job_id": job_id, "source": "none"}
-    squeue = _run(["squeue", "-h", "-j", str(job_id), "-o", "%T"])
+    parsed = normalize_slurm_job_identifier(job_id)
+    query_id = parsed.get("query_id") or ""
+    if not query_id:
+        return {"state": "UNKNOWN", "job_id": "", "array_job_id": "", "array_task_id": "", "display_id": str(job_id or ""), "source": "none"}
+    squeue = _run(["squeue", "-h", "-j", str(query_id), "-o", "%i|%T"])
     if squeue["ok"] and squeue["stdout"].strip():
-        return {"state": squeue["stdout"].splitlines()[0].strip(), "job_id": job_id, "source": "squeue"}
-    sacct = _run(["sacct", "-n", "-j", str(job_id), "--format=State", "-P"])
+        first = squeue["stdout"].splitlines()[0].split("|")
+        job_display = first[0].strip() if first else query_id
+        return {
+            "state": first[1].strip() if len(first) > 1 else "UNKNOWN",
+            "job_id": parsed.get("job_id") or query_id,
+            "array_job_id": parsed.get("array_job_id") or query_id,
+            "array_task_id": parsed.get("array_task_id") or "",
+            "display_id": job_display,
+            "source": "squeue",
+        }
+    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobIDRaw,State", "-P"])
     if sacct["ok"] and sacct["stdout"].strip():
-        state = sacct["stdout"].splitlines()[0].split("|", 1)[0].strip().split()[0]
-        return {"state": state, "job_id": job_id, "source": "sacct"}
-    return {"state": "UNKNOWN", "job_id": job_id, "source": "unknown", "squeue": squeue, "sacct": sacct}
+        preferred = parsed.get("job_id") or query_id
+        chosen = None
+        for line in sacct["stdout"].splitlines():
+            parts = line.split("|")
+            raw_id = parts[0].strip() if parts else ""
+            if raw_id == preferred:
+                chosen = parts
+                break
+            if chosen is None and raw_id == query_id:
+                chosen = parts
+        if chosen:
+            return {
+                "state": chosen[1].strip().split()[0] if len(chosen) > 1 else "UNKNOWN",
+                "job_id": preferred,
+                "array_job_id": parsed.get("array_job_id") or query_id,
+                "array_task_id": parsed.get("array_task_id") or "",
+                "display_id": parsed.get("display_id") or preferred,
+                "source": "sacct",
+            }
+    return {
+        "state": "UNKNOWN",
+        "job_id": parsed.get("job_id") or query_id,
+        "array_job_id": parsed.get("array_job_id") or query_id,
+        "array_task_id": parsed.get("array_task_id") or "",
+        "display_id": parsed.get("display_id") or str(job_id or ""),
+        "source": "unknown",
+        "squeue": squeue,
+        "sacct": sacct,
+    }
 
 
 def _current_user() -> str:
@@ -224,27 +266,36 @@ def _current_user() -> str:
 
 
 def slurm_job_record(job_id: str) -> dict[str, Any]:
-    if not job_id:
-        return {"status": "INVALID", "state": "UNKNOWN", "job_id": job_id, "source": "none"}
-    squeue = _run(["squeue", "-h", "-j", str(job_id), "-o", "%i|%T|%u|%j"])
+    parsed = normalize_slurm_job_identifier(job_id)
+    query_id = parsed.get("query_id") or ""
+    if not query_id:
+        return {"status": "INVALID", "state": "UNKNOWN", "job_id": "", "display_id": str(job_id or ""), "source": "none"}
+    squeue = _run(["squeue", "-h", "-j", str(query_id), "-o", "%i|%T|%u|%j"])
     if squeue["ok"] and squeue["stdout"].strip():
         parts = squeue["stdout"].splitlines()[0].split("|")
         return {
             "status": "FOUND",
-            "job_id": parts[0].strip() if len(parts) > 0 else str(job_id),
+            "job_id": parsed.get("job_id") or query_id,
+            "array_job_id": parsed.get("array_job_id") or query_id,
+            "array_task_id": parsed.get("array_task_id") or "",
+            "display_id": parts[0].strip() if len(parts) > 0 else (parsed.get("display_id") or query_id),
             "state": parts[1].strip() if len(parts) > 1 else "UNKNOWN",
             "user": parts[2].strip() if len(parts) > 2 else "",
             "name": parts[3].strip() if len(parts) > 3 else "",
             "source": "squeue",
         }
-    sacct = _run(["sacct", "-n", "-j", str(job_id), "--format=JobIDRaw,State,User,JobName", "-P"])
+    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobIDRaw,State,User,JobName", "-P"])
     if sacct["ok"] and sacct["stdout"].strip():
+        preferred = parsed.get("job_id") or query_id
         for line in sacct["stdout"].splitlines():
             parts = line.split("|")
-            if parts and parts[0].strip() == str(job_id):
+            if parts and parts[0].strip() in {preferred, query_id}:
                 return {
                     "status": "FOUND",
-                    "job_id": parts[0].strip(),
+                    "job_id": preferred,
+                    "array_job_id": parsed.get("array_job_id") or query_id,
+                    "array_task_id": parsed.get("array_task_id") or "",
+                    "display_id": parsed.get("display_id") or parts[0].strip(),
                     "state": parts[1].strip().split()[0] if len(parts) > 1 else "UNKNOWN",
                     "user": parts[2].strip() if len(parts) > 2 else "",
                     "name": parts[3].strip() if len(parts) > 3 else "",
@@ -255,13 +306,18 @@ def slurm_job_record(job_id: str) -> dict[str, Any]:
 
 
 def slurm_job_timing(job_id: str) -> dict[str, Any]:
-    if not job_id:
-        return {"job_id": job_id, "state": "UNKNOWN"}
-    squeue = _run(["squeue", "-h", "-j", str(job_id), "-o", "%i|%T|%M|%l|%L|%e|%N"])
+    parsed = normalize_slurm_job_identifier(job_id)
+    query_id = parsed.get("query_id") or ""
+    if not query_id:
+        return {"job_id": "", "display_id": str(job_id or ""), "state": "UNKNOWN"}
+    squeue = _run(["squeue", "-h", "-j", str(query_id), "-o", "%i|%T|%M|%l|%L|%e|%N"])
     if squeue["ok"] and squeue["stdout"].strip():
         parts = squeue["stdout"].splitlines()[0].split("|")
         return {
-            "job_id": parts[0].strip() if len(parts) > 0 else str(job_id),
+            "job_id": parsed.get("job_id") or query_id,
+            "array_job_id": parsed.get("array_job_id") or query_id,
+            "array_task_id": parsed.get("array_task_id") or "",
+            "display_id": parts[0].strip() if len(parts) > 0 else (parsed.get("display_id") or query_id),
             "state": parts[1].strip() if len(parts) > 1 else "UNKNOWN",
             "elapsed": parts[2].strip() if len(parts) > 2 else "",
             "time_limit": parts[3].strip() if len(parts) > 3 else "",
@@ -308,21 +364,44 @@ def discover_active_medical_agent_teacher_jobs(*, formal_root: Path, state_root:
         comment = parts[5].strip() if len(parts) > 5 else ""
         command_text = parts[6].strip() if len(parts) > 6 else ""
         group, profile = _parse_teacher_job_name(name)
+        comment_meta = parse_slurm_comment(comment)
         combined = "\n".join([workdir, comment, command_text])
-        comment_match = bool(run_id and comment.startswith(f"medical_agent:{run_id}:"))
+        comment_match = bool(run_id and str(comment_meta.get("run_id") or "") == str(run_id))
         root_match = str(formal_root) in combined or str(state_root) in combined
         if state not in ACTIVE_STATES or not group or (not comment_match and not root_match):
             continue
+        execution_schema_version = str(comment_meta.get("execution_schema_version") or "")
+        if execution_schema_version and execution_schema_version != CANDIDATE_TASK_V1:
+            record_job_lifecycle(
+                state_root,
+                {
+                    "status": "HISTORICAL_INCOMPATIBLE_EXECUTION",
+                    "job_id": job_id,
+                    "display_id": job_id,
+                    "execution_schema_version": execution_schema_version,
+                    "comment": comment,
+                    "group": group,
+                    "profile": profile or "default",
+                },
+            )
+            continue
+        if not execution_schema_version:
+            continue
+        parsed_job = normalize_slurm_job_identifier(job_id)
         matches.append(
             {
-                "job_id": job_id,
-                "array_job_id": job_id.split("_", 1)[0],
+                "job_id": parsed_job.get("job_id") or parsed_job.get("array_job_id") or "",
+                "array_job_id": parsed_job.get("array_job_id") or "",
+                "array_task_id": parsed_job.get("array_task_id") or "",
+                "display_id": parsed_job.get("display_id") or job_id,
                 "slurm_state": state,
                 "user": job_user,
                 "job_name": name,
                 "model_group": group,
                 "group": group,
-                "profile": profile or "default",
+                "profile": str(comment_meta.get("profile") or profile or "default"),
+                "shard_id": str(comment_meta.get("shard_id") or ""),
+                "execution_schema_version": execution_schema_version,
                 "workdir": workdir,
                 "comment": comment,
                 "command": command_text,
@@ -350,7 +429,7 @@ def reconcile_active_teacher_jobs(args: argparse.Namespace, formal_root: Path | 
             state_root,
             {
                 **row,
-                "logical_task_id": f"{run_id}:adopted:{row['model_group']}:{row['profile']}",
+                "logical_task_id": f"{run_id}:adopted:{row['model_group']}:{row['profile']}:{row.get('shard_id') or 'na'}",
                 "scheduler_state": "ADOPTED_ACTIVE_JOB",
                 "attempt": "slurm_reconcile",
             },
@@ -386,7 +465,7 @@ def refresh_lifecycle_for_submitted_jobs(args: argparse.Namespace, formal_root: 
         }
         record_job_lifecycle(args.state_root.resolve(), payload)
         refreshed.append(payload)
-        if state in ACTIVE_STATES or state == "UNKNOWN":
+        if state in ACTIVE_STATES:
             active.append(payload)
         elif state in RETRYABLE_TERMINAL_STATES:
             retryable.append(payload)
@@ -614,6 +693,16 @@ def _load_state(state_root: Path) -> dict[str, Any]:
 def _save_state(state_root: Path, **updates: Any) -> dict[str, Any]:
     paths = _state_paths(state_root)
     state = _load_state(state_root)
+    if updates.get("terminal_state") == "ROUND1_FAILED":
+        updates.setdefault("terminal", True)
+        updates.setdefault("status", "FAILED")
+        updates.setdefault("controller_status", "FAILED")
+        updates.setdefault("scheduler_status", "FATAL")
+        if updates.get("e_step_status") not in {"PASSED", "FAILED"}:
+            updates["e_step_status"] = "FAILED"
+    elif updates.get("terminal_state") == "ROUND1_PASSED":
+        updates.setdefault("terminal", True)
+        updates.setdefault("status", "PASSED")
     state.update(updates)
     state["updated_at"] = utc_now()
     _write_json(paths["state"], state)
@@ -1478,7 +1567,7 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
         for row in read_csv_rows(jobs_csv):
             job_id = str(row.get("job_id") or "")
             state = slurm_job_state(job_id)
-            if state.get("state") in ACTIVE_STATES or state.get("state") == "UNKNOWN":
+            if state.get("state") in ACTIVE_STATES:
                 active.append(state)
             if state.get("state") in RETRYABLE_TERMINAL_STATES:
                 retryable.append(state)

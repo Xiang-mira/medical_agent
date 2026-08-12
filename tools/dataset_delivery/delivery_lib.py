@@ -903,6 +903,37 @@ def _load_nifti(path: Path):
         raise DeliveryError("nibabel is required for NIfTI validation") from exc
 
 
+def write_binary_mask_nifti_from_source(source_path: Path, destination_path: Path) -> dict[str, Any]:
+    try:
+        import nibabel as nib  # type: ignore
+        import numpy as np  # type: ignore
+    except ImportError as exc:
+        raise DeliveryError("nibabel and numpy are required for binary mask normalization") from exc
+    img = nib.load(str(source_path))
+    data = np.asanyarray(img.dataobj)
+    binary = (data > 0).astype(np.uint8)
+    header = img.header.copy()
+    header.set_data_dtype(np.uint8)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    if destination_path.name.endswith(".nii.gz"):
+        tmp_name = destination_path.name[: -len(".nii.gz")] + f".tmp.{os.getpid()}.nii.gz"
+    elif destination_path.name.endswith(".nii"):
+        tmp_name = destination_path.name[: -len(".nii")] + f".tmp.{os.getpid()}.nii"
+    else:
+        tmp_name = destination_path.name + f".tmp.{os.getpid()}"
+    tmp = destination_path.with_name(tmp_name)
+    nib.save(nib.Nifti1Image(binary, img.affine, header), str(tmp))
+    tmp.replace(destination_path)
+    return {
+        "source_path": str(source_path),
+        "destination_path": str(destination_path),
+        "source_dtype": str(img.get_data_dtype()),
+        "written_dtype": "uint8",
+        "foreground_voxels": int(binary.sum()),
+        "labels": [0, 1] if int(binary.sum()) > 0 else [0],
+    }
+
+
 def validate_generated_masks(run_dir: Path, manifest: Path, gap_file: Path, taxonomy: Path, output_dir: Path) -> dict[str, Any]:
     organs = set(confirmed_generate_organs(gap_file, taxonomy))
     rows = []

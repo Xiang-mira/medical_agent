@@ -16,6 +16,11 @@ RETRYABLE_TERMINAL_STATES = {"TIMEOUT", "PREEMPTED", "NODE_FAIL", "OUT_OF_MEMORY
 FATAL_TERMINAL_STATES = {"FAILED", "CANCELLED", "BOOT_FAIL", "DEADLINE"}
 TERMINAL_STATES = SUCCESS_STATES | RETRYABLE_TERMINAL_STATES | FATAL_TERMINAL_STATES
 
+LEGACY_CASE_FULL373_V1 = "legacy_case_full373_v1"
+CANDIDATE_TASK_V1 = "candidate_task_v1"
+DEFAULT_MANIFEST_SCHEMA_VERSION = "candidate_task_manifest_v1"
+DEFAULT_LOGICAL_TASK_NAMESPACE = "case_id|canonical_target|eligible_teacher"
+
 BACKPRESSURE_PATTERNS = (
     "QOSMaxSubmitJobPerUserLimit",
     "QOSMaxJobsPerUserLimit",
@@ -47,16 +52,25 @@ SUBMITTED_JOB_FIELDS = [
     "submission_id",
     "job_id",
     "array_job_id",
+    "array_task_id",
+    "display_id",
     "group",
     "model_group",
     "profile",
+    "shard_id",
+    "shard_index",
     "partition",
     "gres",
     "task_manifest",
     "sbatch_file",
     "array_range",
+    "array_spec",
     "array_concurrency",
     "task_count",
+    "execution_schema_version",
+    "manifest_schema_version",
+    "logical_task_namespace",
+    "logical_task_id",
     "status",
     "submission_status",
     "scheduler_status",
@@ -97,18 +111,109 @@ def classify_sbatch_failure(text: str) -> dict[str, str]:
     return {"class": "FATAL_SUBMISSION_ERROR", "reason": "unclassified_sbatch_failure"}
 
 
+def normalize_slurm_job_identifier(value: str) -> dict[str, str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return {"job_id": "", "array_job_id": "", "array_task_id": "", "display_id": "", "query_id": ""}
+    concrete = re.match(r"^(?P<array>\d+)_(?P<task>\d+)$", raw)
+    if concrete:
+        array_job_id = concrete.group("array")
+        array_task_id = concrete.group("task")
+        return {
+            "job_id": f"{array_job_id}_{array_task_id}",
+            "array_job_id": array_job_id,
+            "array_task_id": array_task_id,
+            "display_id": raw,
+            "query_id": array_job_id,
+        }
+    compressed = re.match(r"^(?P<array>\d+)_\[(?P<display>.+)\]$", raw)
+    if compressed:
+        array_job_id = compressed.group("array")
+        return {
+            "job_id": "",
+            "array_job_id": array_job_id,
+            "array_task_id": "",
+            "display_id": raw,
+            "query_id": array_job_id,
+        }
+    if raw.isdigit():
+        return {
+            "job_id": raw,
+            "array_job_id": raw,
+            "array_task_id": "",
+            "display_id": raw,
+            "query_id": raw,
+        }
+    return {
+        "job_id": "",
+        "array_job_id": "",
+        "array_task_id": "",
+        "display_id": raw,
+        "query_id": "",
+    }
+
+
 def parse_sbatch_job_id(stdout: str) -> dict[str, str]:
     raw = str(stdout or "").splitlines()[-1].strip() if str(stdout or "").strip() else ""
     raw = raw.split(";", 1)[0].strip()
-    array_job_id = raw.split("_", 1)[0].strip()
-    return {"job_id": raw, "array_job_id": array_job_id}
+    parsed = normalize_slurm_job_identifier(raw)
+    if raw and not parsed["display_id"]:
+        parsed["display_id"] = raw
+    return parsed
 
 
-def slurm_comment(*, run_id: str, submission_id: str, group: str, profile: str) -> str:
+def slurm_comment(
+    *,
+    run_id: str,
+    submission_id: str,
+    group: str,
+    profile: str,
+    execution_schema_version: str = "",
+    shard_id: str = "",
+) -> str:
     safe = []
-    for value in (run_id, submission_id, group, profile):
+    if execution_schema_version:
+        values = (run_id, execution_schema_version, submission_id, profile, shard_id or "na")
+    else:
+        values = (run_id, submission_id, group, profile)
+    for value in values:
         safe.append(re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(value or "na")).strip("_") or "na")
     return "medical_agent:" + ":".join(safe)
+
+
+def parse_slurm_comment(comment: str) -> dict[str, str]:
+    raw = str(comment or "").strip()
+    prefix = "medical_agent:"
+    if not raw.startswith(prefix):
+        return {
+            "run_id": "",
+            "execution_schema_version": "",
+            "submission_id": "",
+            "group": "",
+            "profile": "",
+            "shard_id": "",
+            "comment": raw,
+        }
+    parts = raw[len(prefix):].split(":")
+    if len(parts) >= 5 and parts[1] == CANDIDATE_TASK_V1:
+        return {
+            "run_id": parts[0],
+            "execution_schema_version": parts[1],
+            "submission_id": parts[2],
+            "group": "",
+            "profile": parts[3],
+            "shard_id": parts[4],
+            "comment": raw,
+        }
+    return {
+        "run_id": parts[0] if len(parts) > 0 else "",
+        "execution_schema_version": "",
+        "submission_id": parts[1] if len(parts) > 1 else "",
+        "group": parts[2] if len(parts) > 2 else "",
+        "profile": parts[3] if len(parts) > 3 else "",
+        "shard_id": "",
+        "comment": raw,
+    }
 
 
 def load_submitted_jobs(slurm_root: Path) -> list[dict[str, str]]:
@@ -128,32 +233,54 @@ def load_submitted_jobs(slurm_root: Path) -> list[dict[str, str]]:
             pass
     deduped: dict[tuple[str, str, str, str], dict[str, str]] = {}
     for row in rows:
+        parsed = normalize_slurm_job_identifier(str(row.get("job_id") or row.get("display_id") or ""))
+        if parsed["job_id"]:
+            row["job_id"] = parsed["job_id"]
+        if parsed["array_job_id"] and not row.get("array_job_id"):
+            row["array_job_id"] = parsed["array_job_id"]
+        if parsed["array_task_id"] and not row.get("array_task_id"):
+            row["array_task_id"] = parsed["array_task_id"]
+        if parsed["display_id"] and not row.get("display_id"):
+            row["display_id"] = parsed["display_id"]
         key = (
-            str(row.get("job_id") or ""),
+            str(row.get("job_id") or row.get("display_id") or ""),
             str(row.get("submission_id") or ""),
             str(row.get("model_group") or row.get("group") or ""),
-            str(row.get("profile") or ""),
+            str(row.get("profile") or row.get("shard_id") or ""),
         )
         deduped[key] = row
     return list(deduped.values())
 
 
-def _row_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+def _row_key(row: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
     job_id = str(row.get("job_id") or "")
     if job_id:
         return ("job", job_id, "", "", "")
     return (
         "logical",
+        str(row.get("execution_schema_version") or ""),
         str(row.get("submission_id") or ""),
         str(row.get("model_group") or row.get("group") or ""),
-        str(row.get("profile") or ""),
-        str(row.get("task_manifest") or ""),
+        str(row.get("profile") or row.get("shard_id") or ""),
+        str(row.get("logical_task_id") or row.get("task_manifest") or ""),
     )
 
 
 def persist_submitted_job(slurm_root: Path, row: dict[str, Any]) -> list[dict[str, Any]]:
     existing = load_submitted_jobs(slurm_root)
     normalized = {field: str(row.get(field, "")) for field in SUBMITTED_JOB_FIELDS}
+    parsed = normalize_slurm_job_identifier(normalized.get("job_id") or normalized.get("display_id") or "")
+    if parsed["job_id"]:
+        normalized["job_id"] = parsed["job_id"]
+    if parsed["array_job_id"]:
+        normalized["array_job_id"] = normalized.get("array_job_id") or parsed["array_job_id"]
+    if parsed["array_task_id"]:
+        normalized["array_task_id"] = normalized.get("array_task_id") or parsed["array_task_id"]
+    if parsed["display_id"]:
+        normalized["display_id"] = normalized.get("display_id") or parsed["display_id"]
+    normalized["execution_schema_version"] = normalized.get("execution_schema_version") or LEGACY_CASE_FULL373_V1
+    normalized["manifest_schema_version"] = normalized.get("manifest_schema_version") or DEFAULT_MANIFEST_SCHEMA_VERSION
+    normalized["logical_task_namespace"] = normalized.get("logical_task_namespace") or DEFAULT_LOGICAL_TASK_NAMESPACE
     normalized["updated_at"] = utc_now()
     by_key: dict[tuple[str, str, str, str, str], dict[str, Any]] = {_row_key(item): dict(item) for item in existing}
     by_key[_row_key(normalized)] = normalized
@@ -173,19 +300,32 @@ def append_submission_attempt(slurm_root: Path, row: dict[str, Any]) -> None:
     append_jsonl(slurm_root / "submission_attempts.jsonl", {"time": utc_now(), **row})
 
 
-def existing_active_logical_keys(slurm_root: Path) -> set[tuple[str, str, str]]:
-    keys: set[tuple[str, str, str]] = set()
+def job_query_id(row: dict[str, Any]) -> str:
+    parsed = normalize_slurm_job_identifier(str(row.get("job_id") or row.get("display_id") or ""))
+    return parsed["query_id"]
+
+
+def existing_active_logical_keys(slurm_root: Path) -> set[tuple[str, str, str, str, str]]:
+    keys: set[tuple[str, str, str, str, str]] = set()
     for row in load_submitted_jobs(slurm_root):
         status = str(row.get("submission_status") or row.get("status") or "").lower()
         scheduler_status = str(row.get("scheduler_status") or "")
         slurm_state = str(row.get("slurm_state") or "")
-        if status in {"submitted", "adopted", "reused"} or scheduler_status in {"ACTIVE", "ADOPTED_ACTIVE_JOB"} or slurm_state in ACTIVE_STATES:
-            keys.add((
-                str(row.get("submission_id") or ""),
-                str(row.get("model_group") or row.get("group") or ""),
-                str(row.get("profile") or ""),
-            ))
-            keys.add(("", str(row.get("model_group") or row.get("group") or ""), str(row.get("profile") or "")))
+        schema = str(row.get("execution_schema_version") or "")
+        if schema != CANDIDATE_TASK_V1:
+            continue
+        if slurm_state not in ACTIVE_STATES and scheduler_status not in {"ACTIVE", "ADOPTED_ACTIVE_JOB"}:
+            continue
+        if status not in {"submitted", "adopted", "reused"} and scheduler_status not in {"ACTIVE", "ADOPTED_ACTIVE_JOB"}:
+            continue
+        key = (
+            schema,
+            str(row.get("submission_id") or ""),
+            str(row.get("model_group") or row.get("group") or ""),
+            str(row.get("profile") or ""),
+            str(row.get("shard_id") or ""),
+        )
+        keys.add(key)
     return keys
 
 

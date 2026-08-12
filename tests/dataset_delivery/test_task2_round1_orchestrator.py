@@ -12,6 +12,7 @@ import pytest
 from tools.dataset_delivery import task2_round1_orchestrator as orch
 from tools.dataset_delivery import slurm_reliability as reliability
 from tools.dataset_delivery import task2_workspace_staging as staging
+from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1
 
 
 @pytest.fixture(autouse=True)
@@ -1020,7 +1021,7 @@ def test_reconcile_active_teacher_jobs_adopts_matching_slurm_job_without_hardcod
         if command[:2] == ["squeue", "-h"]:
             return {
                 "ok": True,
-                "stdout": f"91919|RUNNING|{os.getenv('USER') or ''}|task2_cads_gpu_t4|/repo|medical_agent:run_reconcile:ready_batch_001:cads:gpu_t4|{formal_root}/slurm/dynamic/ready_batch_001/cads_gpu_t4_task2_array.sbatch\n",
+                "stdout": f"91919|RUNNING|{os.getenv('USER') or ''}|task2_cads_gpu_t4|/repo|medical_agent:run_reconcile:{CANDIDATE_TASK_V1}:ready_batch_001:gpu_t4:shard_000|{formal_root}/slurm/dynamic/ready_batch_001/cads_gpu_t4_shard_000_task2_array.sbatch\n",
                 "stderr": "",
                 "return_code": 0,
             }

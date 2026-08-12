@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.dataset_delivery.delivery_lib import NIFTI_SUFFIX, sha256_file, write_csv, write_json  # noqa: E402
+from tools.dataset_delivery.delivery_lib import NIFTI_SUFFIX, sha256_file, write_binary_mask_nifti_from_source, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.task2_smoke_validator import validate_mask  # noqa: E402
 
 
@@ -159,9 +159,9 @@ def _copy_idempotent(src: Path, dst: Path, *, backup_root: Path) -> dict[str, An
         backup_path = backup_root / f"{dst.name}.{dst_hash[:12]}.bak"
         if not backup_path.exists():
             shutil.copy2(dst, backup_path)
-        shutil.copy2(src, dst)
+        write_binary_mask_nifti_from_source(src, dst)
         return {"action": "overwrote_after_backup", "backup_path": str(backup_path)}
-    shutil.copy2(src, dst)
+    write_binary_mask_nifti_from_source(src, dst)
     return {"action": "copied", "backup_path": ""}
 
 

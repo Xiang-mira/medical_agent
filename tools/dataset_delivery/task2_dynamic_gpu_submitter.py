@@ -20,6 +20,10 @@ from scheduler.resource_recommender import adaptive_overrequest_count  # noqa: E
 from scheduler.resource_discovery import discover_resource_snapshot  # noqa: E402
 from tools.dataset_delivery.delivery_lib import read_csv_fieldnames, read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
+    CANDIDATE_TASK_V1,
+    DEFAULT_LOGICAL_TASK_NAMESPACE,
+    DEFAULT_MANIFEST_SCHEMA_VERSION,
+    SUBMITTED_JOB_FIELDS,
     append_submission_attempt,
     classify_sbatch_failure,
     existing_active_logical_keys,
@@ -37,6 +41,7 @@ DEFAULT_GROUP_WEIGHTS = {
     "unest": 0.20,
 }
 DEFAULT_PROFILE_SPECS = "generic_gpu|gpu|gpu:1|8|64G|06:00:00"
+DEFAULT_SLURM_MAX_ARRAY_SIZE_FALLBACK = 1000
 GPU_VRAM_ESTIMATE_GB = {
     "T4": 16,
     "A10": 24,
@@ -267,12 +272,79 @@ def _replace_directive(lines: list[str], prefix: str, value: str) -> list[str]:
     return output
 
 
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(str(value).strip())
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def detect_max_array_size(explicit: int | None = None) -> dict[str, Any]:
+    cli_value = _positive_int(explicit)
+    if cli_value is not None:
+        return {"value": cli_value, "source": "cli"}
+    env_value = _positive_int(os.getenv("TASK2_SLURM_MAX_ARRAY_SIZE", ""))
+    if env_value is not None:
+        return {"value": env_value, "source": "env"}
+    try:
+        proc = subprocess.run(
+            ["scontrol", "show", "config"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "value": DEFAULT_SLURM_MAX_ARRAY_SIZE_FALLBACK,
+            "source": "fallback",
+            "stderr": f"{type(exc).__name__}: {exc}",
+        }
+    if proc.returncode == 0:
+        match = re.search(r"MaxArraySize\s*=\s*(\d+)", proc.stdout)
+        if match:
+            discovered = _positive_int(match.group(1))
+            if discovered is not None:
+                return {"value": discovered, "source": "scontrol", "stdout": proc.stdout.strip()}
+    return {
+        "value": DEFAULT_SLURM_MAX_ARRAY_SIZE_FALLBACK,
+        "source": "fallback",
+        "stderr": proc.stderr.strip(),
+    }
+
+
+def _logical_task_id(row: dict[str, Any]) -> str:
+    existing = str(row.get("logical_task_id") or "").strip()
+    if existing:
+        return existing
+    case_id = str(row.get("case_id") or "").strip()
+    target = str(row.get("target") or "").strip()
+    teacher = str(row.get("teacher") or "").strip()
+    if case_id and target and teacher:
+        return "|".join([case_id, target, teacher])
+    return "|".join(
+        [
+            case_id,
+            str(row.get("model_group") or row.get("group") or "").strip(),
+            str(row.get("task_index") or row.get("source_manifest_row") or row.get("source_task_index") or "").strip(),
+        ]
+    )
+
+
+def _chunk_rows(rows: list[dict[str, str]], size: int) -> list[list[dict[str, str]]]:
+    if size <= 0:
+        raise ValueError(f"Invalid shard size: {size}")
+    return [rows[index : index + size] for index in range(0, len(rows), size)]
+
+
 def _rewrite_sbatch(
     source: Path,
     destination: Path,
     *,
     group: str,
     profile: GpuSubmitProfile,
+    shard_id: str,
     task_manifest: Path,
     output_root: Path,
     state_root: Path,
@@ -280,14 +352,14 @@ def _rewrite_sbatch(
     submission_id: str,
 ) -> None:
     lines = source.read_text(encoding="utf-8").splitlines()
-    lines = _replace_directive(lines, "#SBATCH --job-name=", f"task2_{group}_{profile.name}")
+    lines = _replace_directive(lines, "#SBATCH --job-name=", f"task2_{group}_{profile.name}_{shard_id}")
     lines = _replace_directive(lines, "#SBATCH --partition=", profile.partition)
     lines = _replace_directive(lines, "#SBATCH --gres=", profile.gres)
     lines = _replace_directive(lines, "#SBATCH --cpus-per-task=", str(profile.cpus_per_task))
     lines = _replace_directive(lines, "#SBATCH --mem=", profile.mem)
     lines = _replace_directive(lines, "#SBATCH --time=", profile.time_limit)
-    lines = _replace_directive(lines, "#SBATCH --output=", str(output_root / "slurm" / f"{group}_{profile.name}_%A_%a.out"))
-    lines = _replace_directive(lines, "#SBATCH --error=", str(output_root / "slurm" / f"{group}_{profile.name}_%A_%a.err"))
+    lines = _replace_directive(lines, "#SBATCH --output=", str(output_root / "slurm" / f"{group}_{profile.name}_{shard_id}_%A_%a.out"))
+    lines = _replace_directive(lines, "#SBATCH --error=", str(output_root / "slurm" / f"{group}_{profile.name}_{shard_id}_%A_%a.err"))
     lines = _replace_directive(lines, "#SBATCH --signal=", "B:USR1@900")
     rewritten: list[str] = []
     inserted_guard = False
@@ -298,7 +370,7 @@ def _rewrite_sbatch(
             suffix = " \\" if stripped.endswith("\\") else ""
             rewritten.append(f"{indent}--task-manifest {task_manifest}{suffix}")
         elif not inserted_guard and "task2_formal_launcher.py" in stripped:
-            logical_task = f"{run_id}:{submission_id}:{group}:{profile.name}"
+            logical_task = f"{run_id}:{submission_id}:{CANDIDATE_TASK_V1}:{group}:{profile.name}:{shard_id}"
             rewritten.append(
                 "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout "
                 f"--state-root {state_root} "
@@ -312,7 +384,7 @@ def _rewrite_sbatch(
         else:
             rewritten.append(line)
     if not inserted_guard:
-        logical_task = f"{run_id}:{submission_id}:{group}:{profile.name}"
+        logical_task = f"{run_id}:{submission_id}:{CANDIDATE_TASK_V1}:{group}:{profile.name}:{shard_id}"
         rewritten.append(
             "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout "
             f"--state-root {state_root} "
@@ -326,16 +398,87 @@ def _rewrite_sbatch(
     destination.chmod(0o755)
 
 
-def _write_shard_manifest(source_manifest: Path, destination: Path, rows: list[dict[str, str]]) -> None:
+def _write_shard_manifest(source_manifest: Path, destination: Path, rows: list[dict[str, str]]) -> list[dict[str, Any]]:
     source_fields = read_csv_fieldnames(source_manifest)
-    fieldnames = ["task_index", *[field for field in source_fields if field != "task_index"], "source_task_index"]
+    extra_fields = [
+        "local_array_index",
+        "global_logical_index",
+        "logical_task_id",
+        "teacher_family",
+        "source_manifest_row",
+        "source_task_index",
+        "execution_schema_version",
+        "manifest_schema_version",
+        "logical_task_namespace",
+    ]
+    fieldnames = ["task_index", *[field for field in source_fields if field != "task_index"], *[field for field in extra_fields if field not in source_fields]]
     shard_rows: list[dict[str, Any]] = []
     for new_index, row in enumerate(rows):
         updated = dict(row)
-        updated["source_task_index"] = str(row.get("task_index") or new_index)
+        source_manifest_row = str(
+            row.get("source_manifest_row")
+            or row.get("source_task_index")
+            or row.get("global_logical_index")
+            or row.get("task_index")
+            or new_index
+        )
         updated["task_index"] = new_index
+        updated["local_array_index"] = str(new_index)
+        updated["global_logical_index"] = str(row.get("global_logical_index") or source_manifest_row)
+        updated["logical_task_id"] = _logical_task_id(row)
+        updated["teacher_family"] = str(row.get("teacher_family") or row.get("teacher") or "")
+        updated["source_manifest_row"] = source_manifest_row
+        updated["source_task_index"] = source_manifest_row
+        updated["execution_schema_version"] = CANDIDATE_TASK_V1
+        updated["manifest_schema_version"] = DEFAULT_MANIFEST_SCHEMA_VERSION
+        updated["logical_task_namespace"] = DEFAULT_LOGICAL_TASK_NAMESPACE
         shard_rows.append(updated)
     write_csv(destination, shard_rows, fieldnames)
+    return shard_rows
+
+
+def _validate_array_plan(row: dict[str, Any], *, max_array_size: int) -> dict[str, Any]:
+    manifest_path = Path(str(row["task_manifest"]))
+    sbatch_path = Path(str(row["sbatch_file"]))
+    task_count = int(row.get("task_count") or 0)
+    concurrency = int(row.get("array_concurrency") or 0)
+    local_start = int(str(row.get("local_start", 0)))
+    local_end = int(str(row.get("local_end", -1)))
+    manifest_rows = read_csv_rows(manifest_path) if manifest_path.exists() else []
+    logical_ids = [str(item.get("logical_task_id") or "") for item in manifest_rows]
+    duplicate_count = len(logical_ids) - len(set(logical_ids))
+    errors: list[str] = []
+    if task_count <= 0:
+        errors.append("task_count_must_be_positive")
+    if local_start != 0:
+        errors.append("local_start_must_equal_zero")
+    if task_count > 0 and local_end != task_count - 1:
+        errors.append("local_end_must_equal_task_count_minus_one")
+    if local_end >= max_array_size:
+        errors.append("local_end_exceeds_max_array_size")
+    if concurrency <= 0 or concurrency > max(1, task_count):
+        errors.append("invalid_array_concurrency")
+    if len(manifest_rows) != task_count:
+        errors.append("manifest_row_count_mismatch")
+    if duplicate_count > 0:
+        errors.append("duplicate_logical_task_ids_within_shard")
+    if not sbatch_path.exists():
+        errors.append("sbatch_file_missing")
+    if not manifest_path.exists():
+        errors.append("manifest_missing")
+    return {
+        "status": "READY" if not errors else "INVALID_ARRAY_PLAN",
+        "errors": errors,
+        "profile": row.get("profile"),
+        "shard_id": row.get("shard_id"),
+        "task_count": task_count,
+        "array_spec": row.get("array_spec"),
+        "concurrency": concurrency,
+        "max_array_size": max_array_size,
+        "manifest": str(manifest_path),
+        "duplicate_logical_task_ids": duplicate_count,
+        "manifest_rows": len(manifest_rows),
+    }
 
 
 def _preflight_sbatch(row: dict[str, Any], *, run_sbatch_test_only: bool) -> dict[str, Any]:
@@ -360,8 +503,9 @@ def _preflight_sbatch(row: dict[str, Any], *, run_sbatch_test_only: bool) -> dic
     if shell_proc.returncode != 0:
         return report
     if run_sbatch_test_only:
+        array_spec = str(row["array_spec"])
         sbatch_proc = subprocess.run(
-            ["sbatch", "--test-only", sbatch_file],
+            ["sbatch", "--test-only", f"--array={array_spec}", sbatch_file],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -374,6 +518,7 @@ def _preflight_sbatch(row: dict[str, Any], *, run_sbatch_test_only: bool) -> dic
                 "sbatch_test_only_stdout": sbatch_proc.stdout.strip(),
                 "sbatch_test_only_stderr": sbatch_proc.stderr.strip(),
                 "sbatch_test_only_skipped": False,
+                "sbatch_test_only_array_spec": array_spec,
             }
         )
     return report
@@ -395,6 +540,8 @@ def build_dynamic_submission_plan(
     append_submitted_jobs: bool = False,
     run_id: str = "",
     git_commit: str = "",
+    max_array_size: int | None = None,
+    max_new_shards_per_round: int | None = None,
 ) -> dict[str, Any]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("status") != "READY":
@@ -429,9 +576,18 @@ def build_dynamic_submission_plan(
     dynamic_root = slurm_root / "dynamic" / safe_submission_id if safe_submission_id else slurm_root / "dynamic"
     dynamic_root.mkdir(parents=True, exist_ok=True)
     active_logical_keys = existing_active_logical_keys(slurm_root)
+    max_array_size_info = detect_max_array_size(max_array_size)
+    detected_max_array_size = int(max_array_size_info["value"])
+    per_round_limit = _positive_int(max_new_shards_per_round)
+    if per_round_limit is None:
+        per_round_limit = _positive_int(os.getenv("TASK2_MAX_NEW_SHARDS_PER_ROUND", ""))
+    if per_round_limit is None:
+        per_round_limit = max(1, len(requested_groups) * max(1, len(profiles)))
 
     shard_rows: list[dict[str, Any]] = []
+    sharding_reports: list[dict[str, Any]] = []
     jobs: list[dict[str, Any]] = []
+    all_source_rows: list[dict[str, Any]] = []
     for group in requested_groups:
         group_summary = summary_groups.get(group) or {}
         task_manifest = Path(str(group_summary.get("task_manifest") or ""))
@@ -444,6 +600,16 @@ def build_dynamic_submission_plan(
         if not source_sbatch.exists():
             raise FileNotFoundError(f"Sbatch file not found for {group}: {source_sbatch}")
         rows = read_csv_rows(task_manifest)
+        for index, row in enumerate(rows):
+            logical_id = _logical_task_id(row)
+            updated = dict(row)
+            updated["global_logical_index"] = str(index)
+            updated["logical_task_id"] = logical_id
+            updated["source_manifest_row"] = str(row.get("task_index") or index)
+            updated["source_task_index"] = str(row.get("task_index") or index)
+            updated["teacher_family"] = str(row.get("teacher_family") or row.get("teacher") or "")
+            all_source_rows.append(updated)
+        rows = all_source_rows[-len(rows):]
         active_profiles = profiles[: min(len(profiles), len(rows))]
         profile_counts = {profile.name: len(rows[index:: len(active_profiles)]) for index, profile in enumerate(active_profiles)}
         profile_weights = {profile.name: 1.0 for profile in active_profiles}
@@ -457,54 +623,149 @@ def build_dynamic_submission_plan(
             rows_for_profile = rows[profile_index:: len(active_profiles)]
             if not rows_for_profile:
                 continue
-            manifest_for_profile = task_manifest
-            if len(active_profiles) > 1:
-                manifest_for_profile = dynamic_root / f"{group}_{profile.name}_task_manifest.csv"
-                _write_shard_manifest(task_manifest, manifest_for_profile, rows_for_profile)
-            sbatch_for_profile = dynamic_root / f"{group}_{profile.name}_task2_array.sbatch"
-            _rewrite_sbatch(
-                source_sbatch,
-                sbatch_for_profile,
-                group=group,
-                profile=profile,
-                task_manifest=manifest_for_profile,
-                output_root=output_root,
-                state_root=state_root,
-                run_id=safe_run_id,
-                submission_id=safe_submission_id or "default",
+            shard_sets = _chunk_rows(rows_for_profile, detected_max_array_size)
+            sharding_reports.append(
+                {
+                    "group": group,
+                    "profile": profile.name,
+                    "task_count": len(rows_for_profile),
+                    "shard_count": len(shard_sets),
+                    "first_shard_task_count": len(shard_sets[0]) if shard_sets else 0,
+                    "last_shard_task_count": len(shard_sets[-1]) if shard_sets else 0,
+                }
             )
-            concurrency = max(1, min(int(profile_slots.get(profile.name) or 1), len(rows_for_profile)))
-            row = {
-                "model_group": group,
-                "profile": profile.name,
-                "partition": profile.partition,
-                "gres": profile.gres,
-                "cpus_per_task": profile.cpus_per_task,
-                "mem": profile.mem,
-                "time_limit": profile.time_limit,
-                "task_count": len(rows_for_profile),
-                "array_concurrency": concurrency,
-                "task_manifest": str(manifest_for_profile),
-                "sbatch_file": str(sbatch_for_profile),
-                "job_id": "",
-                "submission_status": "dry_run" if dry_run else "pending",
-                "preflight_status": "",
-                "preflight_stderr": "",
-                "stderr": "",
-                "run_id": safe_run_id,
+            profile_concurrency = max(1, min(int(profile_slots.get(profile.name) or 1), len(rows_for_profile)))
+            for shard_index, shard in enumerate(shard_sets):
+                shard_id = f"shard_{shard_index:03d}"
+                manifest_for_shard = dynamic_root / f"{group}_{profile.name}_{shard_id}_task_manifest.csv"
+                written_rows = _write_shard_manifest(task_manifest, manifest_for_shard, shard)
+                sbatch_for_shard = dynamic_root / f"{group}_{profile.name}_{shard_id}_task2_array.sbatch"
+                _rewrite_sbatch(
+                    source_sbatch,
+                    sbatch_for_shard,
+                    group=group,
+                    profile=profile,
+                    shard_id=shard_id,
+                    task_manifest=manifest_for_shard,
+                    output_root=output_root,
+                    state_root=state_root,
+                    run_id=safe_run_id,
+                    submission_id=safe_submission_id or "default",
+                )
+                shard_task_count = len(written_rows)
+                local_end = shard_task_count - 1
+                concurrency = max(1, min(profile_concurrency, shard_task_count))
+                array_spec = f"0-{local_end}%{concurrency}"
+                logical_task_id = f"{safe_run_id}:{safe_submission_id}:{CANDIDATE_TASK_V1}:{group}:{profile.name}:{shard_id}"
+                row = {
+                    "run_id": safe_run_id,
+                    "submission_id": safe_submission_id,
+                    "logical_task_id": logical_task_id,
+                    "execution_schema_version": CANDIDATE_TASK_V1,
+                    "manifest_schema_version": DEFAULT_MANIFEST_SCHEMA_VERSION,
+                    "logical_task_namespace": DEFAULT_LOGICAL_TASK_NAMESPACE,
+                    "model_group": group,
+                    "group": group,
+                    "profile": profile.name,
+                    "shard_id": shard_id,
+                    "shard_index": str(shard_index),
+                    "partition": profile.partition,
+                    "gres": profile.gres,
+                    "cpus_per_task": profile.cpus_per_task,
+                    "mem": profile.mem,
+                    "time_limit": profile.time_limit,
+                    "task_count": shard_task_count,
+                    "array_concurrency": concurrency,
+                    "task_manifest": str(manifest_for_shard),
+                    "sbatch_file": str(sbatch_for_shard),
+                    "job_id": "",
+                    "array_job_id": "",
+                    "array_task_id": "",
+                    "display_id": "",
+                    "submission_status": "dry_run" if dry_run else "pending",
+                    "preflight_status": "",
+                    "preflight_stderr": "",
+                    "stderr": "",
+                    "array_range": f"0-{local_end}",
+                    "array_spec": array_spec,
+                    "local_start": 0,
+                    "local_end": local_end,
+                    "comment": slurm_comment(
+                        run_id=safe_run_id,
+                        submission_id=safe_submission_id or "default",
+                        group=group,
+                        profile=profile.name,
+                        execution_schema_version=CANDIDATE_TASK_V1,
+                        shard_id=shard_id,
+                    ),
+                    "formal_root": str(output_root),
+                    "state_root": str(state_root),
+                    "git_commit": git_commit,
+                    "scheduler_status": "PLANNED",
+                }
+                row["array_plan_validation"] = _validate_array_plan(row, max_array_size=detected_max_array_size)
+                shard_rows.append(row)
+
+    all_logical_ids = [_logical_task_id(row) for row in all_source_rows]
+    unique_logical_ids = sorted(set(all_logical_ids))
+    sharded_logical_ids: list[str] = []
+    for row in shard_rows:
+        for manifest_row in read_csv_rows(Path(str(row["task_manifest"]))):
+            sharded_logical_ids.append(str(manifest_row.get("logical_task_id") or ""))
+    sharded_unique_ids = sorted(set(sharded_logical_ids))
+    duplicate_count = len(sharded_logical_ids) - len(sharded_unique_ids)
+    missing_ids = sorted(set(unique_logical_ids) - set(sharded_unique_ids))
+    all_array_specs_valid = all(
+        str(row.get("array_plan_validation", {}).get("status") or "") == "READY"
+        for row in shard_rows
+    )
+    sharding_audit = {
+        "status": "READY" if duplicate_count == 0 and not missing_ids and all_array_specs_valid else "INVALID_ARRAY_PLAN",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "max_array_size": detected_max_array_size,
+        "max_array_size_source": max_array_size_info.get("source"),
+        "profile_count": len(profiles),
+        "shard_count": len(shard_rows),
+        "logical_task_count": len(all_logical_ids),
+        "sharded_task_count": len(sharded_logical_ids),
+        "unique_logical_task_ids": len(sharded_unique_ids),
+        "duplicate_count": duplicate_count,
+        "missing_count": len(missing_ids),
+        "missing_logical_task_ids": missing_ids[:50],
+        "first_shard": shard_rows[0] if shard_rows else {},
+        "last_shard": shard_rows[-1] if shard_rows else {},
+        "all_array_specs_valid": all_array_specs_valid,
+        "profiles": sharding_reports,
+        "jobs": shard_rows,
+        "legacy_active_jobs_adopted": 0,
+        "compressed_job_ids_as_queryable": 0,
+    }
+    write_json(slurm_root / "sharding_audit.json", sharding_audit)
+    if sharding_audit["status"] != "READY":
+        plan_path = output_root / "slurm" / (f"dynamic_gpu_submission_plan_{safe_submission_id}.json" if safe_submission_id else "dynamic_gpu_submission_plan.json")
+        write_json(
+            plan_path,
+            {
+                "status": "INVALID_ARRAY_PLAN",
+                "scheduler_status": "FATAL",
+                "scheduler_mode": "dynamic_gpu_overrequest",
                 "submission_id": safe_submission_id,
-                "array_range": f"0-{len(rows_for_profile) - 1}",
-                "comment": slurm_comment(run_id=safe_run_id, submission_id=safe_submission_id or "default", group=group, profile=profile.name),
-                "formal_root": str(output_root),
-                "state_root": str(state_root),
-                "git_commit": git_commit,
-                "scheduler_status": "PLANNED",
-            }
-            shard_rows.append(row)
+                "run_id": safe_run_id,
+                "sharding_audit": sharding_audit,
+                "jobs": shard_rows,
+            },
+        )
+        raise RuntimeError("INVALID_ARRAY_PLAN: shard plan failed validation; no jobs were submitted")
 
     if not dry_run:
         preflight_failures = []
         for row in shard_rows:
+            array_validation = row.get("array_plan_validation") or {}
+            if array_validation.get("status") != "READY":
+                row["preflight_status"] = "INVALID_ARRAY_PLAN"
+                row["preflight_stderr"] = ",".join(array_validation.get("errors") or [])
+                preflight_failures.append({"job": row, "preflight": array_validation})
+                continue
             report = _preflight_sbatch(row, run_sbatch_test_only=run_sbatch_test_only)
             row["preflight_status"] = report["status"]
             row["preflight_stderr"] = report.get("sbatch_test_only_stderr") or report.get("bash_n_stderr") or ""
@@ -523,26 +784,29 @@ def build_dynamic_submission_plan(
                     "submission_id": safe_submission_id,
                     "resource_inventory": resource_inventory,
                     "worker_sizing": worker_sizing,
+                    "sharding_audit": sharding_audit,
                     "failures": preflight_failures,
                     "jobs": shard_rows,
                 },
             )
             raise RuntimeError(f"Dynamic GPU sbatch preflight failed for {len(preflight_failures)} shard(s); no jobs were submitted")
 
-    csv_fields = [
-        "model_group", "profile", "partition", "gres", "cpus_per_task", "mem", "time_limit",
-        "job_id", "task_count", "array_concurrency", "task_manifest", "sbatch_file",
-        "submission_status", "preflight_status", "preflight_stderr", "stderr",
-    ]
+    csv_fields = SUBMITTED_JOB_FIELDS
     backpressured: list[dict[str, Any]] = []
     fatal_failures: list[dict[str, Any]] = []
     reused: list[dict[str, Any]] = []
+    submit_budget = max(1, per_round_limit)
     for row in shard_rows:
         if dry_run:
             continue
-        logical_key = (str(row.get("submission_id") or ""), str(row["model_group"]), str(row["profile"]))
-        fallback_key = ("", str(row["model_group"]), str(row["profile"]))
-        if logical_key in active_logical_keys or fallback_key in active_logical_keys:
+        logical_key = (
+            str(row.get("execution_schema_version") or ""),
+            str(row.get("submission_id") or ""),
+            str(row["model_group"]),
+            str(row["profile"]),
+            str(row.get("shard_id") or ""),
+        )
+        if logical_key in active_logical_keys:
             row["submission_status"] = "reused"
             row["scheduler_status"] = "ADOPTED_ACTIVE_JOB"
             row["status"] = "ADOPTED_ACTIVE_JOB"
@@ -552,10 +816,12 @@ def build_dynamic_submission_plan(
                 state_root,
                 {
                     "status": "ADOPTED_ACTIVE_JOB",
-                    "logical_task_id": f"{safe_run_id}:{safe_submission_id}:{row['model_group']}:{row['profile']}",
+                    "logical_task_id": row["logical_task_id"],
                     "submission_id": safe_submission_id,
+                    "execution_schema_version": CANDIDATE_TASK_V1,
                     "group": row["model_group"],
                     "profile": row["profile"],
+                    "shard_id": row["shard_id"],
                     "partition": row["partition"],
                     "gres": row["gres"],
                     "task_manifest": row["task_manifest"],
@@ -565,15 +831,20 @@ def build_dynamic_submission_plan(
             reused.append(dict(row))
             jobs.append(dict(row))
             continue
+        if submit_budget <= 0:
+            row["submission_status"] = "deferred"
+            row["scheduler_status"] = "READY_SHARD_QUEUE"
+            continue
         task_count = int(row["task_count"])
         concurrency = int(row["array_concurrency"])
         comment = str(row["comment"])
+        array_spec = str(row["array_spec"])
         proc = subprocess.run(
             [
                 "sbatch",
                 "--parsable",
                 "--comment", comment,
-                f"--array=0-{task_count - 1}%{concurrency}",
+                f"--array={array_spec}",
                 str(row["sbatch_file"]),
             ],
             text=True,
@@ -584,6 +855,8 @@ def build_dynamic_submission_plan(
         parsed_job = parse_sbatch_job_id(proc.stdout)
         row["job_id"] = parsed_job["job_id"]
         row["array_job_id"] = parsed_job["array_job_id"]
+        row["array_task_id"] = parsed_job["array_task_id"]
+        row["display_id"] = parsed_job["display_id"]
         row["submission_status"] = "submitted" if proc.returncode == 0 else "failed"
         row["stderr"] = proc.stderr.strip()
         row["stdout"] = proc.stdout.strip()
@@ -595,7 +868,7 @@ def build_dynamic_submission_plan(
                 "sbatch",
                 "--parsable",
                 "--comment", comment,
-                f"--array=0-{task_count - 1}%{concurrency}",
+                f"--array={array_spec}",
                 str(row["sbatch_file"]),
             ],
         }
@@ -613,6 +886,7 @@ def build_dynamic_submission_plan(
         row["scheduler_status"] = "ACTIVE"
         row["slurm_state"] = "PENDING"
         persist_submitted_job(slurm_root, row)
+        submit_budget -= 1
         record_job_lifecycle(
             state_root,
             {
@@ -620,10 +894,14 @@ def build_dynamic_submission_plan(
                 "scheduler_state": "ACTIVE",
                 "job_id": row["job_id"],
                 "array_job_id": row["array_job_id"],
-                "logical_task_id": f"{safe_run_id}:{safe_submission_id}:{row['model_group']}:{row['profile']}",
+                "array_task_id": row["array_task_id"],
+                "display_id": row["display_id"],
+                "logical_task_id": row["logical_task_id"],
                 "submission_id": safe_submission_id,
+                "execution_schema_version": CANDIDATE_TASK_V1,
                 "group": row["model_group"],
                 "profile": row["profile"],
+                "shard_id": row["shard_id"],
                 "partition": row["partition"],
                 "gres": row["gres"],
                 "task_manifest": row["task_manifest"],
@@ -641,6 +919,7 @@ def build_dynamic_submission_plan(
                 "status": "SUBMISSION_FAILED",
                 "scheduler_status": "FATAL",
                 "submission_id": safe_submission_id,
+                "sharding_audit": sharding_audit,
                 "jobs": jobs,
                 "backpressured_jobs": backpressured,
                 "failed_jobs": fatal_failures,
@@ -662,6 +941,9 @@ def build_dynamic_submission_plan(
     if not dry_run and backpressured:
         scheduler_status = "BACKPRESSURED"
         status = "PARTIALLY_SUBMITTED" if jobs else "WAITING_FOR_SUBMISSION_CAPACITY"
+    elif not dry_run and any(str(row.get("submission_status") or "") == "deferred" for row in shard_rows):
+        scheduler_status = "ACTIVE" if jobs else "READY_SHARD_QUEUE"
+        status = "PARTIALLY_SUBMITTED" if jobs else "READY_SHARD_QUEUE"
 
     plan = {
         "status": status,
@@ -675,7 +957,18 @@ def build_dynamic_submission_plan(
         "state_root": str(state_root),
         "planned_target_workers": int(target_workers),
         "planned_overrequest_workers": planned_overrequest,
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "manifest_schema_version": DEFAULT_MANIFEST_SCHEMA_VERSION,
+        "logical_task_namespace": DEFAULT_LOGICAL_TASK_NAMESPACE,
+        "max_array_size": detected_max_array_size,
+        "max_array_size_source": max_array_size_info.get("source"),
+        "max_new_shards_per_round": per_round_limit,
         "total_task_count": sum(int(row["task_count"]) for row in shard_rows),
+        "logical_task_count": len(all_logical_ids),
+        "sharded_task_count": len(sharded_logical_ids),
+        "unique_logical_task_count": len(sharded_unique_ids),
+        "duplicate_logical_task_count": duplicate_count,
+        "missing_logical_task_count": len(missing_ids),
         "total_array_concurrency": sum(int(row["array_concurrency"]) for row in shard_rows),
         "group_concurrency": group_slots,
         "profile_specs": [{**profile.__dict__, "resource_class": profile.resource_class} for profile in profiles],
@@ -687,10 +980,12 @@ def build_dynamic_submission_plan(
         },
         "resource_inventory": resource_inventory,
         "worker_sizing": worker_sizing,
+        "sharding_audit": sharding_audit,
         "jobs": shard_rows,
         "submitted_jobs": jobs,
         "reused_jobs": reused,
         "backpressured_jobs": backpressured,
+        "deferred_jobs": [row for row in shard_rows if str(row.get("submission_status") or "") == "deferred"],
         "submitted_job_count": len([job for job in jobs if str(job.get("submission_status")) == "submitted"]),
         "reused_job_count": len(reused),
         "backpressured_count": len(backpressured),
