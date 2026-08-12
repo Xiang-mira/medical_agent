@@ -40,6 +40,9 @@ RESUME=${RESUME:-0}
 RETRY_FAILED=${RETRY_FAILED:-0}
 CASE_ID=${CASE_ID:-}
 RUN_TESTS_BEFORE_LAUNCH=${RUN_TESTS_BEFORE_LAUNCH:-0}
+RUNTIME_NO_GIT=${RUNTIME_NO_GIT:-0}
+SKIP_GIT_SYNC=${SKIP_GIT_SYNC:-0}
+EXPECTED_GIT_COMMIT=${EXPECTED_GIT_COMMIT:-}
 DYNAMIC_GPU_SCHEDULER=${DYNAMIC_GPU_SCHEDULER:-1}
 GPU_TARGET_WORKERS=${GPU_TARGET_WORKERS:-30}
 GPU_OVERREQUEST_WORKERS=${GPU_OVERREQUEST_WORKERS:-}
@@ -73,12 +76,19 @@ MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC=${MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC:-$WAIT
 export LABELCRITIC_BASE_URL LABELCRITIC_PORT LABELCRITIC_SERVICE_ROOT LABELCRITIC_MODEL_ID MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY WAIT_LABELCRITIC_SEC MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC
 
 cd "$CODE_ROOT"
-git fetch origin
-git switch main
-git pull --ff-only origin main
+if [ "$RUNTIME_NO_GIT" != "1" ] && [ "$SKIP_GIT_SYNC" != "1" ]; then
+  git fetch origin
+  git switch main
+  git pull --ff-only origin main
+fi
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ]; then
   echo "submit_task2_formal_103cases.sh must run on main, got $BRANCH" >&2
+  exit 2
+fi
+CURRENT_GIT_COMMIT=$(git rev-parse HEAD)
+if [ -n "$EXPECTED_GIT_COMMIT" ] && [ "$CURRENT_GIT_COMMIT" != "$EXPECTED_GIT_COMMIT" ]; then
+  echo "submit_task2_formal_103cases.sh expected git commit $EXPECTED_GIT_COMMIT, got $CURRENT_GIT_COMMIT" >&2
   exit 2
 fi
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then

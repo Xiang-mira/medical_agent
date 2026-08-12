@@ -19,6 +19,8 @@ cd "$CODE_ROOT"
 git fetch origin main
 git switch main
 git pull --ff-only origin main
+EXPECTED_GIT_COMMIT=${EXPECTED_GIT_COMMIT:-$(git rev-parse HEAD)}
+export EXPECTED_GIT_COMMIT
 
 exec "$PYTHON" tools/dataset_delivery/task2_round1_orchestrator.py submit-controller \
   --state-root "$STATE_ROOT" \
@@ -28,4 +30,5 @@ exec "$PYTHON" tools/dataset_delivery/task2_round1_orchestrator.py submit-contro
   --python "$PYTHON" \
   --checkpoint-root "$CHECKPOINT_ROOT" \
   --nnunet-predict-executable "$NNUNETV2_PREDICT_EXECUTABLE" \
-  --unest-python-executable "$UNEST_PYTHON_EXECUTABLE"
+  --unest-python-executable "$UNEST_PYTHON_EXECUTABLE" \
+  --expected-git-commit "$EXPECTED_GIT_COMMIT"

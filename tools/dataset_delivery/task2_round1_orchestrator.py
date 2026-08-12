@@ -286,6 +286,21 @@ def _git_commit() -> str:
     return result["stdout"] if result["ok"] else ""
 
 
+def verify_expected_git_commit(state_root: Path, expected_commit: str) -> dict[str, Any]:
+    expected = str(expected_commit or "").strip()
+    current = _git_commit()
+    status = "PASSED" if not expected or current == expected else "FAILED"
+    report = {
+        "status": status,
+        "expected_git_commit": expected,
+        "actual_git_commit": current,
+        "failure_reason": "" if status == "PASSED" else "expected_git_commit_mismatch",
+    }
+    if status != "PASSED":
+        log_failure(state_root, stage="git_commit_pin", failure_reason=report["failure_reason"], details=report)
+    return report
+
+
 def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
     state_root = args.state_root.resolve()
     paths = _state_paths(state_root)
@@ -298,6 +313,8 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
     status = _run(["git", "status", "--porcelain", "--untracked-files=no"])
     branch = _run(["git", "branch", "--show-current"])
     add("git_main_clean", status["ok"] and not status["stdout"] and branch["stdout"] == "main", {"status": status, "branch": branch["stdout"]})
+    commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
+    add("expected_git_commit", commit_pin["status"] == "PASSED", commit_pin)
     if not args.case_manifest.exists():
         try:
             generated = build_formal_manifest(
@@ -422,6 +439,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "--gpu-overrequest-workers", str(args.gpu_overrequest_workers),
         "--gpu-profile-specs", args.gpu_profile_specs,
         "--poll-sec", str(args.poll_sec),
+        "--expected-git-commit", str(args.expected_git_commit),
     ]
     env_exports = {
         "CODE_ROOT": str(REPO_ROOT),
@@ -432,6 +450,9 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "LABELCRITIC_TENSOR_PARALLEL_SIZE": str(args.labelcritic_tensor_parallel_size),
         "LABELCRITIC_PORT": str(args.labelcritic_port),
         "LABELCRITIC_MODEL_ID": LABELCRITIC_MODEL_ID,
+        "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
+        "RUNTIME_NO_GIT": "1",
+        "SKIP_GIT_SYNC": "1",
     }
     lines = [
         "#!/usr/bin/env bash",
@@ -637,6 +658,9 @@ def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = 
         "DRY_RUN": "0",
         "RESUME": "1",
         "STAGE_WORKSPACE": "1",
+        "RUNTIME_NO_GIT": "1",
+        "SKIP_GIT_SYNC": "1",
+        "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
         "DYNAMIC_GPU_SCHEDULER": "1",
         "GPU_TARGET_WORKERS": str(args.gpu_target_workers),
         "GPU_OVERREQUEST_WORKERS": str(args.gpu_overrequest_workers),
@@ -897,6 +921,11 @@ def _controller_main(args: argparse.Namespace) -> int:
     if current.get("terminal_state") == "ROUND1_FAILED":
         return 2
     _save_state(state_root, status="CONTROLLER_RUNNING", terminal_state="", stage="start", git_commit=_git_commit(), started_at=utc_now())
+    commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
+    _save_state(state_root, stage="git_commit_pin", expected_git_commit=commit_pin)
+    if commit_pin["status"] != "PASSED":
+        _save_state(state_root, terminal_state="ROUND1_FAILED", stage="git_commit_pin", failure_reason=commit_pin["failure_reason"], expected_git_commit=commit_pin)
+        return 2
     labelcritic = ensure_labelcritic_service(state_root)
     if labelcritic["status"] == "SUBMIT_FAILED":
         log_failure(state_root, stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason", "labelcritic_submit_failed"), details=labelcritic)
@@ -1011,6 +1040,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gpu-overrequest-workers", default=int(os.getenv("GPU_OVERREQUEST_WORKERS", "0")), type=int)
     parser.add_argument("--gpu-profile-specs", default=os.getenv("GPU_PROFILE_SPECS", "auto"))
     parser.add_argument("--poll-sec", default=int(os.getenv("ROUND1_ORCH_POLL_SEC", "60")), type=int)
+    parser.add_argument("--expected-git-commit", default=os.getenv("EXPECTED_GIT_COMMIT", _git_commit()))
 
 
 def main() -> int:
