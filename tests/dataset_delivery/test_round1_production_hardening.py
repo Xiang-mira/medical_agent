@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -323,6 +324,25 @@ def test_formal_72b_labelcritic_selects_without_legacy_benchmark_artifact(tmp_pa
     assert selection["selection_status"] == "selected"
     assert selection["formal_winner"] == "teacher_b"
     assert selection["audit_winner"] is None
+
+
+def test_labelcritic_endpoint_resolves_from_service_root_at_selection_time(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import multimodel_loop as mm
+
+    service_root = tmp_path / "labelcritic_72b_service"
+    service_root.mkdir()
+    (service_root / "base_url.txt").write_text("http://h100-node\n", encoding="utf-8")
+    (service_root / "port.txt").write_text("8123\n", encoding="utf-8")
+    (service_root / "endpoint.host").write_text("h100-node\n", encoding="utf-8")
+    monkeypatch.setenv("LABELCRITIC_SERVICE_ROOT", str(service_root))
+    monkeypatch.setenv("MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC", "0")
+
+    base_url, port, meta = mm._resolve_runtime_labelcritic_endpoint("http://localhost", 8000)
+
+    assert base_url == "http://h100-node"
+    assert port == 8123
+    assert meta["status"] == "RESOLVED_FROM_SERVICE_ROOT"
+    assert "h100-node" in os.environ["NO_PROXY"]
 
 
 def test_em_gate_accepts_labelcritic_selected_teacher_against_student_candidate():

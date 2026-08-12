@@ -149,8 +149,11 @@ def _write_array_sbatch(
     for key in (
         "LABELCRITIC_BASE_URL",
         "LABELCRITIC_PORT",
+        "LABELCRITIC_SERVICE_ROOT",
         "LABELCRITIC_MODEL_ID",
         "MEDAI_FORMAL_LABELCRITIC_72B_SELECTION_READY",
+        "MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC",
+        "WAIT_LABELCRITIC_SEC",
         "NO_PROXY",
         "no_proxy",
     ):

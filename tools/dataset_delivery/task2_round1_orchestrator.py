@@ -195,6 +195,34 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
     }
 
 
+def _attempts_root(state_root: Path) -> Path:
+    return state_root / "round1_orchestrated_attempts"
+
+
+def archive_current_attempt(state_root: Path, *, reason: str) -> dict[str, Any]:
+    paths = _state_paths(state_root)
+    root = paths["root"]
+    if not root.exists():
+        return {"status": "NO_CURRENT_ATTEMPT", "reason": reason}
+    attempts = _attempts_root(state_root)
+    attempts.mkdir(parents=True, exist_ok=True)
+    numbers: list[int] = []
+    for path in attempts.glob("attempt_*"):
+        match = re.search(r"attempt_(\d+)$", path.name)
+        if path.is_dir() and match:
+            numbers.append(int(match.group(1)))
+    destination = attempts / f"attempt_{(max(numbers) if numbers else 0) + 1:03d}"
+    root.rename(destination)
+    record = {
+        "status": "ARCHIVED",
+        "archived_attempt": str(destination),
+        "reason": reason,
+        "archived_at": utc_now(),
+    }
+    _write_json(destination / "attempt_archive.json", record)
+    return record
+
+
 def _load_state(state_root: Path) -> dict[str, Any]:
     paths = _state_paths(state_root)
     state = _read_json(paths["state"], {})
@@ -429,6 +457,17 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
 
 
 def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
+    paths = _state_paths(args.state_root.resolve())
+    state = _load_state(args.state_root.resolve())
+    if state.get("terminal_state") == "ROUND1_FAILED" and (getattr(args, "retry_failed", False) or getattr(args, "new_attempt", False)):
+        archive_current_attempt(args.state_root.resolve(), reason="retry_failed_or_new_attempt")
+    elif state.get("terminal_state") in {"ROUND1_PASSED", "ROUND1_FAILED"}:
+        return {"status": "ROUND1_ALREADY_TERMINAL", "terminal_state": state.get("terminal_state"), "state_root": str(paths["root"])}
+    elif getattr(args, "new_attempt", False) and paths["root"].exists():
+        existing = str(state.get("controller_job_id") or "").strip()
+        if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
+            return {"status": "CONTROLLER_ALREADY_ACTIVE", "controller_job_id": existing, "state_root": str(paths["root"])}
+        archive_current_attempt(args.state_root.resolve(), reason="explicit_new_attempt")
     preflight = run_static_preflight(args)
     paths = _state_paths(args.state_root.resolve())
     if preflight["status"] != "PASSED":
@@ -436,8 +475,6 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
         _save_state(args.state_root.resolve(), terminal_state="ROUND1_FAILED", stage="static_preflight", failure_reason="static_preflight_failed", static_preflight=preflight)
         raise SystemExit(json.dumps({"status": "STATIC_PREFLIGHT_FAILED", "report": str(paths["root"] / "static_preflight.json"), "last_failure": failure}, indent=2))
     state = _load_state(args.state_root.resolve())
-    if state.get("terminal_state") in {"ROUND1_PASSED", "ROUND1_FAILED"}:
-        return {"status": "ROUND1_ALREADY_TERMINAL", "terminal_state": state.get("terminal_state"), "state_root": str(paths["root"])}
     existing = str(state.get("controller_job_id") or "").strip()
     if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
         return {"status": "CONTROLLER_ALREADY_ACTIVE", "controller_job_id": existing, "state_root": str(paths["root"])}
@@ -533,7 +570,57 @@ def wait_for_labelcritic_runtime(state_root: Path, *, poll_sec: int) -> dict[str
         time.sleep(max(5, poll_sec))
 
 
-def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any]) -> dict[str, Any]:
+def poll_labelcritic_runtime(state_root: Path) -> dict[str, Any]:
+    service = ensure_labelcritic_service(state_root)
+    _save_state(state_root, stage="labelcritic_poll", labelcritic=service)
+    if service["status"] == "SUBMIT_FAILED":
+        return {"status": "FAILED", "failure_reason": service.get("failure_reason", "labelcritic_submit_failed"), "service": service}
+    if service["status"] == "REUSED_HEALTHY":
+        runtime = labelcritic_runtime_preflight(service["base_url"], int(service["port"]))
+        _save_state(state_root, stage="labelcritic_runtime_preflight", labelcritic_runtime_preflight=runtime)
+        if runtime["status"] == "PASSED":
+            return {"status": "PASSED", "base_url": service["base_url"], "port": int(service["port"]), "runtime": runtime, "service": service}
+        log_failure(state_root, stage="labelcritic_runtime_preflight", failure_reason=runtime.get("failure_reason", "runtime_preflight_failed"), details=runtime)
+        return {"status": "FAILED", "failure_reason": runtime.get("failure_reason", "runtime_preflight_failed"), "runtime": runtime, "service": service}
+    job_id = str(service.get("job_id") or "")
+    state = slurm_job_state(job_id) if job_id else {"state": "UNKNOWN"}
+    if state.get("state") in TERMINAL_FAILURE_STATES:
+        log_failure(state_root, stage="labelcritic_job", failure_reason=f"labelcritic_job_terminal:{state.get('state')}", details=state)
+        return {"status": "FAILED", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state, "service": service}
+    base_file = _service_paths(state_root)["base"]
+    port_file = _service_paths(state_root)["port"]
+    if base_file.exists() and port_file.exists():
+        base = base_file.read_text(encoding="utf-8").strip()
+        port = int(port_file.read_text(encoding="utf-8").strip())
+        health = labelcritic_health(base, port)
+        if health["status"] == "READY":
+            runtime = labelcritic_runtime_preflight(base, port)
+            _save_state(state_root, stage="labelcritic_runtime_preflight", labelcritic_runtime_preflight=runtime)
+            if runtime["status"] == "PASSED":
+                return {"status": "PASSED", "base_url": base, "port": port, "runtime": runtime, "service": service}
+            log_failure(state_root, stage="labelcritic_runtime_preflight", failure_reason=runtime.get("failure_reason", "runtime_preflight_failed"), details=runtime)
+            return {"status": "FAILED", "failure_reason": runtime.get("failure_reason", "runtime_preflight_failed"), "runtime": runtime, "service": service}
+    return {"status": "WAITING", "job": state, "service": service}
+
+
+def _labelcritic_endpoint_hint(state_root: Path, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
+    if labelcritic and labelcritic.get("base_url") and labelcritic.get("port"):
+        return {"base_url": str(labelcritic["base_url"]), "port": int(labelcritic["port"]), "source": "runtime"}
+    service = _service_paths(state_root)
+    if service["base"].exists() and service["port"].exists():
+        return {
+            "base_url": service["base"].read_text(encoding="utf-8").strip(),
+            "port": int(service["port"].read_text(encoding="utf-8").strip()),
+            "source": "service_files",
+        }
+    return {
+        "base_url": os.getenv("LABELCRITIC_BASE_URL", "http://localhost"),
+        "port": int(os.getenv("LABELCRITIC_PORT", "8000")),
+        "source": "env_or_default",
+    }
+
+
+def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
     state_root = args.state_root.resolve()
     state = _load_state(state_root)
     formal_root = Path(str(state.get("formal_root") or (_state_paths(state_root)["root"] / "formal_task2_round1"))).resolve()
@@ -543,6 +630,8 @@ def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any]) -> dict[
         or formal_summary.get("status") == "PASSED"
     ):
         return {"status": "REUSED", "formal_root": str(formal_root), "e_step_status": state.get("e_step_status")}
+    endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
+    service_root = _service_paths(state_root)["root"]
     env = os.environ.copy()
     env.update({
         "DRY_RUN": "0",
@@ -557,10 +646,13 @@ def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any]) -> dict[
         "WORKSPACE_ROOT": str(args.workspace_root),
         "CASE_MANIFEST": str(args.case_manifest),
         "BASE_MANIFEST": str(args.base_manifest),
-        "LABELCRITIC_BASE_URL": str(labelcritic["base_url"]),
-        "LABELCRITIC_PORT": str(labelcritic["port"]),
+        "LABELCRITIC_SERVICE_ROOT": str(service_root),
+        "LABELCRITIC_BASE_URL": str(endpoint["base_url"]),
+        "LABELCRITIC_PORT": str(endpoint["port"]),
         "LABELCRITIC_MODEL_ID": LABELCRITIC_MODEL_ID,
-        "WAIT_LABELCRITIC_SEC": "60",
+        "REQUIRE_LABELCRITIC_HEALTH": "0",
+        "WAIT_LABELCRITIC_SEC": str(os.getenv("WAIT_LABELCRITIC_SEC", "14400")),
+        "MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC": str(os.getenv("MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC", os.getenv("WAIT_LABELCRITIC_SEC", "14400"))),
     })
     result = _run(["bash", "scripts/task2/submit_task2_formal_103cases.sh"], env=env, timeout=None)
     if not result["ok"]:
@@ -805,22 +897,35 @@ def _controller_main(args: argparse.Namespace) -> int:
     if current.get("terminal_state") == "ROUND1_FAILED":
         return 2
     _save_state(state_root, status="CONTROLLER_RUNNING", terminal_state="", stage="start", git_commit=_git_commit(), started_at=utc_now())
-    labelcritic = wait_for_labelcritic_runtime(state_root, poll_sec=args.poll_sec)
-    if labelcritic["status"] != "PASSED":
-        log_failure(state_root, stage="labelcritic", failure_reason=labelcritic.get("failure_reason", "labelcritic_failed"), details=labelcritic)
-        _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
+    labelcritic = ensure_labelcritic_service(state_root)
+    if labelcritic["status"] == "SUBMIT_FAILED":
+        log_failure(state_root, stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason", "labelcritic_submit_failed"), details=labelcritic)
+        _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
         return 2
-    _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic)
+    _save_state(state_root, stage="labelcritic_submitted_or_reused", labelcritic=labelcritic)
     estep_submit = submit_estep(args, labelcritic)
     if estep_submit["status"] == "FAILED":
         log_failure(state_root, stage="e_step_submit", failure_reason=estep_submit.get("failure_reason", "e_step_submit_failed"), details=estep_submit)
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=estep_submit.get("failure_reason"), e_step=estep_submit)
         return 2
+    labelcritic_gate: dict[str, Any] = {"status": "WAITING"}
     while True:
+        if labelcritic_gate.get("status") != "PASSED":
+            labelcritic_gate = poll_labelcritic_runtime(state_root)
+            if labelcritic_gate["status"] == "FAILED":
+                log_failure(state_root, stage="labelcritic", failure_reason=labelcritic_gate.get("failure_reason", "labelcritic_failed"), details=labelcritic_gate)
+                _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic", failure_reason=labelcritic_gate.get("failure_reason"), labelcritic=labelcritic_gate)
+                return 2
+            if labelcritic_gate["status"] == "PASSED":
+                _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic_gate)
         estep = check_estep(args)
-        _save_state(state_root, stage="e_step_wait", e_step=estep, e_step_status=estep["status"])
+        wait_stage = "e_step_wait" if labelcritic_gate.get("status") == "PASSED" else "e_step_and_labelcritic_wait"
+        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate)
         if estep["status"] == "PASSED":
-            break
+            if labelcritic_gate.get("status") == "PASSED":
+                break
+            time.sleep(max(10, args.poll_sec))
+            continue
         if estep["status"] == "FAILED":
             log_failure(state_root, stage="e_step", failure_reason=estep.get("failure_reason", "e_step_failed"), details=estep)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step", failure_reason=estep.get("failure_reason"), e_step=estep)
@@ -902,9 +1007,9 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--unest-python-executable", default=os.getenv("UNEST_PYTHON_EXECUTABLE", "/home/xhan74/envs/medical_agent_train_py311/bin/python"), type=Path)
     parser.add_argument("--registry", default=REPO_ROOT / "configs" / "model_registry.yaml", type=Path)
     parser.add_argument("--target-config", default=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json", type=Path)
-    parser.add_argument("--gpu-target-workers", default=int(os.getenv("GPU_TARGET_WORKERS", "30")), type=int)
-    parser.add_argument("--gpu-overrequest-workers", default=int(os.getenv("GPU_OVERREQUEST_WORKERS", "40")), type=int)
-    parser.add_argument("--gpu-profile-specs", default=os.getenv("GPU_PROFILE_SPECS", "generic_gpu|gpu|gpu:1|8|64G|06:00:00,a100|gpua100|gpu:A100:1|8|80G|06:00:00"))
+    parser.add_argument("--gpu-target-workers", default=int(os.getenv("GPU_TARGET_WORKERS", "0")), type=int)
+    parser.add_argument("--gpu-overrequest-workers", default=int(os.getenv("GPU_OVERREQUEST_WORKERS", "0")), type=int)
+    parser.add_argument("--gpu-profile-specs", default=os.getenv("GPU_PROFILE_SPECS", "auto"))
     parser.add_argument("--poll-sec", default=int(os.getenv("ROUND1_ORCH_POLL_SEC", "60")), type=int)
 
 
@@ -924,6 +1029,8 @@ def main() -> int:
     submit_p.add_argument("--skip-sbatch-test-only", action="store_true")
     submit_p.add_argument("--run-static-tests", default=os.getenv("RUN_STATIC_PREFLIGHT_TESTS", "1").lower() not in {"0", "false", "no"}, action=argparse.BooleanOptionalAction)
     submit_p.add_argument("--static-tests-timeout-sec", default=int(os.getenv("STATIC_PREFLIGHT_TESTS_TIMEOUT_SEC", "900")), type=int)
+    submit_p.add_argument("--retry-failed", default=os.getenv("RETRY_FAILED", "1").lower() not in {"0", "false", "no"}, action=argparse.BooleanOptionalAction)
+    submit_p.add_argument("--new-attempt", default=os.getenv("NEW_ATTEMPT", "0").lower() in {"1", "true", "yes"}, action=argparse.BooleanOptionalAction)
     controller_p = sub.add_parser("controller")
     add_common(controller_p)
     status_p = sub.add_parser("status")

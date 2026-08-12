@@ -58,6 +58,52 @@ METRIC_TARGET_ABSENT_ZERO = "absent_negative_zero_mask"
 METRIC_TARGET_TEACHER_CANDIDATE = "teacher_candidate"
 METRIC_TARGET_STUDENT_CANDIDATE = "student_candidate"
 
+
+def _normalize_runtime_labelcritic_endpoint(base_url: str, port: int) -> tuple[str, int]:
+    base = re.sub(r"/v1/?$", "", (base_url or "http://localhost").rstrip("/"))
+    match = re.match(r"^(https?://[^/:]+):(\d+)$", base)
+    if match:
+        return match.group(1), int(match.group(2))
+    return base, int(port)
+
+
+def _resolve_runtime_labelcritic_endpoint(base_url: str, port: int) -> tuple[str, int, dict[str, Any]]:
+    service_root_value = os.getenv("LABELCRITIC_SERVICE_ROOT", "").strip()
+    if not service_root_value:
+        base, resolved_port = _normalize_runtime_labelcritic_endpoint(base_url, port)
+        return base, resolved_port, {"status": "UNCHANGED", "reason": "LABELCRITIC_SERVICE_ROOT unset"}
+    service_root = Path(service_root_value)
+    base_file = service_root / "base_url.txt"
+    port_file = service_root / "port.txt"
+    host_file = service_root / "endpoint.host"
+    wait_sec = int(os.getenv("MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC", os.getenv("WAIT_LABELCRITIC_SEC", "0")) or "0")
+    deadline = time.time() + max(0, wait_sec)
+    last_reason = "endpoint_files_missing"
+    while True:
+        if base_file.exists() and port_file.exists():
+            resolved_base = base_file.read_text(encoding="utf-8").strip()
+            resolved_port = int(port_file.read_text(encoding="utf-8").strip())
+            if host_file.exists():
+                host = host_file.read_text(encoding="utf-8").strip()
+                if host:
+                    os.environ["NO_PROXY"] = f"{os.environ.get('NO_PROXY', '')},{host}"
+                    os.environ["no_proxy"] = f"{os.environ.get('no_proxy', '')},{host}"
+            return resolved_base, resolved_port, {
+                "status": "RESOLVED_FROM_SERVICE_ROOT",
+                "service_root": str(service_root),
+                "wait_sec": wait_sec,
+            }
+        if wait_sec <= 0 or time.time() >= deadline:
+            base, resolved_port = _normalize_runtime_labelcritic_endpoint(base_url, port)
+            return base, resolved_port, {
+                "status": "UNCHANGED",
+                "service_root": str(service_root),
+                "wait_sec": wait_sec,
+                "reason": last_reason,
+            }
+        time.sleep(10)
+
+
 def _file_sha256(path: str | Path | None) -> str | None:
     if not path or not Path(path).exists():
         return None
@@ -6834,6 +6880,15 @@ def run_multimodel_annotation_loop(
             for candidate in candidates:
                 candidate["candidate_id"] = _candidate_id(case_id, organ, candidate)
                 candidate["mask_sha256"] = _sha256_file(candidate.get("prediction"))
+            selection_critic_base_url, selection_critic_port, runtime_endpoint = (
+                _resolve_runtime_labelcritic_endpoint(critic_base_url, critic_port)
+                if enable_critic
+                else (critic_base_url, critic_port, {"status": "DISABLED"})
+            )
+            if runtime_endpoint.get("status") == "RESOLVED_FROM_SERVICE_ROOT":
+                stage_counts["labelcritic_endpoint_resolved_from_service_root_count"] = (
+                    stage_counts.get("labelcritic_endpoint_resolved_from_service_root_count", 0) + 1
+                )
             selected, selection = _select_candidate(
                 ct=ct,
                 organ=organ,
@@ -6842,11 +6897,11 @@ def run_multimodel_annotation_loop(
                 case_id=case_id,
                 enable_critic=enable_critic,
                 critic_backend=critic_backend,
-                critic_base_url=critic_base_url,
-                critic_port=critic_port,
+                critic_base_url=selection_critic_base_url,
+                critic_port=selection_critic_port,
                 timeout_sec=timeout_sec,
                 dry_run=dry_run,
-                labelcritic_options=labelcritic_options,
+                labelcritic_options={**labelcritic_options, "runtime_endpoint": runtime_endpoint},
                 mask_cache=mask_cache,
                 compare_batch_enabled=compare_batch_enabled,
                 compare_batch_max_candidates=int(os.getenv("MEDAI_LABELCRITIC_COMPARE_BATCH_MAX_CANDIDATES", "2")),

@@ -337,14 +337,21 @@ def discover_resource_snapshot(
     for detail in job_details:
         by_partition_details[str(detail.get("partition", ""))].append(detail)
 
+    discovered_parts = set(sinfo)
+    for node in nodes:
+        discovered_parts.update(str(part) for part in node.get("partitions", []) if part)
+    ordered_parts = ["cpu", "gpu", "gpua100", "gpuh100"]
+    ordered_parts.extend(sorted(part for part in discovered_parts if part not in ordered_parts))
+
     partition_rows: dict[str, Any] = {}
-    for part in ("cpu", "gpu", "gpua100", "gpuh100"):
+    for part in ordered_parts:
         part_nodes = [n for n in nodes if part in n.get("partitions", [])]
         schedulable = [n for n in part_nodes if n.get("schedulable")]
         qrows = by_partition_queue.get(part, [])
         pending = [j for j in qrows if "PEND" in j.get("state", "").upper() or j.get("state") == "PD"]
         running = [j for j in qrows if "RUN" in j.get("state", "").upper() or j.get("state") == "R"]
-        if part == "cpu":
+        part_has_gpu = any(int(n.get("gpus_configured") or 0) > 0 for n in part_nodes)
+        if part == "cpu" or not part_has_gpu:
             cpus_total = sum(int(n.get("cpus") or 0) for n in schedulable)
             cpus_alloc = sum(int(n.get("alloc_cpus") or 0) for n in schedulable)
             partition_rows[part] = {
@@ -364,8 +371,9 @@ def discover_resource_snapshot(
                 "user_running_jobs": sum(1 for j in running if j.get("user") == user),
             }
             continue
-        gpu_type = GPU_PARTITIONS[part]
-        physical_nodes = [n for n in part_nodes if str(n.get("gpu_type") or "").upper() == gpu_type or n.get("gpus_configured", 0)]
+        inferred_types = Counter(str(n.get("gpu_type") or "GPU").upper() for n in part_nodes if int(n.get("gpus_configured") or 0) > 0)
+        gpu_type = GPU_PARTITIONS.get(part) or (inferred_types.most_common(1)[0][0] if inferred_types else "GPU")
+        physical_nodes = [n for n in part_nodes if n.get("gpus_configured", 0)]
         sched_gpu_nodes = [n for n in physical_nodes if n.get("schedulable")]
         physical_total = sum(int(n.get("gpus_configured") or 0) for n in physical_nodes)
         allocatable_total = sum(int(n.get("gpus_configured") or 0) for n in sched_gpu_nodes)
@@ -434,7 +442,7 @@ def snapshot_markdown(snapshot: dict[str, Any]) -> str:
     ]
     cpu = snapshot.get("partitions", {}).get("cpu", {})
     lines.append(f"| CPU | cpu | {cpu.get('cpus_total', 0)} CPUs | {cpu.get('cpus_total', 0)} CPUs | {cpu.get('cpus_idle_estimate', 0)} CPUs | {cpu.get('nodes_idle', 0)} idle | {cpu.get('queued_jobs', 0)} | batch |")
-    for part in ("gpu", "gpua100", "gpuh100"):
+    for part in [name for name, row in snapshot.get("partitions", {}).items() if row.get("gpu_type")]:
         row = snapshot.get("partitions", {}).get(part, {})
         lines.append(
             f"| {row.get('gpu_type', part)} | {part} | {row.get('physical_configured_total', 'unknown')} | "

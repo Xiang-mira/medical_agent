@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scheduler.resource_recommender import adaptive_overrequest_count  # noqa: E402
+from scheduler.resource_discovery import discover_resource_snapshot  # noqa: E402
 from tools.dataset_delivery.delivery_lib import read_csv_fieldnames, read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
 
 
@@ -26,6 +28,18 @@ DEFAULT_GROUP_WEIGHTS = {
     "unest": 0.20,
 }
 DEFAULT_PROFILE_SPECS = "generic_gpu|gpu|gpu:1|8|64G|06:00:00"
+GPU_VRAM_ESTIMATE_GB = {
+    "T4": 16,
+    "A10": 24,
+    "A30": 24,
+    "A40": 48,
+    "A6000": 48,
+    "L40": 48,
+    "L40S": 48,
+    "A100": 80,
+    "H100": 80,
+    "GPU": 16,
+}
 
 
 @dataclass(frozen=True)
@@ -66,6 +80,90 @@ def parse_profile_specs(value: str) -> list[GpuSubmitProfile]:
     if not profiles:
         raise ValueError("At least one GPU profile is required")
     return profiles
+
+
+def _gpu_type_rank(gpu_type: str) -> int:
+    upper = str(gpu_type or "").upper()
+    if "T4" in upper:
+        return 0
+    if upper in {"GPU", "GENERIC"}:
+        return 1
+    if "A100" in upper:
+        return 2
+    if "H100" in upper:
+        return 3
+    return 2
+
+
+def build_auto_gpu_profiles(snapshot: dict[str, Any], *, min_vram_gb: int = 12, include_h100_overflow: bool = True) -> list[GpuSubmitProfile]:
+    profiles: list[GpuSubmitProfile] = []
+    for partition, row in sorted((snapshot.get("partitions") or {}).items()):
+        if int(row.get("allocatable_configured_total") or row.get("gpus_configured_total") or 0) <= 0:
+            continue
+        gpu_type = str(row.get("gpu_type") or "GPU").upper()
+        vram = next((gb for key, gb in GPU_VRAM_ESTIMATE_GB.items() if key in gpu_type), GPU_VRAM_ESTIMATE_GB["GPU"])
+        if vram < min_vram_gb:
+            continue
+        if "H100" in gpu_type and not include_h100_overflow:
+            continue
+        name = re.sub(r"[^A-Za-z0-9_]+", "_", f"{partition}_{gpu_type.lower()}").strip("_").lower()
+        gres_type = "" if gpu_type == "GPU" else f":{gpu_type}"
+        mem = "96G" if vram >= 80 else ("80G" if vram >= 48 else "64G")
+        profiles.append(
+            GpuSubmitProfile(
+                name=name or str(partition),
+                partition=str(partition),
+                gres=f"gpu{gres_type}:1",
+                cpus_per_task=8,
+                mem=mem,
+                time_limit="06:00:00",
+            )
+        )
+    profiles.sort(key=lambda profile: _gpu_type_rank(profile.gres))
+    return profiles or parse_profile_specs(DEFAULT_PROFILE_SPECS)
+
+
+def resolve_profiles(profile_specs: str, *, output_root: Path) -> tuple[list[GpuSubmitProfile], dict[str, Any]]:
+    if str(profile_specs or "").strip().lower() not in {"", "auto", "cluster", "cluster_auto"}:
+        return parse_profile_specs(profile_specs), {"mode": "explicit_profile_specs", "snapshot": None}
+    snapshot = discover_resource_snapshot(output_dir=output_root / "slurm" / "resource_inventory", include_raw=False)
+    profiles = build_auto_gpu_profiles(
+        snapshot,
+        min_vram_gb=int(os.getenv("TASK2_TEACHER_MIN_VRAM_GB", "12")),
+        include_h100_overflow=os.getenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "1").strip().lower() not in {"0", "false", "no"},
+    )
+    return profiles, {"mode": "cluster_auto", "snapshot": snapshot}
+
+
+def auto_worker_target(*, task_count: int, profiles: list[GpuSubmitProfile], resource_inventory: dict[str, Any], explicit_target: int, explicit_overrequest: int | None) -> tuple[int, int, dict[str, Any]]:
+    safety_cap = int(os.getenv("TASK2_GPU_WORKER_SAFETY_CAP", "128"))
+    partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
+    compatible_capacity = 0
+    for profile in profiles:
+        part = partitions.get(profile.partition) or {}
+        compatible_capacity += int(part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
+    if compatible_capacity <= 0:
+        compatible_capacity = len(profiles)
+    target = int(explicit_target)
+    source = "explicit"
+    if target <= 0:
+        target = min(max(1, int(task_count)), max(1, compatible_capacity), max(1, safety_cap))
+        source = "cluster_inventory"
+    else:
+        target = min(target, max(1, int(task_count)), max(1, safety_cap))
+    if explicit_overrequest is None or int(explicit_overrequest) <= 0:
+        overrequest = min(max(1, int(task_count)), max(target, adaptive_overrequest_count(target)))
+        over_source = "adaptive_overrequest_count"
+    else:
+        overrequest = min(max(1, int(task_count)), max(target, int(explicit_overrequest)), max(1, safety_cap))
+        over_source = "explicit"
+    return target, overrequest, {
+        "target_source": source,
+        "overrequest_source": over_source,
+        "compatible_capacity": compatible_capacity,
+        "safety_cap": safety_cap,
+        "fixed_30_ceiling": False,
+    }
 
 
 def parse_group_weights(value: str | None) -> dict[str, float]:
@@ -246,14 +344,21 @@ def build_dynamic_submission_plan(
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("status") != "READY":
         raise RuntimeError(f"Formal Task2 preflight is not READY: {summary.get('status')}")
-    profiles = parse_profile_specs(profile_specs)
+    profiles, resource_inventory = resolve_profiles(profile_specs, output_root=output_root)
     summary_groups = summary.get("groups") or {}
     requested_groups = groups or [group for group in ("cads", "atm", "airrc", "unest") if group in summary_groups]
     task_counts = {
         group: int((summary_groups.get(group) or {}).get("task_count") or 0)
         for group in requested_groups
     }
-    planned_overrequest = int(overrequest_workers or adaptive_overrequest_count(target_workers))
+    ready_task_total = sum(int(value) for value in task_counts.values())
+    target_workers, planned_overrequest, worker_sizing = auto_worker_target(
+        task_count=ready_task_total,
+        profiles=profiles,
+        resource_inventory=resource_inventory,
+        explicit_target=target_workers,
+        explicit_overrequest=overrequest_workers,
+    )
     group_slots = allocate_group_concurrency(
         requested_groups,
         task_counts,
@@ -345,6 +450,8 @@ def build_dynamic_submission_plan(
                     "scheduler_mode": "dynamic_gpu_overrequest",
                     "planned_target_workers": int(target_workers),
                     "planned_overrequest_workers": planned_overrequest,
+                    "resource_inventory": resource_inventory,
+                    "worker_sizing": worker_sizing,
                     "failures": preflight_failures,
                     "jobs": shard_rows,
                 },
@@ -396,6 +503,8 @@ def build_dynamic_submission_plan(
         "total_array_concurrency": sum(int(row["array_concurrency"]) for row in shard_rows),
         "group_concurrency": group_slots,
         "profile_specs": [profile.__dict__ for profile in profiles],
+        "resource_inventory": resource_inventory,
+        "worker_sizing": worker_sizing,
         "jobs": shard_rows,
         "dependency_policy": {
             "parallel": [
@@ -437,9 +546,9 @@ def main() -> int:
     parser.add_argument("--summary", required=True, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
     parser.add_argument("--state-root", required=True, type=Path)
-    parser.add_argument("--target-workers", default=30, type=int)
+    parser.add_argument("--target-workers", default=0, type=int)
     parser.add_argument("--overrequest-workers", default=None, type=int)
-    parser.add_argument("--profile-specs", default=DEFAULT_PROFILE_SPECS)
+    parser.add_argument("--profile-specs", default="auto")
     parser.add_argument("--groups", default="")
     parser.add_argument("--group-weights", default="")
     parser.add_argument("--dry-run", action="store_true")

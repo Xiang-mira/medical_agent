@@ -132,3 +132,39 @@ def test_dynamic_submitter_preflight_failure_submits_no_partial_jobs(tmp_path: P
     assert not any("--parsable" in call for call in calls)
     plan = json.loads((tmp_path / "slurm" / "dynamic_gpu_submission_plan.json").read_text(encoding="utf-8"))
     assert plan["status"] == "PREFLIGHT_FAILED"
+
+
+def test_dynamic_submitter_auto_profiles_use_cluster_inventory_without_fixed_30_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 12, "gpus_configured_total": 12},
+            "gpua100": {"partition": "gpua100", "gpu_type": "A100", "allocatable_configured_total": 24, "gpus_configured_total": 24},
+            "spare_l40": {"partition": "spare_l40", "gpu_type": "L40S", "allocatable_configured_total": 20, "gpus_configured_total": 20},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"cads": 80})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["cads"],
+        dry_run=True,
+    )
+
+    assert plan["planned_target_workers"] == 64
+    assert plan["planned_overrequest_workers"] == 80
+    assert plan["worker_sizing"]["fixed_30_ceiling"] is False
+    assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu", "gpua100", "spare_l40", "gpuh100"}
+    shard_paths = [Path(row["task_manifest"]) for row in plan["jobs"]]
+    source_indices: list[str] = []
+    for path in shard_paths:
+        source_indices.extend(row["source_task_index"] for row in _rows(path))
+    assert sorted(source_indices, key=int) == [str(index) for index in range(80)]

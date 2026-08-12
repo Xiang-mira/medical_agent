@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scheduler.resource_discovery import parse_scontrol_job, parse_scontrol_nodes, parse_sinfo_fallback, validate_snapshot_invariants
+from scheduler.resource_discovery import discover_resource_snapshot, parse_scontrol_job, parse_scontrol_nodes, parse_sinfo_fallback, validate_snapshot_invariants
 
 
 def test_parse_scontrol_nodes_computes_gpu_shapes():
@@ -38,3 +38,29 @@ def test_snapshot_invariants():
     assert validate_snapshot_invariants(snap)["status"] == "success"
     bad = {"partitions": {"gpu": {"gpu_type": "T4", "physical_configured_total": 1, "allocatable_configured_total": 1, "allocated_estimate": 2, "idle_estimate": 0}}}
     assert validate_snapshot_invariants(bad)["status"] == "failed"
+
+
+def test_discover_resource_snapshot_includes_extra_gpu_partitions(monkeypatch):
+    def fake_run(args):
+        if args == ["scontrol", "show", "nodes"]:
+            return 0, """
+NodeName=l40-01 State=IDLE CPUTot=64 CPUAlloc=0 RealMemory=500000 AllocMem=0 Gres=gpu:L40S:4 CfgTRES=cpu=64,mem=500000M,gres/gpu=4 AllocTRES= Partitions=spare_l40
+""", ""
+        if args == ["sinfo", "--json"]:
+            return 1, "", "no json"
+        if args == ["sinfo", "-h", "-o", "%P|%a|%l|%D"]:
+            return 0, "spare_l40|up|1-00:00:00|1\n", ""
+        if args == ["sinfo", "-N", "-h", "-o", "%N|%P|%t|%G|%C|%m"]:
+            return 0, "", ""
+        if args == ["squeue", "--json"]:
+            return 0, '{"jobs":[]}', ""
+        if args == ["scontrol", "show", "config"]:
+            return 0, "ClusterName = test\n", ""
+        raise AssertionError(f"unexpected command: {args}")
+
+    monkeypatch.setattr("scheduler.resource_discovery._run", fake_run)
+    monkeypatch.setattr("scheduler.resource_discovery.shutil.which", lambda name: None)
+    snapshot = discover_resource_snapshot()
+    row = snapshot["partitions"]["spare_l40"]
+    assert row["gpu_type"] == "L40S"
+    assert row["allocatable_configured_total"] == 4

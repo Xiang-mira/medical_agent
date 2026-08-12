@@ -35,6 +35,8 @@ def _args(tmp_path: Path) -> SimpleNamespace:
         skip_sbatch_test_only=True,
         run_static_tests=False,
         static_tests_timeout_sec=1,
+        retry_failed=True,
+        new_attempt=False,
     )
 
 
@@ -69,18 +71,48 @@ def test_pending_labelcritic_waits_until_runtime_ready(tmp_path, monkeypatch):
     assert sleeps
 
 
-def test_service_runtime_validation_failure_blocks_estep(tmp_path, monkeypatch):
+def test_pending_labelcritic_submits_estep_before_runtime_ready(tmp_path, monkeypatch):
     args = _args(tmp_path)
-    monkeypatch.setattr(orch, "wait_for_labelcritic_runtime", lambda state_root, poll_sec: {"status": "FAILED", "failure_reason": "bad_runtime"})
+    calls: list[str] = []
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: calls.append("ensure_labelcritic") or {"status": "REUSED_ACTIVE_JOB", "job_id": "4527698"})
 
-    def fail_estep(*args, **kwargs):
-        raise AssertionError("E-step must not launch after LabelCritic runtime failure")
+    poll_results = iter([
+        {"status": "WAITING", "job": {"state": "PENDING"}, "service": {"status": "REUSED_ACTIVE_JOB", "job_id": "4527698"}},
+        {"status": "PASSED", "base_url": "http://node", "port": 8000, "runtime": {"status": "PASSED"}},
+    ])
+    estep_results = iter([
+        {"status": "RUNNING"},
+        {"status": "PASSED"},
+    ])
+    monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: calls.append("poll_labelcritic") or next(poll_results))
+    monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic=None: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or next(estep_results))
+    monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
+    monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
+    monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
+    monkeypatch.setattr(orch.time, "sleep", lambda sec: calls.append("sleep"))
 
-    monkeypatch.setattr(orch, "submit_estep", fail_estep)
+    assert orch.controller(args) == 0
+    assert calls.index("submit_estep") < calls.index("poll_labelcritic")
+    assert calls.index("submit_mstep") > calls.index("check_estep")
+
+
+def test_service_runtime_validation_failure_blocks_mstep_not_estep(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_ACTIVE_JOB", "job_id": "4527571"})
+    monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic=None: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: {"status": "FAILED", "failure_reason": "bad_runtime"})
+
+    def fail_mstep(*args, **kwargs):
+        raise AssertionError("M-step must not launch after LabelCritic runtime failure")
+
+    monkeypatch.setattr(orch, "submit_mstep", fail_mstep)
     assert orch.controller(args) == 2
     state = orch._load_state(args.state_root)
     assert state["terminal_state"] == "ROUND1_FAILED"
     assert state["stage"] == "labelcritic"
+    assert calls == ["submit_estep"]
     paths = orch._state_paths(args.state_root)
     assert paths["last_failure"].is_file()
     assert paths["failures"].is_file()
@@ -93,7 +125,8 @@ def test_service_runtime_validation_failure_blocks_estep(tmp_path, monkeypatch):
 def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
     args = _args(tmp_path)
     calls: list[str] = []
-    monkeypatch.setattr(orch, "wait_for_labelcritic_runtime", lambda state_root, poll_sec: {"status": "PASSED", "base_url": "http://node", "port": 8000})
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_HEALTHY", "base_url": "http://node", "port": 8000})
+    monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: calls.append("poll_labelcritic") or {"status": "PASSED", "base_url": "http://node", "port": 8000})
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic: calls.append("submit_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
@@ -101,8 +134,38 @@ def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
 
     assert orch.controller(args) == 0
-    assert calls == ["submit_estep", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
+    assert calls == ["submit_estep", "poll_labelcritic", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
     assert orch._load_state(args.state_root)["terminal_state"] == "ROUND1_PASSED"
+
+
+def test_estep_passed_waits_for_labelcritic_gate_before_mstep(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_ACTIVE_JOB", "job_id": "4527698"})
+    poll_results = iter([
+        {"status": "WAITING", "job": {"state": "RUNNING"}},
+        {"status": "PASSED", "base_url": "http://node", "port": 8000},
+    ])
+    monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: calls.append("poll_labelcritic") or next(poll_results))
+    monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic: calls.append("submit_estep") or {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or {"status": "PASSED"})
+    monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
+    monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
+    monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
+    monkeypatch.setattr(orch.time, "sleep", lambda sec: calls.append("sleep"))
+
+    assert orch.controller(args) == 0
+    assert calls == [
+        "submit_estep",
+        "poll_labelcritic",
+        "check_estep",
+        "sleep",
+        "poll_labelcritic",
+        "check_estep",
+        "submit_mstep",
+        "check_mstep",
+        "final_validator",
+    ]
 
 
 def test_submit_controller_exits_after_sbatch_submission(tmp_path, monkeypatch):
@@ -110,7 +173,13 @@ def test_submit_controller_exits_after_sbatch_submission(tmp_path, monkeypatch):
     paths = orch._state_paths(args.state_root)
     paths["root"].mkdir(parents=True)
     paths["controller_sbatch"].write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
-    monkeypatch.setattr(orch, "run_static_preflight", lambda args: {"status": "PASSED"})
+    def fake_preflight(args):
+        new_paths = orch._state_paths(args.state_root)
+        new_paths["root"].mkdir(parents=True, exist_ok=True)
+        new_paths["controller_sbatch"].write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
+        return {"status": "PASSED"}
+
+    monkeypatch.setattr(orch, "run_static_preflight", fake_preflight)
     submitted: list[list[str]] = []
 
     def fake_run(command, **kwargs):
@@ -150,3 +219,32 @@ def test_terminal_labelcritic_failure_propagates(tmp_path, monkeypatch):
     result = orch.wait_for_labelcritic_runtime(tmp_path, poll_sec=1)
     assert result["status"] == "FAILED"
     assert result["failure_reason"] == "labelcritic_job_terminal:FAILED"
+
+
+def test_retry_failed_archives_existing_attempt_and_submits_new_controller(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    paths = orch._state_paths(args.state_root)
+    orch._save_state(args.state_root, terminal_state="ROUND1_FAILED", failure_reason="old_failure")
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    def fake_preflight(args):
+        new_paths = orch._state_paths(args.state_root)
+        new_paths["root"].mkdir(parents=True, exist_ok=True)
+        new_paths["controller_sbatch"].write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
+        return {"status": "PASSED"}
+
+    monkeypatch.setattr(orch, "run_static_preflight", fake_preflight)
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "COMPLETED", "job_id": job_id})
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["sbatch", "--parsable"]:
+            return {"ok": True, "stdout": "888\n", "stderr": "", "return_code": 0}
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+    result = orch.submit_controller(args)
+    assert result["status"] == "CONTROLLER_SUBMITTED"
+    archived = list((args.state_root / "round1_orchestrated_attempts").glob("attempt_001/attempt_archive.json"))
+    assert archived
+    assert orch._load_state(args.state_root)["controller_job_id"] == "888"
