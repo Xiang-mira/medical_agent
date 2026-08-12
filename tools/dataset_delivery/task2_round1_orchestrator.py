@@ -32,6 +32,12 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     student_pretimeout,
 )
 from tools.dataset_delivery.task2_formal_manifest import FORMAL_CASE_COUNT, build_formal_manifest, validate_formal_manifest  # noqa: E402
+from tools.dataset_delivery.task2_full373_round1_launcher import (  # noqa: E402
+    FULL373_GROUP,
+    FULL373_ROOT_NAME,
+    aggregate_full373_estep,
+    build_full_round1_scope,
+)
 from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
 
 
@@ -711,6 +717,33 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
         add("cases_103_manifest", manifest.get("rows") == FORMAL_CASE_COUNT and manifest.get("unique_case_count") == FORMAL_CASE_COUNT, manifest)
     except Exception as exc:
         add("cases_103_manifest", False, f"{type(exc).__name__}: {exc}")
+    try:
+        full_scope = build_full_round1_scope(
+            case_manifest=manifest_for_preflight.resolve(),
+            registry_path=args.registry.resolve(),
+            target_config=args.target_config.resolve(),
+            output_root=paths["root"] / FULL373_ROOT_NAME,
+            cache_roots=[paths["root"] / "formal_task2_round1"],
+            expected_case_count=FORMAL_CASE_COUNT,
+        )
+        add(
+            "full_373_multiteacher_scope",
+            full_scope.get("status") == "READY"
+            and full_scope.get("case_count") == FORMAL_CASE_COUNT
+            and full_scope.get("canonical_target_count") == 373
+            and int(full_scope.get("unroutable_target_count") or 0) == 0,
+            {
+                "scope_json": str(paths["root"] / FULL373_ROOT_NAME / "full_round1_scope.json"),
+                "case_count": full_scope.get("case_count"),
+                "canonical_target_count": full_scope.get("canonical_target_count"),
+                "enabled_teacher_count": full_scope.get("enabled_teacher_count"),
+                "target_teacher_pairs": full_scope.get("target_teacher_pairs"),
+                "total_logical_candidate_tasks": full_scope.get("total_logical_candidate_tasks"),
+                "unroutable_target_count": full_scope.get("unroutable_target_count"),
+            },
+        )
+    except Exception as exc:
+        add("full_373_multiteacher_scope", False, f"{type(exc).__name__}: {exc}")
     add("personal_workspace_writable", os.access(args.workspace_root.resolve(), os.W_OK) if args.workspace_root.exists() else os.access(args.workspace_root.parent.resolve(), os.W_OK), str(args.workspace_root))
     public_root = Path("/projects/bodymaps/Data")
     add("public_data_not_output_root", public_root not in args.state_root.resolve().parents and args.state_root.resolve() != public_root, str(args.state_root))
@@ -730,6 +763,7 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
         "tools/dataset_delivery/task2_round1_orchestrator.py",
         "tools/dataset_delivery/task2_formal_launcher.py",
         "tools/dataset_delivery/task2_dynamic_gpu_submitter.py",
+        "tools/dataset_delivery/task2_full373_round1_launcher.py",
         "tools/dataset_delivery/formal_round1_preflight.py",
     ])
     add("py_compile_orchestration", compile_result["ok"], compile_result)
@@ -749,6 +783,7 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
             "tests/dataset_delivery/test_task2_runtime_repair.py",
             "tests/dataset_delivery/test_task2_formal_production.py",
             "tests/dataset_delivery/test_task2_dynamic_gpu_submitter.py",
+            "tests/dataset_delivery/test_task2_full373_round1_launcher.py",
         ]
         result = _run([str(args.python), "-m", "pytest", "-q", *tests], env=sanitized_static_test_env(), timeout=int(args.static_tests_timeout_sec))
         add("task1_task2_scheduler_regression_tests", result["ok"], result)
@@ -1160,7 +1195,8 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     run_id = _run_id(state_root)
     submitted_cases = set(str(case_id) for case_id in state.get("teacher_submitted_case_ids") or [])
     statuses = _staging_status_rows(args, source_manifest)
-    ready_cases = [row["case_id"] for row in statuses if row["status"] == "INPUT_READY" and row["case_id"] not in submitted_cases]
+    ready_status_rows = [row for row in statuses if row["status"] == "INPUT_READY" and row["case_id"] not in submitted_cases]
+    ready_cases = [row["case_id"] for row in ready_status_rows]
     if not ready_cases:
         return {
             "status": "NO_NEW_READY_CASES",
@@ -1176,8 +1212,21 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     else:
         batch_index = int(state.get("teacher_batch_index") or 0) + 1
         submission_id = f"ready_batch_{batch_index:03d}"
-    formal_root = Path(str(state.get("formal_root") or (paths["root"] / "formal_task2_round1"))).resolve()
+    formal_root = Path(str(state.get("formal_root") or (paths["root"] / FULL373_ROOT_NAME))).resolve()
     reconcile_active_teacher_jobs(args, formal_root)
+    ready_manifest = paths["root"] / f"{submission_id}_full373_ready_cases.csv"
+    write_csv(
+        ready_manifest,
+        [
+            {
+                "case_id": row["case_id"],
+                "ct_path": row["ct_path"],
+                "annotation_folder": row["annotation_folder"],
+            }
+            for row in ready_status_rows
+        ],
+        ["case_id", "ct_path", "annotation_folder"],
+    )
     endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
     env = runtime_no_git_env()
     env.update({
@@ -1192,22 +1241,16 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     })
     plan_cmd = [
         str(args.python),
-        "tools/dataset_delivery/task2_formal_launcher.py",
+        "tools/dataset_delivery/task2_full373_round1_launcher.py",
         "--output-root", str(formal_root),
-        "--case-manifest", str(source_manifest),
-        "--base-manifest", str(args.base_manifest),
-        "--code-root", str(REPO_ROOT),
+        "--case-manifest", str(ready_manifest),
         "--python", str(args.python),
         "--registry", str(args.registry),
         "--target-config", str(args.target_config),
         "--checkpoint-root", str(args.checkpoint_root),
         "--nnunet-predict-executable", str(args.nnunet_predict_executable),
         "--unest-python-executable", str(args.unest_python_executable),
-        "--groups", os.getenv("GROUPS", "cads,atm,airrc,unest"),
-        "--ready-case-ids", ",".join(ready_cases),
-        "--staged-workspace-root", str(args.workspace_root),
-        "--submission-tag", submission_id,
-        "--resume",
+        "--cache-root", str(paths["root"] / "formal_task2_round1"),
     ]
     plan_result = _run(plan_cmd, env=env, timeout=600)
     if not plan_result["ok"]:
@@ -1227,8 +1270,8 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "--target-workers", str(args.gpu_target_workers),
         "--overrequest-workers", str(args.gpu_overrequest_workers),
         "--profile-specs", args.gpu_profile_specs,
-        "--groups", os.getenv("GROUPS", "cads,atm,airrc,unest"),
-        "--group-weights", os.getenv("GPU_GROUP_WEIGHTS", "cads=0.45,atm=0.15,airrc=0.20,unest=0.20"),
+        "--groups", FULL373_GROUP,
+        "--group-weights", os.getenv("GPU_GROUP_WEIGHTS", "full373=1.0"),
         "--submission-id", submission_id,
         "--append-submitted-jobs",
         "--run-id", run_id,
@@ -1312,11 +1355,11 @@ def advance_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None =
 def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
     state_root = args.state_root.resolve()
     state = _load_state(state_root)
-    formal_root = Path(str(state.get("formal_root") or (_state_paths(state_root)["root"] / "formal_task2_round1"))).resolve()
-    formal_summary = _read_json(formal_root / "task2_formal_summary.json", {})
+    formal_root = Path(str(state.get("formal_root") or (_state_paths(state_root)["root"] / FULL373_ROOT_NAME))).resolve()
+    full_summary = _read_json(formal_root / "full_373_estep_status.json", {})
     if state.get("e_step_status") in {"SUBMITTED", "PASSED"} and (
         (formal_root / "slurm" / "submitted_jobs.csv").exists()
-        or formal_summary.get("status") == "PASSED"
+        or full_summary.get("status") == "PASSED"
     ):
         return {"status": "REUSED", "formal_root": str(formal_root), "e_step_status": state.get("e_step_status")}
     result = advance_estep(args, labelcritic)
@@ -1332,11 +1375,10 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
     formal_root = Path(str(state.get("formal_root") or ""))
     if not formal_root.exists():
         return {"status": "PENDING", "reason": "formal_root_missing"}
-    env = runtime_no_git_env()
-    env.update({"FORMAL_ROOT": str(formal_root), "CASE_MANIFEST": str(args.case_manifest), "BASE_MANIFEST": str(args.base_manifest), "STATE_ROOT": str(args.state_root)})
-    result = _run(["bash", "scripts/task2/check_task2_formal_103cases.sh"], env=env, timeout=600)
-    if result["ok"]:
-        return {"status": "PASSED", "formal_root": str(formal_root), "check": result}
+    aggregate = aggregate_full373_estep(formal_root, expected_cases=FORMAL_CASE_COUNT, expected_targets=373)
+    if aggregate["status"] == "PASSED":
+        return {"status": "PASSED", "formal_root": str(formal_root), "check": aggregate}
+    result = {"ok": aggregate["status"] != "FAILED", "stdout": json.dumps(aggregate), "stderr": "", "return_code": 0 if aggregate["status"] != "FAILED" else 2}
     jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
     active = []
     failed = []
@@ -1396,7 +1438,35 @@ def build_mstep_manifest(args: argparse.Namespace) -> dict[str, Any]:
             return {"status": "REUSED", "manifest": str(paths["mstep_manifest"]), "num_items": len(doc.get("items") or [])}
     state = _load_state(args.state_root.resolve())
     formal_root = Path(str(state.get("formal_root") or ""))
+    full_manifest = _read_json(formal_root / "training_manifest.json", {})
+    full_gate = _read_json(formal_root / "full_373_estep_status.json", {})
+    if full_manifest.get("items"):
+        if full_gate.get("status") != "PASSED":
+            return {
+                "status": "FAILED",
+                "failure_reason": "full_373_estep_gate_not_passed",
+                "gate": full_gate,
+                "manifest": str(formal_root / "training_manifest.json"),
+            }
+        manifest = dict(full_manifest)
+        manifest.update(
+            {
+                "version": "full_373_multiteacher_round1_voxtell_manifest_v1",
+                "source_formal_root": str(formal_root),
+                "source_stage": "full_373_multiteacher_round1_estep",
+                "training_contract_version": manifest.get("training_contract_version") or TRAINING_CONTRACT_VERSION,
+            }
+        )
+        _write_json(paths["mstep_manifest"], manifest)
+        return {"status": "REUSED", "manifest": str(paths["mstep_manifest"]), "num_items": len(manifest.get("items") or [])}
     rows_doc = _read_json(formal_root / "task2_formal_case_target_status.json", {})
+    if formal_root.name == FULL373_ROOT_NAME or not rows_doc.get("rows"):
+        return {
+            "status": "FAILED",
+            "failure_reason": "full_373_training_manifest_missing",
+            "formal_root": str(formal_root),
+            "expected_manifest": str(formal_root / "training_manifest.json"),
+        }
     case_rows = {str(row.get("case_id") or ""): row for row in read_csv_rows(args.case_manifest)}
     target_doc = _read_json(args.target_config, {})
     targets = list(target_doc.get("target_organs") or [])
@@ -1570,11 +1640,21 @@ def run_round1_final_validator(args: argparse.Namespace) -> dict[str, Any]:
     mstep_result = _read_json(mstep_result_path, {})
     checkpoint = Path(str(mstep_result.get("inference_checkpoint") or paths["root"] / "round1" / "mstep" / "voxtell_finetuned_model" / "fold_0" / "checkpoint_final.pth"))
     formal_root = Path(str(state.get("formal_root") or ""))
+    full_gate = _read_json(formal_root / "full_373_estep_status.json", {})
     formal_status = _read_json(formal_root / "task2_formal_summary.json", {})
-    formal_validator_status = formal_status.get("status") or formal_status.get("validation_status")
+    formal_validator_status = full_gate.get("status") or formal_status.get("status") or formal_status.get("validation_status")
     checks = [
         {"name": "e_step_status_passed", "ok": state.get("e_step_status") == "PASSED", "detail": state.get("e_step_status")},
-        {"name": "formal_validator_passed", "ok": bool(formal_validator_status in {"PASSED", "passed", "success"}), "detail": formal_validator_status or "missing_task2_formal_summary"},
+        {
+            "name": "full_373_estep_gate_passed",
+            "ok": bool(
+                full_gate.get("status") == "PASSED"
+                and full_gate.get("case_count") == FORMAL_CASE_COUNT
+                and full_gate.get("canonical_target_count") == 373
+                and full_gate.get("manifest_targets") == FORMAL_CASE_COUNT * 373
+            ),
+            "detail": formal_validator_status or "missing_full_373_estep_status",
+        },
         {"name": "mstep_result_success", "ok": mstep_result.get("status") == "success", "detail": str(mstep_result_path)},
         {"name": "mstep_checkpoint_exists", "ok": checkpoint.is_file(), "detail": str(checkpoint)},
         {

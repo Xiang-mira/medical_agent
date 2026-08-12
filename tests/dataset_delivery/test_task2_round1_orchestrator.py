@@ -91,19 +91,19 @@ def _fake_teacher_submitter(monkeypatch, *, submitted_commands: list[list[str]] 
     def fake_run(command, **kwargs):
         if submitted_commands is not None:
             submitted_commands.append(command)
-        if any(str(part).endswith("task2_formal_launcher.py") for part in command):
+        if any(str(part).endswith("task2_full373_round1_launcher.py") for part in command):
             formal_root = Path(command[command.index("--output-root") + 1])
-            ready_ids = command[command.index("--ready-case-ids") + 1].split(",")
+            ready_manifest = Path(command[command.index("--case-manifest") + 1])
+            ready_ids = [row["case_id"] for row in csv.DictReader(ready_manifest.open("r", encoding="utf-8"))]
             if captured_ready_ids is not None:
-                captured_ready_ids.append([item for item in ready_ids if item])
+                captured_ready_ids.append(ready_ids)
             formal_root.mkdir(parents=True, exist_ok=True)
             groups = {
-                group: {
+                "full373": {
                     "task_count": len([item for item in ready_ids if item]),
-                    "task_manifest": str(formal_root / "slurm" / "submissions" / "ready_batch_001" / f"{group}_task_manifest.csv"),
-                    "sbatch_file": str(formal_root / "slurm" / "submissions" / "ready_batch_001" / f"{group}_task2_array.sbatch"),
+                    "task_manifest": str(formal_root / "slurm" / "full373_task_manifest.csv"),
+                    "sbatch_file": str(formal_root / "slurm" / "full373_multiteacher_array.sbatch"),
                 }
-                for group in ("cads", "atm", "airrc", "unest")
             }
             (formal_root / "formal_task2_submission_manifest.json").write_text(
                 '{"status":"READY","task_count":4,"groups":' + json.dumps(groups) + "}\n",
@@ -465,7 +465,7 @@ def test_ready_teacher_submit_sets_no_git_runtime_env_without_display_or_github_
             return {"ok": True, "stdout": "41f8fad", "stderr": "", "return_code": 0}
         if "env" in kwargs:
             captured_envs.append(kwargs["env"])
-        if any(str(part).endswith("task2_formal_launcher.py") for part in command):
+        if any(str(part).endswith("task2_full373_round1_launcher.py") for part in command):
             formal_root = Path(command[command.index("--output-root") + 1])
             formal_root.mkdir(parents=True, exist_ok=True)
             (formal_root / "formal_task2_submission_manifest.json").write_text('{"status":"READY","task_count":4,"groups":{}}\n', encoding="utf-8")
@@ -578,6 +578,19 @@ def test_static_preflight_pytest_uses_sanitized_environment(tmp_path, monkeypatc
         },
     )
     monkeypatch.setattr(orch, "validate_formal_manifest", lambda **kwargs: {"rows": orch.FORMAL_CASE_COUNT, "unique_case_count": orch.FORMAL_CASE_COUNT})
+    monkeypatch.setattr(
+        orch,
+        "build_full_round1_scope",
+        lambda **kwargs: {
+            "status": "READY",
+            "case_count": orch.FORMAL_CASE_COUNT,
+            "canonical_target_count": 373,
+            "enabled_teacher_count": 21,
+            "target_teacher_pairs": 599,
+            "total_logical_candidate_tasks": orch.FORMAL_CASE_COUNT * 599,
+            "unroutable_target_count": 0,
+        },
+    )
 
     def fake_run(command, **kwargs):
         if "-m" in command and "pytest" in command:
@@ -881,7 +894,7 @@ def test_teacher_submit_backpressure_is_not_round1_failure_and_keeps_submission_
             return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
         if command == ["git", "rev-parse", "HEAD"]:
             return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
-        if any(str(part).endswith("task2_formal_launcher.py") for part in command):
+        if any(str(part).endswith("task2_full373_round1_launcher.py") for part in command):
             formal_root.mkdir(parents=True, exist_ok=True)
             (formal_root / "formal_task2_submission_manifest.json").write_text(
                 json.dumps(
