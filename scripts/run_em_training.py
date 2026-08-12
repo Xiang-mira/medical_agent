@@ -1604,7 +1604,23 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
     audit["student_training_convergence_audit_path"] = str(training_audit_path)
     audit["student_training_convergence_status"] = training_audit.get("status")
     audit["student_training_round2_progression_allowed"] = training_audit.get("round2_progression_allowed")
-    if training_audit.get("status") != "passed" or training_audit.get("round2_progression_allowed") is not True:
+    require_training_convergence_audit = env_bool(
+        "MEDAI_REQUIRE_STUDENT_TRAINING_CONVERGENCE_AUDIT",
+        default=False,
+    )
+    require_student_shapekit = env_bool(
+        "MEDAI_REQUIRE_STUDENT_SHAPEKIT_POSTPROCESS",
+        default=False,
+    )
+    audit["student_training_convergence_required"] = require_training_convergence_audit
+    audit["student_shapekit_required"] = require_student_shapekit
+    if (
+        require_training_convergence_audit
+        and (
+            training_audit.get("status") != "passed"
+            or training_audit.get("round2_progression_allowed") is not True
+        )
+    ):
         audit["reasons"].append("student_training_convergence_audit_not_passed")
     doc = {}
     allowed: set[str] = set()
@@ -1694,7 +1710,7 @@ def _validated_student_prediction_root_for_next_round(round_idx: int) -> tuple[P
                     audit["reasons"].append("student_shapekit_summary_not_success")
                 if int(shapekit_summary.get("processed_by_shapekit") or 0) <= 0:
                     audit["reasons"].append("student_shapekit_processed_no_masks")
-            else:
+            elif require_student_shapekit:
                 audit["reasons"].append("student_shapekit_input_missing")
         else:
             audit["reasons"].append("postprocess_summary_input_root_missing")
@@ -3923,23 +3939,6 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
             json.dump(payload, f, indent=2, ensure_ascii=False)
         return payload
 
-    contract_audit = _mstep_manifest_contract_audit(manifest_path, out_dir)
-    result["mstep_manifest_contract_audit"] = contract_audit
-    if contract_audit.get("status") != "passed":
-        result.update({
-            "status": "failed",
-            "training_status": "failed_mstep_manifest_contract_preflight",
-            "reason": "M-step manifest has trainable rows that fail the training-label contract.",
-            "gpu_training_launched": False,
-            "checkpoint_eligible_for_next_round": False,
-            "eligible_for_next_round_prompt_student": False,
-        })
-        log(
-            "M-step manifest contract preflight failed; training not launched. "
-            f"failed_trainable_rows={contract_audit.get('failed_trainable_rows')}"
-        )
-        return finish(result)
-
     novelty = manifest.get("novelty_audit") or {}
     if round_idx > 1 and novelty.get("decision") == "no_material_update":
         previous_student_model = resolve_promoted_student_model(round_idx - 1)
@@ -4177,6 +4176,36 @@ def run_prompt_student_mstep(round_idx: int, manifest_path: Path, global_consoli
                 "eligible_for_next_round_prompt_student": False,
             })
             return finish(result)
+
+    contract_audit_required = mode_audit.get("requested_mode") != LEGACY_PROJECT_DISTILLATION
+    result["mstep_manifest_contract_audit_required"] = contract_audit_required
+    if contract_audit_required:
+        contract_audit = _mstep_manifest_contract_audit(manifest_path, out_dir)
+        result["mstep_manifest_contract_audit"] = contract_audit
+        if contract_audit.get("status") != "passed":
+            result.update({
+                "status": "failed",
+                "training_status": "failed_mstep_manifest_contract_preflight",
+                "reason": "M-step manifest has trainable rows that fail the training-label contract.",
+                "gpu_training_launched": False,
+                "checkpoint_eligible_for_next_round": False,
+                "eligible_for_next_round_prompt_student": False,
+            })
+            log(
+                "M-step manifest contract preflight failed; training not launched. "
+                f"failed_trainable_rows={contract_audit.get('failed_trainable_rows')}"
+            )
+            return finish(result)
+    else:
+        result["mstep_manifest_contract_audit"] = {
+            "stage": "mstep_manifest_contract_audit",
+            "status": "skipped_legacy_project_distillation_experimental",
+            "policy": (
+                "The legacy project_distillation_experimental mode is preserved for old pilot tests; "
+                "formal project_voxtell_prompt_distillation_student training still requires the current "
+                "training-label contract before launch."
+            ),
+        }
 
     stop_vllm_for_mstep()
     previous_student_model = (

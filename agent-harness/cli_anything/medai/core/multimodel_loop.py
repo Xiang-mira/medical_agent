@@ -886,6 +886,8 @@ def _build_case_execution_plan(
     registry_models = registry.get("models", {}) or {}
     requested_keys, requested_model_diagnostics = canonical_model_keys(requested_models or [], registry)
     requested_set = set(requested_keys)
+    requested_raw_set = {str(item).strip() for item in (requested_models or []) if str(item).strip()}
+    custom_requested_models = bool(requested_raw_set) and not requested_set
     runtime_profile = profile_runtime_policy(os.getenv("MEDAI_EXPERIMENT_PROFILE", "advisor_aligned_default"))
     official_voxtell_policy = runtime_profile.get("official_voxtell_pretrained") or {}
     special_candidate_keys = {
@@ -900,6 +902,9 @@ def _build_case_execution_plan(
         norm = _norm_organ_key(organ)
         branch_entry = branch_map.get(organ) or branch_map.get(norm) or {}
         raw_routed_candidates = [str(m).strip() for m in routed.get(norm, []) if str(m).strip()]
+        if custom_requested_models:
+            custom_route_hits = [m for m in raw_routed_candidates if m in requested_raw_set]
+            raw_routed_candidates = custom_route_hits or list(requested_raw_set)
         routed_candidate_diagnostics: list[dict[str, Any]] = []
         canonical_routed_candidates: list[str] = []
         seen_routed: set[str] = set()
@@ -912,11 +917,16 @@ def _build_case_execution_plan(
                 "source": resolved.source,
                 "reason": resolved.reason,
             })
-            if resolved.ok and resolved.resolved and resolved.resolved in registry_models and resolved.resolved not in seen_routed:
+            if custom_requested_models and raw_model in requested_raw_set and raw_model not in seen_routed:
+                canonical_routed_candidates.append(raw_model)
+                seen_routed.add(raw_model)
+            elif resolved.ok and resolved.resolved and resolved.resolved in registry_models and resolved.resolved not in seen_routed:
                 canonical_routed_candidates.append(resolved.resolved)
                 seen_routed.add(resolved.resolved)
         if requested_set:
             routed_candidates = [m for m in canonical_routed_candidates if m in requested_set]
+        elif custom_requested_models:
+            routed_candidates = [m for m in canonical_routed_candidates if m in requested_raw_set]
         else:
             routed_candidates = [m for m in canonical_routed_candidates if m in registry_models]
         route = _resolve_routed_models(
@@ -5954,7 +5964,7 @@ def run_multimodel_annotation_loop(
     registry = load_registry(registry_path)
     model_keys, model_resolution = canonical_model_keys(models or [], registry)
     if models is not None:
-        models = model_keys
+        models = model_keys or list(models)
     project_root = Path(__file__).resolve().parents[4]
     resolved_checkpoint_root = resolve_checkpoint_root(
         explicit=checkpoint_root,
@@ -6525,7 +6535,11 @@ def run_multimodel_annotation_loop(
                     key for key in preseeded_keys
                     if key != "student_prev" and "student" not in key.lower()
                 }
-                if tracker and not tracker.should_run_all(organ):
+                if (
+                    tracker
+                    and candidate_mode not in {"route_pruned_with_competition"}
+                    and not tracker.should_run_all(organ)
+                ):
                     top_models = tracker.get_top_k_models(organ, k=2)
                     organ_model_seg_dirs = {
                         k: v for k, v in candidate_model_seg_dirs.items()

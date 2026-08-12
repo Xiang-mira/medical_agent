@@ -971,7 +971,7 @@ models:
       with --output_label_mode pancreas_only.
     runner: command_template
     supported_organ_aliases:
-      celiac_aa_celiac_artery: celiac_aa
+      celiac_aa: celiac_aa
       inferior_vena_cava: postcava
       small_intestine: intestine
     checkpoint_path: checkpoints/nnUNet_private/nnUNet_private/Dataset1339_ePAI/nnUNetTrainer__nnUNetPlans__3d_fullres
@@ -1399,7 +1399,7 @@ models:
     - adrenal_gland_right
     - aorta
     - cbd_stent
-    - celiac_aa (celiac_artery)
+    - celiac_aa
     - colon
     - common_bile_duct
     - duodenum
@@ -1649,7 +1649,7 @@ organ_to_models:
   - epai_20250421
   celiac_aa:
   - epai_20250421
-  celiac_aa_celiac_artery:
+  celiac_aa:
   - epai_20250421
   celiac_trunk:
   - vsmtrans

@@ -173,7 +173,7 @@
       "Dataset001_ATLASNet",
       "ePAI"
     ],
-    "celiac_aa (celiac_artery)": [
+    "celiac_aa": [
       "Dataset001_ATLASNet",
       "ePAI"
     ],
@@ -1480,7 +1480,7 @@
     "brain",
     "brainstem",
     "cbd_stent",
-    "celiac_aa (celiac_artery)",
+    "celiac_aa",
     "clavicula_left",
     "clavicula_right",
     "colon",

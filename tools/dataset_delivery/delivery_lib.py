@@ -87,6 +87,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_file_if_exists(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    return sha256_file(path)
+
+
 def load_taxonomy_names(path: Path, *, expected_count: int = 373) -> list[str]:
     doc = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(doc, dict) and isinstance(doc.get("target_organs"), list):
@@ -522,26 +528,48 @@ def apply_rename(
         for m in mappings:
             if m.source_name in present:
                 target_hits.setdefault(m.target_name, []).append(m.source_name)
+        alias_conflicts: dict[str, dict[str, Any]] = {}
         blocked_targets = {target for target, sources in target_hits.items() if len(sources) > 1}
+        for target, sources in target_hits.items():
+            if len(sources) > 1:
+                hashes = {source: sha256_file_if_exists(mask_dir / f"{source}{NIFTI_SUFFIX}") for source in sorted(sources)}
+                alias_conflicts[target] = {
+                    "source_names": sorted(sources),
+                    "source_sha256": hashes,
+                    "identical": len(set(h for h in hashes.values() if h)) == 1,
+                }
         for target, alias in aliases.items():
             present_aliases = sorted(set(alias["sources"]) & set(present))
             if len(present_aliases) > 1:
                 blocked_targets.add(target)
+                hashes = {source: sha256_file_if_exists(mask_dir / f"{source}{NIFTI_SUFFIX}") for source in present_aliases}
+                alias_conflicts[target] = {
+                    "source_names": present_aliases,
+                    "source_sha256": hashes,
+                    "identical": len(set(h for h in hashes.values() if h)) == 1,
+                }
         for m in mappings:
             src = mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"
             dst = mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"
+            conflict = alias_conflicts.get(m.target_name, {})
             row = {
                 "case_id": case_id,
                 "source_name": m.source_name,
                 "target_name": m.target_name,
                 "source_path": str(src),
                 "target_path": str(dst),
+                "source_sha256": sha256_file_if_exists(src),
+                "target_sha256": sha256_file_if_exists(dst),
+                "alias_conflict_sources": ";".join(conflict.get("source_names", [])),
+                "alias_conflict_source_sha256": json.dumps(conflict.get("source_sha256", {}), sort_keys=True),
+                "alias_conflict_identical": str(bool(conflict.get("identical", False))).lower() if conflict else "",
+                "provenance_policy": "preserve_original_masks_no_silent_overwrite",
                 "mode": mode,
                 "status": "",
                 "reason": "",
             }
             if m.target_name in blocked_targets:
-                row.update({"status": "conflict", "reason": "alias_group_coexistence"})
+                row.update({"status": "conflict", "reason": "alias_group_coexistence_identical" if conflict.get("identical") else "alias_group_coexistence_different_masks"})
             elif src.exists() and dst.exists():
                 row.update({"status": "conflict", "reason": "source_and_target_exist"})
             elif not src.exists() and dst.exists():
@@ -560,11 +588,22 @@ def apply_rename(
                 "target_name": m.target_name,
                 "source_path": str(mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"),
                 "target_path": str(mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"),
+                "source_sha256": sha256_file_if_exists(mask_dir / f"{m.source_name}{NIFTI_SUFFIX}"),
+                "target_sha256": sha256_file_if_exists(mask_dir / f"{m.target_name}{NIFTI_SUFFIX}"),
+                "alias_conflict_sources": "",
+                "alias_conflict_source_sha256": "",
+                "alias_conflict_identical": "",
+                "provenance_policy": "pending_review_not_executable",
                 "mode": mode,
                 "status": "skipped_pending_review",
                 "reason": "mapping_status_pending_review",
             })
-    fields = ["case_id", "source_name", "target_name", "source_path", "target_path", "mode", "status", "reason"]
+    fields = [
+        "case_id", "source_name", "target_name", "source_path", "target_path",
+        "source_sha256", "target_sha256", "alias_conflict_sources",
+        "alias_conflict_source_sha256", "alias_conflict_identical",
+        "provenance_policy", "mode", "status", "reason",
+    ]
     write_csv(report, report_rows, fields)
     status_counts: dict[str, int] = {}
     for row in report_rows:

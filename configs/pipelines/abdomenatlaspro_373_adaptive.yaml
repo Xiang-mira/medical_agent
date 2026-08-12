@@ -42,7 +42,7 @@ tasks:
   labelcritic_batch:
     task_type: labelcritic
     entrypoint: scheduler_builtin
-    resource_profile: labelcritic_72b_4h100_formal
+    resource_profile: labelcritic_72b_2h100_formal
     launcher: vllm_same_job
     gt_access_policy: none
     dependencies: [labelcritic_candidate_manifest]

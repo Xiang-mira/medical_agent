@@ -87,6 +87,8 @@ def _command_for_group(
     checkpoint_root: Path,
     nnunet_predict_executable: Path,
     unest_python_executable: Path,
+    enable_shapekit: bool = False,
+    enable_critic: bool = False,
 ) -> list[str]:
     spec = SMOKE_SPECS[group]
     command = [
@@ -101,11 +103,12 @@ def _command_for_group(
         "--unest-python-executable", str(unest_python_executable),
         "--timeout-sec", str(timeout_sec),
         "--teacher-inference-mode", "hierarchical_roi" if group in {"atm", "unest"} else "full_volume",
-        "--no-enable-shapekit",
-        "--debug-allow-no-shapekit",
-        "--no-enable-critic",
         "--strict-delivery-targets",
     ]
+    if not enable_shapekit:
+        command.extend(["--no-enable-shapekit", "--debug-allow-no-shapekit"])
+    if not enable_critic:
+        command.append("--no-enable-critic")
     if group == "atm":
         command.extend(["--strict-delivery-fov-override-organs", "airway_tree"])
     command.extend(["--log-file", str(run_out / "run_loop.log")])

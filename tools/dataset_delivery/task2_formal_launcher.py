@@ -35,6 +35,7 @@ from tools.dataset_delivery.task2_formal_manifest import (  # noqa: E402
 )
 from tools.dataset_delivery.task2_formal_validator import VALID_COMPLETION_STATUSES, validate_case_group_run  # noqa: E402
 from tools.dataset_delivery.task2_preflight import build_preflight  # noqa: E402
+from tools.dataset_delivery.task2_recovery import recover_case_group  # noqa: E402
 from tools.dataset_delivery.task2_smoke_launcher import _command_for_group  # noqa: E402
 
 
@@ -208,6 +209,29 @@ def execute_task_index(
         }
         write_json(task_root / "task_state.json", state)
         return state
+    recovery = recover_case_group(
+        output_root=output_root,
+        case_id=case_id,
+        group=group,
+        targets=targets,
+        ct_path=ct_path,
+        models=[item for item in str(row.get("models") or "").split(",") if item],
+        apply=True,
+    )
+    if recovery.get("recovered_target_count") and _task_completed(output_root, case_id, group, ct_path):
+        state = {
+            "status": "completed",
+            "case_id": case_id,
+            "group": group,
+            "targets": targets,
+            "task_index": task_index,
+            "run_out": str(run_out),
+            "return_code": 0,
+            "resume_reason": "recovered_existing_raw_teacher_output",
+            "candidate_recovery": recovery,
+        }
+        write_json(task_root / "task_state.json", state)
+        return state
     registry_path = Path(str(row.get("registry_path") or REPO_ROOT / "configs" / "model_registry.yaml"))
     command = _command_for_group(
         group=group,
@@ -219,6 +243,8 @@ def execute_task_index(
         checkpoint_root=checkpoint_root,
         nnunet_predict_executable=nnunet_predict_executable,
         unest_python_executable=unest_python_executable or DEFAULT_UNEST_PYTHON,
+        enable_shapekit=True,
+        enable_critic=True,
     )
     task_root.mkdir(parents=True, exist_ok=True)
     (task_root / "command.txt").write_text(" ".join(str(part) for part in command) + "\n", encoding="utf-8")

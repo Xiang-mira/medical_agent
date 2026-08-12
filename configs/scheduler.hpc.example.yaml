@@ -54,7 +54,7 @@ resource_policy:
     preferred_order: [t4_single_gpu, a100_single_gpu]
     smoke_required: true
   labelcritic_resource_selection:
-    preferred_order: [labelcritic_72b_4h100_formal, labelcritic_72b_validated_alternative, labelcritic_smaller_vlm_triage]
+    preferred_order: [labelcritic_72b_2h100_formal, labelcritic_72b_1h100_smoke, labelcritic_72b_2a100_formal, labelcritic_72b_4x48gb_formal, labelcritic_72b_4h100_formal]
     smoke_required: true
 
 slurm_defaults:

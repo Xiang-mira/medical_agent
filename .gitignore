@@ -32,6 +32,13 @@ results/
 comparison_results/
 .hf_hpc_upload_staging/
 .runtime/
+slurm-*.out
+slurm-*.err
+*.out
+*.err
+.last_*
+*.bak_*
+FETCH_HEAD
 /rows
 /cid
 /label_dir

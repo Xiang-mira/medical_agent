@@ -103,8 +103,45 @@ resource_profiles:
     ddp_validated: false
     launcher: torchrun
 
+  labelcritic_72b_2h100_formal:
+    tier: official_formal_preferred
+    partition: gpuh100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 16
+    memory_gb: 192
+    walltime: "08:00:00"
+    gpu_count: 2
+    tensor_parallel_size: 2
+    container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+    model_id: Qwen/Qwen2-VL-72B-Instruct-AWQ
+    model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
+    model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
+    port: 8000
+    gpu_memory_utilization: 0.88
+    max_model_len: 8192
+
+  labelcritic_72b_1h100_smoke:
+    tier: official_real_prompt_smoke
+    partition: gpuh100
+    nodes: 1
+    ntasks: 1
+    cpus_per_task: 12
+    memory_gb: 128
+    walltime: "02:00:00"
+    gpu_count: 1
+    tensor_parallel_size: 1
+    smoke_only: true
+    container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+    model_id: Qwen/Qwen2-VL-72B-Instruct-AWQ
+    model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
+    model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
+    port: 8000
+    gpu_memory_utilization: 0.82
+    max_model_len: 4096
+
   labelcritic_72b_4h100_formal:
-    tier: official_formal_preferred_but_scarce
+    tier: official_formal_high_capacity
     partition: gpuh100
     nodes: 1
     ntasks: 1
@@ -118,14 +155,34 @@ resource_profiles:
     model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
     model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
     port: 8000
+    gpu_memory_utilization: 0.90
+    max_model_len: 8192
 
-  labelcritic_72b_validated_alternative:
-    tier: validated_alternative_must_be_labeled
+  labelcritic_72b_2a100_formal:
+    tier: official_formal_validated_alternative
     partition: gpua100
     nodes: 1
     ntasks: 1
+    cpus_per_task: 16
+    memory_gb: 192
+    walltime: "08:00:00"
+    gpu_count: 2
+    tensor_parallel_size: 2
+    container: /home/xhan74/containers/vllm-openai-v0.19.1.sif
+    model_id: Qwen/Qwen2-VL-72B-Instruct-AWQ
+    model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
+    model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
+    port: 8000
+    gpu_memory_utilization: 0.88
+    max_model_len: 8192
+
+  labelcritic_72b_4x48gb_formal:
+    tier: official_formal_48gb_multi_gpu
+    partition: gpu
+    nodes: 1
+    ntasks: 1
     cpus_per_task: 24
-    memory_gb: 256
+    memory_gb: 192
     walltime: "08:00:00"
     gpu_count: 4
     tensor_parallel_size: 4
@@ -134,6 +191,8 @@ resource_profiles:
     model_revision: 712d5a5a210e7f0af603d2a949b577c68de2c6ef
     model_dir: /projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/Qwen/Qwen2-VL-72B-Instruct-AWQ
     port: 8000
+    gpu_memory_utilization: 0.86
+    max_model_len: 6144
 
   labelcritic_smaller_vlm_triage:
     tier: debug_or_triage_only_not_formal

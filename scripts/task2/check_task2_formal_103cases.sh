@@ -3,7 +3,8 @@ set -euo pipefail
 
 CODE_ROOT=${CODE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/code/medical_agent}
 PYTHON=${PYTHON:-/home/xhan74/envs/medical_agent/bin/python}
-CASE_MANIFEST=${CASE_MANIFEST:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_103cases_work/cases_103_manifest.csv}
+WORKSPACE_ROOT=${WORKSPACE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/workspaces/abdomenatlaspro_103_round1_20260812}
+CASE_MANIFEST=${CASE_MANIFEST:-$WORKSPACE_ROOT/manifests/cases_103_manifest.csv}
 BASE_MANIFEST=${BASE_MANIFEST:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv}
 OUT_PARENT=${OUT_PARENT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373}
 STATE_ROOT=${STATE_ROOT:-$OUT_PARENT/runtime_state}

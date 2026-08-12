@@ -705,9 +705,9 @@
         "epai_20250421"
       ]
     },
-    "celiac_aa_celiac_artery": {
-      "canonical_id": "celiac_aa_celiac_artery",
-      "display_name": "celiac_aa (celiac_artery)",
+    "celiac_aa": {
+      "canonical_id": "celiac_aa",
+      "display_name": "celiac_aa",
       "hierarchy_role": "major",
       "parent_ids": [],
       "comparison_family": "vessel_or_small_structure",

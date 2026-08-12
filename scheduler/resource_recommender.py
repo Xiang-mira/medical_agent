@@ -9,6 +9,7 @@ from .utils import SchedulerError
 
 
 PLAN_IDS = {"fastest-start", "fastest-completion", "balanced", "conservative", "manual"}
+LABELCRITIC_72B_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 
 
 def workload_estimates(train_cases: int, test_cases: int, *, epochs: int = 1, steps_per_epoch: int | None = None, batch_size: int = 2, target_count: int = 373) -> dict[str, Any]:
@@ -57,6 +58,52 @@ def _stage(stage: str, profile: str, partition: str, gpu_type: str, gpu_count: i
     }
 
 
+def adaptive_overrequest_count(target_available: int, *, reserve_ratio: float = 1.0 / 3.0, minimum_extra: int = 1) -> int:
+    """Plan a larger schedulable pool than the desired live concurrency.
+
+    Slurm cannot reserve "spare" GPUs for a running array, but the workflow can
+    keep enough queued work to refill slots when nodes free up.  The default
+    gives the operational rule used in the 103-case launch: target 30 live GPU
+    workers by planning 40 queued/eligible workers.
+    """
+    target_available = max(1, int(target_available))
+    extra = max(int(minimum_extra), math.ceil(target_available * float(reserve_ratio)))
+    return target_available + extra
+
+
+def select_labelcritic_72b_profile(snapshot: dict[str, Any], profiles: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Select a formal Qwen2-VL-72B profile without model downgrade."""
+    profiles = profiles or [
+        {"profile": "labelcritic_72b_2h100_formal", "partition": "gpuh100", "gpu_type": "H100", "gpu_count": 2, "tensor_parallel_size": 2, "min_total_vram_gb": 144},
+        {"profile": "labelcritic_72b_1h100_smoke", "partition": "gpuh100", "gpu_type": "H100", "gpu_count": 1, "tensor_parallel_size": 1, "min_total_vram_gb": 80, "smoke_only": True},
+        {"profile": "labelcritic_72b_2a100_formal", "partition": "gpua100", "gpu_type": "A100", "gpu_count": 2, "tensor_parallel_size": 2, "min_total_vram_gb": 144},
+        {"profile": "labelcritic_72b_4x48gb_formal", "partition": "gpu", "gpu_type": "48GB", "gpu_count": 4, "tensor_parallel_size": 4, "min_total_vram_gb": 192},
+    ]
+    parts = snapshot.get("partitions", {}) or {}
+    for profile in profiles:
+        part = parts.get(str(profile["partition"]), {}) or {}
+        gpu_count = int(profile["gpu_count"])
+        shape_key = f"nodes_with_at_least_{gpu_count}_free_gpus" if gpu_count in {1, 2, 4} else "nodes_with_at_least_1_free_gpu"
+        if int(part.get(shape_key) or 0) > 0:
+            return {
+                "status": "READY",
+                "model_id": LABELCRITIC_72B_MODEL_ID,
+                "selected_profile": profile,
+                "tensor_parallel_size": int(profile["tensor_parallel_size"]),
+                "gpu_memory_utilization": 0.88 if gpu_count >= 2 else 0.82,
+                "max_model_len": 8192 if gpu_count >= 2 else 4096,
+                "visual_resolution": "formal" if gpu_count >= 2 else "smoke_low_resolution",
+                "silent_downgrade": False,
+            }
+    return {
+        "status": "insufficient_resource",
+        "model_id": LABELCRITIC_72B_MODEL_ID,
+        "required_profiles": profiles,
+        "silent_downgrade": False,
+        "reason": "No configured node shape is currently allocatable for Qwen2-VL-72B-AWQ.",
+    }
+
+
 def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_cases: int, *, gpu_budget: dict[str, int] | None = None) -> dict[str, Any]:
     invariants = validate_snapshot_invariants(snapshot)
     if invariants["status"] != "success":
@@ -73,13 +120,16 @@ def recommend_resource_plans(snapshot: dict[str, Any], train_cases: int, test_ca
         "conservative": ("t4_single_gpu", "gpu", "T4", max(1, min(4, t4_conc)), "keeps to validated single-GPU profiles and modest concurrency", "longer execution time"),
     }
     for plan_id, (profile, partition, gpu_type, conc, reason, risk) in templates.items():
-        label_replicas = max(1, min(2, budget["max_labelcritic_replicas"], budget["labelcritic_replicas"], max(1, budget["max_h100_gpus"] // 4)))
+        label_replicas = max(1, min(2, budget["max_labelcritic_replicas"], budget["labelcritic_replicas"], max(1, budget["max_h100_gpus"] // 2)))
+        labelcritic_selection = select_labelcritic_72b_profile(snapshot)
+        selected_lc = labelcritic_selection.get("selected_profile") or {"profile": "labelcritic_72b_2h100_formal", "partition": "gpuh100", "gpu_type": "H100", "gpu_count": 2}
+        teacher_overrequest = adaptive_overrequest_count(conc)
         stages = [
-            _stage("teacher_train_inference", profile, partition, gpu_type, 1, train_cases, conc, snapshot, reason, risk),
-            _stage("teacher_test_inference", profile, partition, gpu_type, 1, test_cases, conc, snapshot, reason, risk),
+            _stage("teacher_train_inference", profile, partition, gpu_type, 1, train_cases, conc, snapshot, reason, risk) | {"planned_overrequest_workers": teacher_overrequest},
+            _stage("teacher_test_inference", profile, partition, gpu_type, 1, test_cases, conc, snapshot, reason, risk) | {"planned_overrequest_workers": teacher_overrequest},
             _stage("student_training", "a100_single_gpu", "gpua100", "A100", 1, 1, 1, snapshot, "single-GPU training remains the default until DDP smoke passes", "slower than validated DDP would be"),
             _stage("student_inference", profile, partition, gpu_type, 1, test_cases, conc, snapshot, reason, risk),
-            _stage("labelcritic", "labelcritic_72b_4h100_formal", "gpuh100", "H100", 4, label_replicas, label_replicas, snapshot, "formal LabelCritic requires 4xH100 tensor parallel per replica", "H100 is scarce; queueing likely"),
+            _stage("labelcritic", selected_lc["profile"], selected_lc["partition"], selected_lc["gpu_type"], int(selected_lc["gpu_count"]), label_replicas, label_replicas, snapshot, "formal LabelCritic keeps Qwen2-VL-72B-AWQ and adapts tensor parallelism to available VRAM", "H100/A100 availability may require queueing") | {"labelcritic_resource_preflight": labelcritic_selection},
         ]
         plans.append(
             {
@@ -106,8 +156,17 @@ def validate_user_plan(plan: dict[str, Any], *, ddp_validated: bool = False, h10
             errors.append("Student multi-GPU training requires validated single-node DDP smoke before submission.")
         if name == "student_training" and gpu_type == "H100" and gpu_count == 4 and not h100_ddp_allowed:
             errors.append("4xH100 student DDP requires explicit user allowance and dedicated smoke.")
-        if name == "labelcritic" and not (gpu_type == "H100" and gpu_count == 4):
-            errors.append("Formal LabelCritic replicas must use exactly one node with 4xH100 and tensor_parallel_size=4.")
+        if name == "labelcritic":
+            model_id = str(stage.get("model_id") or LABELCRITIC_72B_MODEL_ID)
+            allowed = (
+                (gpu_type == "H100" and gpu_count in {1, 2})
+                or (gpu_type == "A100" and gpu_count == 2)
+                or (gpu_count == 4 and str(gpu_type).upper() in {"48GB", "L40S", "A6000", "A40"})
+            )
+            if model_id != LABELCRITIC_72B_MODEL_ID:
+                errors.append("Formal LabelCritic must use Qwen/Qwen2-VL-72B-Instruct-AWQ; silent downgrade is forbidden.")
+            if not allowed:
+                errors.append("Formal LabelCritic resource profile must be one of: 1xH100 smoke, 2xH100, 2xA100, or 4x48GB.")
     if errors:
         raise SchedulerError("; ".join(errors))
     return {"status": "success", "plan_id": plan.get("plan_id")}
@@ -121,8 +180,9 @@ def labelcritic_replica_shards(task_count: int, replicas: int, output_root: str)
             {
                 "replica_index": replica,
                 "gpu_type": "H100",
-                "gpu_count": 4,
-                "tensor_parallel_size": 4,
+                "gpu_count": 2,
+                "tensor_parallel_size": 2,
+                "model_id": LABELCRITIC_72B_MODEL_ID,
                 "task_start": (task_count * replica) // replicas,
                 "task_end": (task_count * (replica + 1)) // replicas,
                 "output_dir": f"{output_root}/replica_{replica:02d}",

@@ -987,7 +987,7 @@ def build_focus_alias_summary(alias_summary: dict[str, Any]) -> dict[str, Any]:
         }
 
     return {
-        "celiac": add_rows([row for row in groups if row["alias_group"] == "alias_celiac_aa_celiac_artery"]),
+        "celiac": add_rows([row for row in groups if row["alias_group"] == "alias_celiac_aa"]),
         "lung_lobe": add_rows([row for row in groups if str(row["alias_group"]).startswith("alias_lung_")]),
         "brachiocephalic": add_rows([row for row in groups if str(row["alias_group"]).startswith("alias_brachiocephalic_vein_")]),
     }

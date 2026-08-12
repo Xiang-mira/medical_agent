@@ -590,11 +590,11 @@
       "notes": "bootstrap direct-match pilot entry; confirm against AbdomenAtlasPro mask audit before formal publication"
     },
     {
-      "target_name": "celiac_aa (celiac_artery)",
+      "target_name": "celiac_aa",
       "target_index": 48,
       "mapping_status": "direct",
       "source_masks": [
-        "celiac_aa (celiac_artery)"
+        "celiac_aa"
       ],
       "mapping_rule": "read_single_binary_mask_after_leading_underscore_normalization",
       "participates_in_pilot338": true,

@@ -18,5 +18,3 @@ alias_lung_middle_right_lobe,lung_middle_right_lobe,lung_middle_lobe_right,confi
 alias_lung_upper_right_lobe,lung_upper_right_lobe,right_lung_upper_lobe,confirmed,word-order aliases for the same right upper lung lobe
 alias_lung_upper_right_lobe,lung_upper_right_lobe,lung_lobe_upper_right,confirmed,word-order aliases for the same right upper lung lobe
 alias_lung_upper_right_lobe,lung_upper_right_lobe,lung_upper_lobe_right,confirmed,word-order aliases for the same right upper lung lobe
-alias_celiac_aa_celiac_artery,celiac_aa_celiac_artery,celiac_aa,confirmed,taxonomy target spells the same class as celiac_aa (celiac_artery)
-alias_celiac_aa_celiac_artery,celiac_aa_celiac_artery,celiac_artery,confirmed,taxonomy target spells the same class as celiac_aa (celiac_artery)

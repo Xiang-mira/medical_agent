@@ -1261,7 +1261,7 @@ teacher_models:
   - adrenal_gland_right
   - aorta
   - cbd_stent
-  - celiac_aa (celiac_artery)
+  - celiac_aa
   - colon
   - common_bile_duct
   - duodenum

@@ -3,15 +3,16 @@ set -euo pipefail
 
 CODE_ROOT=${CODE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/code/medical_agent}
 PYTHON=${PYTHON:-/home/xhan74/envs/medical_agent/bin/python}
+WORKSPACE_ROOT=${WORKSPACE_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/workspaces/abdomenatlaspro_103_round1_20260812}
 BASE_MANIFEST=${BASE_MANIFEST:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_100cases_work/cases_100_manifest.csv}
 FORMAL_APPEND_CASES=${FORMAL_APPEND_CASES:-configs/dataset_delivery/task2_formal_append_cases.csv}
-CASE_MANIFEST=${CASE_MANIFEST:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/generated_labels_103cases_work/cases_103_manifest.csv}
+CASE_MANIFEST=${CASE_MANIFEST:-$WORKSPACE_ROOT/manifests/cases_103_manifest.csv}
 CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints}
 NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict}
 UNEST_PYTHON_EXECUTABLE=${UNEST_PYTHON_EXECUTABLE:-/home/xhan74/envs/medical_agent_train_py311/bin/python}
 OUT_PARENT=${OUT_PARENT:-/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373}
 STATE_ROOT=${STATE_ROOT:-$OUT_PARENT/runtime_state}
-FORMAL_OUT_ROOT=${FORMAL_OUT_ROOT:-$OUT_PARENT/formal_task2_22targets_103cases_$(date +%Y%m%d_%H%M%S)}
+FORMAL_OUT_ROOT=${FORMAL_OUT_ROOT:-$WORKSPACE_ROOT/teacher/formal_task2_22targets_103cases_$(date +%Y%m%d_%H%M%S)}
 REGISTRY=${REGISTRY:-configs/model_registry.yaml}
 TARGET_CONFIG=${TARGET_CONFIG:-configs/student_3d_prompt_target_organs.json}
 PARTITION=${PARTITION:-gpu}
@@ -30,6 +31,10 @@ RESUME=${RESUME:-0}
 RETRY_FAILED=${RETRY_FAILED:-0}
 CASE_ID=${CASE_ID:-}
 RUN_TESTS_BEFORE_LAUNCH=${RUN_TESTS_BEFORE_LAUNCH:-0}
+STAGE_WORKSPACE=${STAGE_WORKSPACE:-0}
+SOURCE_CASE_MANIFEST=${SOURCE_CASE_MANIFEST:-}
+IMAGE_ROOT=${IMAGE_ROOT:-/projects/bodymaps/Data/image_only/AbdomenAtlasPro/AbdomenAtlasPro}
+MASK_ROOT=${MASK_ROOT:-/projects/bodymaps/Data/mask_only/AbdomenAtlasPro/AbdomenAtlasPro}
 
 if [ -f "$HOME/.bodymaps_env" ]; then
   source "$HOME/.bodymaps_env"
@@ -37,7 +42,7 @@ fi
 
 cd "$CODE_ROOT"
 git fetch origin
-git checkout main
+git switch main
 git pull --ff-only origin main
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ]; then
@@ -52,20 +57,52 @@ fi
 
 MANIFEST_WORK_ROOT=$(dirname "$CASE_MANIFEST")
 mkdir -p "$MANIFEST_WORK_ROOT"
-"$PYTHON" tools/dataset_delivery/task2_formal_manifest.py \
-  --base-manifest "$BASE_MANIFEST" \
-  --append-cases "$FORMAL_APPEND_CASES" \
-  --output-manifest "$CASE_MANIFEST" \
-  --audit-json "$MANIFEST_WORK_ROOT/cases_103_manifest.audit.json" \
-  --audit-csv "$MANIFEST_WORK_ROOT/cases_103_manifest.audit.csv"
+if [ "$STAGE_WORKSPACE" = "1" ]; then
+  if [ -z "$SOURCE_CASE_MANIFEST" ]; then
+    SOURCE_CASE_MANIFEST="$MANIFEST_WORK_ROOT/cases_103_source_manifest.csv"
+    "$PYTHON" tools/dataset_delivery/task2_formal_manifest.py \
+      --base-manifest "$BASE_MANIFEST" \
+      --append-cases "$FORMAL_APPEND_CASES" \
+      --output-manifest "$SOURCE_CASE_MANIFEST" \
+      --audit-json "$MANIFEST_WORK_ROOT/cases_103_source_manifest.audit.json" \
+      --audit-csv "$MANIFEST_WORK_ROOT/cases_103_source_manifest.audit.csv"
+  fi
+  "$PYTHON" tools/dataset_delivery/task2_workspace_staging.py \
+    --cases-manifest "$SOURCE_CASE_MANIFEST" \
+    --workspace-root "$WORKSPACE_ROOT" \
+    --image-root "$IMAGE_ROOT" \
+    --mask-root "$MASK_ROOT" \
+    --base-manifest "$BASE_MANIFEST" \
+    --resume
+elif [ ! -f "$CASE_MANIFEST" ]; then
+  "$PYTHON" tools/dataset_delivery/task2_formal_manifest.py \
+    --base-manifest "$BASE_MANIFEST" \
+    --append-cases "$FORMAL_APPEND_CASES" \
+    --output-manifest "$CASE_MANIFEST" \
+    --audit-json "$MANIFEST_WORK_ROOT/cases_103_manifest.audit.json" \
+    --audit-csv "$MANIFEST_WORK_ROOT/cases_103_manifest.audit.csv"
+fi
 
 "$PYTHON" -m py_compile \
   tools/dataset_delivery/task2_formal_manifest.py \
   tools/dataset_delivery/task2_formal_launcher.py \
   tools/dataset_delivery/task2_formal_validator.py \
+  tools/dataset_delivery/task2_manifest_masks.py \
   tools/dataset_delivery/task2_preflight.py \
+  tools/dataset_delivery/task2_recovery.py \
+  tools/dataset_delivery/task2_workspace_staging.py \
+  tools/dataset_delivery/formal_round1_preflight.py \
+  tools/dataset_delivery/labelcritic_resource_preflight.py \
   tools/dataset_delivery/task2_smoke_validator.py \
   agent-harness/cli_anything/medai/core/multimodel_loop.py
+
+"$PYTHON" tools/dataset_delivery/formal_round1_preflight.py \
+  --workspace-root "$WORKSPACE_ROOT" \
+  --cases-manifest "$CASE_MANIFEST" \
+  --base-manifest "$BASE_MANIFEST" \
+  --code-root "$CODE_ROOT" \
+  --checkpoint-root "$CHECKPOINT_ROOT" \
+  --output-json "$WORKSPACE_ROOT/manifests/formal_round1_preflight.json"
 
 if [ "$RUN_TESTS_BEFORE_LAUNCH" = "1" ]; then
   "$PYTHON" -m pytest -q \

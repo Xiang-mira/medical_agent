@@ -4927,13 +4927,13 @@
       "automatic_failure_action": "allow_class_agnostic_pairwise"
     },
     {
-      "canonical_name": "celiac_aa (celiac_artery)",
-      "canonical_organ": "celiac_aa (celiac_artery)",
-      "canonical_id": "celiac_aa (celiac_artery)",
-      "display_name": "celiac aa  celiac artery",
+      "canonical_name": "celiac_aa",
+      "canonical_organ": "celiac_aa",
+      "canonical_id": "celiac_aa",
+      "display_name": "celiac artery",
       "aliases": [
-        "celiac aa celiac artery",
-        "celiac aa celiac artery (arterial vessel)"
+        "celiac artery",
+        "celiac artery (arterial vessel)"
       ],
       "category": "vessel",
       "laterality": null,
@@ -4950,7 +4950,7 @@
         "bowel",
         "solid organs"
       ],
-      "ct_appearance": "celiac aa  celiac artery should be identified as the named vessel within abdomen and retroperitoneum; use its relationship to diaphragm, spine, bowel to distinguish it from adjacent tissues. Base appearance prior: tubular arterial structure following a predictable vascular course",
+      "ct_appearance": "celiac artery should be identified as the named vessel within abdomen and retroperitoneum; use its relationship to diaphragm, spine, bowel to distinguish it from adjacent tissues. Base appearance prior: tubular arterial structure following a predictable vascular course",
       "morphology": "Tubular or branching vascular structure following a plausible anatomic course.",
       "shape_and_continuity_prior": "The mask should follow a plausible tubular or branching vascular course and should not appear as random disconnected blobs.",
       "continuity_prior": "The mask should follow a plausible tubular or branching vascular course and should not appear as random disconnected blobs.",
@@ -4969,7 +4969,7 @@
       "symmetry_prior": "No mandatory bilateral symmetry; judge the named structure and scan coverage.",
       "partial_fov_behavior": "A structure may terminate at a scan boundary when partially covered; internal random breaks away from a boundary remain suspicious.",
       "anatomical_constraints": [
-        "the candidate must specifically represent celiac aa  celiac artery, not merely a structure of the same broad type",
+        "the candidate must specifically represent celiac artery, not merely a structure of the same broad type",
         "should be located in or near abdomen and retroperitoneum",
         "should respect adjacent anatomic boundaries and not leak into unrelated structures"
       ],
@@ -4990,7 +4990,7 @@
         "reject if the mask primarily marks a different organ or neighboring structure",
         "reject if the mask is dominated by scattered isolated false positives"
       ],
-      "labelcritic_instruction": "Compare candidate masks for celiac aa celiac artery and select the candidate that best matches the target's CT appearance, expected location, shape/continuity, laterality when applicable, and exclusion boundaries. Reject candidates with wrong-organ leakage, gross mislocation, severe fragmentation, or implausible anatomy.",
+      "labelcritic_instruction": "Compare candidate masks for celiac artery and select the candidate that best matches the target's CT appearance, expected location, shape/continuity, laterality when applicable, and exclusion boundaries. Reject candidates with wrong-organ leakage, gross mislocation, severe fragmentation, or implausible anatomy.",
       "source": "generated_from_project_config",
       "source_type": "project_extension",
       "provenance": {
@@ -43191,14 +43191,14 @@
       "requires_manual_review": false,
       "automatic_failure_action": "allow_class_agnostic_pairwise"
     },
-    "celiac_aa (celiac_artery)": {
-      "canonical_name": "celiac_aa (celiac_artery)",
-      "canonical_organ": "celiac_aa (celiac_artery)",
-      "canonical_id": "celiac_aa (celiac_artery)",
-      "display_name": "celiac aa  celiac artery",
+    "celiac_aa": {
+      "canonical_name": "celiac_aa",
+      "canonical_organ": "celiac_aa",
+      "canonical_id": "celiac_aa",
+      "display_name": "celiac artery",
       "aliases": [
-        "celiac aa celiac artery",
-        "celiac aa celiac artery (arterial vessel)"
+        "celiac artery",
+        "celiac artery (arterial vessel)"
       ],
       "category": "vessel",
       "laterality": null,
@@ -43215,7 +43215,7 @@
         "bowel",
         "solid organs"
       ],
-      "ct_appearance": "celiac aa  celiac artery should be identified as the named vessel within abdomen and retroperitoneum; use its relationship to diaphragm, spine, bowel to distinguish it from adjacent tissues. Base appearance prior: tubular arterial structure following a predictable vascular course",
+      "ct_appearance": "celiac artery should be identified as the named vessel within abdomen and retroperitoneum; use its relationship to diaphragm, spine, bowel to distinguish it from adjacent tissues. Base appearance prior: tubular arterial structure following a predictable vascular course",
       "morphology": "Tubular or branching vascular structure following a plausible anatomic course.",
       "shape_and_continuity_prior": "The mask should follow a plausible tubular or branching vascular course and should not appear as random disconnected blobs.",
       "continuity_prior": "The mask should follow a plausible tubular or branching vascular course and should not appear as random disconnected blobs.",
@@ -43234,7 +43234,7 @@
       "symmetry_prior": "No mandatory bilateral symmetry; judge the named structure and scan coverage.",
       "partial_fov_behavior": "A structure may terminate at a scan boundary when partially covered; internal random breaks away from a boundary remain suspicious.",
       "anatomical_constraints": [
-        "the candidate must specifically represent celiac aa  celiac artery, not merely a structure of the same broad type",
+        "the candidate must specifically represent celiac artery, not merely a structure of the same broad type",
         "should be located in or near abdomen and retroperitoneum",
         "should respect adjacent anatomic boundaries and not leak into unrelated structures"
       ],
@@ -43255,7 +43255,7 @@
         "reject if the mask primarily marks a different organ or neighboring structure",
         "reject if the mask is dominated by scattered isolated false positives"
       ],
-      "labelcritic_instruction": "Compare candidate masks for celiac aa celiac artery and select the candidate that best matches the target's CT appearance, expected location, shape/continuity, laterality when applicable, and exclusion boundaries. Reject candidates with wrong-organ leakage, gross mislocation, severe fragmentation, or implausible anatomy.",
+      "labelcritic_instruction": "Compare candidate masks for celiac artery and select the candidate that best matches the target's CT appearance, expected location, shape/continuity, laterality when applicable, and exclusion boundaries. Reject candidates with wrong-organ leakage, gross mislocation, severe fragmentation, or implausible anatomy.",
       "source": "generated_from_project_config",
       "source_type": "project_extension",
       "provenance": {

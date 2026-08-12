@@ -70,7 +70,7 @@
     "carpal_right",
     "caudate_nucleus",
     "cbd_stent",
-    "celiac_aa (celiac_artery)",
+    "celiac_aa",
     "celiac_trunk",
     "central_sulcus",
     "cerebellum",
@@ -445,7 +445,7 @@
     "carpal_right": 46,
     "caudate_nucleus": 47,
     "cbd_stent": 48,
-    "celiac_aa (celiac_artery)": 49,
+    "celiac_aa": 49,
     "celiac_trunk": 50,
     "central_sulcus": 51,
     "cerebellum": 52,
@@ -820,7 +820,7 @@
     "carpal_right": "segment the right carpal",
     "caudate_nucleus": "segment the caudate nucleus",
     "cbd_stent": "segment the cbd stent",
-    "celiac_aa (celiac_artery)": "segment the celiac aa  celiac artery",
+    "celiac_aa": "segment the celiac artery",
     "celiac_trunk": "segment the celiac trunk",
     "central_sulcus": "segment the central sulcus",
     "cerebellum": "segment the cerebellum",
@@ -2919,12 +2919,12 @@
         ]
       }
     },
-    "celiac_aa (celiac_artery)": {
-      "canonical_prompt": "segment the celiac aa  celiac artery",
-      "display_name": "celiac aa  celiac artery",
+    "celiac_aa": {
+      "canonical_prompt": "segment the celiac artery",
+      "display_name": "celiac artery",
       "aliases": [
-        "celiac aa  celiac artery",
-        "celiac aa  celiac artery (arterial vessel)"
+        "celiac artery",
+        "celiac artery (arterial vessel)"
       ],
       "region": "abdomen and retroperitoneum",
       "landmarks": [
@@ -2936,24 +2936,24 @@
       "ct_appearance": "tubular arterial structure following a predictable vascular course",
       "prompts": {
         "simple_instruction": [
-          "segment the celiac aa celiac artery",
-          "outline the celiac aa celiac artery"
+          "segment the celiac artery",
+          "outline the celiac artery"
         ],
         "anatomical_location": [
-          "Segment the celiac aa celiac artery in the abdomen and retroperitoneum; use nearby landmarks such as diaphragm, spine, bowel, solid organs.",
-          "Find the celiac aa celiac artery by its expected location in the abdomen and retroperitoneum, adjacent to diaphragm, spine, bowel, solid organs."
+          "Segment the celiac artery in the abdomen and retroperitoneum; use nearby landmarks such as diaphragm, spine, bowel, solid organs.",
+          "Find the celiac artery by its expected location in the abdomen and retroperitoneum, adjacent to diaphragm, spine, bowel, solid organs."
         ],
         "ct_appearance": [
-          "Identify the celiac aa celiac artery on CT as a tubular arterial structure following a predictable vascular course.",
-          "Create a mask for the celiac aa celiac artery, following its CT appearance as a tubular arterial structure following a predictable vascular course."
+          "Identify the celiac artery on CT as a tubular arterial structure following a predictable vascular course.",
+          "Create a mask for the celiac artery, following its CT appearance as a tubular arterial structure following a predictable vascular course."
         ],
         "synonyms_medical_terms": [
-          "segment the celiac aa celiac artery",
-          "segment the celiac aa celiac artery (arterial vessel)"
+          "segment the celiac artery",
+          "segment the celiac artery (arterial vessel)"
         ],
         "natural_language": [
-          "Please delineate the celiac aa celiac artery on this CT volume while respecting its expected shape, location, and boundaries.",
-          "Mark only the voxels belonging to the celiac aa celiac artery; avoid adjacent structures such as diaphragm, spine, bowel, solid organs."
+          "Please delineate the celiac artery on this CT volume while respecting its expected shape, location, and boundaries.",
+          "Mark only the voxels belonging to the celiac artery; avoid adjacent structures such as diaphragm, spine, bowel, solid organs."
         ]
       }
     },
@@ -15419,16 +15419,16 @@
       "Please delineate the cbd stent on this CT volume while respecting its expected shape, location, and boundaries.",
       "Mark only the voxels belonging to the cbd stent; avoid adjacent structures such as nearby organs, vessels, bones, soft-tissue planes."
     ],
-    "celiac_aa (celiac_artery)": [
-      "segment the celiac aa celiac artery",
-      "outline the celiac aa celiac artery",
-      "Segment the celiac aa celiac artery in the abdomen and retroperitoneum; use nearby landmarks such as diaphragm, spine, bowel, solid organs.",
-      "Find the celiac aa celiac artery by its expected location in the abdomen and retroperitoneum, adjacent to diaphragm, spine, bowel, solid organs.",
-      "Identify the celiac aa celiac artery on CT as a tubular arterial structure following a predictable vascular course.",
-      "Create a mask for the celiac aa celiac artery, following its CT appearance as a tubular arterial structure following a predictable vascular course.",
-      "segment the celiac aa celiac artery (arterial vessel)",
-      "Please delineate the celiac aa celiac artery on this CT volume while respecting its expected shape, location, and boundaries.",
-      "Mark only the voxels belonging to the celiac aa celiac artery; avoid adjacent structures such as diaphragm, spine, bowel, solid organs."
+    "celiac_aa": [
+      "segment the celiac artery",
+      "outline the celiac artery",
+      "Segment the celiac artery in the abdomen and retroperitoneum; use nearby landmarks such as diaphragm, spine, bowel, solid organs.",
+      "Find the celiac artery by its expected location in the abdomen and retroperitoneum, adjacent to diaphragm, spine, bowel, solid organs.",
+      "Identify the celiac artery on CT as a tubular arterial structure following a predictable vascular course.",
+      "Create a mask for the celiac artery, following its CT appearance as a tubular arterial structure following a predictable vascular course.",
+      "segment the celiac artery (arterial vessel)",
+      "Please delineate the celiac artery on this CT volume while respecting its expected shape, location, and boundaries.",
+      "Mark only the voxels belonging to the celiac artery; avoid adjacent structures such as diaphragm, spine, bowel, solid organs."
     ],
     "celiac_trunk": [
       "segment the celiac trunk",

@@ -46,6 +46,7 @@ ROW_FIELDS = [
     "nonzero_voxels",
     "geometry_valid",
     "final_status",
+    "terminal_state",
     "reason",
 ]
 SUMMARY_FIELDS = [
@@ -62,6 +63,20 @@ SUMMARY_FIELDS = [
     "runtime_failed",
     "validation_failed",
 ]
+
+
+def _terminal_state(final_status: str, validation: dict[str, Any], *, teacher_called: bool, task_completed: bool) -> str:
+    if final_status == "generated_valid_mask":
+        return "SUCCESS"
+    if final_status in {"confirmed_absent", "out_of_fov", "not_applicable"}:
+        return "ABSENT"
+    if validation.get("exists") and int(validation.get("foreground_voxels") or 0) == 0:
+        return "COMPLETED_NO_NONZERO"
+    if final_status == "expected_present_but_missing" and task_completed and teacher_called:
+        return "ABSENT"
+    if not task_completed:
+        return "PENDING"
+    return "FAILED"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -201,6 +216,7 @@ def _final_status_for_row(
         "nonzero_voxels": int(validation.get("foreground_voxels") or 0),
         "geometry_valid": bool(validation.get("valid")),
         "final_status": final_status,
+        "terminal_state": _terminal_state(final_status, validation, teacher_called=teacher_called, task_completed=task_completed),
         "reason": reason,
         "delivery_status": delivery_status,
         "task_state_status": str(task_state.get("status") or ""),
@@ -261,6 +277,9 @@ def build_case_target_table(
     counts = {status: 0 for status in SUMMARY_FIELDS if status not in {"status", "case_count", "target_count", "row_count", "expected_row_count"}}
     for row in rows:
         counts[row["final_status"]] = counts.get(row["final_status"], 0) + 1
+    terminal_counts: dict[str, int] = {}
+    for row in rows:
+        terminal_counts[str(row.get("terminal_state") or "PENDING")] = terminal_counts.get(str(row.get("terminal_state") or "PENDING"), 0) + 1
     summary = {
         "status": "PASSED" if not any(counts[status] for status in FAILURE_STATUSES) else "VALIDATION_FAILED",
         "case_count": len(cases),
@@ -268,6 +287,8 @@ def build_case_target_table(
         "row_count": len(rows),
         "expected_row_count": len(cases) * len(FORMAL_TARGETS),
         "strict_delivery_failure_count": sum(counts[status] for status in FAILURE_STATUSES),
+        "terminal_state_counts": terminal_counts,
+        "all_case_targets_terminal": sum(terminal_counts.get(state, 0) for state in ["SUCCESS", "FAILED", "ABSENT", "COMPLETED_NO_NONZERO"]) == len(rows),
         **counts,
         "group_counts": group_summary,
         "rows_csv": str(output_root / "task2_formal_case_target_status.csv"),

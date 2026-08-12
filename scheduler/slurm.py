@@ -105,11 +105,19 @@ def render_labelcritic_script(task: dict[str, Any], profile: dict[str, Any], cli
     tp = int(profile.get("tensor_parallel_size") or profile.get("gpu_count") or 1)
     port = int(profile.get("port") or 8000)
     container = str(profile.get("container") or "")
+    gpu_memory_utilization = profile.get("gpu_memory_utilization")
+    max_model_len = profile.get("max_model_len")
     if not container:
         raise SchedulerError("LabelCritic profile requires a vLLM container path")
+    extra_args = []
+    if gpu_memory_utilization:
+        extra_args.extend(["--gpu-memory-utilization", str(gpu_memory_utilization)])
+    if max_model_len:
+        extra_args.extend(["--max-model-len", str(max_model_len)])
     launch = (
         f"apptainer exec --nv {shlex.quote(container)} python -m vllm.entrypoints.openai.api_server "
-        f"--model {model_dir} --served-model-name {model_id} --tensor-parallel-size {tp} --host 127.0.0.1 --port {port}"
+        f"--model {model_dir} --served-model-name {model_id} --tensor-parallel-size {tp} --host 127.0.0.1 --port {port} "
+        f"{shell_join(extra_args)}"
     )
     body = [
         "#!/bin/bash",

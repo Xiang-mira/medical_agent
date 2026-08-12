@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 ATLASNET_373_ORGANS = {
     "adrenal_gland_left", "adrenal_gland_right", "aorta", "cbd_stent",
-    "celiac_aa (celiac_artery)", "colon", "common_bile_duct", "duodenum",
+    "celiac_aa", "colon", "common_bile_duct", "duodenum",
     "gall_bladder", "inferior_vena_cava", "intestine", "kidney_left",
     "kidney_right", "liver", "pancreas", "pancreatic_duct",
     "portal_vein_and_splenic_vein", "renal_vein_left", "renal_vein_right",
@@ -18,7 +18,7 @@ ATLASNET_373_ORGANS = {
 }
 
 ATLASNET_PRIORITY_ORGANS = {
-    "aorta", "cbd_stent", "celiac_aa (celiac_artery)", "colon",
+    "aorta", "cbd_stent", "celiac_aa", "colon",
     "common_bile_duct", "duodenum", "gall_bladder", "inferior_vena_cava",
     "intestine", "pancreatic_duct", "portal_vein_and_splenic_vein",
     "renal_vein_left", "renal_vein_right", "stomach",

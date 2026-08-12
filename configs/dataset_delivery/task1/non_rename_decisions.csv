@@ -1,4 +1,5 @@
 source_name,target_name,classification,status,reason,evidence
+coronary_arteries,coronary_artery,boundary_review,pending_review,insufficient_evidence_singular_plural_scope,source semantics do not yet prove that plural coronary arteries and singular coronary artery have identical anatomical scope
 kidney,kidney_cortex,task2_generate,confirmed_non_rename,whole organ to cortex is coarse-to-fine,Boundary rule: not same granularity or requires generated/finer mask; excluded from Task 1 executable mapping
 kidney,kidney_medulla,task2_generate,confirmed_non_rename,whole organ to medulla is coarse-to-fine,Boundary rule: not same granularity or requires generated/finer mask; excluded from Task 1 executable mapping
 kidney,kidney_pelvicalyceal_system,task2_generate,confirmed_non_rename,whole organ to pelvicalyceal system is coarse-to-fine,Boundary rule: not same granularity or requires generated/finer mask; excluded from Task 1 executable mapping

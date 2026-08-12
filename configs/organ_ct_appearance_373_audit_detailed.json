@@ -746,7 +746,7 @@
       "issues": []
     },
     {
-      "organ": "celiac_aa (celiac_artery)",
+      "organ": "celiac_aa",
       "formal_selection_eligible": true,
       "source": "generated_from_project_config",
       "source_type": "project_extension",

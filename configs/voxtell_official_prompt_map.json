@@ -21,7 +21,7 @@
     "bronchus",
     "carpal",
     "cbd_stent",
-    "celiac_aa (celiac_artery)",
+    "celiac_aa",
     "central_sulcus",
     "colostomy_bag",
     "compact_bone",
@@ -728,8 +728,8 @@
       "mapping_provenance": "project class canonical name; no medical-description rewrite"
     },
     {
-      "project_class": "celiac_aa (celiac_artery)",
-      "canonical_prompt": "celiac aa celiac artery",
+      "project_class": "celiac_aa",
+      "canonical_prompt": "celiac artery",
       "canonical_bank_index": null,
       "approved_variants": [],
       "mapping_source": "project_extension",

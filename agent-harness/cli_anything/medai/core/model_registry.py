@@ -336,7 +336,7 @@ def _default_model_entry(key: str, organs: list[str], checkpoint_root: str = "ch
                 "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet",
             ],
             "supported_organ_aliases": {
-                "celiac_aa_celiac_artery": "celiac_aa",
+                "celiac_aa": "celiac_aa",
                 "inferior_vena_cava": "postcava",
                 "small_intestine": "intestine",
             },
@@ -500,7 +500,7 @@ def build_registry_dict(checkpoint_map: str | Path, checkpoint_root: str = "chec
     # ATLAS-Net came from the teacher's 'Another version of ShapeKit' model card,
     # not always from the checkpoint map rows. Keep it as a first-class candidate.
     models.setdefault("atlasnet", _default_model_entry("atlasnet", [
-        "aorta", "adrenal_gland_left", "adrenal_gland_right", "common_bile_duct", "celiac_aa (celiac_artery)", "colon", "duodenum", "gall_bladder", "inferior_vena_cava", "kidney_left", "kidney_right", "liver", "pancreas", "pancreatic_duct", "superior_mesenteric_artery", "intestine", "spleen", "stomach", "portal_vein_and_splenic_vein", "renal_vein_left", "renal_vein_right", "cbd_stent", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"
+        "aorta", "adrenal_gland_left", "adrenal_gland_right", "common_bile_duct", "celiac_aa", "colon", "duodenum", "gall_bladder", "inferior_vena_cava", "kidney_left", "kidney_right", "liver", "pancreas", "pancreatic_duct", "superior_mesenteric_artery", "intestine", "spleen", "stomach", "portal_vein_and_splenic_vein", "renal_vein_left", "renal_vein_right", "cbd_stent", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet"
     ], checkpoint_root))
     filtered_records: list[dict[str, Any]] = []
     organ_to_models: dict[str, list[str]] = {}
@@ -716,7 +716,7 @@ def recommend_primary_models_for_organs(registry: dict[str, Any], organs: list[s
         if routed_candidates:
             primary = routed_candidates[0]
             auxiliaries = routed_candidates[1:]
-        elif o in {"pancreas", "pancreatic_duct", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet", "pancreatic_lesion", "common_bile_duct", "cbd_stent", "superior_mesenteric_artery", "celiac_aa", "celiac_aa_celiac_artery", "renal_vein_left", "renal_vein_right", "veins", "portal_vein_and_splenic_vein", "portal_splenic_veins"}:
+        elif o in {"pancreas", "pancreatic_duct", "pancreatic_pdac", "pancreatic_cyst", "pancreatic_pnet", "pancreatic_lesion", "common_bile_duct", "cbd_stent", "superior_mesenteric_artery", "celiac_aa", "celiac_aa", "renal_vein_left", "renal_vein_right", "veins", "portal_vein_and_splenic_vein", "portal_splenic_veins"}:
             primary = "epai_20250421"
             auxiliaries = ["atlasnet", "vsmtrans", "cads551", "moose888", "totalsegmentator", "vista3d"]
         elif o in {"liver", "spleen", "stomach", "duodenum", "colon", "kidney_left", "kidney_right", "gall_bladder", "intestine"}:

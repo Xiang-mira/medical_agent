@@ -4,7 +4,7 @@
   "models": {
     "atlasnet": {
       "local_to_global": {
-        "celiac_artery": "celiac_aa (celiac_artery)",
+        "celiac_artery": "celiac_aa",
         "gallbladder": "gall_bladder",
         "small_intestine": "intestine",
         "portal_splenic_veins": "portal_vein_and_splenic_vein"
@@ -23,7 +23,7 @@
         "common_bile_duct",
         "pancreatic_duct",
         "cbd_stent",
-        "celiac_aa (celiac_artery)",
+        "celiac_aa",
         "superior_mesenteric_artery",
         "portal_vein_and_splenic_vein",
         "renal_vein_left",
@@ -60,7 +60,7 @@
     },
     "epai_20250421": {
       "local_to_global": {
-        "celiac_aa": "celiac_aa (celiac_artery)"
+        "celiac_aa": "celiac_aa"
       },
       "_pathology_ignore": [
         "pancreatic_pdac",
