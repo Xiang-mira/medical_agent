@@ -36,6 +36,7 @@ from tools.dataset_delivery.task2_full373_round1_launcher import (  # noqa: E402
     FULL373_GROUP,
     FULL373_ROOT_NAME,
     aggregate_full373_estep,
+    build_estep_telemetry,
     build_full_round1_scope,
 )
 from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
@@ -563,6 +564,8 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
         "source_manifest": state_root / "case_level_manifests" / "cases_103_source_manifest.csv",
         "staged_manifest": root / "cases_103_staged_manifest.csv",
         "teacher_batches": root / "teacher_batches.jsonl",
+        "labelcritic_selection_sbatch": root / "labelcritic_selection_workers.sbatch",
+        "labelcritic_selection_job": root / "labelcritic_selection_job_id.txt",
         "mstep_sbatch": root / "round1_mstep_student.sbatch",
         "mstep_job": root / "round1_mstep_job_id.txt",
         "mstep_manifest": root / "round1" / "mstep" / "voxtell_prompt_student_manifest.json",
@@ -1239,6 +1242,8 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "WAIT_LABELCRITIC_SEC": str(os.getenv("WAIT_LABELCRITIC_SEC", "14400")),
         "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
     })
+    if "TASK2_ALLOW_H100_TEACHER_OVERFLOW" not in os.environ and labelcritic and labelcritic.get("status"):
+        env["TASK2_ALLOW_H100_TEACHER_OVERFLOW"] = "0"
     plan_cmd = [
         str(args.python),
         "tools/dataset_delivery/task2_full373_round1_launcher.py",
@@ -1250,6 +1255,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "--checkpoint-root", str(args.checkpoint_root),
         "--nnunet-predict-executable", str(args.nnunet_predict_executable),
         "--unest-python-executable", str(args.unest_python_executable),
+        "--state-root", str(state_root),
         "--cache-root", str(paths["root"] / "formal_task2_round1"),
     ]
     plan_result = _run(plan_cmd, env=env, timeout=600)
@@ -1327,6 +1333,90 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         scheduler_status=scheduler_status,
     )
     return batch
+
+
+def render_labelcritic_selection_sbatch(args: argparse.Namespace, formal_root: Path, path: Path, labelcritic: dict[str, Any]) -> dict[str, Any]:
+    worker_count = max(1, int(os.getenv("LABELCRITIC_SELECTION_WORKERS", "4")))
+    endpoint = _labelcritic_endpoint_hint(args.state_root.resolve(), labelcritic)
+    lines = [
+        "#!/usr/bin/env bash",
+        "#SBATCH --job-name=task2_labelcritic_select",
+        f"#SBATCH --partition={os.getenv('LABELCRITIC_SELECTION_PARTITION', 'cpu')}",
+        f"#SBATCH --cpus-per-task={os.getenv('LABELCRITIC_SELECTION_CPUS', '2')}",
+        f"#SBATCH --mem={os.getenv('LABELCRITIC_SELECTION_MEM', '12G')}",
+        f"#SBATCH --time={os.getenv('LABELCRITIC_SELECTION_TIME', '12:00:00')}",
+        "#SBATCH --signal=B:USR1@900",
+        f"#SBATCH --output={_state_paths(args.state_root)['root'] / 'labelcritic_select_%A_%a.out'}",
+        f"#SBATCH --error={_state_paths(args.state_root)['root'] / 'labelcritic_select_%A_%a.err'}",
+        "#SBATCH --export=ALL",
+        "",
+        "set -euo pipefail",
+        "unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS",
+        f"cd {shlex.quote(str(REPO_ROOT))}",
+        f"export STATE_ROOT={shlex.quote(str(args.state_root))}",
+        f"export LABELCRITIC_BASE_URL={shlex.quote(str(endpoint['base_url']))}",
+        f"export LABELCRITIC_PORT={shlex.quote(str(endpoint['port']))}",
+        f"export LABELCRITIC_MODEL_ID={shlex.quote(LABELCRITIC_MODEL_ID)}",
+        "export RUNTIME_NO_GIT=1",
+        "export SKIP_GIT_SYNC=1",
+        "export GIT_TERMINAL_PROMPT=0",
+        "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout --state-root \"$STATE_ROOT\" --logical-task-id labelcritic_selection --job-id \"${SLURM_JOB_ID:-}\" --task-index \"${SLURM_ARRAY_TASK_ID:-}\"' USR1",
+        f"{shlex.quote(str(args.python))} tools/dataset_delivery/task2_full373_round1_launcher.py \\",
+        f"  --output-root {shlex.quote(str(formal_root))} \\",
+        f"  --state-root {shlex.quote(str(args.state_root))} \\",
+        f"  --target-config {shlex.quote(str(args.target_config))} \\",
+        "  --selection-worker \\",
+        "  --worker-id \"${SLURM_JOB_ID:-local}_${SLURM_ARRAY_TASK_ID:-0}\" \\",
+        "  --critic-base-url \"$LABELCRITIC_BASE_URL\" \\",
+        "  --critic-port \"$LABELCRITIC_PORT\"",
+        "",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    path.chmod(0o755)
+    return {"path": str(path), "worker_count": worker_count, "endpoint": endpoint}
+
+
+def submit_labelcritic_selection_workers(args: argparse.Namespace, labelcritic: dict[str, Any]) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    paths = _state_paths(state_root)
+    state = _load_state(state_root)
+    formal_root = Path(str(state.get("formal_root") or (paths["root"] / FULL373_ROOT_NAME))).resolve()
+    if not formal_root.exists():
+        return {"status": "WAITING_FOR_ESTEP_ROOT", "formal_root": str(formal_root)}
+    telemetry = build_estep_telemetry(formal_root)
+    if int((telemetry.get("labelcritic") or {}).get("queue_depth") or 0) <= 0 and int((telemetry.get("case_target") or {}).get("terminal") or 0) >= int((telemetry.get("case_target") or {}).get("total") or 1):
+        return {"status": "NO_SELECTION_WORKERS_NEEDED", "telemetry": telemetry}
+    existing = str(state.get("labelcritic_selection_job_id") or "").strip()
+    if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
+        return {"status": "REUSED_ACTIVE_SELECTION_WORKERS", "job_id": existing, "telemetry": telemetry}
+    rendered = render_labelcritic_selection_sbatch(args, formal_root, paths["labelcritic_selection_sbatch"], labelcritic)
+    for command in (["bash", "-n", str(paths["labelcritic_selection_sbatch"])], ["sbatch", "--test-only", str(paths["labelcritic_selection_sbatch"])]):
+        result = _run(command)
+        if not result["ok"]:
+            log_failure(state_root, stage="labelcritic_selection_sbatch_preflight", failure_reason="labelcritic_selection_sbatch_preflight_failed", details=result)
+            return {"status": "FAILED", "failure_reason": "labelcritic_selection_sbatch_preflight_failed", "preflight": result}
+    worker_count = int(rendered["worker_count"])
+    run_id = _run_id(state_root)
+    result = _run([
+        "sbatch",
+        "--parsable",
+        "--comment", slurm_comment(run_id=run_id, submission_id="labelcritic_selection", group="labelcritic", profile="cpu"),
+        f"--array=0-{worker_count - 1}%{worker_count}",
+        str(paths["labelcritic_selection_sbatch"]),
+    ])
+    if not result["ok"]:
+        classification = classify_sbatch_failure(result["stderr"] or result["stdout"])
+        if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE":
+            _save_state(state_root, labelcritic_selection_status="WAITING_FOR_SUBMISSION_CAPACITY", scheduler_status="BACKPRESSURED", labelcritic_selection_submit=result)
+            return {"status": "WAITING_FOR_SUBMISSION_CAPACITY", "scheduler_status": "BACKPRESSURED", "failure_reason": classification["reason"], "telemetry": telemetry}
+        log_failure(state_root, stage="labelcritic_selection_submit", failure_reason=result["stderr"] or "labelcritic_selection_submit_failed", details=result)
+        return {"status": "FAILED", "failure_reason": result["stderr"] or "labelcritic_selection_submit_failed", "submit": result}
+    job_id = result["stdout"].splitlines()[-1].strip()
+    paths["labelcritic_selection_job"].write_text(job_id + "\n", encoding="utf-8")
+    _save_state(state_root, labelcritic_selection_status="SUBMITTED", labelcritic_selection_job_id=job_id, labelcritic_selection_sbatch=rendered)
+    record_job_lifecycle(state_root, {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:labelcritic_selection", "stage": "labelcritic_selection", "profile": "cpu", "array_concurrency": worker_count})
+    return {"status": "SUBMITTED", "job_id": job_id, "worker_count": worker_count, "telemetry": telemetry}
 
 
 def advance_estep(args: argparse.Namespace, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1539,6 +1629,80 @@ def build_mstep_manifest(args: argparse.Namespace) -> dict[str, Any]:
     return {"status": manifest["status"].upper(), "manifest": str(paths["mstep_manifest"]), "num_items": len(items)}
 
 
+def _mstep_profiles() -> list[dict[str, str]]:
+    if os.getenv("MSTEP_PARTITION") or os.getenv("MSTEP_GRES"):
+        return [{
+            "name": os.getenv("MSTEP_PROFILE", os.getenv("MSTEP_PARTITION", "custom")),
+            "partition": os.getenv("MSTEP_PARTITION", "gpua100"),
+            "gres": os.getenv("MSTEP_GRES", "gpu:A100:1"),
+            "cpus": os.getenv("MSTEP_CPUS", "12"),
+            "mem": os.getenv("MSTEP_MEM", "96G"),
+            "time": os.getenv("MSTEP_TIME", "10:00:00"),
+        }]
+    specs = os.getenv(
+        "MSTEP_PROFILE_SPECS",
+        "student_a100|gpua100|gpu:A100:1|12|96G|10:00:00,student_h100|gpuh100|gpu:H100:1|12|96G|10:00:00",
+    )
+    profiles = []
+    for raw in specs.split(","):
+        parts = [part.strip() for part in raw.split("|")]
+        if len(parts) != 6:
+            continue
+        name, partition, gres, cpus, mem, time_limit = parts
+        profiles.append({"name": name, "partition": partition, "gres": gres, "cpus": cpus, "mem": mem, "time": time_limit})
+    return profiles or [{"name": "student_a100", "partition": "gpua100", "gres": "gpu:A100:1", "cpus": "12", "mem": "96G", "time": "10:00:00"}]
+
+
+def _write_mstep_sbatch(args: argparse.Namespace, profile: dict[str, str], path: Path, manifest: dict[str, Any]) -> None:
+    state_root = args.state_root.resolve()
+    paths = _state_paths(state_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "#!/usr/bin/env bash",
+        "#SBATCH --job-name=task2_round1_mstep_student",
+        f"#SBATCH --partition={profile['partition']}",
+        f"#SBATCH --gres={profile['gres']}",
+        f"#SBATCH --cpus-per-task={profile['cpus']}",
+        f"#SBATCH --mem={profile['mem']}",
+        f"#SBATCH --time={profile['time']}",
+        "#SBATCH --signal=B:USR1@900",
+        f"#SBATCH --output={paths['root'] / ('mstep_' + profile['name'] + '_%j.out')}",
+        f"#SBATCH --error={paths['root'] / ('mstep_' + profile['name'] + '_%j.err')}",
+        "#SBATCH --export=ALL",
+        "",
+        "set -euo pipefail",
+        "unset DISPLAY GITHUB_TOKEN GH_TOKEN GIT_ASKPASS SSH_ASKPASS",
+        f"cd {shlex.quote(str(REPO_ROOT))}",
+        f"export STATE_ROOT={shlex.quote(str(state_root))}",
+        f"export MEDAI_OUTPUT_ROOT={shlex.quote(str(paths['root']))}",
+        f"export MEDAI_VOXTELL_MODEL_DIR={shlex.quote(str(os.getenv('MEDAI_VOXTELL_MODEL_DIR', '/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/VoxTell/voxtell_v1.1')))}",
+        "export MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt",
+        "export MEDAI_VOXTELL_MSTEP_MODE=project_voxtell_prompt_distillation_student",
+        "export MEDAI_VOXTELL_TRAINING_PROFILE=quality_weighted_ablation",
+        "export MEDAI_MSTEP_BATCH_SIZE=1",
+        "export MEDAI_FORMAL_STATE_MACHINE=1",
+        "export RUNTIME_NO_GIT=1",
+        "export SKIP_GIT_SYNC=1",
+        "export GIT_TERMINAL_PROMPT=0",
+        f"trap 'python tools/dataset_delivery/slurm_reliability.py student-pretimeout --state-root {shlex.quote(str(state_root))} --checkpoint-dir {shlex.quote(str(paths['mstep_output'] / 'walltime_checkpoints'))} --job-id \"${{SLURM_JOB_ID:-}}\"' USR1",
+        f"{shlex.quote(str(args.python))} - <<'PY'",
+        "from pathlib import Path",
+        "import json",
+        "import torch",
+        f"manifest = Path({str(paths['mstep_manifest'])!r})",
+        "assert manifest.is_file(), f'missing training manifest: {manifest}'",
+        "assert torch.cuda.is_available(), 'CUDA is not available for Student M-step'",
+        "print(json.dumps({'stage':'student_runtime_preflight','status':'PASSED','cuda':True,'device':torch.cuda.get_device_name(0)}), flush=True)",
+        "from scripts import run_em_training as em",
+        f"result = em.run_prompt_student_mstep(1, Path({str(paths['mstep_manifest'])!r}))",
+        "raise SystemExit(0 if result.get('status') == 'success' else 2)",
+        "PY",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    path.chmod(0o755)
+
+
 def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
     state_root = args.state_root.resolve()
     paths = _state_paths(state_root)
@@ -1553,59 +1717,39 @@ def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
     if manifest["status"] not in {"SUCCESS", "REUSED"}:
         log_failure(state_root, stage="m_step_manifest", failure_reason="mstep_manifest_failed", details=manifest)
         return {"status": "FAILED", "failure_reason": "mstep_manifest_failed", "manifest": manifest}
-    lines = [
-        "#!/usr/bin/env bash",
-        "#SBATCH --job-name=task2_round1_mstep_student",
-        f"#SBATCH --partition={os.getenv('MSTEP_PARTITION', 'gpua100')}",
-        f"#SBATCH --gres={os.getenv('MSTEP_GRES', 'gpu:A100:1')}",
-        f"#SBATCH --cpus-per-task={os.getenv('MSTEP_CPUS', '12')}",
-        f"#SBATCH --mem={os.getenv('MSTEP_MEM', '96G')}",
-        f"#SBATCH --time={os.getenv('MSTEP_TIME', '10:00:00')}",
-        "#SBATCH --signal=B:USR1@900",
-        f"#SBATCH --output={paths['root'] / 'mstep_%j.out'}",
-        f"#SBATCH --error={paths['root'] / 'mstep_%j.err'}",
-        "#SBATCH --export=ALL",
-        "",
-        "set -euo pipefail",
-        f"cd {shlex.quote(str(REPO_ROOT))}",
-        f"export STATE_ROOT={shlex.quote(str(state_root))}",
-        f"export MEDAI_OUTPUT_ROOT={shlex.quote(str(paths['root']))}",
-        f"export MEDAI_VOXTELL_MODEL_DIR={shlex.quote(str(os.getenv('MEDAI_VOXTELL_MODEL_DIR', '/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints/VoxTell/voxtell_v1.1')))}",
-        "export MEDAI_STUDENT_BACKEND=voxtell_style_3d_prompt",
-        "export MEDAI_VOXTELL_MSTEP_MODE=project_voxtell_prompt_distillation_student",
-        "export MEDAI_VOXTELL_TRAINING_PROFILE=quality_weighted_ablation",
-        "export MEDAI_MSTEP_BATCH_SIZE=1",
-        "export MEDAI_FORMAL_STATE_MACHINE=1",
-        f"trap 'python tools/dataset_delivery/slurm_reliability.py student-pretimeout --state-root {shlex.quote(str(state_root))} --checkpoint-dir {shlex.quote(str(paths['mstep_output'] / 'walltime_checkpoints'))} --job-id \"${{SLURM_JOB_ID:-}}\"' USR1",
-        f"{shlex.quote(str(args.python))} - <<'PY'",
-        "from pathlib import Path",
-        "from scripts import run_em_training as em",
-        f"result = em.run_prompt_student_mstep(1, Path({str(paths['mstep_manifest'])!r}))",
-        "raise SystemExit(0 if result.get('status') == 'success' else 2)",
-        "PY",
-        "",
-    ]
-    paths["mstep_sbatch"].write_text("\n".join(lines), encoding="utf-8")
-    paths["mstep_sbatch"].chmod(0o755)
-    for command in (["bash", "-n", str(paths["mstep_sbatch"])], ["sbatch", "--test-only", str(paths["mstep_sbatch"])]):
-        result = _run(command)
-        if not result["ok"]:
-            log_failure(state_root, stage="m_step_sbatch_preflight", failure_reason="mstep_sbatch_preflight_failed", details=result)
-            return {"status": "FAILED", "failure_reason": "mstep_sbatch_preflight_failed", "preflight": result}
     run_id = _run_id(state_root)
-    result = _run(["sbatch", "--parsable", "--comment", slurm_comment(run_id=run_id, submission_id="mstep", group="student", profile=os.getenv("MSTEP_PARTITION", "gpua100")), str(paths["mstep_sbatch"])])
-    if not result["ok"]:
+    backpressured = []
+    preflight_failures = []
+    for profile in _mstep_profiles():
+        sbatch_path = paths["mstep_sbatch"].with_name(f"round1_mstep_student_{profile['name']}.sbatch")
+        _write_mstep_sbatch(args, profile, sbatch_path, manifest)
+        failed_preflight = None
+        for command in (["bash", "-n", str(sbatch_path)], ["sbatch", "--test-only", str(sbatch_path)]):
+            result = _run(command)
+            if not result["ok"]:
+                failed_preflight = result
+                break
+        if failed_preflight is not None:
+            preflight_failures.append({"profile": profile, "preflight": failed_preflight})
+            continue
+        result = _run(["sbatch", "--parsable", "--comment", slurm_comment(run_id=run_id, submission_id="mstep", group="student", profile=profile["name"]), str(sbatch_path)])
+        if result["ok"]:
+            job_id = result["stdout"].splitlines()[-1].strip()
+            paths["mstep_job"].write_text(job_id + "\n", encoding="utf-8")
+            _save_state(state_root, mstep_status="SUBMITTED", mstep_job_id=job_id, mstep_manifest=manifest, mstep_profile=profile, mstep_sbatch=str(sbatch_path))
+            record_job_lifecycle(state_root, {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:mstep", "stage": "mstep", "profile": profile["name"], "partition": profile["partition"], "gres": profile["gres"]})
+            return {"status": "SUBMITTED", "job_id": job_id, "manifest": manifest, "profile": profile}
         classification = classify_sbatch_failure(result["stderr"] or result["stdout"])
         if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE":
-            _save_state(state_root, mstep_status="WAITING_FOR_SUBMISSION_CAPACITY", scheduler_status="BACKPRESSURED", mstep_submit=result)
-            return {"status": "WAITING_FOR_SUBMISSION_CAPACITY", "scheduler_status": "BACKPRESSURED", "failure_reason": classification["reason"], "submit": result}
+            backpressured.append({"profile": profile, "failure_reason": classification["reason"], "submit": result})
+            continue
         log_failure(state_root, stage="m_step_submit", failure_reason=result["stderr"] or "mstep_submit_failed", details=result)
         return {"status": "FAILED", "failure_reason": result["stderr"], "submit": result}
-    job_id = result["stdout"].splitlines()[-1].strip()
-    paths["mstep_job"].write_text(job_id + "\n", encoding="utf-8")
-    _save_state(state_root, mstep_status="SUBMITTED", mstep_job_id=job_id, mstep_manifest=manifest)
-    record_job_lifecycle(state_root, {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:mstep", "stage": "mstep", "profile": os.getenv("MSTEP_PARTITION", "gpua100")})
-    return {"status": "SUBMITTED", "job_id": job_id, "manifest": manifest}
+    if backpressured:
+        _save_state(state_root, mstep_status="WAITING_FOR_SUBMISSION_CAPACITY", scheduler_status="BACKPRESSURED", mstep_submit={"backpressured": backpressured, "preflight_failures": preflight_failures})
+        return {"status": "WAITING_FOR_SUBMISSION_CAPACITY", "scheduler_status": "BACKPRESSURED", "failure_reason": "all_mstep_profiles_backpressured", "backpressured": backpressured, "preflight_failures": preflight_failures}
+    log_failure(state_root, stage="m_step_sbatch_preflight", failure_reason="no_mstep_profile_passed_preflight", details={"preflight_failures": preflight_failures})
+    return {"status": "FAILED", "failure_reason": "no_mstep_profile_passed_preflight", "preflight_failures": preflight_failures}
 
 
 def check_mstep(args: argparse.Namespace) -> dict[str, Any]:
@@ -1722,9 +1866,16 @@ def _controller_main(args: argparse.Namespace) -> int:
             log_failure(state_root, stage="e_step_submit", failure_reason=progress.get("failure_reason", "e_step_submit_failed"), details=progress)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=progress.get("failure_reason"), e_step=progress)
             return 2
+        selection = {"status": "WAITING_FOR_LABELCRITIC"}
+        if labelcritic_gate.get("status") == "PASSED":
+            selection = submit_labelcritic_selection_workers(args, labelcritic_gate)
+            if selection["status"] == "FAILED":
+                log_failure(state_root, stage="labelcritic_selection_submit", failure_reason=selection.get("failure_reason", "labelcritic_selection_submit_failed"), details=selection)
+                _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_selection_submit", failure_reason=selection.get("failure_reason"), labelcritic_selection=selection)
+                return 2
         estep = check_estep(args)
         wait_stage = "e_step_wait" if labelcritic_gate.get("status") == "PASSED" else "e_step_and_labelcritic_wait"
-        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate, e_step_progress=progress)
+        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate, labelcritic_selection=selection, e_step_progress=progress)
         if estep["status"] == "PASSED":
             if labelcritic_gate.get("status") == "PASSED":
                 break
@@ -1784,10 +1935,44 @@ def controller(args: argparse.Namespace) -> int:
         return 2
 
 
+def _resource_telemetry(state_root: Path) -> dict[str, Any]:
+    state = _load_state(state_root)
+    formal_root = Path(str(state.get("formal_root") or ""))
+    jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
+    teacher_t4 = teacher_a100 = teacher_h100 = 0
+    if jobs_csv.exists():
+        for row in read_csv_rows(jobs_csv):
+            job_state = slurm_job_state(str(row.get("job_id") or ""))
+            if job_state.get("state") not in ACTIVE_STATES:
+                continue
+            gres = str(row.get("gres") or row.get("profile") or "").upper()
+            if "T4" in gres or row.get("profile") == "generic_gpu":
+                teacher_t4 += 1
+            elif "A100" in gres:
+                teacher_a100 += 1
+            elif "H100" in gres:
+                teacher_h100 += 1
+    labelcritic = state.get("labelcritic") or {}
+    label_job = slurm_job_state(str(labelcritic.get("job_id") or "")) if isinstance(labelcritic, dict) else {"state": "UNKNOWN"}
+    mstep_job = slurm_job_state(str(state.get("mstep_job_id") or "")) if state.get("mstep_job_id") else {"state": "NOT_SUBMITTED"}
+    return {
+        "teacher_t4_running": teacher_t4,
+        "teacher_a100_running": teacher_a100,
+        "teacher_h100_running": teacher_h100,
+        "labelcritic_h100_state": label_job.get("state"),
+        "student_state": mstep_job.get("state"),
+    }
+
+
 def status(args: argparse.Namespace) -> dict[str, Any]:
     state = _load_state(args.state_root.resolve())
     paths = _state_paths(args.state_root.resolve())
     last_failure = _read_json(paths["last_failure"], {})
+    formal_root = Path(str(state.get("formal_root") or ""))
+    estep_telemetry = build_estep_telemetry(formal_root) if formal_root.exists() else {}
+    labelcritic = state.get("labelcritic") or {}
+    if isinstance(labelcritic, dict) and labelcritic.get("job_id"):
+        labelcritic = {**labelcritic, "service_state": slurm_job_state(str(labelcritic.get("job_id"))).get("state")}
     return {
         "status": state.get("terminal_state") or state.get("stage") or state.get("status") or "NOT_STARTED",
         "state_root": str(paths["root"]),
@@ -1796,7 +1981,11 @@ def status(args: argparse.Namespace) -> dict[str, Any]:
         "failure_log": str(paths["failures"]),
         "last_failure_json": str(paths["last_failure"]),
         "controller_job_id": state.get("controller_job_id"),
-        "labelcritic": state.get("labelcritic"),
+        "labelcritic": labelcritic,
+        "teacher": (estep_telemetry.get("teacher_candidate") or {}),
+        "case_target": (estep_telemetry.get("case_target") or {}),
+        "labelcritic_queue": (estep_telemetry.get("labelcritic") or {}),
+        "resources": _resource_telemetry(args.state_root.resolve()),
         "e_step_status": state.get("e_step_status"),
         "mstep_status": state.get("mstep_status"),
         "failure_reason": state.get("failure_reason", "") or last_failure.get("failure_reason", ""),

@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tools.dataset_delivery import task2_full373_round1_launcher as full373
 from tools.dataset_delivery import task2_round1_orchestrator as orch
 
@@ -137,17 +139,29 @@ def test_task2_outputs_can_be_reused_as_exact_candidate_cache(monkeypatch, tmp_p
     assert scope["cache_audit"]["reusable_candidates"][0]["cache_status"] == "REUSED_VALID_CANDIDATE"
 
 
-def test_full373_execute_uses_run_loop_all_routed_teachers_and_labelcritic(monkeypatch, tmp_path: Path):
+def test_full373_execute_runs_one_teacher_target_candidate_without_labelcritic(monkeypatch, tmp_path: Path):
     manifest = tmp_path / "tasks.csv"
     manifest.write_text(
-        "task_index,case_id,ct_path,annotation_folder,registry_path,target_config,checkpoint_root,nnunet_predict_executable,unest_python_executable,python\n"
-        f"0,CASE001,{tmp_path / 'ct.nii.gz'},{tmp_path / 'ann'},configs/model_registry.yaml,configs/student_3d_prompt_target_organs.json,/ckpt,nnUNetv2_predict,/venv/bin/python,{Path('/usr/bin/python')}\n",
+        "task_index,case_id,target,teacher,candidate_id,ct_path,annotation_folder,registry_path,target_config,checkpoint_root,nnunet_predict_executable,unest_python_executable,python\n"
+        f"0,CASE001,organ_a,teacher1,cand1,{tmp_path / 'ct.nii.gz'},{tmp_path / 'ann'},configs/model_registry.yaml,configs/student_3d_prompt_target_organs.json,/ckpt,nnUNetv2_predict,/venv/bin/python,{Path('/usr/bin/python')}\n",
         encoding="utf-8",
     )
     captured: list[str] = []
 
     def fake_run(command, **kwargs):
         captured.extend([str(part) for part in command])
+        case_output = tmp_path / "out" / "candidate_runs" / "CASE001" / "organ_a" / "teacher1"
+        mask = case_output / "annotation_versions" / "CASE001" / "updated" / "organ_a.nii.gz"
+        mask.parent.mkdir(parents=True, exist_ok=True)
+        mask.write_bytes(b"mask")
+        full373.write_json(
+            case_output / "annotation_versions" / "CASE001" / "selection_metadata.json",
+            {
+                "ct_path": str(tmp_path / "ct.nii.gz"),
+                "selection_rows": [{"organ": "organ_a", "candidate_predictions": [{"model": "teacher1", "prediction": str(mask), "candidate_exists": True, "candidate_qc_status": "pass"}]}],
+                "selected_organs": [{"organ": "organ_a", "final_mask": str(mask), "target_type": "positive_hard"}],
+            },
+        )
         return subprocess.CompletedProcess(command, 0, '{"status":"success"}', "")
 
     monkeypatch.setattr(full373.subprocess, "run", fake_run)
@@ -155,9 +169,10 @@ def test_full373_execute_uses_run_loop_all_routed_teachers_and_labelcritic(monke
 
     assert result["status"] == "COMPLETED"
     assert "--models" in captured
-    assert captured[captured.index("--models") + 1] == ""
-    assert "--organs" in captured and captured[captured.index("--organs") + 1] == "student_373"
-    assert "--enable-critic" in captured
+    assert captured[captured.index("--models") + 1] == "teacher1"
+    assert "--organs" in captured and captured[captured.index("--organs") + 1] == "organ_a"
+    assert "--no-enable-critic" in captured
+    assert "--enable-critic" not in captured
     assert "--no-use-annotation-folder-reference" in captured
 
 
@@ -206,3 +221,151 @@ def test_mstep_cannot_be_released_by_old_22_target_task2_status(tmp_path: Path):
 
     assert result["status"] == "FAILED"
     assert result["failure_reason"] == "full_373_training_manifest_missing"
+
+
+def _write_scope(root: Path, *, cases: list[str], routes: dict[str, list[str]]) -> None:
+    rows = []
+    for case_id in cases:
+        for target, teachers in routes.items():
+            for teacher in teachers:
+                rows.append({"case_id": case_id, "target": target, "teacher": teacher, "candidate_id": f"{case_id}_{target}_{teacher}"})
+    full373.write_json(
+        root / "full_round1_scope.json",
+        {
+            "case_count": len(cases),
+            "canonical_target_count": len(routes),
+            "routes": routes,
+            "task_rows": rows,
+            "total_logical_candidate_tasks": len(rows),
+        },
+    )
+
+
+def _candidate(root: Path, case_id: str, target: str, teacher: str, status: str = "SUCCESS") -> dict:
+    mask = root / "masks" / case_id / target / f"{teacher}.nii.gz"
+    if status == "SUCCESS":
+        mask.parent.mkdir(parents=True, exist_ok=True)
+        mask.write_bytes(b"mask")
+    state = {
+        "status": status,
+        "case_id": case_id,
+        "target": target,
+        "teacher": teacher,
+        "model": teacher,
+        "candidate_id": f"{case_id}_{target}_{teacher}",
+        "candidate_exists": status == "SUCCESS",
+        "prediction": str(mask) if status == "SUCCESS" else "",
+        "eligible_for_labelcritic": status == "SUCCESS",
+        "candidate_qc_status": "pass",
+    }
+    full373.publish_candidate_state(root, state)
+    return state
+
+
+def test_case_target_waits_until_all_eligible_teacher_candidates_terminal(tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1", "teacher2", "teacher3"]})
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher1")
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher2")
+    state = full373.recompute_case_target_readiness(tmp_path, case_id="CASE001", target="organ_a")
+    assert state["status"] == "WAITING_FOR_CANDIDATES"
+
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher3")
+    claim = full373.claim_next_case_target(tmp_path, worker_id="critic1", labelcritic_ready=True)
+    assert claim["status"] == "CLAIMED"
+    assert claim["case_target"]["case_id"] == "CASE001"
+    assert claim["case_target"]["target"] == "organ_a"
+
+
+def test_case_target_ready_does_not_wait_for_global_teacher_completion(tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001", "CASE002"], routes={"organ_a": ["teacher1", "teacher2"]})
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher1")
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher2")
+    _candidate(tmp_path, "CASE002", "organ_a", "teacher1")
+
+    claim = full373.claim_next_case_target(tmp_path, worker_id="critic1", labelcritic_ready=True)
+
+    assert claim["status"] == "CLAIMED"
+    assert claim["case_target"]["case_id"] == "CASE001"
+
+
+def test_labelcritic_pending_accumulates_ready_backlog_without_failure(tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1", "teacher2"]})
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher1")
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher2")
+
+    claim = full373.claim_next_case_target(tmp_path, worker_id="critic1", labelcritic_ready=False)
+
+    assert claim["status"] == "WAITING_FOR_LABELCRITIC"
+    assert claim["queue_depth"] == 1
+    telemetry = full373.build_estep_telemetry(tmp_path)
+    assert telemetry["labelcritic"]["queue_depth"] == 1
+
+
+def test_labelcritic_ready_consumes_backlog_and_passes_all_candidates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1", "teacher2", "teacher3"]})
+    for teacher in ["teacher1", "teacher2", "teacher3"]:
+        _candidate(tmp_path, "CASE001", "organ_a", teacher)
+    captured: dict[str, int] = {}
+
+    def fake_select_candidate(**kwargs):
+        captured["candidate_count"] = len(kwargs["candidates"])
+        return kwargs["candidates"][1], {
+            "selection_method": "label_critic",
+            "selection_status": "selected",
+            "selected_model": kwargs["candidates"][1]["model"],
+            "labelcritic_records": [{"status": "success"}],
+        }
+
+    monkeypatch.setattr(full373, "_select_candidate", fake_select_candidate)
+    claim = full373.claim_next_case_target(tmp_path, worker_id="critic1", labelcritic_ready=True)
+    result = full373.select_case_target(
+        tmp_path,
+        case_id=claim["case_target"]["case_id"],
+        target=claim["case_target"]["target"],
+        critic_base_url="http://node",
+        critic_port=8000,
+    )
+
+    assert captured["candidate_count"] == 3
+    assert result["status"] == "SELECTED"
+    assert result["selected_model"] == "teacher2"
+
+
+def test_single_teacher_target_uses_existing_single_candidate_policy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_b": ["teacher1"]})
+    _candidate(tmp_path, "CASE001", "organ_b", "teacher1")
+
+    def fake_select_candidate(**kwargs):
+        return kwargs["candidates"][0], {
+            "selection_method": "single_teacher_provisional",
+            "selection_status": "provisional",
+            "selected_model": "teacher1",
+        }
+
+    monkeypatch.setattr(full373, "_select_candidate", fake_select_candidate)
+    result = full373.select_case_target(tmp_path, case_id="CASE001", target="organ_b", critic_base_url="http://node", critic_port=8000)
+    assert result["status"] == "VALID_SINGLE_TEACHER_ACCEPTED"
+
+
+def test_same_logical_candidate_cannot_be_claimed_twice(tmp_path: Path):
+    first = full373.claim_work(tmp_path, claim_kind="candidate", claim_key="CASE001|organ|teacher", worker_id="gpu_t4")
+    second = full373.claim_work(tmp_path, claim_kind="candidate", claim_key="CASE001|organ|teacher", worker_id="gpu_a100")
+    assert first["status"] == "CLAIMED"
+    assert second["status"] == "BUSY"
+
+
+def test_same_case_target_cannot_be_selected_by_two_workers(tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher1")
+    first = full373.claim_next_case_target(tmp_path, worker_id="critic1", labelcritic_ready=True)
+    second = full373.claim_next_case_target(tmp_path, worker_id="critic2", labelcritic_ready=True)
+    assert first["status"] == "CLAIMED"
+    assert second["status"] != "CLAIMED"
+
+
+def test_estep_gate_requires_all_case_targets_terminal_not_just_candidates_ready(tmp_path: Path):
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"], "organ_b": ["teacher1"]})
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher1")
+    report = full373.aggregate_full373_estep(tmp_path, expected_cases=1, expected_targets=2)
+    assert report["status"] == "RUNNING"
+    assert report["manifest_targets"] == 0

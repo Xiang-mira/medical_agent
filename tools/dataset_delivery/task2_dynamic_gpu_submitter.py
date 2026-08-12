@@ -60,6 +60,19 @@ class GpuSubmitProfile:
     mem: str
     time_limit: str
 
+    @property
+    def resource_class(self) -> str:
+        upper = f"{self.partition} {self.gres} {self.name}".upper()
+        if "H100" in upper:
+            return "GPU_HIGH_MEMORY_H100"
+        if "A100" in upper:
+            return "GPU_HIGH_MEMORY_A100"
+        if "T4" in upper:
+            return "GPU_LIGHT_T4"
+        if any(token in upper for token in ("L40", "A40", "A6000", "A30", "A10")):
+            return "GPU_MEDIUM"
+        return "GPU_INFERENCE_COMPATIBLE"
+
 
 def parse_profile_specs(value: str) -> list[GpuSubmitProfile]:
     profiles: list[GpuSubmitProfile] = []
@@ -95,12 +108,14 @@ def _gpu_type_rank(gpu_type: str) -> int:
     upper = str(gpu_type or "").upper()
     if "T4" in upper:
         return 0
-    if upper in {"GPU", "GENERIC"}:
+    if upper in {"GPU", "GENERIC"} or "GPU:1" == upper:
         return 1
-    if "A100" in upper:
+    if any(token in upper for token in ("A10", "A30", "A40", "A6000", "L40")):
         return 2
-    if "H100" in upper:
+    if "A100" in upper:
         return 3
+    if "H100" in upper:
+        return 4
     return 2
 
 
@@ -128,7 +143,7 @@ def build_auto_gpu_profiles(snapshot: dict[str, Any], *, min_vram_gb: int = 12, 
                 time_limit="06:00:00",
             )
         )
-    profiles.sort(key=lambda profile: _gpu_type_rank(profile.gres))
+    profiles.sort(key=lambda profile: _gpu_type_rank(f"{profile.name} {profile.partition} {profile.gres}"))
     return profiles or parse_profile_specs(DEFAULT_PROFILE_SPECS)
 
 
@@ -663,7 +678,13 @@ def build_dynamic_submission_plan(
         "total_task_count": sum(int(row["task_count"]) for row in shard_rows),
         "total_array_concurrency": sum(int(row["array_concurrency"]) for row in shard_rows),
         "group_concurrency": group_slots,
-        "profile_specs": [profile.__dict__ for profile in profiles],
+        "profile_specs": [{**profile.__dict__, "resource_class": profile.resource_class} for profile in profiles],
+        "resource_policy": {
+            "teacher_resource_requirement": "GPU_INFERENCE_COMPATIBLE",
+            "profile_priority_order": "T4/generic/immediately-compatible GPUs first; A100/H100 are opportunistic overflow, not scientific ownership",
+            "labelcritic_h100_reservation": os.getenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "1").strip().lower() in {"0", "false", "no"},
+            "h100_overflow_policy": "DEFERRED_LOW_UTILITY_PROFILE when LabelCritic service is active unless TASK2_ALLOW_H100_TEACHER_OVERFLOW=1",
+        },
         "resource_inventory": resource_inventory,
         "worker_sizing": worker_sizing,
         "jobs": shard_rows,

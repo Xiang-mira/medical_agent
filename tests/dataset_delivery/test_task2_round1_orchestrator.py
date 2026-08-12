@@ -345,6 +345,52 @@ def test_service_runtime_validation_failure_blocks_mstep_not_estep(tmp_path, mon
     assert status["failure_log"] == str(paths["failures"])
 
 
+def test_labelcritic_ready_submits_selection_workers_while_teacher_continues(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    orch._save_state(args.state_root, formal_root=str(formal_root))
+    (formal_root / "queues").mkdir(parents=True)
+    monkeypatch.setattr(orch, "build_estep_telemetry", lambda formal: {"labelcritic": {"queue_depth": 3}, "case_target": {"total": 4, "terminal": 1}})
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "COMPLETED", "job_id": job_id})
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(part) for part in command])
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if command[:2] == ["sbatch", "--parsable"]:
+            return {"ok": True, "stdout": "555\n", "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+    result = orch.submit_labelcritic_selection_workers(args, {"status": "PASSED", "base_url": "http://node", "port": 8000})
+    assert result["status"] == "SUBMITTED"
+    assert result["job_id"] == "555"
+    assert any("--array=0-3%4" in call for command in calls for call in command)
+
+
+def test_status_reports_round1_streaming_telemetry(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    formal_root.mkdir(parents=True)
+    orch._save_state(args.state_root, formal_root=str(formal_root), labelcritic={"job_id": "111111"}, mstep_job_id="222222")
+    monkeypatch.setattr(
+        orch,
+        "build_estep_telemetry",
+        lambda formal: {
+            "teacher_candidate": {"total": 10, "success": 4, "running": 2, "pending": 4, "retry": 0, "terminal": 4},
+            "case_target": {"total": 6, "waiting_candidates": 4, "candidates_ready": 1, "labelcritic_running": 1, "selected": 0},
+            "labelcritic": {"queue_depth": 1, "running_requests": 1, "completed": 0, "retry": 0},
+        },
+    )
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "RUNNING", "job_id": job_id})
+    status = orch.status(SimpleNamespace(state_root=args.state_root))
+    assert status["teacher"]["total"] == 10
+    assert status["case_target"]["total"] == 6
+    assert status["labelcritic_queue"]["queue_depth"] == 1
+    assert status["resources"]["labelcritic_h100_state"] == "RUNNING"
+
+
 def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
     args = _args(tmp_path)
     calls: list[str] = []
@@ -360,6 +406,38 @@ def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
     assert orch.controller(args) == 0
     assert calls == ["submit_estep", "poll_labelcritic", "advance_estep", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
     assert orch._load_state(args.state_root)["terminal_state"] == "ROUND1_PASSED"
+
+
+def test_mstep_uses_a100_preferred_h100_fallback_on_backpressure(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    mask = tmp_path / "mask.nii.gz"
+    mask.write_bytes(b"mask")
+    orch._save_state(args.state_root, formal_root=str(formal_root), e_step_status="PASSED")
+    (formal_root / "training_manifest.json").parent.mkdir(parents=True, exist_ok=True)
+    (formal_root / "training_manifest.json").write_text(json.dumps({"status": "success", "items": [{"case_id": "CASE001", "organ": "organ_a", "mask_path": str(mask), "training_weight": 1.0}]}), encoding="utf-8")
+    (formal_root / "full_373_estep_status.json").write_text(json.dumps({"status": "PASSED"}), encoding="utf-8")
+    monkeypatch.delenv("MSTEP_PARTITION", raising=False)
+    monkeypatch.delenv("MSTEP_GRES", raising=False)
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(part) for part in command])
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if command[:2] == ["sbatch", "--parsable"] and "student_a100" in " ".join(map(str, command)):
+            return {"ok": False, "stdout": "", "stderr": "Batch job submission failed: QOSMaxJobsPerUserLimit", "return_code": 1}
+        if command[:2] == ["sbatch", "--parsable"] and "student_h100" in " ".join(map(str, command)):
+            return {"ok": True, "stdout": "666\n", "stderr": "", "return_code": 0}
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+    result = orch.submit_mstep(args)
+    assert result["status"] == "SUBMITTED"
+    assert result["job_id"] == "666"
+    assert result["profile"]["partition"] == "gpuh100"
 
 
 def test_estep_passed_waits_for_labelcritic_gate_before_mstep(tmp_path, monkeypatch):

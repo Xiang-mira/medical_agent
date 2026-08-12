@@ -163,11 +163,41 @@ def test_dynamic_submitter_auto_profiles_use_cluster_inventory_without_fixed_30_
     assert plan["planned_overrequest_workers"] == 80
     assert plan["worker_sizing"]["fixed_30_ceiling"] is False
     assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu", "gpua100", "spare_l40", "gpuh100"}
+    assert [profile["resource_class"] for profile in plan["profile_specs"]][0] == "GPU_LIGHT_T4"
     shard_paths = [Path(row["task_manifest"]) for row in plan["jobs"]]
     source_indices: list[str] = []
     for path in shard_paths:
         source_indices.extend(row["source_task_index"] for row in _rows(path))
     assert sorted(source_indices, key=int) == [str(index) for index in range(80)]
+
+
+def test_dynamic_submitter_can_defer_teacher_h100_when_labelcritic_reserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 4, "gpus_configured_total": 4},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    monkeypatch.setenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "0")
+    summary = _summary(tmp_path, {"full373": 8})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+    )
+
+    assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu"}
+    assert plan["resource_policy"]["teacher_resource_requirement"] == "GPU_INFERENCE_COMPATIBLE"
+    assert plan["resource_policy"]["labelcritic_h100_reservation"] is True
 
 
 def test_dynamic_submitter_partial_sbatch_success_persists_before_qos_backpressure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
