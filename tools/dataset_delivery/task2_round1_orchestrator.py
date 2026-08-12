@@ -183,6 +183,8 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
         "root": root,
         "state": root / "state.json",
         "events": root / "events.jsonl",
+        "failures": root / "failures.jsonl",
+        "last_failure": root / "last_failure.json",
         "controller_sbatch": root / "controller.sbatch",
         "controller_job": root / "controller_job_id.txt",
         "mstep_sbatch": root / "round1_mstep_student.sbatch",
@@ -209,6 +211,46 @@ def _save_state(state_root: Path, **updates: Any) -> dict[str, Any]:
     with paths["events"].open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"time": state["updated_at"], **updates}, ensure_ascii=False) + "\n")
     return state
+
+
+def _tail_text(value: Any, limit: int = 4000) -> str:
+    text = str(value or "")
+    return text[-limit:]
+
+
+def _compact_details(value: Any) -> Any:
+    if isinstance(value, dict):
+        compact: dict[str, Any] = {}
+        for key, item in value.items():
+            safe_key = str(key)
+            if key in {"stdout", "stderr", "stdout_tail", "stderr_tail"}:
+                compact[safe_key] = _tail_text(item)
+            else:
+                compact[safe_key] = _compact_details(item)
+        return compact
+    if isinstance(value, (list, tuple)):
+        return [_compact_details(item) for item in value[:100]]
+    if isinstance(value, set):
+        return sorted(_compact_details(item) for item in value)
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def log_failure(state_root: Path, *, stage: str, failure_reason: str, details: Any | None = None) -> dict[str, Any]:
+    paths = _state_paths(state_root)
+    record = {
+        "time": utc_now(),
+        "stage": stage,
+        "failure_reason": str(failure_reason or "unknown_failure"),
+        "git_commit": _git_commit(),
+        "details": _compact_details(details or {}),
+    }
+    paths["failures"].parent.mkdir(parents=True, exist_ok=True)
+    with paths["failures"].open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _write_json(paths["last_failure"], record)
+    return record
 
 
 def _git_commit() -> str:
@@ -390,8 +432,9 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
     preflight = run_static_preflight(args)
     paths = _state_paths(args.state_root.resolve())
     if preflight["status"] != "PASSED":
+        failure = log_failure(args.state_root.resolve(), stage="static_preflight", failure_reason="static_preflight_failed", details=preflight)
         _save_state(args.state_root.resolve(), terminal_state="ROUND1_FAILED", stage="static_preflight", failure_reason="static_preflight_failed", static_preflight=preflight)
-        raise SystemExit(json.dumps({"status": "STATIC_PREFLIGHT_FAILED", "report": str(paths["root"] / "static_preflight.json")}, indent=2))
+        raise SystemExit(json.dumps({"status": "STATIC_PREFLIGHT_FAILED", "report": str(paths["root"] / "static_preflight.json"), "last_failure": failure}, indent=2))
     state = _load_state(args.state_root.resolve())
     if state.get("terminal_state") in {"ROUND1_PASSED", "ROUND1_FAILED"}:
         return {"status": "ROUND1_ALREADY_TERMINAL", "terminal_state": state.get("terminal_state"), "state_root": str(paths["root"])}
@@ -400,6 +443,7 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "CONTROLLER_ALREADY_ACTIVE", "controller_job_id": existing, "state_root": str(paths["root"])}
     result = _run(["sbatch", "--parsable", str(paths["controller_sbatch"])])
     if not result["ok"]:
+        log_failure(args.state_root.resolve(), stage="controller_submit", failure_reason=result["stderr"] or "controller_submit_failed", details=result)
         _save_state(args.state_root.resolve(), terminal_state="ROUND1_FAILED", stage="controller_submit", failure_reason=result["stderr"], controller_submit=result)
         raise SystemExit(result["stderr"])
     job_id = result["stdout"].splitlines()[-1].strip()
@@ -450,6 +494,7 @@ def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
         return {"status": "REUSED_ACTIVE_JOB", "job_id": named}
     result = _run(["bash", "scripts/task2/submit_labelcritic_72b_service.sh"], env=os.environ.copy())
     if not result["ok"]:
+        log_failure(state_root, stage="labelcritic_submit", failure_reason=result["stderr"] or result["stdout"] or "labelcritic_submit_failed", details=result)
         return {"status": "SUBMIT_FAILED", "failure_reason": result["stderr"], "submit": result}
     job_id_match = re.search(r"LABELCRITIC_JOB_ID=([^\s]+)", result["stdout"])
     job_id = job_id_match.group(1) if job_id_match else (service["job"].read_text(encoding="utf-8").strip() if service["job"].exists() else "")
@@ -465,10 +510,12 @@ def wait_for_labelcritic_runtime(state_root: Path, *, poll_sec: int) -> dict[str
             _save_state(state_root, stage="labelcritic_runtime_preflight", labelcritic_runtime_preflight=runtime)
             if runtime["status"] == "PASSED":
                 return {"status": "PASSED", "base_url": service["base_url"], "port": int(service["port"]), "runtime": runtime}
+            log_failure(state_root, stage="labelcritic_runtime_preflight", failure_reason=runtime.get("failure_reason", "runtime_preflight_failed"), details=runtime)
             return {"status": "FAILED", "failure_reason": runtime.get("failure_reason", "runtime_preflight_failed"), "runtime": runtime}
         job_id = str(service.get("job_id") or "")
         state = slurm_job_state(job_id) if job_id else {"state": "UNKNOWN"}
         if state.get("state") in TERMINAL_FAILURE_STATES:
+            log_failure(state_root, stage="labelcritic_job", failure_reason=f"labelcritic_job_terminal:{state.get('state')}", details=state)
             return {"status": "FAILED", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state}
         base_file = _service_paths(state_root)["base"]
         port_file = _service_paths(state_root)["port"]
@@ -481,6 +528,7 @@ def wait_for_labelcritic_runtime(state_root: Path, *, poll_sec: int) -> dict[str
                 _save_state(state_root, stage="labelcritic_runtime_preflight", labelcritic_runtime_preflight=runtime)
                 if runtime["status"] == "PASSED":
                     return {"status": "PASSED", "base_url": base, "port": port, "runtime": runtime}
+                log_failure(state_root, stage="labelcritic_runtime_preflight", failure_reason=runtime.get("failure_reason", "runtime_preflight_failed"), details=runtime)
                 return {"status": "FAILED", "failure_reason": runtime.get("failure_reason", "runtime_preflight_failed"), "runtime": runtime}
         time.sleep(max(5, poll_sec))
 
@@ -516,6 +564,7 @@ def submit_estep(args: argparse.Namespace, labelcritic: dict[str, Any]) -> dict[
     })
     result = _run(["bash", "scripts/task2/submit_task2_formal_103cases.sh"], env=env, timeout=None)
     if not result["ok"]:
+        log_failure(state_root, stage="e_step_submit", failure_reason=result["stderr"] or result["stdout"] or "e_step_submit_failed", details=result)
         return {"status": "FAILED", "failure_reason": result["stderr"] or result["stdout"], "submit": result, "formal_root": str(formal_root)}
     _save_state(state_root, e_step_status="SUBMITTED", formal_root=str(formal_root), e_step_submit=result)
     return {"status": "SUBMITTED", "formal_root": str(formal_root), "submit": result}
@@ -543,6 +592,7 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
             if state.get("state") in TERMINAL_FAILURE_STATES:
                 failed.append(state)
     if failed and not active:
+        log_failure(args.state_root.resolve(), stage="e_step", failure_reason="e_step_jobs_terminal_failed", details={"failed_jobs": failed, "check": result})
         return {"status": "FAILED", "failure_reason": "e_step_jobs_terminal_failed", "failed_jobs": failed, "check": result}
     return {"status": "RUNNING", "active_jobs": active, "check": result}
 
@@ -642,6 +692,7 @@ def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "REUSED", "job_id": existing}
     manifest = build_mstep_manifest(args)
     if manifest["status"] not in {"SUCCESS", "REUSED"}:
+        log_failure(state_root, stage="m_step_manifest", failure_reason="mstep_manifest_failed", details=manifest)
         return {"status": "FAILED", "failure_reason": "mstep_manifest_failed", "manifest": manifest}
     lines = [
         "#!/usr/bin/env bash",
@@ -677,9 +728,11 @@ def submit_mstep(args: argparse.Namespace) -> dict[str, Any]:
     for command in (["bash", "-n", str(paths["mstep_sbatch"])], ["sbatch", "--test-only", str(paths["mstep_sbatch"])]):
         result = _run(command)
         if not result["ok"]:
+            log_failure(state_root, stage="m_step_sbatch_preflight", failure_reason="mstep_sbatch_preflight_failed", details=result)
             return {"status": "FAILED", "failure_reason": "mstep_sbatch_preflight_failed", "preflight": result}
     result = _run(["sbatch", "--parsable", str(paths["mstep_sbatch"])])
     if not result["ok"]:
+        log_failure(state_root, stage="m_step_submit", failure_reason=result["stderr"] or "mstep_submit_failed", details=result)
         return {"status": "FAILED", "failure_reason": result["stderr"], "submit": result}
     job_id = result["stdout"].splitlines()[-1].strip()
     paths["mstep_job"].write_text(job_id + "\n", encoding="utf-8")
@@ -693,11 +746,16 @@ def check_mstep(args: argparse.Namespace) -> dict[str, Any]:
     result = _read_json(result_json, {})
     if result.get("status") == "success":
         checkpoint = paths["mstep_output"] / "voxtell_finetuned_model" / "fold_0" / "checkpoint_final.pth"
-        return {"status": "PASSED" if checkpoint.exists() else "FAILED", "result": str(result_json), "checkpoint": str(checkpoint), "failure_reason": "" if checkpoint.exists() else "checkpoint_missing"}
+        if checkpoint.exists():
+            return {"status": "PASSED", "result": str(result_json), "checkpoint": str(checkpoint), "failure_reason": ""}
+        payload = {"status": "FAILED", "result": str(result_json), "checkpoint": str(checkpoint), "failure_reason": "checkpoint_missing"}
+        log_failure(args.state_root.resolve(), stage="m_step", failure_reason="checkpoint_missing", details=payload)
+        return payload
     state = _load_state(args.state_root.resolve())
     job_id = str(state.get("mstep_job_id") or "")
     job_state = slurm_job_state(job_id) if job_id else {"state": "UNKNOWN"}
     if job_state.get("state") in TERMINAL_FAILURE_STATES:
+        log_failure(args.state_root.resolve(), stage="m_step", failure_reason=f"mstep_job_terminal:{job_state.get('state')}", details=job_state)
         return {"status": "FAILED", "failure_reason": f"mstep_job_terminal:{job_state.get('state')}", "job": job_state}
     return {"status": "RUNNING", "job": job_state}
 
@@ -734,10 +792,12 @@ def run_round1_final_validator(args: argparse.Namespace) -> dict[str, Any]:
         "failure_reason": "" if all(check["ok"] for check in checks) else ",".join(check["name"] for check in checks if not check["ok"]),
     }
     _write_json(paths["final"], report)
+    if report["status"] != "PASSED":
+        log_failure(args.state_root.resolve(), stage="final_validator", failure_reason=report["failure_reason"], details=report)
     return report
 
 
-def controller(args: argparse.Namespace) -> int:
+def _controller_main(args: argparse.Namespace) -> int:
     state_root = args.state_root.resolve()
     current = _load_state(state_root)
     if current.get("terminal_state") == "ROUND1_PASSED":
@@ -747,11 +807,13 @@ def controller(args: argparse.Namespace) -> int:
     _save_state(state_root, status="CONTROLLER_RUNNING", terminal_state="", stage="start", git_commit=_git_commit(), started_at=utc_now())
     labelcritic = wait_for_labelcritic_runtime(state_root, poll_sec=args.poll_sec)
     if labelcritic["status"] != "PASSED":
+        log_failure(state_root, stage="labelcritic", failure_reason=labelcritic.get("failure_reason", "labelcritic_failed"), details=labelcritic)
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
         return 2
     _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic)
     estep_submit = submit_estep(args, labelcritic)
     if estep_submit["status"] == "FAILED":
+        log_failure(state_root, stage="e_step_submit", failure_reason=estep_submit.get("failure_reason", "e_step_submit_failed"), details=estep_submit)
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=estep_submit.get("failure_reason"), e_step=estep_submit)
         return 2
     while True:
@@ -760,11 +822,13 @@ def controller(args: argparse.Namespace) -> int:
         if estep["status"] == "PASSED":
             break
         if estep["status"] == "FAILED":
+            log_failure(state_root, stage="e_step", failure_reason=estep.get("failure_reason", "e_step_failed"), details=estep)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step", failure_reason=estep.get("failure_reason"), e_step=estep)
             return 2
         time.sleep(max(10, args.poll_sec))
     mstep_submit = submit_mstep(args)
     if mstep_submit["status"] == "FAILED":
+        log_failure(state_root, stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason", "m_step_submit_failed"), details=mstep_submit)
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason"), m_step=mstep_submit)
         return 2
     while True:
@@ -778,22 +842,50 @@ def controller(args: argparse.Namespace) -> int:
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="final_validator", failure_reason=final.get("failure_reason"), final=final, finished_at=utc_now())
             return 2
         if mstep["status"] == "FAILED":
+            log_failure(state_root, stage="m_step", failure_reason=mstep.get("failure_reason", "m_step_failed"), details=mstep)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step", failure_reason=mstep.get("failure_reason"), m_step=mstep)
             return 2
         time.sleep(max(10, args.poll_sec))
 
 
+def controller(args: argparse.Namespace) -> int:
+    try:
+        return _controller_main(args)
+    except Exception as exc:
+        state_root = args.state_root.resolve()
+        failure = log_failure(
+            state_root,
+            stage="controller_unhandled_exception",
+            failure_reason=f"{type(exc).__name__}: {exc}",
+            details={"exception_type": type(exc).__name__, "exception": str(exc)},
+        )
+        _save_state(
+            state_root,
+            terminal_state="ROUND1_FAILED",
+            stage="controller_unhandled_exception",
+            failure_reason=failure["failure_reason"],
+            last_failure=str(_state_paths(state_root)["last_failure"]),
+        )
+        return 2
+
+
 def status(args: argparse.Namespace) -> dict[str, Any]:
     state = _load_state(args.state_root.resolve())
     paths = _state_paths(args.state_root.resolve())
+    last_failure = _read_json(paths["last_failure"], {})
     return {
         "status": state.get("terminal_state") or state.get("stage") or state.get("status") or "NOT_STARTED",
         "state_root": str(paths["root"]),
+        "state_json": str(paths["state"]),
+        "events_log": str(paths["events"]),
+        "failure_log": str(paths["failures"]),
+        "last_failure_json": str(paths["last_failure"]),
         "controller_job_id": state.get("controller_job_id"),
         "labelcritic": state.get("labelcritic"),
         "e_step_status": state.get("e_step_status"),
         "mstep_status": state.get("mstep_status"),
-        "failure_reason": state.get("failure_reason", ""),
+        "failure_reason": state.get("failure_reason", "") or last_failure.get("failure_reason", ""),
+        "last_failure": last_failure,
         "formal_root": state.get("formal_root", ""),
         "updated_at": state.get("updated_at", ""),
     }

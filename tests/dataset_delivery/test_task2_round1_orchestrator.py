@@ -81,6 +81,13 @@ def test_service_runtime_validation_failure_blocks_estep(tmp_path, monkeypatch):
     state = orch._load_state(args.state_root)
     assert state["terminal_state"] == "ROUND1_FAILED"
     assert state["stage"] == "labelcritic"
+    paths = orch._state_paths(args.state_root)
+    assert paths["last_failure"].is_file()
+    assert paths["failures"].is_file()
+    status = orch.status(SimpleNamespace(state_root=args.state_root))
+    assert status["failure_reason"] == "bad_runtime"
+    assert status["last_failure"]["stage"] == "labelcritic"
+    assert status["failure_log"] == str(paths["failures"])
 
 
 def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
