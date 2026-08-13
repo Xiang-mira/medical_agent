@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.dataset_delivery import task2_round1_orchestrator as orch
+from tools.dataset_delivery import task2_full373_round1_launcher as full373
 from tools.dataset_delivery import slurm_reliability as reliability
 from tools.dataset_delivery import task2_workspace_staging as staging
 from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1
@@ -823,6 +824,184 @@ def test_retry_failed_archives_existing_attempt_and_submits_new_controller(tmp_p
     archived = list((args.state_root / "round1_orchestrated_attempts").glob("attempt_001/attempt_archive.json"))
     assert archived
     assert orch._load_state(args.state_root)["controller_job_id"] == "888"
+
+
+def test_archive_current_attempt_never_renames_round1_orchestrated_root(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    paths = orch._state_paths(args.state_root)
+    paths["root"].mkdir(parents=True)
+    paths["state"].write_text('{"run_id":"round1_test"}\n', encoding="utf-8")
+    durable = paths["root"] / orch.FULL373_ROOT_NAME
+    durable.mkdir()
+    (durable / "scientific_sentinel.txt").write_text("keep me\n", encoding="utf-8")
+    original_rename = Path.rename
+
+    def spy_rename(self, target):
+        if self == paths["root"]:
+            raise AssertionError("archive_current_attempt must not rename the durable round1_orchestrated root")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", spy_rename)
+
+    archive = orch.archive_current_attempt(args.state_root, reason="safety")
+
+    assert archive["status"] == "ARCHIVED"
+    assert durable.is_dir()
+    assert (durable / "scientific_sentinel.txt").read_text(encoding="utf-8") == "keep me\n"
+    assert "full_373_multiteacher_round1" in archive["retained_artifacts"]
+
+
+def test_retry_failed_fault_injection_preserves_scientific_state_and_replenishes_workers(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    paths = orch._state_paths(args.state_root)
+    formal_root = paths["root"] / orch.FULL373_ROOT_NAME
+    queue_manifest = formal_root / "queues" / "shared_ready_candidate_manifest.csv"
+    queue_manifest.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_success", "ct_path": "/ct", "annotation_folder": "/ann"},
+        {"task_index": "1", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher2", "candidate_id": "cand_empty", "ct_path": "/ct", "annotation_folder": "/ann"},
+        {"task_index": "2", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher3", "candidate_id": "cand_ready", "ct_path": "/ct", "annotation_folder": "/ann"},
+        {"task_index": "3", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher4", "candidate_id": "cand_running", "ct_path": "/ct", "annotation_folder": "/ann"},
+    ]
+    queue_manifest.write_text(
+        "task_index,case_id,target,teacher,candidate_id,ct_path,annotation_folder\n"
+        + "\n".join(",".join(row[field] for field in ["task_index", "case_id", "target", "teacher", "candidate_id", "ct_path", "annotation_folder"]) for row in rows)
+        + "\n",
+        encoding="utf-8",
+    )
+    full373.write_json(
+        formal_root / "full_round1_scope.json",
+        {
+            "run_id": "round1_test_scientific",
+            "case_count": 1,
+            "canonical_target_count": 1,
+            "routes": {"organ_a": ["teacher1", "teacher2", "teacher3", "teacher4"]},
+            "task_rows": rows,
+            "total_logical_candidate_tasks": 4,
+        },
+    )
+    (formal_root / "scientific_sentinel.txt").write_text("durable scientific output\n", encoding="utf-8")
+    for status, teacher, candidate_id in (
+        ("SUCCESS", "teacher1", "cand_success"),
+        ("COMPLETED_NO_NONZERO", "teacher2", "cand_empty"),
+        ("READY", "teacher3", "cand_ready"),
+        ("RUNNING", "teacher4", "cand_running"),
+    ):
+        full373.publish_candidate_state(
+            formal_root,
+            {
+                "status": status,
+                "case_id": "CASE001",
+                "target": "organ_a",
+                "teacher": teacher,
+                "candidate_id": candidate_id,
+                "candidate_exists": status == "SUCCESS",
+                "prediction": "/mask" if status == "SUCCESS" else "",
+            },
+            recompute_target=False,
+        )
+    (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"round1_test_scientific,attempt_A,ready_batch_001,4584475,full373,gpu_t4,4,{CANDIDATE_TASK_V1},submitted,ACTIVE,CANCELLED\n"
+        f"round1_test_scientific,attempt_A,ready_batch_001,4584476,full373,gpu_t4,4,{CANDIDATE_TASK_V1},submitted,ACTIVE,TIMEOUT\n"
+        f"round1_test_scientific,attempt_A,ready_batch_001,4584477,full373,gpu_t4,4,{CANDIDATE_TASK_V1},submitted,ACTIVE,FAILED\n",
+        encoding="utf-8",
+    )
+    case_ids = [f"CASE{i:03d}" for i in range(103)]
+    source_manifest = _write_source_manifest(orch._state_paths(args.state_root)["source_manifest"], case_ids)
+    for case_id in case_ids:
+        _stage_ready_case(args.workspace_root, case_id)
+    label_service = orch._service_paths(args.state_root)
+    label_service["root"].mkdir(parents=True, exist_ok=True)
+    label_service["job"].write_text("4527698\n", encoding="utf-8")
+    orch._save_state(
+        args.state_root,
+        run_id="round1_test_scientific",
+        terminal_state="ROUND1_FAILED",
+        scheduler_status="FATAL",
+        e_step_status="FAILED",
+        failure_reason="e_step_jobs_terminal_failed",
+        execution_attempt_id="attempt_A",
+        worker_generation="attempt_A",
+        controller_job_id="old_controller",
+        formal_root=str(formal_root),
+        source_manifest=str(source_manifest),
+        teacher_submitted_case_ids=case_ids,
+        labelcritic={"job_id": "4527698", "status": "SUBMITTED"},
+    )
+    commands: list[list[str]] = []
+
+    def fake_preflight(call_args):
+        new_paths = orch._state_paths(call_args.state_root)
+        new_paths["root"].mkdir(parents=True, exist_ok=True)
+        new_paths["controller_sbatch"].write_text("#!/usr/bin/env bash\ntrue\n", encoding="utf-8")
+        return {"status": "PASSED"}
+
+    def fake_run(command, **kwargs):
+        commands.append([str(item) for item in command])
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        if command[:2] == ["sbatch", "--parsable"]:
+            return {"ok": True, "stdout": "999001\n", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_full373_round1_launcher.py") for part in command):
+            (formal_root / "formal_task2_submission_manifest.json").write_text(
+                json.dumps({"status": "READY", "task_count": 4, "groups": {"full373": {"task_count": 4, "task_manifest": str(queue_manifest), "sbatch_file": str(formal_root / "slurm" / "worker.sbatch")}}}),
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command):
+            safe_id = "ready_batch_001"
+            (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+            full373.recover_candidate_seed_marker(formal_root, task_manifest=queue_manifest)
+            full373.recover_stale_candidate_claims(formal_root, task_manifest=queue_manifest)
+            (formal_root / "slurm" / f"dynamic_gpu_submission_plan_{safe_id}.json").write_text(
+                json.dumps({"status": "SUBMITTED", "scheduler_status": "ACTIVE", "task_ownership": "shared_queue", "profile_binding": False}),
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": '{"status":"SUBMITTED"}', "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "run_static_preflight", fake_preflight)
+    monkeypatch.setattr(orch, "_run", fake_run)
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "PENDING" if str(job_id) == "4527698" else "CANCELLED", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "slurm_job_timing", lambda job_id: {"state": "CANCELLED", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "slurm_job_record", lambda job_id: _labelcritic_record(str(job_id), state="PENDING"))
+    monkeypatch.setattr(orch, "find_labelcritic_job_by_name", lambda: "")
+
+    submit = orch.submit_controller(args)
+    labelcritic = orch.ensure_labelcritic_service(args.state_root)
+    estep = orch.submit_ready_teacher_batch(args, source_manifest, labelcritic)
+    check = orch.check_estep(args)
+    claim_a = full373.claim_next_ready_candidate(formal_root, task_manifest=queue_manifest, worker_id="w1", profile="gpu_t4")
+    claim_b = full373.claim_next_ready_candidate(formal_root, task_manifest=queue_manifest, worker_id="w2", profile="gpu_t4")
+
+    archive_records = list((args.state_root / "round1_orchestrated_attempts").glob("attempt_001/attempt_archive.json"))
+    state = orch._load_state(args.state_root)
+    marker = json.loads((formal_root / "queues" / "candidate_seed_complete.json").read_text(encoding="utf-8"))
+    dynamic_commands = [command for command in commands if any(part.endswith("task2_dynamic_gpu_submitter.py") for part in command)]
+
+    assert submit["status"] == "CONTROLLER_SUBMITTED"
+    assert archive_records
+    assert (formal_root / "scientific_sentinel.txt").read_text(encoding="utf-8") == "durable scientific output\n"
+    assert full373.load_candidate_state(formal_root, case_id="CASE001", target="organ_a", teacher="teacher1")["status"] == "SUCCESS"
+    assert full373.load_candidate_state(formal_root, case_id="CASE001", target="organ_a", teacher="teacher2")["status"] == "COMPLETED_NO_NONZERO"
+    assert state["run_id"] == "round1_test_scientific"
+    assert state["execution_attempt_id"] != "attempt_A"
+    assert state["worker_generation"] != "attempt_A"
+    assert state["controller_job_id"] == "999001"
+    assert labelcritic["status"] == "REUSED_ACTIVE_JOB"
+    assert labelcritic["job_id"] == "4527698"
+    assert estep["status"] == "SUBMITTED"
+    assert dynamic_commands
+    assert check["status"] == "RUNNING"
+    assert check["lifecycle"]["historical"]
+    assert marker["logical_task_count"] == 4
+    assert marker["validated_existing_count"] == 4
+    assert marker["scientific_run_id"] == "round1_test_scientific"
+    assert claim_a["status"] == "CLAIMED"
+    assert claim_b["status"] == "CLAIMED"
+    assert claim_a["candidate"]["candidate_id"] != claim_b["candidate"]["candidate_id"]
 
 
 def test_retry_attempt_dynamically_reuses_active_labelcritic_service(tmp_path, monkeypatch):

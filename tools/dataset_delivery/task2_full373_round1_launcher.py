@@ -460,6 +460,11 @@ def _manifest_identity(path: Path | None, rows: list[dict[str, Any]], *, include
     }
 
 
+def _scientific_run_id(output_root: Path) -> str:
+    scope = _read_json(output_root / "full_round1_submission_scope.json", {}) or _read_json(output_root / "full_round1_scope.json", {})
+    return str(scope.get("run_id") or os.getenv("ROUND1_RUN_ID") or os.getenv("TASK2_SCIENTIFIC_RUN_ID") or "")
+
+
 def _candidate_seed_marker_matches(output_root: Path, *, task_manifest: Path | None, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     loaded_rows = rows if rows is not None else _candidate_queue_rows(output_root, task_manifest=task_manifest)
     identity = _manifest_identity(task_manifest or _candidate_queue_manifest(output_root), loaded_rows, include_hash=False)
@@ -708,11 +713,13 @@ def seed_candidate_states(output_root: Path, *, task_manifest: Path | None = Non
     marker = {
         "schema_version": "candidate_seed_complete_v1",
         "execution_schema_version": CANDIDATE_TASK_V1,
+        "scientific_run_id": _scientific_run_id(output_root),
         "logical_task_count": len(rows),
         **identity,
         "seeded": seeded,
         "retained": retained,
         "seeded_count": seeded,
+        "newly_seeded_count": seeded,
         "validated_existing_count": retained,
         "retained_terminal_count": 0,
         "completed_at": utc_now(),
@@ -746,10 +753,12 @@ def recover_candidate_seed_marker(output_root: Path, *, task_manifest: Path | No
             "status": "INCOMPLETE",
             "schema_version": "candidate_seed_complete_v1",
             "execution_schema_version": CANDIDATE_TASK_V1,
+            "scientific_run_id": _scientific_run_id(output_root),
             "logical_task_count": len(rows),
             **identity,
             "validated_existing_count": existing,
             "seeded_count": 0,
+            "newly_seeded_count": 0,
             "retained_terminal_count": retained_terminal,
             "missing_count": len(missing),
             "missing_sample": missing[:50],
@@ -757,10 +766,12 @@ def recover_candidate_seed_marker(output_root: Path, *, task_manifest: Path | No
     marker = {
         "schema_version": "candidate_seed_complete_v1",
         "execution_schema_version": CANDIDATE_TASK_V1,
+        "scientific_run_id": _scientific_run_id(output_root),
         "logical_task_count": len(rows),
         **identity,
         "validated_existing_count": existing,
         "seeded_count": 0,
+        "newly_seeded_count": 0,
         "retained_terminal_count": retained_terminal,
         "completed_at": utc_now(),
     }

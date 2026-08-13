@@ -673,6 +673,25 @@ def _attempts_root(state_root: Path) -> Path:
     return state_root / "round1_orchestrated_attempts"
 
 
+CONTROL_PLANE_ARCHIVE_NAMES = {
+    "state.json",
+    "events.jsonl",
+    "failures.jsonl",
+    "last_failure.json",
+    "controller.sbatch",
+    "controller_job_id.txt",
+    "teacher_batches.jsonl",
+    "job_lifecycle.jsonl",
+    "job_lifecycle_current.json",
+    "walltime_guard.jsonl",
+    "staging_array.sbatch",
+    "staging_job_id.txt",
+    "labelcritic_selection_workers.sbatch",
+    "labelcritic_selection_job_id.txt",
+    "static_preflight.json",
+}
+
+
 def archive_current_attempt(state_root: Path, *, reason: str) -> dict[str, Any]:
     paths = _state_paths(state_root)
     root = paths["root"]
@@ -686,15 +705,65 @@ def archive_current_attempt(state_root: Path, *, reason: str) -> dict[str, Any]:
         if path.is_dir() and match:
             numbers.append(int(match.group(1)))
     destination = attempts / f"attempt_{(max(numbers) if numbers else 0) + 1:03d}"
-    root.rename(destination)
+    destination.mkdir(parents=True, exist_ok=False)
+    archived = []
+    retained = []
+    for path in sorted(root.iterdir()):
+        if path.name in CONTROL_PLANE_ARCHIVE_NAMES:
+            path.rename(destination / path.name)
+            archived.append(path.name)
+        else:
+            retained.append(path.name)
     record = {
         "status": "ARCHIVED",
         "archived_attempt": str(destination),
         "reason": reason,
+        "archived_control_plane_artifacts": archived,
+        "retained_artifacts": retained,
         "archived_at": utc_now(),
     }
     _write_json(destination / "attempt_archive.json", record)
     return record
+
+
+def prepare_retry_attempt_state(state_root: Path, *, previous_state: dict[str, Any], archive: dict[str, Any]) -> dict[str, Any]:
+    preserved_keys = {
+        "run_id",
+        "formal_root",
+        "workspace_root",
+        "case_manifest",
+        "base_manifest",
+        "source_manifest",
+        "staged_manifest",
+        "labelcritic",
+        "labelcritic_job_id",
+        "labelcritic_service",
+        "teacher_h100_policy",
+    }
+    state = {key: previous_state[key] for key in preserved_keys if key in previous_state and previous_state.get(key) not in (None, "")}
+    if not state.get("run_id"):
+        state["run_id"] = _run_id(state_root)
+    if not state.get("formal_root"):
+        state["formal_root"] = str(_state_paths(state_root)["root"] / FULL373_ROOT_NAME)
+    attempt = _new_execution_attempt_id_value(state_root)
+    state.update(
+        {
+            "status": "RETRY_READY",
+            "terminal": False,
+            "terminal_state": "",
+            "controller_status": "",
+            "scheduler_status": "RETRY_READY",
+            "e_step_status": "",
+            "failure_reason": "",
+            "controller_job_id": "",
+            "execution_attempt_id": attempt,
+            "worker_generation": attempt,
+            "previous_attempt_archive": archive,
+            "updated_at": utc_now(),
+        }
+    )
+    _write_json(_state_paths(state_root)["state"], state)
+    return state
 
 
 def _load_state(state_root: Path) -> dict[str, Any]:
@@ -787,11 +856,15 @@ def _execution_attempt_id(state_root: Path, *, new: bool = False) -> str:
         existing = str(state.get("execution_attempt_id") or os.getenv("TASK2_EXECUTION_ATTEMPT_ID") or "").strip()
         if existing:
             return re.sub(r"[^A-Za-z0-9_.:-]+", "_", existing)
-    run_id = _run_id(state_root)
-    attempt = f"{run_id}_attempt_{int(time.time())}_{os.getpid()}"
-    attempt = re.sub(r"[^A-Za-z0-9_.:-]+", "_", attempt).strip("_")
+    attempt = _new_execution_attempt_id_value(state_root)
     _save_state(state_root, execution_attempt_id=attempt, worker_generation=attempt, execution_attempt_started_at=utc_now())
     return attempt
+
+
+def _new_execution_attempt_id_value(state_root: Path) -> str:
+    run_id = _run_id(state_root)
+    attempt = f"{run_id}_attempt_{int(time.time())}_{os.getpid()}"
+    return re.sub(r"[^A-Za-z0-9_.:-]+", "_", attempt).strip("_")
 
 
 def verify_expected_git_commit(state_root: Path, expected_commit: str) -> dict[str, Any]:
@@ -1021,14 +1094,16 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
     paths = _state_paths(args.state_root.resolve())
     state = _load_state(args.state_root.resolve())
     if state.get("terminal_state") == "ROUND1_FAILED" and (getattr(args, "retry_failed", False) or getattr(args, "new_attempt", False)):
-        archive_current_attempt(args.state_root.resolve(), reason="retry_failed_or_new_attempt")
+        archive = archive_current_attempt(args.state_root.resolve(), reason="retry_failed_or_new_attempt")
+        state = prepare_retry_attempt_state(args.state_root.resolve(), previous_state=state, archive=archive)
     elif state.get("terminal_state") in {"ROUND1_PASSED", "ROUND1_FAILED"}:
         return {"status": "ROUND1_ALREADY_TERMINAL", "terminal_state": state.get("terminal_state"), "state_root": str(paths["root"])}
     elif getattr(args, "new_attempt", False) and paths["root"].exists():
         existing = str(state.get("controller_job_id") or "").strip()
         if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
             return {"status": "CONTROLLER_ALREADY_ACTIVE", "controller_job_id": existing, "state_root": str(paths["root"])}
-        archive_current_attempt(args.state_root.resolve(), reason="explicit_new_attempt")
+        archive = archive_current_attempt(args.state_root.resolve(), reason="explicit_new_attempt")
+        state = prepare_retry_attempt_state(args.state_root.resolve(), previous_state=state, archive=archive)
     preflight = run_static_preflight(args)
     paths = _state_paths(args.state_root.resolve())
     if preflight["status"] != "PASSED":
@@ -1040,6 +1115,7 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
     if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
         return {"status": "CONTROLLER_ALREADY_ACTIVE", "controller_job_id": existing, "state_root": str(paths["root"])}
     run_id = _run_id(args.state_root.resolve())
+    execution_attempt_id = _execution_attempt_id(args.state_root.resolve())
     result = _run(["sbatch", "--parsable", "--comment", slurm_comment(run_id=run_id, submission_id="controller", group="controller", profile="cpu"), str(paths["controller_sbatch"])])
     if not result["ok"]:
         log_failure(args.state_root.resolve(), stage="controller_submit", failure_reason=result["stderr"] or "controller_submit_failed", details=result)
@@ -1047,8 +1123,8 @@ def submit_controller(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit(result["stderr"])
     job_id = result["stdout"].splitlines()[-1].strip()
     paths["controller_job"].write_text(job_id + "\n", encoding="utf-8")
-    _save_state(args.state_root.resolve(), status="CONTROLLER_SUBMITTED", controller_job_id=job_id, git_commit=_git_commit(), static_preflight_path=str(paths["root"] / "static_preflight.json"))
-    record_job_lifecycle(args.state_root.resolve(), {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:controller", "stage": "controller", "profile": "cpu"})
+    _save_state(args.state_root.resolve(), status="CONTROLLER_SUBMITTED", controller_job_id=job_id, git_commit=_git_commit(), static_preflight_path=str(paths["root"] / "static_preflight.json"), execution_attempt_id=execution_attempt_id, worker_generation=execution_attempt_id)
+    record_job_lifecycle(args.state_root.resolve(), {"status": "SUBMITTED", "job_id": job_id, "logical_task_id": f"{run_id}:controller", "stage": "controller", "profile": "cpu", "execution_attempt_id": execution_attempt_id})
     return {"status": "CONTROLLER_SUBMITTED", "controller_job_id": job_id, "state_root": str(paths["root"])}
 
 
