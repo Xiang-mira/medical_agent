@@ -67,6 +67,21 @@ def test_labelcritic_not_required_allows_opportunistic_teacher_h100(tmp_path: Pa
     assert policy["teacher_h100_deferred_for_labelcritic"] is False
 
 
+def test_labelcritic_not_required_overrides_discovered_pending_job(tmp_path: Path):
+    policy = resolve_teacher_h100_policy(
+        state_root=tmp_path / "state",
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=False,
+        find_labelcritic_job_fn=lambda: {"status": "SELECTED", "job_id": "987654", "state": "PENDING", "source": "test_discovery"},
+    )
+
+    assert policy["labelcritic_job_found"] is True
+    assert policy["labelcritic_job_state"] == "PENDING"
+    assert policy["labelcritic_h100_reserved"] is False
+    assert policy["effective_teacher_h100_enabled"] is True
+    assert policy["reservation_reason"] == "labelcritic_not_required"
+
+
 def test_overflow_env_zero_disables_h100_even_without_labelcritic_reservation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "0")
 

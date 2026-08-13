@@ -338,6 +338,9 @@ def resolve_teacher_h100_policy(
     if explicit_reserved is not None:
         reserved = bool(explicit_reserved)
         reason = "explicit_labelcritic_h100_reserved" if reserved else "explicit_labelcritic_h100_not_reserved"
+    elif not bool(required):
+        reserved = False
+        reason = "labelcritic_not_required"
     elif job_state in LABELCRITIC_H100_RESERVING_STATES:
         reserved = True
         reason = f"labelcritic_job_state:{job_state}"
@@ -347,9 +350,6 @@ def resolve_teacher_h100_policy(
             reason = f"labelcritic_required_job_terminal:{job_state}"
         else:
             reason = "labelcritic_required_without_active_job"
-    else:
-        reserved = False
-        reason = "labelcritic_not_required"
 
     effective = bool(allow) and not bool(reserved)
     return {
