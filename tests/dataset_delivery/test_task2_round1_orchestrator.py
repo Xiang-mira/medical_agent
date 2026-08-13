@@ -883,6 +883,59 @@ def test_seventy_of_103_staged_allows_gpu_teacher_workers(tmp_path, monkeypatch)
     assert any(any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command) for command in commands)
 
 
+def test_shared_queue_restart_ignores_historical_cancelled_worker_as_scientific_failure(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    (formal_root / "slurm").mkdir(parents=True)
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"round1_run,attempt_a,ready_batch_001,4584475,full373,gpu_t4,6,{CANDIDATE_TASK_V1},submitted,ACTIVE,CANCELLED\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_run", execution_attempt_id="attempt_b")
+    monkeypatch.setattr(orch, "aggregate_full373_estep", lambda *args, **kwargs: {"status": "RUNNING"})
+    monkeypatch.setattr(orch, "slurm_job_timing", lambda job_id: {"state": "CANCELLED", "job_id": job_id})
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "CANCELLED", "job_id": job_id})
+
+    result = orch.check_estep(args)
+
+    assert result["status"] == "RUNNING"
+    assert result["active_jobs"] == []
+    assert result["lifecycle"]["historical"][0]["job_id"] == "4584475"
+    assert result["lifecycle"]["fatal"] == []
+    assert (orch._state_paths(args.state_root)["job_lifecycle"]).is_file()
+
+
+def test_shared_queue_restart_replenishes_workers_even_when_all_cases_previously_submitted(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    case_ids = [f"CASE{i:03d}" for i in range(103)]
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", case_ids)
+    for case_id in case_ids:
+        _stage_ready_case(args.workspace_root, case_id)
+    formal_root = tmp_path / "formal"
+    orch._save_state(
+        args.state_root,
+        formal_root=str(formal_root),
+        run_id="round1_run",
+        execution_attempt_id="attempt_b",
+        teacher_submitted_case_ids=case_ids,
+    )
+    commands: list[list[str]] = []
+    captured_ready: list[list[str]] = []
+    _fake_teacher_submitter(monkeypatch, submitted_commands=commands, captured_ready_ids=captured_ready)
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "4527698"})
+
+    assert result["status"] == "SUBMITTED"
+    assert result["case_count"] == 103
+    assert result["previously_submitted_case_count"] == 103
+    assert captured_ready == [case_ids]
+    dynamic_commands = [command for command in commands if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command)]
+    assert dynamic_commands
+    assert "--execution-attempt-id" in dynamic_commands[0]
+    assert dynamic_commands[0][dynamic_commands[0].index("--execution-attempt-id") + 1] == "attempt_b"
+
+
 def test_existing_staged_case_resume_does_not_recopied(tmp_path, monkeypatch):
     source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001"])
     _stage_ready_case(tmp_path / "workspace", "CASE001")

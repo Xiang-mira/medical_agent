@@ -573,6 +573,77 @@ def test_seed_candidate_states_does_not_recompute_case_target_for_each_ready_can
     assert calls["count"] == 0
 
 
+def test_restart_recovers_seed_marker_from_complete_existing_queue_without_overwriting_terminal(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_success", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "1", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher2", "candidate_id": "cand_empty", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "2", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher3", "candidate_id": "cand_ready", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1", "teacher2", "teacher3"]})
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher1", status="SUCCESS")
+    _candidate(tmp_path, "CASE001", "organ_a", "teacher2", status="COMPLETED_NO_NONZERO")
+    full373.publish_candidate_state(
+        tmp_path,
+        {
+            "status": "READY",
+            "case_id": "CASE001",
+            "target": "organ_a",
+            "teacher": "teacher3",
+            "candidate_id": "cand_ready",
+        },
+        recompute_target=False,
+    )
+
+    marker = recover = full373.recover_candidate_seed_marker(tmp_path, task_manifest=manifest)
+
+    assert recover["status"] == "READY"
+    assert marker["execution_schema_version"] == full373.CANDIDATE_TASK_V1
+    assert marker["logical_task_count"] == 3
+    assert marker["validated_existing_count"] == 3
+    assert marker["seeded_count"] == 0
+    assert marker["retained_terminal_count"] == 2
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")["status"] == "SUCCESS"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher2")["status"] == "COMPLETED_NO_NONZERO"
+
+
+def test_stale_running_candidate_with_missing_claim_requeues_and_reclaims(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_stale", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    full373.publish_candidate_state(
+        tmp_path,
+        {
+            "status": "RUNNING",
+            "case_id": "CASE001",
+            "target": "organ_a",
+            "teacher": "teacher1",
+            "candidate_id": "cand_stale",
+        },
+        recompute_target=False,
+    )
+    full373.recover_candidate_seed_marker(tmp_path, task_manifest=manifest)
+
+    recovery = full373.recover_stale_candidate_claims(tmp_path, task_manifest=manifest)
+    claim = full373.claim_next_ready_candidate(
+        tmp_path,
+        task_manifest=manifest,
+        worker_id="replacement",
+        profile="gpu_t4",
+        resource_class="GPU_LIGHT_T4",
+    )
+
+    assert recovery["recovered_count"] == 1
+    assert claim["status"] == "CLAIMED"
+    assert claim["candidate"]["status"] == "CLAIMED"
+
+
 def test_build_submission_manifest_does_not_seed_before_dynamic_worker_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     targets = [f"organ_{index:03d}" for index in range(373)]
     _patch_routes(monkeypatch, {target: ["teacher1"] for target in targets})

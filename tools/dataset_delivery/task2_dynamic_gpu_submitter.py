@@ -507,18 +507,51 @@ def _desired_workers_by_profile(
     return _allocate_slots([profile.name for profile in profiles], counts, total_slots, weights)
 
 
-def _worker_pool_counts(slurm_root: Path, profiles: list[GpuSubmitProfile]) -> dict[str, dict[str, int]]:
+def _slurm_job_state(job_id: str) -> dict[str, Any]:
+    query_id = str(job_id or "").split("_", 1)[0].strip()
+    if not query_id:
+        return {"state": "UNKNOWN", "job_id": str(job_id or "")}
+    try:
+        proc = subprocess.run(
+            ["squeue", "-h", "-j", query_id, "-o", "%T"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "squeue_error", "error": f"{type(exc).__name__}: {exc}"}
+    if proc.returncode == 0 and proc.stdout.strip():
+        return {"state": proc.stdout.splitlines()[0].strip(), "job_id": str(job_id or ""), "source": "squeue"}
+    try:
+        proc = subprocess.run(
+            ["sacct", "-n", "-j", query_id, "--format=State", "-P"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "sacct_error", "error": f"{type(exc).__name__}: {exc}"}
+    if proc.returncode == 0 and proc.stdout.strip():
+        return {"state": proc.stdout.splitlines()[0].split("|")[0].strip(), "job_id": str(job_id or ""), "source": "sacct"}
+    return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "unknown"}
+
+
+def _worker_pool_counts(slurm_root: Path, profiles: list[GpuSubmitProfile], *, execution_attempt_id: str = "") -> dict[str, dict[str, int]]:
     profile_names = {profile.name for profile in profiles}
     counts = {name: {"running": 0, "pending": 0, "active": 0} for name in profile_names}
     for row in load_submitted_jobs(slurm_root):
         if str(row.get("execution_schema_version") or "") != CANDIDATE_TASK_V1:
             continue
+        if execution_attempt_id and str(row.get("execution_attempt_id") or "") != str(execution_attempt_id):
+            continue
         profile_name = str(row.get("profile") or "")
         if profile_name not in counts:
             continue
-        slurm_state = str(row.get("slurm_state") or "")
-        scheduler_status = str(row.get("scheduler_status") or "")
-        if slurm_state in ACTIVE_STATES or scheduler_status in {"ACTIVE", "ADOPTED_ACTIVE_JOB"}:
+        job_id = str(row.get("job_id") or "")
+        slurm_state = str(_slurm_job_state(job_id).get("state") or row.get("slurm_state") or "")
+        if slurm_state in ACTIVE_STATES:
             counts[profile_name]["active"] += int(row.get("task_count") or 0 or 1)
             if slurm_state == "RUNNING":
                 counts[profile_name]["running"] += int(row.get("task_count") or 0 or 1)
@@ -892,6 +925,7 @@ def build_dynamic_submission_plan(
     dry_run: bool = False,
     run_sbatch_test_only: bool = True,
     submission_id: str = "",
+    execution_attempt_id: str = "",
     append_submitted_jobs: bool = False,
     run_id: str = "",
     git_commit: str = "",
@@ -935,6 +969,11 @@ def build_dynamic_submission_plan(
     slurm_root = output_root / "slurm"
     safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(submission_id or "").strip()).strip("_")
     safe_run_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(run_id or os.getenv("ROUND1_RUN_ID") or state_root.name or "round1").strip()).strip("_")
+    safe_execution_attempt_id = re.sub(
+        r"[^A-Za-z0-9_.:-]+",
+        "_",
+        str(execution_attempt_id or os.getenv("TASK2_EXECUTION_ATTEMPT_ID") or f"{safe_run_id}_{safe_submission_id or 'default'}").strip(),
+    ).strip("_")
     dynamic_root = slurm_root / "dynamic" / safe_submission_id if safe_submission_id else slurm_root / "dynamic"
     dynamic_root.mkdir(parents=True, exist_ok=True)
     max_array_size_info = detect_max_array_size(max_array_size)
@@ -976,9 +1015,11 @@ def build_dynamic_submission_plan(
 
     shared_manifest = dynamic_root / "shared_ready_candidate_manifest.csv"
     shared_rows = _write_shared_manifest(manifest_reference, shared_manifest, all_source_rows)
-    from tools.dataset_delivery.task2_full373_round1_launcher import seed_candidate_states
+    from tools.dataset_delivery.task2_full373_round1_launcher import recover_candidate_seed_marker, recover_stale_candidate_claims, seed_candidate_states
 
-    candidate_seed = seed_candidate_states(output_root, task_manifest=shared_manifest)
+    seed_recovery = recover_candidate_seed_marker(output_root, task_manifest=shared_manifest)
+    candidate_seed = seed_recovery if seed_recovery.get("status") == "READY" else seed_candidate_states(output_root, task_manifest=shared_manifest)
+    stale_claim_recovery = recover_stale_candidate_claims(output_root, task_manifest=shared_manifest)
     all_logical_ids = [_logical_task_id(row) for row in all_source_rows]
     sharded_logical_ids = [str(row.get("logical_task_id") or "") for row in shared_rows]
     unique_logical_ids = sorted(set(all_logical_ids))
@@ -1002,7 +1043,7 @@ def build_dynamic_submission_plan(
         qos_states=qos_states,
         h100_enabled=h100_enabled,
     )
-    existing_workers = _worker_pool_counts(slurm_root, profiles)
+    existing_workers = _worker_pool_counts(slurm_root, profiles, execution_attempt_id=safe_execution_attempt_id)
     group_slots = allocate_group_concurrency(
         requested_groups,
         task_counts,
@@ -1064,6 +1105,8 @@ def build_dynamic_submission_plan(
             local_end = worker_count - 1
             row = {
                 "run_id": safe_run_id,
+                "execution_attempt_id": safe_execution_attempt_id,
+                "worker_generation": safe_execution_attempt_id,
                 "submission_id": safe_submission_id,
                 "logical_task_id": f"{safe_run_id}:{safe_submission_id}:{CANDIDATE_TASK_V1}:full373:{profile.name}:{shard_id}",
                 "execution_schema_version": CANDIDATE_TASK_V1,
@@ -1167,6 +1210,7 @@ def build_dynamic_submission_plan(
                 "scheduler_status": "FATAL",
                 "scheduler_mode": "shared_queue_worker_pool",
                 "submission_id": safe_submission_id,
+                "execution_attempt_id": safe_execution_attempt_id,
                 "run_id": safe_run_id,
                 "sharding_audit": sharding_audit,
                 "jobs": worker_rows,
@@ -1178,7 +1222,7 @@ def build_dynamic_submission_plan(
     backpressured: list[dict[str, Any]] = []
     fatal_failures: list[dict[str, Any]] = []
     reused: list[dict[str, Any]] = []
-    active_logical_keys = existing_active_logical_keys(slurm_root)
+    active_logical_keys = existing_active_logical_keys(slurm_root, execution_attempt_id=safe_execution_attempt_id)
 
     if not dry_run:
         preflight_failures = []
@@ -1218,6 +1262,7 @@ def build_dynamic_submission_plan(
                     "planned_target_workers": int(target_workers),
                     "planned_overrequest_workers": planned_overrequest,
                     "submission_id": safe_submission_id,
+                    "execution_attempt_id": safe_execution_attempt_id,
                     "resource_inventory": resource_inventory,
                     "worker_sizing": worker_sizing,
                     "sharding_audit": sharding_audit,
@@ -1254,6 +1299,7 @@ def build_dynamic_submission_plan(
                     "status": "ADOPTED_ACTIVE_JOB",
                     "logical_task_id": row["logical_task_id"],
                     "submission_id": safe_submission_id,
+                    "execution_attempt_id": safe_execution_attempt_id,
                     "execution_schema_version": CANDIDATE_TASK_V1,
                     "group": row["model_group"],
                     "profile": row["profile"],
@@ -1348,6 +1394,7 @@ def build_dynamic_submission_plan(
                 "display_id": row["display_id"],
                 "logical_task_id": row["logical_task_id"],
                 "submission_id": safe_submission_id,
+                "execution_attempt_id": safe_execution_attempt_id,
                 "execution_schema_version": CANDIDATE_TASK_V1,
                 "group": row["model_group"],
                 "profile": row["profile"],
@@ -1370,6 +1417,7 @@ def build_dynamic_submission_plan(
                 "status": "SUBMISSION_FAILED",
                 "scheduler_status": "FATAL",
                 "submission_id": safe_submission_id,
+                "execution_attempt_id": safe_execution_attempt_id,
                 "sharding_audit": sharding_audit,
                 "jobs": jobs,
                 "backpressured_jobs": backpressured,
@@ -1402,6 +1450,8 @@ def build_dynamic_submission_plan(
         "scheduler_mode": "shared_queue_worker_pool",
         "created_at": utc_now(),
         "submission_id": safe_submission_id,
+        "execution_attempt_id": safe_execution_attempt_id,
+        "worker_generation": safe_execution_attempt_id,
         "run_id": safe_run_id,
         "summary_path": str(summary_path),
         "output_root": str(output_root),
@@ -1416,6 +1466,8 @@ def build_dynamic_submission_plan(
         "max_new_shards_per_round": per_round_limit,
         "total_task_count": len(shared_rows),
         "candidate_seed": candidate_seed,
+        "candidate_seed_recovery": seed_recovery,
+        "stale_claim_recovery": stale_claim_recovery,
         "logical_task_count": len(all_logical_ids),
         "sharded_task_count": len(sharded_logical_ids),
         "unique_logical_task_count": len(sharded_unique_ids),
@@ -1526,6 +1578,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-sbatch-test-only", action="store_true")
     parser.add_argument("--submission-id", default="")
+    parser.add_argument("--execution-attempt-id", default=os.getenv("TASK2_EXECUTION_ATTEMPT_ID", ""))
     parser.add_argument("--append-submitted-jobs", action="store_true")
     parser.add_argument("--run-id", default=os.getenv("ROUND1_RUN_ID", ""))
     parser.add_argument("--git-commit", default=os.getenv("EXPECTED_GIT_COMMIT", ""))
@@ -1548,6 +1601,7 @@ def main() -> int:
         dry_run=bool(args.dry_run),
         run_sbatch_test_only=not bool(args.skip_sbatch_test_only),
         submission_id=args.submission_id,
+        execution_attempt_id=args.execution_attempt_id,
         append_submitted_jobs=bool(args.append_submitted_jobs),
         run_id=args.run_id,
         git_commit=args.git_commit,

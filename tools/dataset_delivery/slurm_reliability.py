@@ -49,6 +49,8 @@ FATAL_SUBMIT_PATTERNS = (
 
 SUBMITTED_JOB_FIELDS = [
     "run_id",
+    "execution_attempt_id",
+    "worker_generation",
     "submission_id",
     "job_id",
     "array_job_id",
@@ -305,7 +307,7 @@ def job_query_id(row: dict[str, Any]) -> str:
     return parsed["query_id"]
 
 
-def existing_active_logical_keys(slurm_root: Path) -> set[tuple[str, str, str, str, str]]:
+def existing_active_logical_keys(slurm_root: Path, *, execution_attempt_id: str = "") -> set[tuple[str, str, str, str, str]]:
     keys: set[tuple[str, str, str, str, str]] = set()
     for row in load_submitted_jobs(slurm_root):
         status = str(row.get("submission_status") or row.get("status") or "").lower()
@@ -313,6 +315,8 @@ def existing_active_logical_keys(slurm_root: Path) -> set[tuple[str, str, str, s
         slurm_state = str(row.get("slurm_state") or "")
         schema = str(row.get("execution_schema_version") or "")
         if schema != CANDIDATE_TASK_V1:
+            continue
+        if execution_attempt_id and str(row.get("execution_attempt_id") or "") != str(execution_attempt_id):
             continue
         if slurm_state not in ACTIVE_STATES and scheduler_status not in {"ACTIVE", "ADOPTED_ACTIVE_JOB"}:
             continue

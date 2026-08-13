@@ -421,15 +421,18 @@ def reconcile_active_teacher_jobs(args: argparse.Namespace, formal_root: Path | 
     state_root = args.state_root.resolve()
     state = _load_state(state_root)
     run_id = state.get("run_id") or _run_id(state_root)
+    execution_attempt_id = _execution_attempt_id(state_root)
     resolved_formal_root = Path(str(formal_root or state.get("formal_root") or (_state_paths(state_root)["root"] / "formal_task2_round1"))).resolve()
     rows = discover_active_medical_agent_teacher_jobs(formal_root=resolved_formal_root, state_root=state_root, run_id=str(run_id))
     slurm_root = resolved_formal_root / "slurm"
     for row in rows:
-        persist_submitted_job(slurm_root, {**row, "run_id": run_id, "git_commit": _git_commit()})
+        persist_submitted_job(slurm_root, {**row, "run_id": run_id, "execution_attempt_id": execution_attempt_id, "worker_generation": execution_attempt_id, "git_commit": _git_commit()})
         record_job_lifecycle(
             state_root,
             {
                 **row,
+                "execution_attempt_id": execution_attempt_id,
+                "worker_generation": execution_attempt_id,
                 "logical_task_id": f"{run_id}:adopted:{row['model_group']}:{row['profile']}:{row.get('shard_id') or 'na'}",
                 "scheduler_state": "ADOPTED_ACTIVE_JOB",
                 "attempt": "slurm_reconcile",
@@ -443,19 +446,25 @@ def reconcile_active_teacher_jobs(args: argparse.Namespace, formal_root: Path | 
 def refresh_lifecycle_for_submitted_jobs(args: argparse.Namespace, formal_root: Path) -> dict[str, Any]:
     jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
     rows = read_csv_rows(jobs_csv) if jobs_csv.exists() else []
+    current_attempt = str(_load_state(args.state_root.resolve()).get("execution_attempt_id") or "")
     refreshed = []
     retryable = []
     fatal = []
     active = []
+    historical = []
     for row in rows:
         job_id = str(row.get("job_id") or "")
         if not job_id:
             continue
         timing = slurm_job_timing(job_id)
         state = str(timing.get("state") or "UNKNOWN")
+        attempt_id = str(row.get("execution_attempt_id") or "")
+        is_current_attempt = bool(current_attempt and attempt_id == current_attempt)
         payload = {
             **row,
             "job_id": job_id,
+            "current_execution_attempt_id": current_attempt,
+            "is_current_execution_attempt": is_current_attempt,
             "slurm_state": state,
             "elapsed": timing.get("elapsed", ""),
             "time_limit": timing.get("time_limit", ""),
@@ -466,13 +475,16 @@ def refresh_lifecycle_for_submitted_jobs(args: argparse.Namespace, formal_root: 
         }
         record_job_lifecycle(args.state_root.resolve(), payload)
         refreshed.append(payload)
+        if current_attempt and not is_current_attempt:
+            historical.append(payload)
+            continue
         if state in ACTIVE_STATES:
             active.append(payload)
         elif state in RETRYABLE_TERMINAL_STATES:
             retryable.append(payload)
         elif state in TERMINAL_FAILURE_STATES:
             fatal.append(payload)
-    return {"status": "REFRESHED", "jobs": refreshed, "active": active, "retryable": retryable, "fatal": fatal}
+    return {"status": "REFRESHED", "jobs": refreshed, "active": active, "retryable": retryable, "fatal": fatal, "historical": historical, "current_execution_attempt_id": current_attempt}
 
 
 def validate_labelcritic_job(job_id: str, *, require_identity: bool = True) -> dict[str, Any]:
@@ -767,6 +779,19 @@ def _run_id(state_root: Path) -> str:
     run_id = "round1_" + str(abs(hash(seed)))
     _save_state(state_root, run_id=run_id)
     return run_id
+
+
+def _execution_attempt_id(state_root: Path, *, new: bool = False) -> str:
+    state = _load_state(state_root)
+    if not new:
+        existing = str(state.get("execution_attempt_id") or os.getenv("TASK2_EXECUTION_ATTEMPT_ID") or "").strip()
+        if existing:
+            return re.sub(r"[^A-Za-z0-9_.:-]+", "_", existing)
+    run_id = _run_id(state_root)
+    attempt = f"{run_id}_attempt_{int(time.time())}_{os.getpid()}"
+    attempt = re.sub(r"[^A-Za-z0-9_.:-]+", "_", attempt).strip("_")
+    _save_state(state_root, execution_attempt_id=attempt, worker_generation=attempt, execution_attempt_started_at=utc_now())
+    return attempt
 
 
 def verify_expected_git_commit(state_root: Path, expected_commit: str) -> dict[str, Any]:
@@ -1286,13 +1311,14 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     paths = _state_paths(state_root)
     state = _load_state(state_root)
     run_id = _run_id(state_root)
+    execution_attempt_id = _execution_attempt_id(state_root)
     submitted_cases = set(str(case_id) for case_id in state.get("teacher_submitted_case_ids") or [])
     statuses = _staging_status_rows(args, source_manifest)
-    ready_status_rows = [row for row in statuses if row["status"] == "INPUT_READY" and row["case_id"] not in submitted_cases]
+    ready_status_rows = [row for row in statuses if row["status"] == "INPUT_READY"]
     ready_cases = [row["case_id"] for row in ready_status_rows]
     if not ready_cases:
         return {
-            "status": "NO_NEW_READY_CASES",
+            "status": "NO_INPUT_READY_CASES",
             "ready_count": sum(1 for row in statuses if row["status"] == "INPUT_READY"),
             "submitted_case_count": len(submitted_cases),
             "staging_failed_count": sum(1 for row in statuses if row["status"] == "STAGING_FAILED"),
@@ -1379,6 +1405,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "--groups", FULL373_GROUP,
         "--group-weights", os.getenv("GPU_GROUP_WEIGHTS", "full373=1.0"),
         "--submission-id", submission_id,
+        "--execution-attempt-id", execution_attempt_id,
         "--append-submitted-jobs",
         "--run-id", run_id,
         "--git-commit", _git_commit(),
@@ -1402,8 +1429,10 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "status": dynamic_status if dynamic_status in BACKPRESSURE_STATUSES else "SUBMITTED",
         "scheduler_status": scheduler_status,
         "submission_id": submission_id,
+        "execution_attempt_id": execution_attempt_id,
         "case_ids": ready_cases,
         "case_count": len(ready_cases),
+        "previously_submitted_case_count": len(submitted_cases),
         "planned_task_count": int(summary.get("task_count") or 0),
         "formal_root": str(formal_root),
         "plan": plan_result,
@@ -1578,31 +1607,24 @@ def check_estep(args: argparse.Namespace) -> dict[str, Any]:
     retryable = []
     if jobs_csv.exists():
         lifecycle = refresh_lifecycle_for_submitted_jobs(args, formal_root)
-        for row in read_csv_rows(jobs_csv):
-            job_id = str(row.get("job_id") or "")
-            state = slurm_job_state(job_id)
-            if state.get("state") in ACTIVE_STATES:
-                active.append(state)
-            if state.get("state") in RETRYABLE_TERMINAL_STATES:
-                retryable.append(state)
-            elif state.get("state") in TERMINAL_FAILURE_STATES:
-                failed.append(state)
+        active = list(lifecycle.get("active") or [])
+        retryable = list(lifecycle.get("retryable") or [])
+        failed = list(lifecycle.get("fatal") or [])
     else:
         lifecycle = {"status": "NO_SUBMITTED_JOBS"}
-    if failed and not active:
-        log_failure(args.state_root.resolve(), stage="e_step", failure_reason="e_step_jobs_terminal_failed", details={"failed_jobs": failed, "check": result})
-        return {"status": "FAILED", "failure_reason": "e_step_jobs_terminal_failed", "failed_jobs": failed, "check": result}
-    if retryable and not active:
+    if (failed or retryable) and not active:
         _save_state(
             args.state_root.resolve(),
             scheduler_status="RETRY_PENDING",
             walltime_recovery_status="RETRY_PENDING",
             e_step_retryable_terminal_jobs=retryable,
+            e_step_historical_terminal_worker_jobs=failed,
         )
         return {
             "status": "RUNNING",
             "scheduler_status": "RETRY_PENDING",
             "retryable_terminal_jobs": retryable,
+            "historical_terminal_worker_jobs": failed,
             "lifecycle": lifecycle,
             "check": result,
         }
@@ -1935,7 +1957,18 @@ def _controller_main(args: argparse.Namespace) -> int:
     if current.get("terminal_state") == "ROUND1_FAILED":
         return 2
     run_id = _run_id(state_root)
-    _save_state(state_root, status="CONTROLLER_RUNNING", terminal_state="", stage="start", git_commit=_git_commit(), run_id=run_id, started_at=utc_now())
+    execution_attempt_id = _execution_attempt_id(state_root, new=True)
+    _save_state(
+        state_root,
+        status="CONTROLLER_RUNNING",
+        terminal_state="",
+        stage="start",
+        git_commit=_git_commit(),
+        run_id=run_id,
+        execution_attempt_id=execution_attempt_id,
+        worker_generation=execution_attempt_id,
+        started_at=utc_now(),
+    )
     commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
     _save_state(state_root, stage="git_commit_pin", expected_git_commit=commit_pin)
     if commit_pin["status"] != "PASSED":

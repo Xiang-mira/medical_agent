@@ -104,6 +104,43 @@ def test_dynamic_submitter_profile_shards_do_not_duplicate_source_task_indices(t
     assert sorted((row["source_task_index"] for row in rows), key=int) == [str(index) for index in range(8)]
 
 
+def test_dynamic_submitter_replenishes_current_attempt_when_only_historical_workers_remain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"cads": 4})
+    (tmp_path / "slurm").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"run_a,attempt_a,batch_a,4584475,cads,generic_gpu,4,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_job_state",
+        lambda job_id: {"state": "CANCELLED", "job_id": str(job_id)},
+    )
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=2,
+        overrequest_workers=2,
+        profile_specs="generic_gpu|gpu|gpu:1|8|64G|06:00:00",
+        groups=["cads"],
+        dry_run=True,
+        run_id="run_a",
+        submission_id="batch_b",
+        execution_attempt_id="attempt_b",
+    )
+
+    assert plan["status"] == "DRY_RUN"
+    assert plan["execution_attempt_id"] == "attempt_b"
+    assert plan["worker_pool"]["existing_workers_by_profile"]["generic_gpu"]["active"] == 0
+    assert plan["total_array_concurrency"] == 2
+    rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
+    assert any(row["execution_attempt_id"] == "attempt_b" for row in rows)
+
+
 def test_dynamic_submitter_preflight_failure_submits_no_partial_jobs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
 

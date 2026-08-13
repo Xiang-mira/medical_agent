@@ -467,6 +467,7 @@ def _candidate_seed_marker_matches(output_root: Path, *, task_manifest: Path | N
     matches = (
         bool(marker)
         and marker.get("schema_version") == "candidate_seed_complete_v1"
+        and str(marker.get("execution_schema_version") or CANDIDATE_TASK_V1) == CANDIDATE_TASK_V1
         and int(marker.get("logical_task_count") or -1) == len(loaded_rows)
         and str(marker.get("manifest_path") or "") == str(identity.get("manifest_path") or "")
         and int(marker.get("manifest_size") or -1) == int(identity.get("manifest_size") or -2)
@@ -706,14 +707,95 @@ def seed_candidate_states(output_root: Path, *, task_manifest: Path | None = Non
     identity = _manifest_identity(task_manifest or _candidate_queue_manifest(output_root), rows)
     marker = {
         "schema_version": "candidate_seed_complete_v1",
+        "execution_schema_version": CANDIDATE_TASK_V1,
         "logical_task_count": len(rows),
         **identity,
         "seeded": seeded,
         "retained": retained,
+        "seeded_count": seeded,
+        "validated_existing_count": retained,
+        "retained_terminal_count": 0,
         "completed_at": utc_now(),
     }
     atomic_write_json(_queue_paths(output_root)["candidate_seed_complete"], marker)
     return {"status": "READY", **marker}
+
+
+def recover_candidate_seed_marker(output_root: Path, *, task_manifest: Path | None = None) -> dict[str, Any]:
+    rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    existing = 0
+    retained_terminal = 0
+    missing: list[dict[str, str]] = []
+    for row in rows:
+        case_id = str(row.get("case_id") or "").strip()
+        target = _norm(str(row.get("target") or ""))
+        teacher = str(row.get("teacher") or "").strip()
+        if not case_id or not target or not teacher:
+            missing.append({"case_id": case_id, "target": target, "teacher": teacher, "reason": "invalid_manifest_row"})
+            continue
+        state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+        if not state:
+            missing.append({"case_id": case_id, "target": target, "teacher": teacher, "reason": "candidate_state_missing"})
+            continue
+        existing += 1
+        if _candidate_terminal(state):
+            retained_terminal += 1
+    identity = _manifest_identity(task_manifest or _candidate_queue_manifest(output_root), rows)
+    if missing:
+        return {
+            "status": "INCOMPLETE",
+            "schema_version": "candidate_seed_complete_v1",
+            "execution_schema_version": CANDIDATE_TASK_V1,
+            "logical_task_count": len(rows),
+            **identity,
+            "validated_existing_count": existing,
+            "seeded_count": 0,
+            "retained_terminal_count": retained_terminal,
+            "missing_count": len(missing),
+            "missing_sample": missing[:50],
+        }
+    marker = {
+        "schema_version": "candidate_seed_complete_v1",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "logical_task_count": len(rows),
+        **identity,
+        "validated_existing_count": existing,
+        "seeded_count": 0,
+        "retained_terminal_count": retained_terminal,
+        "completed_at": utc_now(),
+    }
+    atomic_write_json(_queue_paths(output_root)["candidate_seed_complete"], marker)
+    return {"status": "READY", **marker}
+
+
+def recover_stale_candidate_claims(output_root: Path, *, task_manifest: Path | None = None, lease_sec: int = 7200) -> dict[str, Any]:
+    rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    recovered = []
+    now = time.time()
+    for row in rows:
+        case_id = str(row.get("case_id") or "").strip()
+        target = _norm(str(row.get("target") or ""))
+        teacher = str(row.get("teacher") or "").strip()
+        if not case_id or not target or not teacher:
+            continue
+        state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+        status = str(state.get("status") or "")
+        if status not in {"CLAIMED", "RUNNING"}:
+            continue
+        candidate_id = _candidate_id_from_row(row)
+        claim_path = _claim_path(output_root, claim_kind="candidate", claim_key=candidate_id)
+        claim_doc = _read_json(claim_path, {}) if claim_path.exists() else {}
+        if claim_path.exists() and not _claim_expired(claim_doc, now=now, lease_sec=int(claim_doc.get("lease_sec") or lease_sec)):
+            continue
+        updated = {
+            **state,
+            "status": "RETRY_PENDING",
+            "failure_reason": str(state.get("failure_reason") or ("claim_missing_requeued" if not claim_path.exists() else "lease_expired_requeued")),
+            "updated_at": utc_now(),
+        }
+        publish_candidate_state(output_root, updated)
+        recovered.append({"case_id": case_id, "target": target, "teacher": teacher, "candidate_id": candidate_id, "previous_status": status})
+    return {"status": "READY", "recovered_count": len(recovered), "recovered": recovered[:100], "logical_task_count": len(rows)}
 
 
 def claim_next_ready_candidate(
