@@ -79,6 +79,17 @@ OUTPUT_FIELDS = [
     "destination_checksum",
 ]
 UNMAPPED_FIELDS = ["case_id", "source_name", "source_path", "action", "reason", "source_checksum"]
+COVERAGE_FIELDS = [
+    "case_id",
+    "raw_target_name",
+    "canonical_target",
+    "coverage_status",
+    "source_label_names",
+    "source_mask_path",
+    "source_mask_sha256",
+    "needs_task2_generation",
+    "reason",
+]
 NON_ANATOMY_TOKENS = (
     "cancer",
     "lesion",
@@ -92,15 +103,32 @@ NON_ANATOMY_TOKENS = (
     "tumor",
     "tumour",
 )
+OUTSIDE_373_SOURCE_NAMES = {
+    "abdominal_tissue",
+    "intermuscular_adipose_tissue",
+    "lymph_nodes",
+    "unknown_tissue",
+    "visceral_adipose_tissue",
+}
+GRANULARITY_OR_OUTSIDE_373_SOURCE_NAMES = {
+    "liver_vessels",
+    "muscles",
+    "nasal_cavity",
+    "skeletal_muscle",
+}
 
 
 def _canonical_target_contract(target_config: Path) -> tuple[set[str], int]:
+    raw_targets = _raw_target_names(target_config)
+    return {canonical_target_name(str(item)) for item in raw_targets}, len(raw_targets)
+
+
+def _raw_target_names(target_config: Path) -> list[str]:
     validation = validate_formal_373_target_space(target_config)
     if validation.get("status") != "success" and target_config.resolve() == DEFAULT_TARGET_CONFIG.resolve():
         raise DeliveryError(f"Formal target config failed validation: {target_config}")
     doc = json.loads(target_config.read_text(encoding="utf-8"))
-    raw_targets = list(doc.get("target_organs", []))
-    return {canonical_target_name(str(item)) for item in raw_targets}, len(raw_targets)
+    return [str(item) for item in doc.get("target_organs", [])]
 
 
 def _workspace_paths(workspace_root: Path) -> dict[str, Path]:
@@ -156,7 +184,7 @@ def _non_rename_action(rows: list[dict[str, str]]) -> tuple[str, str, str]:
     classifications = {str(row.get("classification") or "") for row in rows}
     reasons = ";".join(str(row.get("reason") or "") for row in rows if row.get("reason"))
     if "task2_generate" in classifications:
-        return "NON_RENAME_TASK2", "confirmed_non_rename", reasons or "boundary_classification_task2_generate"
+        return "NONRENAME_TASK2", "confirmed_non_rename", reasons or "boundary_classification_task2_generate"
     if "exclude" in classifications:
         return "EXCLUDED_NON_ANATOMY", "confirmed_non_rename", reasons or "boundary_classification_exclude"
     return "PENDING_MAPPING", "pending_non_rename_review", reasons or "boundary_review_pending"
@@ -165,6 +193,14 @@ def _non_rename_action(rows: list[dict[str, str]]) -> tuple[str, str, str]:
 def _is_non_anatomy(name: str) -> bool:
     parts = set(name.split("_"))
     return any(token in parts or token in name for token in NON_ANATOMY_TOKENS)
+
+
+def _outside_373_action(name: str) -> tuple[str, str] | None:
+    if name in OUTSIDE_373_SOURCE_NAMES:
+        return "EXCLUDED_OUTSIDE_373", "source_label_outside_authoritative_373_target_set"
+    if name in GRANULARITY_OR_OUTSIDE_373_SOURCE_NAMES:
+        return "OUTSIDE_373_OR_GRANULARITY_MISMATCH", "source_label_not_confirmed_as_same_granularity_373_target"
+    return None
 
 
 def _audit_row(
@@ -208,6 +244,14 @@ def _confirmed_alias_sources(alias_groups: dict[str, dict[str, Any]], canonical_
         safe_label_name(str(row.get("source_name", "")))
         for row in alias.get("rows", [])
         if str(row.get("status") or "").strip().lower() == "confirmed"
+    }
+
+
+def _confirmed_mapping_sources(confirmed: dict[str, Any], canonical_name: str) -> set[str]:
+    return {
+        source
+        for source, row in confirmed.items()
+        if canonical_target_name(str(row.target_name)) == canonical_name and row.status == "confirmed"
     }
 
 
@@ -313,15 +357,55 @@ def _plan_case(
                 )
             )
             continue
+        outside_action = _outside_373_action(source_name)
+        if outside_action:
+            action, reason = outside_action
+            row = _audit_row(
+                case_id=case_id,
+                source_name=source_name,
+                source_path=source_path,
+                canonical_name="",
+                action=action,
+                mapping_status="excluded",
+                mapping_source="task1_outside_373_policy",
+                reason=reason,
+                destination_path=None,
+            )
+            deferred_rows.append(row)
+            continue
         if source_name in pending:
             row = pending[source_name][0]
             canonical_name = canonical_target_name(row.target_name)
-            planned.setdefault(canonical_name, []).append((source_path, source_name, "PENDING_MAPPING", "pending_review", "organ_rename_mapping_373.csv", row.reason or "mapping_status_pending_review"))
+            audit = _audit_row(
+                case_id=case_id,
+                source_name=source_name,
+                source_path=source_path,
+                canonical_name=canonical_name,
+                action="PENDING_MAPPING",
+                mapping_status="pending_review",
+                mapping_source="organ_rename_mapping_373.csv",
+                reason=row.reason or "mapping_status_pending_review",
+                destination_path=None,
+            )
+            deferred_rows.append(audit)
+            unmapped_rows.append({"case_id": case_id, "source_name": source_name, "source_path": str(source_path), "action": "PENDING_MAPPING", "reason": audit["reason"], "source_checksum": audit["source_checksum"]})
             continue
         if source_name in rejected:
             row = rejected[source_name][0]
             canonical_name = canonical_target_name(row.target_name)
-            planned.setdefault(canonical_name, []).append((source_path, source_name, "PENDING_MAPPING", "rejected", "organ_rename_mapping_373.csv", row.reason or "mapping_status_rejected"))
+            audit = _audit_row(
+                case_id=case_id,
+                source_name=source_name,
+                source_path=source_path,
+                canonical_name=canonical_name,
+                action="PENDING_MAPPING",
+                mapping_status="rejected",
+                mapping_source="organ_rename_mapping_373.csv",
+                reason=row.reason or "mapping_status_rejected",
+                destination_path=None,
+            )
+            deferred_rows.append(audit)
+            unmapped_rows.append({"case_id": case_id, "source_name": source_name, "source_path": str(source_path), "action": "PENDING_MAPPING", "reason": audit["reason"], "source_checksum": audit["source_checksum"]})
             continue
         else:
             reason = "no_confirmed_task1_mapping_or_formal_target"
@@ -353,7 +437,7 @@ def _plan_case(
         all_source_aliases = ";".join(entry[1] for entry in entries)
         if len(entries) > 1:
             sources = {entry[1] for entry in entries}
-            confirmed_aliases = _confirmed_alias_sources(alias_groups, canonical_name)
+            confirmed_aliases = _confirmed_alias_sources(alias_groups, canonical_name) | _confirmed_mapping_sources(confirmed, canonical_name)
             unapproved = {
                 source
                 for source_path, source, action, mapping_status, _mapping_source, _reason in entries
@@ -417,7 +501,7 @@ def _plan_case(
                 )
             continue
         source_path, source_name, action, mapping_status, mapping_source, reason = entries[0]
-        resolved_action = "CANONICAL_SOURCE_SELECTED" if action == "KEEP_CANONICAL" else "SELECTED_CONFIRMED_ALIAS" if action == "RENAMED" else action
+        resolved_action = "CANONICAL_SOURCE_SELECTED" if action == "KEEP_CANONICAL" else "CONFIRMED_RENAME" if action == "RENAMED" else action
         if resolved_action == "PENDING_MAPPING":
             unmapped_rows.append({"case_id": case_id, "source_name": source_name, "source_path": str(source_path), "action": resolved_action, "reason": reason, "source_checksum": sha256_file_if_exists(source_path)})
         audit_rows.append(
@@ -442,7 +526,7 @@ def _plan_case(
 
 def _copy_planned_rows(rows: list[dict[str, Any]], *, resume: bool) -> None:
     for row in rows:
-        if row["action"] not in {"CANONICAL_SOURCE_SELECTED", "SELECTED_CONFIRMED_ALIAS"}:
+        if row["action"] not in {"CANONICAL_SOURCE_SELECTED", "CONFIRMED_RENAME", "SELECTED_CONFIRMED_ALIAS"}:
             continue
         src = Path(str(row["source_path"]))
         dst = Path(str(row["destination_path"]))
@@ -463,7 +547,7 @@ def _copy_planned_rows(rows: list[dict[str, Any]], *, resume: bool) -> None:
 def _output_rows(audit_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for row in audit_rows:
-        if row["action"] not in {"CANONICAL_SOURCE_SELECTED", "SELECTED_CONFIRMED_ALIAS"}:
+        if row["action"] not in {"CANONICAL_SOURCE_SELECTED", "CONFIRMED_RENAME", "SELECTED_CONFIRMED_ALIAS"}:
             continue
         resolution_type = "KEEP_CANONICAL" if row["action"] == "CANONICAL_SOURCE_SELECTED" else "CONFIRMED_RENAME"
         if row["selection_policy"] == "canonical_source_over_confirmed_aliases":
@@ -486,6 +570,125 @@ def _output_rows(audit_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def _original_source_index(source_dir: Path) -> dict[str, Path]:
+    if not source_dir.is_dir():
+        return {}
+    return {
+        safe_label_name(path.name): path
+        for path in sorted(source_dir.glob(f"*{NIFTI_SUFFIX}"))
+        if path.is_file()
+    }
+
+
+def _coverage_gap_index(non_rename: dict[str, list[dict[str, str]]], target_set: set[str]) -> dict[str, set[str]]:
+    gaps: dict[str, set[str]] = {}
+    for source_name, rows in non_rename.items():
+        for row in rows:
+            if str(row.get("classification") or "") != "task2_generate":
+                continue
+            target = canonical_target_name(safe_label_name(row.get("target_name", "")))
+            if target in target_set:
+                gaps.setdefault(target, set()).add(source_name)
+    return gaps
+
+
+def audit_task1_source_coverage(
+    *,
+    workspace_root: Path,
+    non_rename_decisions: Path = DEFAULT_NON_RENAME,
+    target_config: Path = DEFAULT_TARGET_CONFIG,
+    case_manifest: Path | None = None,
+    expected_case_count: int = 103,
+) -> dict[str, Any]:
+    """Write a label-coverage manifest without inferring anatomical absence."""
+    workspace_root = workspace_root.resolve()
+    paths = _workspace_paths(workspace_root)
+    raw_targets = _raw_target_names(target_config)
+    target_set = {canonical_target_name(str(item)) for item in raw_targets}
+    non_rename = _load_non_rename(non_rename_decisions)
+    gap_sources_by_target = _coverage_gap_index(non_rename, target_set)
+    case_dirs = _case_dirs(paths["original"], case_manifest)
+
+    rows: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    for case_id, source_dir in case_dirs:
+        original_sources = _original_source_index(source_dir)
+        canonical_dir = paths["canonical"] / case_id / "segmentations"
+        for raw_target in raw_targets:
+            canonical_target = canonical_target_name(str(raw_target))
+            canonical_path = canonical_dir / f"{canonical_target}{NIFTI_SUFFIX}"
+            if canonical_path.is_file():
+                status = "SOURCE_AVAILABLE"
+                source_names = canonical_target
+                source_paths = str(canonical_path)
+                source_hashes = sha256_file(canonical_path)
+                needs_task2 = "false"
+                reason = "canonical_source_mask_available_after_task1_rename"
+            else:
+                gap_sources = sorted(
+                    source_name
+                    for source_name in gap_sources_by_target.get(canonical_target, set())
+                    if source_name in original_sources
+                )
+                if gap_sources:
+                    status = "GRANULARITY_GAP"
+                    source_names = ";".join(gap_sources)
+                    source_paths = ";".join(str(original_sources[source_name]) for source_name in gap_sources)
+                    source_hashes = ";".join(sha256_file(original_sources[source_name]) for source_name in gap_sources)
+                    needs_task2 = "true"
+                    reason = "source_label_exists_but_task1_boundary_marks_target_as_task2_generate"
+                else:
+                    status = "TARGET_MISSING"
+                    source_names = ""
+                    source_paths = ""
+                    source_hashes = ""
+                    needs_task2 = "true"
+                    reason = "no_same_granularity_canonical_source_label_available_do_not_infer_absent_or_out_of_fov"
+            status_counts[status] = status_counts.get(status, 0) + 1
+            rows.append(
+                {
+                    "case_id": case_id,
+                    "raw_target_name": str(raw_target),
+                    "canonical_target": canonical_target,
+                    "coverage_status": status,
+                    "source_label_names": source_names,
+                    "source_mask_path": source_paths,
+                    "source_mask_sha256": source_hashes,
+                    "needs_task2_generation": needs_task2,
+                    "reason": reason,
+                }
+            )
+
+    summary = {
+        "status": "READY" if len(case_dirs) == expected_case_count else "BLOCKED",
+        "stage": "task1_373_source_coverage_audit",
+        "mode": "coverage-audit",
+        "created_at": utc_now(),
+        "workspace_root": str(workspace_root),
+        "original_mask_root": str(paths["original"]),
+        "canonical_mask_root": str(paths["canonical"]),
+        "target_config": str(target_config),
+        "authoritative_raw_target_count": len(raw_targets),
+        "effective_canonical_target_count": len(target_set),
+        "case_count": len(case_dirs),
+        "expected_case_count": expected_case_count,
+        "case_count_ok": len(case_dirs) == expected_case_count,
+        "coverage_row_count": len(rows),
+        "expected_coverage_row_count": len(case_dirs) * len(raw_targets),
+        "status_counts": status_counts,
+        "source_available_count": status_counts.get("SOURCE_AVAILABLE", 0),
+        "granularity_gap_count": status_counts.get("GRANULARITY_GAP", 0),
+        "target_missing_count": status_counts.get("TARGET_MISSING", 0),
+        "needs_task2_generation_count": sum(1 for row in rows if row["needs_task2_generation"] == "true"),
+        "absence_inference_policy": "source_mask_absence_is_not_ABSENT_or_OUT_OF_FOV",
+        "writes_masks": False,
+    }
+    paths["manifests"].mkdir(parents=True, exist_ok=True)
+    write_csv(paths["manifests"] / "task1_373_source_coverage.csv", rows, COVERAGE_FIELDS)
+    write_json(paths["manifests"] / "task1_373_source_coverage_summary.json", summary)
+    return summary
 
 
 def build_task1_canonical_masks(
@@ -537,8 +740,9 @@ def build_task1_canonical_masks(
             raise DeliveryError(f"Task1 canonical apply requires {expected_case_count} cases, got {len(case_dirs)}")
         if collision_rows:
             raise DeliveryError(f"Task1 canonical apply blocked by {len(collision_rows)} collision(s)")
-        if unmapped_rows and not allow_unmapped:
-            raise DeliveryError(f"Task1 canonical apply blocked by {len(unmapped_rows)} unmapped/pending source mask(s)")
+        blocking_unmapped = [row for row in unmapped_rows if row.get("action") == "UNMAPPED"]
+        if blocking_unmapped and not allow_unmapped:
+            raise DeliveryError(f"Task1 canonical apply blocked by {len(blocking_unmapped)} unmapped source mask(s)")
         _copy_planned_rows(audit_rows, resume=resume)
         for row in audit_rows:
             if row["destination_path"]:
@@ -547,7 +751,7 @@ def build_task1_canonical_masks(
     if mode == "validate":
         missing = [
             row for row in audit_rows
-            if row["action"] in {"CANONICAL_SOURCE_SELECTED", "SELECTED_CONFIRMED_ALIAS"}
+            if row["action"] in {"CANONICAL_SOURCE_SELECTED", "CONFIRMED_RENAME", "SELECTED_CONFIRMED_ALIAS"}
             and (not row["destination_path"] or row["source_checksum"] != sha256_file_if_exists(Path(str(row["destination_path"]))))
         ]
         if missing:
@@ -557,11 +761,16 @@ def build_task1_canonical_masks(
                 row["destination_checksum"] = sha256_file_if_exists(Path(str(row["destination_path"])))
 
     output_rows = _output_rows(audit_rows)
+    nonblocking_exclusion_rows = [
+        row for row in audit_rows
+        if row.get("action") in {"EXCLUDED_NON_ANATOMY", "EXCLUDED_OUTSIDE_373", "OUTSIDE_373_OR_GRANULARITY_MISMATCH", "NONRENAME_TASK2", "PENDING_MAPPING"}
+    ]
     status_counts: dict[str, int] = {}
     for row in audit_rows:
         status_counts[str(row["action"])] = status_counts.get(str(row["action"]), 0) + 1
+    blocking_unmapped = [row for row in unmapped_rows if row.get("action") == "UNMAPPED"]
     summary = {
-        "status": "READY" if not collision_rows and (allow_unmapped or not unmapped_rows) else "BLOCKED",
+        "status": "READY" if not collision_rows and (allow_unmapped or not blocking_unmapped) else "BLOCKED",
         "stage": "task1_373_canonical_masks",
         "mode": mode,
         "created_at": utc_now(),
@@ -577,15 +786,17 @@ def build_task1_canonical_masks(
         "audit_row_count": len(audit_rows),
         "status_counts": status_counts,
         "source_mask_count": len(audit_rows),
-        "confirmed_rename_count": status_counts.get("SELECTED_CONFIRMED_ALIAS", 0),
+        "confirmed_rename_count": status_counts.get("CONFIRMED_RENAME", 0),
         "keep_canonical_count": status_counts.get("CANONICAL_SOURCE_SELECTED", 0),
         "canonical_source_selected_count": status_counts.get("CANONICAL_SOURCE_SELECTED", 0),
         "selected_alias_count": status_counts.get("SELECTED_CONFIRMED_ALIAS", 0),
         "redundant_confirmed_alias_count": status_counts.get("REDUNDANT_CONFIRMED_ALIAS", 0),
-        "nonrename_task2_count": status_counts.get("NON_RENAME_TASK2", 0),
+        "nonrename_task2_count": status_counts.get("NONRENAME_TASK2", 0),
         "pending_mapping_count": status_counts.get("PENDING_MAPPING", 0),
         "excluded_non_anatomy_count": status_counts.get("EXCLUDED_NON_ANATOMY", 0),
-        "unmapped_count": len(unmapped_rows),
+        "excluded_outside_373_count": status_counts.get("EXCLUDED_OUTSIDE_373", 0),
+        "outside_373_or_granularity_mismatch_count": status_counts.get("OUTSIDE_373_OR_GRANULARITY_MISMATCH", 0),
+        "unmapped_count": status_counts.get("UNMAPPED", 0),
         "unapproved_collision_count": len(collision_rows),
         "collision_count": len(collision_rows),
         "mapping_artifacts": {
@@ -598,6 +809,7 @@ def build_task1_canonical_masks(
     paths["manifests"].mkdir(parents=True, exist_ok=True)
     write_csv(paths["manifests"] / "task1_373_rename_audit.csv", audit_rows, AUDIT_FIELDS)
     write_csv(paths["manifests"] / "task1_373_canonical_outputs.csv", output_rows, OUTPUT_FIELDS)
+    write_csv(paths["manifests"] / "task1_373_excluded_source_labels.csv", nonblocking_exclusion_rows, AUDIT_FIELDS)
     write_json(paths["manifests"] / "task1_373_rename_summary.json", summary)
     write_csv(paths["manifests"] / "task1_373_collision_report.csv", collision_rows, COLLISION_FIELDS)
     write_csv(paths["manifests"] / "task1_373_unmapped.csv", unmapped_rows, UNMAPPED_FIELDS)
@@ -619,21 +831,31 @@ def main() -> int:
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--validate", action="store_true")
+    mode.add_argument("--coverage-audit", action="store_true")
     args = parser.parse_args()
-    selected_mode = "apply" if args.apply else ("validate" if args.validate else "dry-run")
     try:
-        result = build_task1_canonical_masks(
-            workspace_root=args.workspace_root,
-            mapping=args.mapping,
-            non_rename_decisions=args.non_rename_decisions,
-            alias_groups=args.alias_groups,
-            target_config=args.target_config,
-            case_manifest=args.case_manifest,
-            mode=selected_mode,
-            expected_case_count=args.expected_case_count,
-            allow_unmapped=args.allow_unmapped,
-            resume=not args.no_resume,
-        )
+        if args.coverage_audit:
+            result = audit_task1_source_coverage(
+                workspace_root=args.workspace_root,
+                non_rename_decisions=args.non_rename_decisions,
+                target_config=args.target_config,
+                case_manifest=args.case_manifest,
+                expected_case_count=args.expected_case_count,
+            )
+        else:
+            selected_mode = "apply" if args.apply else ("validate" if args.validate else "dry-run")
+            result = build_task1_canonical_masks(
+                workspace_root=args.workspace_root,
+                mapping=args.mapping,
+                non_rename_decisions=args.non_rename_decisions,
+                alias_groups=args.alias_groups,
+                target_config=args.target_config,
+                case_manifest=args.case_manifest,
+                mode=selected_mode,
+                expected_case_count=args.expected_case_count,
+                allow_unmapped=args.allow_unmapped,
+                resume=not args.no_resume,
+            )
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0 if result["status"] == "READY" else 2
     except Exception as exc:
