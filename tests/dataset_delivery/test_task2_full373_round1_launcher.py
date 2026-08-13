@@ -735,6 +735,13 @@ def test_build_submission_manifest_does_not_seed_before_dynamic_worker_manifest(
     targets = [f"organ_{index:03d}" for index in range(373)]
     _patch_routes(monkeypatch, {target: ["teacher1"] for target in targets})
     case_manifest = _case_manifest(tmp_path / "cases.csv", ["CASE001"])
+    original_ann = tmp_path / "workspace" / "inputs" / "masks_original" / "CASE001" / "segmentations"
+    canonical_ann = tmp_path / "workspace" / "inputs" / "masks_373_canonical" / "CASE001" / "segmentations"
+    case_manifest.write_text(
+        "case_id,ct_path,annotation_folder,original_annotation_folder,canonical_annotation_folder\n"
+        f"CASE001,{tmp_path / 'ct.nii.gz'},{original_ann},{original_ann},{canonical_ann}\n",
+        encoding="utf-8",
+    )
     target_config = _target_config(tmp_path / "targets.json", targets)
 
     def fail_seed(*args, **kwargs):
@@ -760,6 +767,83 @@ def test_build_submission_manifest_does_not_seed_before_dynamic_worker_manifest(
     assert "candidate_seed" not in summary
     rows = full373.read_csv_rows(Path(summary["groups"][full373.FULL373_GROUP]["task_manifest"]))
     assert rows[0]["totalsegmentator_executable"] == "/opt/totalseg/bin/TotalSegmentator"
+    assert rows[0]["annotation_folder"] == str(original_ann)
+    assert rows[0]["original_annotation_folder"] == str(original_ann)
+    assert rows[0]["canonical_annotation_folder"] == str(canonical_ann)
+
+
+def test_full373_merge_prefers_task1_source_mask_with_provenance_without_changing_teacher_scope(tmp_path: Path):
+    ct = tmp_path / "ct.nii.gz"
+    _save_mask(ct)
+    canonical_dir = tmp_path / "workspace" / "inputs" / "masks_373_canonical" / "CASE001" / "segmentations"
+    task1_mask = _save_mask(canonical_dir / "organ_a.nii.gz")
+    teacher_mask = _save_mask(tmp_path / "teacher" / "organ_a.nii.gz")
+    manifest = tmp_path / "out" / "slurm" / "full373_task_manifest.csv"
+    _write_candidate_manifest(
+        manifest,
+        [
+            {
+                "task_index": "0",
+                "case_id": "CASE001",
+                "target": "organ_a",
+                "teacher": "teacher1",
+                "candidate_id": "cand_a",
+                "ct_path": str(ct),
+                "annotation_folder": str(tmp_path / "workspace" / "inputs" / "masks_original" / "CASE001" / "segmentations"),
+                "original_annotation_folder": str(tmp_path / "workspace" / "inputs" / "masks_original" / "CASE001" / "segmentations"),
+                "canonical_annotation_folder": str(canonical_dir),
+            }
+        ],
+    )
+    full373.write_json(
+        tmp_path / "out" / "full_round1_scope.json",
+        {
+            "case_count": 1,
+            "canonical_target_count": 1,
+            "routes": {"organ_a": ["teacher1"]},
+            "task_rows": [{"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a"}],
+            "total_logical_candidate_tasks": 1,
+        },
+    )
+    full373.publish_candidate_state(
+        tmp_path / "out",
+        {
+            "status": "SUCCESS",
+            "case_id": "CASE001",
+            "target": "organ_a",
+            "teacher": "teacher1",
+            "candidate_id": "cand_a",
+            "candidate_exists": True,
+            "prediction": str(teacher_mask),
+        },
+        recompute_target=True,
+    )
+    state_path = tmp_path / "out" / "queues" / "case_target_states" / "CASE001" / "organ_a.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state.update(
+        {
+            "status": "VALID_SINGLE_TEACHER_ACCEPTED",
+            "ct_path": str(ct),
+            "target": "organ_a",
+            "organ": "organ_a",
+            "selected_model": "teacher1",
+            "final_mask": str(teacher_mask),
+            "teacher_names": ["teacher1"],
+        }
+    )
+    full373.atomic_write_json(state_path, state)
+
+    report = full373.aggregate_full373_estep(tmp_path / "out", expected_cases=1, expected_targets=1)
+    manifest_doc = json.loads((tmp_path / "out" / "training_manifest.json").read_text(encoding="utf-8"))
+    item = manifest_doc["items"][0]
+
+    assert report["status"] == "PASSED"
+    assert item["mask_path"] == str(task1_mask)
+    assert item["source"] == "task1_source"
+    assert item["source_role"] == "task1_source"
+    assert item["source_stage"] == "task1_373_canonical_source_mask"
+    assert item["training_eligible"] is True
+    assert item["contract_failures"] == []
 
 
 def test_two_workers_share_one_seed_and_keep_o_excl_claim_authority(tmp_path: Path):

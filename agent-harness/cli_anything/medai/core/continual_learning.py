@@ -224,6 +224,8 @@ def _source_role(row: dict[str, Any]) -> tuple[str, str | None]:
     provider_lower = provider.lower()
     if "student" in provider_lower:
         return "student", provider or None
+    if provider_lower == "task1_source":
+        return "task1_source", provider or None
     if provider_lower in {"round_prev_selected", "previous_selected", "selected_previous_round"}:
         # These aliases discard the true origin. They are not sufficient
         # provenance for a formal positive label.
@@ -276,6 +278,16 @@ def _previous_pseudo_carry_forward(row: dict[str, Any], provider: str | None) ->
     }
 
 
+def _verified_task1_source(row: dict[str, Any], provider: str | None) -> bool:
+    if str(provider or "").lower() != "task1_source":
+        return False
+    if str(row.get("dataset_role") or "").lower() != "source_label":
+        return False
+    if str(row.get("source_stage") or "").lower() != "task1_373_canonical_source_mask":
+        return False
+    return str(row.get("ground_truth_status") or "").lower() == "task1_source_not_expert_gt"
+
+
 def canonicalize_training_record(
     row: dict[str, Any],
     *,
@@ -315,11 +327,13 @@ def canonicalize_training_record(
             reasons.append(str(foreground_audit.get("reason") or "positive_mask_invalid"))
     verified_student = supervision_type == "positive" and _verified_student_replacement(item, provider)
     previous_carry_forward = supervision_type == "positive" and _previous_pseudo_carry_forward(item, provider)
+    verified_task1_source = supervision_type == "positive" and _verified_task1_source(item, provider)
     if (
         supervision_type == "positive"
         and source_role != "teacher"
         and not verified_student
         and not previous_carry_forward
+        and not verified_task1_source
     ):
         reasons.append(f"positive_source_role_forbidden:{source_role}")
     if supervision_type == "positive" and grade not in {"A", "B", "C"}:
@@ -418,10 +432,12 @@ def canonicalize_training_record(
             "source_role": (
                 "student" if verified_student else
                 "previous_pseudo_label" if previous_carry_forward else
+                "task1_source" if verified_task1_source else
                 source_role
             ),
             "verified_student_replacement": verified_student,
             "previous_pseudo_carry_forward": previous_carry_forward,
+            "verified_task1_source": verified_task1_source,
             "source_round": round_index if round_index is not None else item.get("source_round"),
             "memory_role": (
                 "historical"

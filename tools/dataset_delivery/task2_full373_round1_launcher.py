@@ -26,7 +26,7 @@ from cli_anything.medai.core.model_registry import candidate_models_for_organs, 
 from cli_anything.medai.core.continual_learning import TRAINING_CONTRACT_VERSION, canonicalize_training_record  # noqa: E402
 from cli_anything.medai.core.multimodel_loop import _select_candidate  # noqa: E402
 from cli_anything.medai.core.target_space import validate_formal_373_target_space  # noqa: E402
-from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
+from tools.dataset_delivery.delivery_lib import NIFTI_SUFFIX, read_csv_rows, sha256_file_if_exists, utc_now, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_binary_mask_nifti_from_source  # noqa: E402
 from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1  # noqa: E402
 
@@ -555,7 +555,9 @@ def build_submission_manifest(
                 "teacher": str(candidate.get("teacher") or ""),
                 "candidate_id": str(candidate.get("candidate_id") or f"cand_{_sha(case_id + '|' + str(candidate.get('target')) + '|' + str(candidate.get('teacher')))}"),
                 "ct_path": row.get("ct_path") or row.get("image_path") or "",
-                "annotation_folder": row.get("annotation_folder") or row.get("reference_mask_dir") or "",
+                "annotation_folder": row.get("annotation_folder") or row.get("original_annotation_folder") or row.get("reference_mask_dir") or "",
+                "original_annotation_folder": row.get("original_annotation_folder") or row.get("annotation_folder") or row.get("reference_mask_dir") or "",
+                "canonical_annotation_folder": row.get("canonical_annotation_folder") or "",
                 "registry_path": str(registry_path),
                 "target_config": str(target_config),
                 "checkpoint_root": str(checkpoint_root),
@@ -1053,7 +1055,9 @@ def _execute_candidate_row(
             {
                 "case_id": case_id,
                 "ct_path": str(row.get("ct_path") or ""),
-                "annotation_folder": str(row.get("annotation_folder") or ""),
+                "annotation_folder": str(row.get("original_annotation_folder") or row.get("annotation_folder") or ""),
+                "original_annotation_folder": str(row.get("original_annotation_folder") or row.get("annotation_folder") or ""),
+                "canonical_annotation_folder": str(row.get("canonical_annotation_folder") or ""),
             },
         )
         case_output = output_root / "candidate_runs" / case_id / target / teacher
@@ -1528,6 +1532,104 @@ def _selection_training_item(selection: dict[str, Any], *, target_config: Path |
     return canonicalize_training_record(item, round_index=1, project_root=REPO_ROOT, strict_soft=True)
 
 
+def _case_manifest_context(output_root: Path) -> dict[str, dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for manifest in sorted((output_root / "slurm").glob("*.csv")):
+        try:
+            rows.extend(read_csv_rows(manifest))
+        except Exception:
+            continue
+    out: dict[str, dict[str, str]] = {}
+    for row in rows:
+        case_id = str(row.get("case_id") or "").strip()
+        if not case_id:
+            continue
+        entry = out.setdefault(case_id, {})
+        for key in ("ct_path", "original_annotation_folder", "canonical_annotation_folder"):
+            value = str(row.get(key) or "").strip()
+            if value and not entry.get(key):
+                entry[key] = value
+    return out
+
+
+def _task1_source_training_item(
+    *,
+    case_id: str,
+    target: str,
+    context: dict[str, str],
+    target_config: Path | None = None,
+) -> dict[str, Any] | None:
+    canonical_dir = Path(str(context.get("canonical_annotation_folder") or ""))
+    mask = canonical_dir / f"{target}{NIFTI_SUFFIX}"
+    ct_path = str(context.get("ct_path") or "")
+    if not canonical_dir.is_dir() or not mask.is_file() or not ct_path:
+        return None
+    targets, prompts = _load_target_config_prompts(target_config or (REPO_ROOT / "configs/student_3d_prompt_target_organs.json"))
+    try:
+        target_id = targets.index(target)
+    except ValueError:
+        target_id = -1
+    item = {
+        "case_id": case_id,
+        "image": ct_path,
+        "ct_path": ct_path,
+        "organ": target,
+        "canonical_organ": target,
+        "requested_canonical_id": target,
+        "resolved_canonical_id": target,
+        "prompt": prompts.get(target, target.replace("_", " ")),
+        "mask": str(mask),
+        "mask_path": str(mask),
+        "supervision_type": "positive",
+        "target_type": "positive_hard",
+        "label_role": "task1_source_label",
+        "supervision_role": "task1_source_label",
+        "distillation_role": "positive",
+        "dataset_role": "source_label",
+        "source": "task1_source",
+        "source_model": "task1_source",
+        "selected_model": "task1_source",
+        "origin_provider": "task1_source",
+        "selected_teacher": "",
+        "eligible_teachers": [],
+        "ground_truth_status": "task1_source_not_expert_gt",
+        "scoring_schema_version": "autolabel_core_v3_task1_source",
+        "grade": "A",
+        "training_weight": 1.0,
+        "distillation_eligible": True,
+        "training_eligible": True,
+        "student_target_id": target_id,
+        "source_stage": "task1_373_canonical_source_mask",
+        "task1_source_mask_sha256": sha256_file_if_exists(mask),
+    }
+    return canonicalize_training_record(item, round_index=1, project_root=REPO_ROOT, strict_soft=True)
+
+
+def _merged_training_item(
+    *,
+    output_root: Path,
+    case_id: str,
+    target: str,
+    state: dict[str, Any],
+    case_context: dict[str, dict[str, str]],
+    target_config: Path | None = None,
+) -> dict[str, Any] | None:
+    task1_item = _task1_source_training_item(
+        case_id=case_id,
+        target=target,
+        context=case_context.get(case_id, {}),
+        target_config=target_config,
+    )
+    if task1_item:
+        return task1_item
+    item = _selection_training_item(state, target_config=target_config)
+    if item:
+        item["source"] = "task2_teacher"
+        item["selected_teacher"] = item.get("selected_model") or item.get("source_model") or ""
+        item["eligible_teachers"] = list((state.get("teacher_names") or state.get("eligible_teachers") or []))
+    return item
+
+
 def aggregate_full373_estep(output_root: Path, *, expected_cases: int = 103, expected_targets: int = 373) -> dict[str, Any]:
     scope = _read_json(output_root / "full_round1_scope.json", {})
     if int(scope.get("case_count") or 0) > 0:
@@ -1549,6 +1651,7 @@ def aggregate_full373_estep(output_root: Path, *, expected_cases: int = 103, exp
     training_items = []
     pending = []
     failed = []
+    case_context = _case_manifest_context(output_root)
     state_files = list(_queue_paths(output_root)["case_target_states"].glob("*/*.json"))
     if state_files:
         for case_id in cases:
@@ -1557,7 +1660,7 @@ def aggregate_full373_estep(output_root: Path, *, expected_cases: int = 103, exp
                 status = str(state.get("status") or "WAITING_FOR_CANDIDATES")
                 if status in VALID_TERMINAL_TARGET_STATES:
                     state_items.append({"case_id": case_id, "organ": target, "terminal_state": status, **state})
-                    item = _selection_training_item(state)
+                    item = _merged_training_item(output_root=output_root, case_id=case_id, target=target, state=state, case_context=case_context)
                     if item:
                         training_items.append(item)
                 elif status in NON_TERMINAL_TARGET_STATES:

@@ -1301,6 +1301,23 @@ def test_case_level_source_manifest_preserves_valid_source_paths(tmp_path, monke
     assert "/source/CASE000/ct.nii.gz" in rows
 
 
+def test_case_level_staged_manifest_distinguishes_original_and_canonical_mask_dirs(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    paths = orch._state_paths(args.state_root)
+    case_ids = [f"CASE{i:03d}" for i in range(103)]
+    _write_source_manifest(paths["source_manifest"], case_ids)
+    monkeypatch.setattr(orch, "build_formal_manifest", lambda **kwargs: pytest.fail("source manifest should be reused"))
+
+    result = orch.ensure_case_level_manifests(args)
+    rows = orch.read_csv_rows(Path(result["staged_manifest"]))
+    first = rows[0]
+
+    assert first["annotation_folder"].endswith("/inputs/masks_original/CASE000/segmentations")
+    assert first["reference_mask_dir"] == first["annotation_folder"]
+    assert first["original_annotation_folder"] == first["annotation_folder"]
+    assert first["canonical_annotation_folder"].endswith("/inputs/masks_373_canonical/CASE000/segmentations")
+
+
 def test_case_level_source_manifest_rebuilds_stale_staged_paths(tmp_path, monkeypatch):
     args = _args(tmp_path)
     paths = orch._state_paths(args.state_root)

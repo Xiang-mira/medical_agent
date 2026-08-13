@@ -576,12 +576,16 @@ def _case_id(row: dict[str, Any], index: int) -> str:
 
 def _staged_row(row: dict[str, Any], *, case_id: str, index: int, workspace_root: Path) -> dict[str, Any]:
     updated = dict(row)
+    original_annotation_folder = str(workspace_root.resolve() / "inputs" / "masks_original" / case_id / "segmentations")
+    canonical_annotation_folder = str(workspace_root.resolve() / "inputs" / "masks_373_canonical" / case_id / "segmentations")
     updated["index"] = index
     updated["case_id"] = case_id
     updated["ct_path"] = str(workspace_root.resolve() / "inputs" / "images" / case_id / "ct.nii.gz")
     updated["image_path"] = updated["ct_path"]
-    updated["annotation_folder"] = str(workspace_root.resolve() / "inputs" / "masks_original" / case_id / "segmentations")
-    updated["reference_mask_dir"] = updated["annotation_folder"]
+    updated["original_annotation_folder"] = original_annotation_folder
+    updated["canonical_annotation_folder"] = canonical_annotation_folder
+    updated["annotation_folder"] = original_annotation_folder
+    updated["reference_mask_dir"] = original_annotation_folder
     return updated
 
 
@@ -1434,10 +1438,12 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
                 "case_id": row["case_id"],
                 "ct_path": row["ct_path"],
                 "annotation_folder": row["annotation_folder"],
+                "original_annotation_folder": row.get("original_annotation_folder") or row["annotation_folder"],
+                "canonical_annotation_folder": row.get("canonical_annotation_folder") or "",
             }
             for row in ready_status_rows
         ],
-        ["case_id", "ct_path", "annotation_folder"],
+        ["case_id", "ct_path", "annotation_folder", "original_annotation_folder", "canonical_annotation_folder"],
     )
     endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
     h100_policy = resolve_teacher_h100_policy(

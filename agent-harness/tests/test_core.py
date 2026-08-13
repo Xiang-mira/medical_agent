@@ -476,6 +476,37 @@ class TestFormal373TargetAndAutoFineLabels:
         assert validator_non_targets == set()
         assert validator_missing == set()
 
+    def test_task1_source_training_record_requires_explicit_provenance_contract(self, tmp_path):
+        from cli_anything.medai.core.continual_learning import canonicalize_training_record
+
+        image = tmp_path / "ct.nii.gz"
+        mask = tmp_path / "mask.nii.gz"
+        _make_nii(np.ones((4, 4, 4), dtype=np.uint8), image)
+        _make_nii(np.ones((4, 4, 4), dtype=np.uint8), mask)
+
+        item = canonicalize_training_record(
+            {
+                "case_id": "case",
+                "ct_path": str(image),
+                "organ": "liver",
+                "canonical_organ": "liver",
+                "mask_path": str(mask),
+                "target_type": "positive_hard",
+                "grade": "A",
+                "source_model": "task1_source",
+                "dataset_role": "pseudo_label",
+                "source_stage": "unknown",
+                "ground_truth_status": "task1_source_not_expert_gt",
+            },
+            round_index=1,
+            project_root=tmp_path,
+        )
+
+        assert item["source_role"] == "task1_source"
+        assert item["verified_task1_source"] is False
+        assert item["training_eligible"] is False
+        assert "positive_source_role_forbidden:task1_source" in item["contract_failures"]
+
     def test_label_passport_maps_grade_to_training_weight(self, tmp_path):
         from cli_anything.medai.core.auto_fine_label import build_label_passport
 
