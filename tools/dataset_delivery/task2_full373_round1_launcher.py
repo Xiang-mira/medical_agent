@@ -559,7 +559,6 @@ def build_submission_manifest(
     slurm_root = output_root / "slurm"
     task_manifest = _candidate_queue_manifest(output_root)
     write_csv(task_manifest, rows, list(rows[0].keys()) if rows else ["task_index", "case_id", "target", "teacher", "candidate_id"])
-    candidate_seed = seed_candidate_states(output_root, task_manifest=task_manifest)
     sbatch = slurm_root / "full373_multiteacher_array.sbatch"
     _write_array_sbatch(sbatch, python=python, output_root=output_root, task_manifest=task_manifest, state_root=state_root)
     summary = {
@@ -569,7 +568,6 @@ def build_submission_manifest(
         "scope": str(output_root / "full_round1_submission_scope.json"),
         "scope_status": scope,
         "task_count": len(rows),
-        "candidate_seed": candidate_seed,
         "scientific_task_unit": "case_id x canonical_target x eligible_teacher",
         "scheduler_array_unit": "generic GPU worker array consuming shared READY candidate queue",
         "groups": {
@@ -653,14 +651,15 @@ def load_candidate_state(output_root: Path, *, case_id: str, target: str, teache
     return _read_json(_state_path(output_root, case_id, target, teacher, kind="candidate"), {})
 
 
-def publish_candidate_state(output_root: Path, state: dict[str, Any]) -> dict[str, Any]:
+def publish_candidate_state(output_root: Path, state: dict[str, Any], *, recompute_target: bool = True) -> dict[str, Any]:
     case_id = str(state["case_id"])
     target = _norm(str(state["target"]))
     teacher = str(state["teacher"])
     path = _state_path(output_root, case_id, target, teacher, kind="candidate")
     atomic_write_json(path, state)
     _append_event(output_root, {"event": "candidate_state", "case_id": case_id, "target": target, "teacher": teacher, "status": state.get("status")})
-    recompute_case_target_readiness(output_root, case_id=case_id, target=target)
+    if recompute_target:
+        recompute_case_target_readiness(output_root, case_id=case_id, target=target)
     return state
 
 
@@ -702,6 +701,7 @@ def seed_candidate_states(output_root: Path, *, task_manifest: Path | None = Non
                 "updated_at": utc_now(),
                 "published_at": utc_now(),
             },
+            recompute_target=False,
         )
     identity = _manifest_identity(task_manifest or _candidate_queue_manifest(output_root), rows)
     marker = {
@@ -998,6 +998,8 @@ def run_candidate_queue_worker(
     seed_marker_check = _candidate_seed_marker_matches(output_root, task_manifest=task_manifest, rows=manifest_rows)
     cursor = _manifest_cursor_offset(output_root, worker_id=worker_id, manifest_rows=manifest_rows)
     while True:
+        if seed_marker_check["status"] != "MATCH":
+            seed_marker_check = _candidate_seed_marker_matches(output_root, task_manifest=task_manifest, rows=manifest_rows)
         claim = claim_next_ready_candidate_from_rows(
             output_root,
             manifest_rows=manifest_rows,

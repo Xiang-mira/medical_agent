@@ -464,6 +464,143 @@ def test_queue_worker_does_not_call_global_seed_and_loads_manifest_once(monkeypa
     assert manifest_loads["count"] == 1
 
 
+def test_queue_worker_refreshes_seed_marker_without_reloading_manifest_or_seeding(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    seed_calls = {"count": 0}
+    manifest_loads = {"count": 0}
+    sleep_calls = {"count": 0}
+    original_rows = full373._candidate_queue_rows
+
+    def fail_seed(*args, **kwargs):
+        seed_calls["count"] += 1
+        raise AssertionError("queue worker must wait for controller seed, not seed itself")
+
+    def counted_rows(*args, **kwargs):
+        manifest_loads["count"] += 1
+        return original_rows(*args, **kwargs)
+
+    def fake_sleep(_seconds):
+        sleep_calls["count"] += 1
+        full373.publish_candidate_state(
+            tmp_path,
+            {
+                "status": "READY",
+                "case_id": "CASE001",
+                "target": "organ_a",
+                "teacher": "teacher1",
+                "candidate_id": "cand_a",
+            },
+            recompute_target=False,
+        )
+        identity = full373._manifest_identity(manifest, original_rows(tmp_path, task_manifest=manifest))
+        full373.atomic_write_json(
+            tmp_path / "queues" / "candidate_seed_complete.json",
+            {
+                "schema_version": "candidate_seed_complete_v1",
+                "logical_task_count": 1,
+                **identity,
+                "seeded": 1,
+                "retained": 0,
+                "completed_at": full373.utc_now(),
+            },
+        )
+
+    def fake_execute(row, output_root, **kwargs):
+        full373.publish_candidate_state(
+            output_root,
+            {
+                "status": "SUCCESS",
+                "case_id": row["case_id"],
+                "target": row["target"],
+                "teacher": row["teacher"],
+                "candidate_id": row["candidate_id"],
+                "candidate_exists": False,
+                "prediction": "",
+            },
+        )
+        return {"status": "COMPLETED", "candidate_status": "SUCCESS"}
+
+    monkeypatch.setattr(full373, "seed_candidate_states", fail_seed)
+    monkeypatch.setattr(full373, "_candidate_queue_rows", counted_rows)
+    monkeypatch.setattr(full373.time, "sleep", fake_sleep)
+    monkeypatch.setattr(full373, "_execute_candidate_row", fake_execute)
+
+    result = full373.run_candidate_queue_worker(
+        tmp_path,
+        task_manifest=manifest,
+        worker_id="worker_a",
+        profile="gpu_t4",
+        resource_class="GPU_LIGHT_T4",
+        poll_sec=1,
+        max_tasks=1,
+        max_idle_sec=60,
+    )
+
+    assert result["status"] == "MAX_TASKS_REACHED"
+    assert result["completed"] == 1
+    assert seed_calls["count"] == 0
+    assert manifest_loads["count"] == 1
+    assert sleep_calls["count"] == 1
+
+
+def test_seed_candidate_states_does_not_recompute_case_target_for_each_ready_candidate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "1", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher2", "candidate_id": "cand_b", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1", "teacher2"]})
+    calls = {"count": 0}
+
+    def fail_recompute(*args, **kwargs):
+        calls["count"] += 1
+        raise AssertionError("global READY seed must not recompute case-target readiness per candidate")
+
+    monkeypatch.setattr(full373, "recompute_case_target_readiness", fail_recompute)
+
+    seed = full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+
+    assert seed["seeded"] == 2
+    assert seed["logical_task_count"] == 2
+    assert calls["count"] == 0
+
+
+def test_build_submission_manifest_does_not_seed_before_dynamic_worker_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    targets = [f"organ_{index:03d}" for index in range(373)]
+    _patch_routes(monkeypatch, {target: ["teacher1"] for target in targets})
+    case_manifest = _case_manifest(tmp_path / "cases.csv", ["CASE001"])
+    target_config = _target_config(tmp_path / "targets.json", targets)
+
+    def fail_seed(*args, **kwargs):
+        raise AssertionError("full373 planning must not seed; dynamic submitter seeds the actual worker manifest once")
+
+    monkeypatch.setattr(full373, "seed_candidate_states", fail_seed)
+
+    summary = full373.build_submission_manifest(
+        case_manifest=case_manifest,
+        output_root=tmp_path / "out",
+        registry_path=tmp_path / "registry.yaml",
+        target_config=target_config,
+        python=Path("/usr/bin/python"),
+        checkpoint_root=tmp_path / "checkpoints",
+        nnunet_predict_executable=tmp_path / "nnUNetv2_predict",
+        unest_python_executable=tmp_path / "unest_python",
+        expected_case_count=1,
+    )
+
+    assert summary["status"] == "READY"
+    assert summary["task_count"] == 373
+    assert "candidate_seed" not in summary
+
+
 def test_two_workers_share_one_seed_and_keep_o_excl_claim_authority(tmp_path: Path):
     manifest = _write_candidate_manifest(
         tmp_path / "shared.csv",
