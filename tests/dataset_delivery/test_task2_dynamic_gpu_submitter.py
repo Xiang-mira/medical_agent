@@ -161,6 +161,7 @@ def test_dynamic_submitter_auto_profiles_use_cluster_inventory_without_fixed_30_
         profile_specs="auto",
         groups=["cads"],
         dry_run=True,
+        labelcritic_required=False,
     )
 
     assert plan["planned_target_workers"] == 64
@@ -186,6 +187,148 @@ def test_dynamic_submitter_can_defer_teacher_h100_when_labelcritic_reserved(tmp_
         }
     }
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"full373": 8})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=True,
+        labelcritic_job_id="777777",
+        labelcritic_job_state="PENDING",
+    )
+
+    assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu"}
+    assert plan["allow_h100_teacher_overflow"] is True
+    assert plan["labelcritic_job_state"] == "PENDING"
+    assert plan["labelcritic_h100_reserved"] is True
+    assert plan["effective_teacher_h100_enabled"] is False
+    assert plan["teacher_h100_deferred_for_labelcritic"] is True
+    assert plan["desired_teacher_h100_workers"] == 0
+    assert plan["resource_policy"]["teacher_resource_requirement"] == "GPU_INFERENCE_COMPATIBLE"
+    assert plan["resource_policy"]["labelcritic_h100_reservation"] is True
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "STARTING"])
+def test_dynamic_submitter_blocks_teacher_h100_for_labelcritic_runtime_states(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 1, "gpus_configured_total": 1},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"full373": 8})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=True,
+        labelcritic_job_id="777777",
+        labelcritic_job_state=state,
+    )
+
+    assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu"}
+    assert plan["labelcritic_job_state"] == state
+    assert plan["labelcritic_h100_reserved"] is True
+    assert plan["effective_teacher_h100_enabled"] is False
+    assert plan["desired_teacher_h100_workers"] == 0
+    assert not any("H100" in str(row.get("gres") or "").upper() for row in plan["jobs"])
+
+
+def test_dynamic_submitter_keeps_h100_reserved_when_labelcritic_required_but_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 2, "gpus_configured_total": 2},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    monkeypatch.setattr(
+        "tools.dataset_delivery.task2_h100_policy.default_find_labelcritic_job_by_name",
+        lambda: {"status": "NONE"},
+    )
+    summary = _summary(tmp_path, {"full373": 8})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=True,
+    )
+
+    assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu"}
+    assert plan["labelcritic_job_found"] is False
+    assert plan["labelcritic_h100_reserved"] is True
+    assert plan["effective_teacher_h100_enabled"] is False
+    assert plan["desired_teacher_h100_workers"] == 0
+
+
+def test_dynamic_submitter_allows_teacher_h100_when_labelcritic_not_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 1, "gpus_configured_total": 1},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"full373": 24})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=False,
+    )
+
+    assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu", "gpuh100"}
+    assert plan["labelcritic_h100_reserved"] is False
+    assert plan["effective_teacher_h100_enabled"] is True
+    assert plan["desired_teacher_h100_workers"] > 0
+    assert any("H100" in str(row.get("gres") or "").upper() for row in plan["jobs"])
+
+
+def test_dynamic_submitter_env_zero_blocks_teacher_h100_even_when_labelcritic_not_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 2, "gpus_configured_total": 2},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
     monkeypatch.setenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "0")
     summary = _summary(tmp_path, {"full373": 8})
 
@@ -198,11 +341,14 @@ def test_dynamic_submitter_can_defer_teacher_h100_when_labelcritic_reserved(tmp_
         profile_specs="auto",
         groups=["full373"],
         dry_run=True,
+        labelcritic_required=False,
     )
 
     assert {profile["partition"] for profile in plan["profile_specs"]} == {"gpu"}
-    assert plan["resource_policy"]["teacher_resource_requirement"] == "GPU_INFERENCE_COMPATIBLE"
-    assert plan["resource_policy"]["labelcritic_h100_reservation"] is True
+    assert plan["allow_h100_teacher_overflow"] is False
+    assert plan["labelcritic_h100_reserved"] is False
+    assert plan["effective_teacher_h100_enabled"] is False
+    assert plan["desired_teacher_h100_workers"] == 0
 
 
 def test_dynamic_submitter_partial_sbatch_success_persists_before_qos_backpressure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -444,6 +590,44 @@ def test_dynamic_submitter_shards_by_detected_max_array_size_and_conserves_logic
     assert plan["missing_logical_task_count"] == 0
     assert plan["sharding_audit"]["all_array_specs_valid"] is True
     assert all(int(row["local_end"]) <= 3999 for row in plan["jobs"])
+
+
+def test_dynamic_submitter_preserves_full_61697_t4_reachability_when_h100_reserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {"partition": "gpu", "gpu_type": "T4", "allocatable_configured_total": 4000, "gpus_configured_total": 4000},
+            "gpuh100": {"partition": "gpuh100", "gpu_type": "H100", "allocatable_configured_total": 8, "gpus_configured_total": 8},
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    monkeypatch.setenv("TASK2_GPU_WORKER_SAFETY_CAP", "5000")
+    summary = _summary(tmp_path, {"full373": 61697})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=4000,
+        overrequest_workers=4000,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+        max_array_size=4000,
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=True,
+        labelcritic_job_id="777777",
+        labelcritic_job_state="PENDING",
+    )
+
+    assert plan["logical_task_count"] == 61697
+    assert plan["unique_logical_task_count"] == 61697
+    assert plan["t4_only_reachability_logical_task_count"] == 61697
+    assert plan["task_ownership"] == "shared_queue"
+    assert plan["profile_binding"] is False
+    assert plan["primary_teacher_profile"] == "gpu_t4"
+    assert plan["desired_teacher_h100_workers"] == 0
 
 
 def test_dynamic_submitter_worker_arrays_split_at_max_array_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

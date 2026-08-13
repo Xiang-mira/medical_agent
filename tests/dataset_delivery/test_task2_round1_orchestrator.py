@@ -568,6 +568,70 @@ def test_ready_teacher_submit_sets_no_git_runtime_env_without_display_or_github_
         assert "SSH_ASKPASS" not in captured
 
 
+def test_ready_teacher_submit_passes_labelcritic_h100_policy_without_disabling_admin_allow(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    monkeypatch.setenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "1")
+    source_manifest = tmp_path / "source.csv"
+    source_manifest.write_text("index,case_id,ct_path,annotation_folder\n0,CASE001,/src/ct.nii.gz,/src/segmentations\n", encoding="utf-8")
+    ct = args.workspace_root / "inputs" / "images" / "CASE001" / "ct.nii.gz"
+    mask = args.workspace_root / "inputs" / "masks_original" / "CASE001" / "segmentations" / "liver.nii.gz"
+    ct.parent.mkdir(parents=True, exist_ok=True)
+    mask.parent.mkdir(parents=True, exist_ok=True)
+    ct.write_bytes(b"ct")
+    mask.write_bytes(b"mask")
+    orch._save_state(args.state_root, formal_root=str(tmp_path / "formal"))
+    captured_dynamic_env: dict[str, str] = {}
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "PENDING", "job_id": str(job_id), "source": "test"})
+
+    def fake_run(command, **kwargs):
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_full373_round1_launcher.py") for part in command):
+            formal_root = Path(command[command.index("--output-root") + 1])
+            formal_root.mkdir(parents=True, exist_ok=True)
+            (formal_root / "formal_task2_submission_manifest.json").write_text('{"status":"READY","task_count":4,"groups":{}}\n', encoding="utf-8")
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command):
+            captured_dynamic_env.update(kwargs.get("env") or {})
+            formal_root = Path(command[command.index("--output-root") + 1])
+            (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+            (formal_root / "slurm" / "dynamic_gpu_submission_plan_ready_batch_001.json").write_text(
+                json.dumps(
+                    {
+                        "status": "SUBMITTED",
+                        "scheduler_status": "ACTIVE",
+                        "teacher_h100_policy": {
+                            "allow_h100_teacher_overflow": True,
+                            "labelcritic_required": True,
+                            "labelcritic_job_found": True,
+                            "labelcritic_job_id": "111111",
+                            "labelcritic_job_state": "PENDING",
+                            "labelcritic_h100_reserved": True,
+                            "effective_teacher_h100_enabled": False,
+                            "teacher_h100_deferred_for_labelcritic": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": '{"status":"SUBMITTED"}', "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "REUSED_ACTIVE_JOB", "job_id": "111111"})
+
+    assert result["status"] == "SUBMITTED"
+    assert captured_dynamic_env["TASK2_ALLOW_H100_TEACHER_OVERFLOW"] == "1"
+    policy = json.loads(captured_dynamic_env["TASK2_TEACHER_H100_POLICY_JSON"])
+    assert policy["allow_h100_teacher_overflow"] is True
+    assert policy["labelcritic_job_state"] == "PENDING"
+    assert policy["labelcritic_h100_reserved"] is True
+    assert policy["effective_teacher_h100_enabled"] is False
+    assert policy["teacher_h100_deferred_for_labelcritic"] is True
+    assert orch._load_state(args.state_root)["teacher_h100_policy"]["labelcritic_job_state"] == "PENDING"
+
+
 def test_formal_submitter_runtime_no_git_skips_remote_sync_without_display_or_credentials(tmp_path, monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     fake_bin = tmp_path / "bin"
@@ -1104,7 +1168,25 @@ def test_status_reports_shared_queue_worker_and_qos_telemetry(tmp_path):
                 "task_ownership": "shared_queue",
                 "profile_binding": False,
                 "primary_teacher_profile": "gpu_t4",
+                "allow_h100_teacher_overflow": True,
+                "labelcritic_required": True,
+                "labelcritic_job_found": True,
+                "labelcritic_job_id": "777777",
+                "labelcritic_job_state": "RUNNING",
+                "labelcritic_h100_reserved": True,
+                "effective_teacher_h100_enabled": False,
                 "teacher_h100_deferred_for_labelcritic": True,
+                "desired_teacher_h100_workers": 0,
+                "teacher_h100_policy": {
+                    "allow_h100_teacher_overflow": True,
+                    "labelcritic_required": True,
+                    "labelcritic_job_found": True,
+                    "labelcritic_job_id": "777777",
+                    "labelcritic_job_state": "RUNNING",
+                    "labelcritic_h100_reserved": True,
+                    "effective_teacher_h100_enabled": False,
+                    "teacher_h100_deferred_for_labelcritic": True,
+                },
             }
         ),
         encoding="utf-8",
@@ -1139,7 +1221,12 @@ def test_status_reports_shared_queue_worker_and_qos_telemetry(tmp_path):
     assert payload["resources"]["task_ownership"] == "shared_queue"
     assert payload["resources"]["profile_binding"] is False
     assert payload["resources"]["primary_teacher_profile"] == "gpu_t4"
+    assert payload["resources"]["allow_h100_teacher_overflow"] is True
+    assert payload["resources"]["labelcritic_job_state"] == "RUNNING"
+    assert payload["resources"]["labelcritic_h100_reserved"] is True
+    assert payload["resources"]["effective_teacher_h100_enabled"] is False
     assert payload["resources"]["teacher_h100_deferred_for_labelcritic"] is True
+    assert payload["resources"]["desired_teacher_h100_workers"] == 0
     assert payload["resources"]["teacher_workers"]["t4_running"] == 1
     assert payload["resources"]["teacher_workers"]["a100_pending"] == 1
     assert payload["resources"]["qos"]["per_profile_known_good"]["gpu_t4"] == 4000

@@ -36,6 +36,7 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     slurm_comment,
     student_pretimeout,
 )
+from tools.dataset_delivery.task2_h100_policy import resolve_teacher_h100_policy  # noqa: E402
 from tools.dataset_delivery.task2_formal_manifest import FORMAL_CASE_COUNT, build_formal_manifest, validate_formal_manifest  # noqa: E402
 from tools.dataset_delivery.task2_full373_round1_launcher import (  # noqa: E402
     FULL373_GROUP,
@@ -1320,6 +1321,13 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         ["case_id", "ct_path", "annotation_folder"],
     )
     endpoint = _labelcritic_endpoint_hint(state_root, labelcritic)
+    h100_policy = resolve_teacher_h100_policy(
+        state_root=state_root,
+        labelcritic=labelcritic,
+        slurm_job_state_fn=slurm_job_state,
+        find_labelcritic_job_fn=find_labelcritic_job_by_name,
+        source="orchestrator_submit_ready_teacher_batch",
+    )
     env = runtime_no_git_env()
     env.update({
         "LABELCRITIC_SERVICE_ROOT": str(_service_paths(state_root)["root"]),
@@ -1330,9 +1338,12 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC": str(os.getenv("MEDAI_LABELCRITIC_ENDPOINT_WAIT_SEC", os.getenv("WAIT_LABELCRITIC_SEC", "14400"))),
         "WAIT_LABELCRITIC_SEC": str(os.getenv("WAIT_LABELCRITIC_SEC", "14400")),
         "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
+        "TASK2_TEACHER_H100_POLICY_JSON": json.dumps(h100_policy, ensure_ascii=False),
+        "TASK2_LABELCRITIC_REQUIRED": "1" if h100_policy.get("labelcritic_required") else "0",
+        "TASK2_LABELCRITIC_H100_RESERVED": "1" if h100_policy.get("labelcritic_h100_reserved") else "0",
+        "TASK2_LABELCRITIC_JOB_ID": str(h100_policy.get("labelcritic_job_id") or ""),
+        "TASK2_LABELCRITIC_JOB_STATE": str(h100_policy.get("labelcritic_job_state") or ""),
     })
-    if "TASK2_ALLOW_H100_TEACHER_OVERFLOW" not in os.environ and labelcritic and labelcritic.get("status"):
-        env["TASK2_ALLOW_H100_TEACHER_OVERFLOW"] = "0"
     plan_cmd = [
         str(args.python),
         "tools/dataset_delivery/task2_full373_round1_launcher.py",
@@ -1398,6 +1409,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "plan": plan_result,
         "dynamic": dynamic_result,
         "dynamic_plan": dynamic_plan,
+        "teacher_h100_policy": dynamic_plan.get("teacher_h100_policy") or h100_policy,
         "created_at": utc_now(),
     }
     _append_teacher_batch(paths, batch)
@@ -1409,6 +1421,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
             formal_root=str(formal_root),
             last_teacher_batch=batch,
             scheduler_status=scheduler_status,
+            teacher_h100_policy=batch["teacher_h100_policy"],
         )
         return batch
     updated = sorted(submitted_cases | set(ready_cases))
@@ -1420,6 +1433,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         formal_root=str(formal_root),
         last_teacher_batch=batch,
         scheduler_status=scheduler_status,
+        teacher_h100_policy=batch["teacher_h100_policy"],
     )
     return batch
 
@@ -2060,12 +2074,30 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
     mstep_job = slurm_job_state(str(state.get("mstep_job_id") or "")) if state.get("mstep_job_id") else {"state": "NOT_SUBMITTED"}
     qos_cache = _read_json(formal_root / "slurm" / "qos_capacity_cache.json", {}) if formal_root.exists() else {}
     dynamic_plan = _read_json(formal_root / "slurm" / "dynamic_gpu_submission_plan.json", {}) if formal_root.exists() else {}
+    stored_policy = dynamic_plan.get("teacher_h100_policy") or state.get("teacher_h100_policy") or {}
+    h100_policy = resolve_teacher_h100_policy(
+        state_root=state_root,
+        labelcritic=labelcritic if isinstance(labelcritic, dict) else None,
+        labelcritic_job_id=str(stored_policy.get("labelcritic_job_id") or "") if isinstance(stored_policy, dict) else None,
+        slurm_job_state_fn=slurm_job_state,
+        find_labelcritic_job_fn=find_labelcritic_job_by_name,
+        source="orchestrator_status",
+    )
     return {
         "teacher_workers": worker_counts,
         "task_ownership": dynamic_plan.get("task_ownership", ""),
         "profile_binding": dynamic_plan.get("profile_binding"),
         "primary_teacher_profile": dynamic_plan.get("primary_teacher_profile", ""),
-        "teacher_h100_deferred_for_labelcritic": dynamic_plan.get("teacher_h100_deferred_for_labelcritic"),
+        "allow_h100_teacher_overflow": h100_policy.get("allow_h100_teacher_overflow"),
+        "labelcritic_required": h100_policy.get("labelcritic_required"),
+        "labelcritic_job_found": h100_policy.get("labelcritic_job_found"),
+        "labelcritic_job_id": h100_policy.get("labelcritic_job_id"),
+        "labelcritic_job_state": h100_policy.get("labelcritic_job_state"),
+        "labelcritic_h100_reserved": h100_policy.get("labelcritic_h100_reserved"),
+        "effective_teacher_h100_enabled": h100_policy.get("effective_teacher_h100_enabled"),
+        "teacher_h100_deferred_for_labelcritic": h100_policy.get("teacher_h100_deferred_for_labelcritic"),
+        "desired_teacher_h100_workers": dynamic_plan.get("desired_teacher_h100_workers"),
+        "teacher_h100_policy": h100_policy,
         "qos": {
             "per_profile_known_good": {
                 str(name): int((doc or {}).get("known_good_size") or 0)

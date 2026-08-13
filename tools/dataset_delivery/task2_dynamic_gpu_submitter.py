@@ -35,6 +35,7 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     record_job_lifecycle,
     slurm_comment,
 )
+from tools.dataset_delivery.task2_h100_policy import resolve_teacher_h100_policy  # noqa: E402
 
 
 DEFAULT_GROUP_WEIGHTS = {
@@ -157,14 +158,14 @@ def build_auto_gpu_profiles(snapshot: dict[str, Any], *, min_vram_gb: int = 12, 
     return profiles or parse_profile_specs(DEFAULT_PROFILE_SPECS)
 
 
-def resolve_profiles(profile_specs: str, *, output_root: Path) -> tuple[list[GpuSubmitProfile], dict[str, Any]]:
+def resolve_profiles(profile_specs: str, *, output_root: Path, include_h100_overflow: bool = True) -> tuple[list[GpuSubmitProfile], dict[str, Any]]:
     if str(profile_specs or "").strip().lower() not in {"", "auto", "cluster", "cluster_auto"}:
         return parse_profile_specs(profile_specs), {"mode": "explicit_profile_specs", "snapshot": None}
     snapshot = discover_resource_snapshot(output_dir=output_root / "slurm" / "resource_inventory", include_raw=False)
     profiles = build_auto_gpu_profiles(
         snapshot,
         min_vram_gb=int(os.getenv("TASK2_TEACHER_MIN_VRAM_GB", "12")),
-        include_h100_overflow=os.getenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "1").strip().lower() not in {"0", "false", "no"},
+        include_h100_overflow=include_h100_overflow,
     )
     return profiles, {"mode": "cluster_auto", "snapshot": snapshot}
 
@@ -896,11 +897,25 @@ def build_dynamic_submission_plan(
     git_commit: str = "",
     max_array_size: int | None = None,
     max_new_shards_per_round: int | None = None,
+    allow_h100_teacher_overflow: Any | None = None,
+    labelcritic_required: Any | None = None,
+    labelcritic_job_id: str | None = None,
+    labelcritic_job_state: str | None = None,
+    labelcritic_h100_reserved: Any | None = None,
 ) -> dict[str, Any]:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if summary.get("status") != "READY":
         raise RuntimeError(f"Formal Task2 preflight is not READY: {summary.get('status')}")
-    profiles, resource_inventory = resolve_profiles(profile_specs, output_root=output_root)
+    h100_policy = resolve_teacher_h100_policy(
+        state_root=state_root,
+        allow_h100_teacher_overflow=allow_h100_teacher_overflow,
+        labelcritic_required=labelcritic_required,
+        labelcritic_job_id=labelcritic_job_id,
+        labelcritic_job_state=labelcritic_job_state,
+        labelcritic_h100_reserved=labelcritic_h100_reserved,
+    )
+    h100_enabled = bool(h100_policy.get("effective_teacher_h100_enabled"))
+    profiles, resource_inventory = resolve_profiles(profile_specs, output_root=output_root, include_h100_overflow=h100_enabled)
     summary_groups = summary.get("groups") or {}
     requested_groups = groups or [group for group in ("cads", "atm", "airrc", "unest") if group in summary_groups]
     task_counts = {
@@ -967,7 +982,6 @@ def build_dynamic_submission_plan(
     sharded_unique_ids = sorted(set(sharded_logical_ids))
     duplicate_count = len(sharded_logical_ids) - len(sharded_unique_ids)
     missing_ids = sorted(set(unique_logical_ids) - set(sharded_unique_ids))
-    h100_enabled = os.getenv("TASK2_ALLOW_H100_TEACHER_OVERFLOW", "1").strip().lower() not in {"0", "false", "no"}
     qos_states = {
         profile.name: _profile_qos_state(
             profile,
@@ -997,6 +1011,11 @@ def build_dynamic_submission_plan(
     worker_rows: list[dict[str, Any]] = []
     profile_reports: list[dict[str, Any]] = []
     primary_teacher_profile = next((profile.name for profile in profiles if "T4" in f"{profile.name} {profile.gres} {profile.partition}".upper()), profiles[0].name if profiles else "")
+    desired_teacher_h100_workers = sum(
+        int(desired_workers.get(profile.name) or 0)
+        for profile in profiles
+        if "H100" in f"{profile.name} {profile.partition} {profile.gres}".upper()
+    )
     for profile in profiles:
         qos_state = qos_states.get(profile.name) or {}
         effective_limit = int(qos_state.get("effective_limit") or 0)
@@ -1101,10 +1120,6 @@ def build_dynamic_submission_plan(
         str(row.get("array_plan_validation", {}).get("status") or "") == "READY"
         for row in worker_rows
     )
-    all_array_specs_valid = all(
-        str(row.get("array_plan_validation", {}).get("status") or "") == "READY"
-        for row in worker_rows
-    )
     sharding_audit = {
         "status": "READY" if duplicate_count == 0 and not missing_ids and all_array_specs_valid else "INVALID_ARRAY_PLAN",
         "execution_schema_version": CANDIDATE_TASK_V1,
@@ -1128,6 +1143,16 @@ def build_dynamic_submission_plan(
         "task_ownership": "shared_queue",
         "profile_binding": False,
         "primary_teacher_profile": primary_teacher_profile,
+        "allow_h100_teacher_overflow": bool(h100_policy.get("allow_h100_teacher_overflow")),
+        "labelcritic_required": bool(h100_policy.get("labelcritic_required")),
+        "labelcritic_job_found": bool(h100_policy.get("labelcritic_job_found")),
+        "labelcritic_job_id": h100_policy.get("labelcritic_job_id", ""),
+        "labelcritic_job_state": h100_policy.get("labelcritic_job_state", "UNKNOWN"),
+        "labelcritic_h100_reserved": bool(h100_policy.get("labelcritic_h100_reserved")),
+        "effective_teacher_h100_enabled": h100_enabled,
+        "teacher_h100_deferred_for_labelcritic": bool(h100_policy.get("teacher_h100_deferred_for_labelcritic")),
+        "desired_teacher_h100_workers": desired_teacher_h100_workers,
+        "teacher_h100_policy": h100_policy,
     }
     write_json(slurm_root / "sharding_audit.json", sharding_audit)
     if sharding_audit["status"] != "READY":
@@ -1398,15 +1423,34 @@ def build_dynamic_submission_plan(
         "task_ownership": "shared_queue",
         "profile_binding": False,
         "primary_teacher_profile": primary_teacher_profile,
-        "teacher_h100_deferred_for_labelcritic": not h100_enabled,
+        "allow_h100_teacher_overflow": bool(h100_policy.get("allow_h100_teacher_overflow")),
+        "labelcritic_required": bool(h100_policy.get("labelcritic_required")),
+        "labelcritic_job_found": bool(h100_policy.get("labelcritic_job_found")),
+        "labelcritic_job_id": h100_policy.get("labelcritic_job_id", ""),
+        "labelcritic_job_state": h100_policy.get("labelcritic_job_state", "UNKNOWN"),
+        "labelcritic_h100_reserved": bool(h100_policy.get("labelcritic_h100_reserved")),
+        "effective_teacher_h100_enabled": h100_enabled,
+        "teacher_h100_deferred_for_labelcritic": bool(h100_policy.get("teacher_h100_deferred_for_labelcritic")),
+        "desired_teacher_h100_workers": desired_teacher_h100_workers,
         "t4_only_reachability_logical_task_count": len(all_logical_ids),
         "resource_policy": {
             "teacher_resource_requirement": "GPU_INFERENCE_COMPATIBLE",
             "profile_priority_order": "T4/generic/immediately-compatible GPUs first; A100/H100 are opportunistic overflow, not scientific ownership",
-            "labelcritic_h100_reservation": not h100_enabled,
-            "h100_overflow_policy": "DEFERRED_LOW_UTILITY_PROFILE when LabelCritic service is active unless TASK2_ALLOW_H100_TEACHER_OVERFLOW=1",
+            "allow_h100_teacher_overflow": bool(h100_policy.get("allow_h100_teacher_overflow")),
+            "labelcritic_required": bool(h100_policy.get("labelcritic_required")),
+            "labelcritic_job_found": bool(h100_policy.get("labelcritic_job_found")),
+            "labelcritic_job_id": h100_policy.get("labelcritic_job_id", ""),
+            "labelcritic_job_state": h100_policy.get("labelcritic_job_state", "UNKNOWN"),
+            "labelcritic_h100_reservation": bool(h100_policy.get("labelcritic_h100_reserved")),
+            "effective_teacher_h100_enabled": h100_enabled,
+            "teacher_h100_deferred_for_labelcritic": bool(h100_policy.get("teacher_h100_deferred_for_labelcritic")),
+            "desired_teacher_h100_workers": desired_teacher_h100_workers,
+            "reservation_reason": h100_policy.get("reservation_reason", ""),
+            "source": h100_policy.get("source", ""),
+            "h100_overflow_policy": "TASK2_ALLOW_H100_TEACHER_OVERFLOW only grants admin permission; effective Teacher H100 use also requires LabelCritic H100 not reserved",
             "qos_backpressure_classification": "QOSMaxSubmitJobPerUserLimit classified as BACKPRESSURE",
         },
+        "teacher_h100_policy": h100_policy,
         "resource_inventory": resource_inventory,
         "worker_sizing": worker_sizing,
         "worker_pool": {
@@ -1481,6 +1525,11 @@ def main() -> int:
     parser.add_argument("--append-submitted-jobs", action="store_true")
     parser.add_argument("--run-id", default=os.getenv("ROUND1_RUN_ID", ""))
     parser.add_argument("--git-commit", default=os.getenv("EXPECTED_GIT_COMMIT", ""))
+    parser.add_argument("--allow-h100-teacher-overflow", default=None)
+    parser.add_argument("--labelcritic-required", default=None)
+    parser.add_argument("--labelcritic-job-id", default="")
+    parser.add_argument("--labelcritic-state", default="")
+    parser.add_argument("--labelcritic-h100-reserved", default=None)
     args = parser.parse_args()
     groups = [item.strip() for item in args.groups.replace(";", ",").split(",") if item.strip()] or None
     plan = build_dynamic_submission_plan(
@@ -1498,8 +1547,33 @@ def main() -> int:
         append_submitted_jobs=bool(args.append_submitted_jobs),
         run_id=args.run_id,
         git_commit=args.git_commit,
+        allow_h100_teacher_overflow=args.allow_h100_teacher_overflow,
+        labelcritic_required=args.labelcritic_required,
+        labelcritic_job_id=args.labelcritic_job_id,
+        labelcritic_job_state=args.labelcritic_state,
+        labelcritic_h100_reserved=args.labelcritic_h100_reserved,
     )
-    print(json.dumps({k: plan[k] for k in ("status", "scheduler_status", "planned_target_workers", "planned_overrequest_workers", "total_array_concurrency")}, indent=2))
+    print(
+        json.dumps(
+            {
+                k: plan[k]
+                for k in (
+                    "status",
+                    "scheduler_status",
+                    "planned_target_workers",
+                    "planned_overrequest_workers",
+                    "total_array_concurrency",
+                    "allow_h100_teacher_overflow",
+                    "labelcritic_job_state",
+                    "labelcritic_h100_reserved",
+                    "effective_teacher_h100_enabled",
+                    "teacher_h100_deferred_for_labelcritic",
+                    "desired_teacher_h100_workers",
+                )
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
