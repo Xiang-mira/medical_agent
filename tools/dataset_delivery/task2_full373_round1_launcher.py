@@ -114,6 +114,7 @@ def _queue_paths(output_root: Path) -> dict[str, Path]:
         "selection_results": root / "selection_results",
         "events": root / "events.jsonl",
         "telemetry": root / "telemetry.json",
+        "candidate_seed_complete": root / "candidate_seed_complete.json",
     }
 
 
@@ -425,6 +426,55 @@ def _candidate_queue_rows(output_root: Path, *, task_manifest: Path | None = Non
     return rows
 
 
+def _manifest_cursor_offset(output_root: Path, *, worker_id: str, manifest_rows: list[dict[str, Any]]) -> int:
+    if not manifest_rows:
+        return 0
+    seed = f"{worker_id}|{len(manifest_rows)}|{manifest_rows[0].get('case_id','')}|{manifest_rows[-1].get('case_id','')}"
+    try:
+        return int(_sha(seed, 8), 16) % len(manifest_rows)
+    except Exception:
+        return 0
+
+
+def _manifest_identity(path: Path | None, rows: list[dict[str, Any]], *, include_hash: bool = True) -> dict[str, Any]:
+    manifest_path = Path(str(path or ""))
+    if manifest_path.exists():
+        stat = manifest_path.stat()
+        identity = {
+            "manifest_path": str(manifest_path.resolve()),
+            "manifest_size": int(stat.st_size),
+            "manifest_mtime_ns": int(stat.st_mtime_ns),
+        }
+        if include_hash:
+            identity["manifest_sha256"] = _sha(manifest_path.read_text(encoding="utf-8"), 24)
+        return identity
+    row_keys = [
+        f"{row.get('case_id','')}|{_norm(str(row.get('target') or ''))}|{row.get('teacher','')}|{_candidate_id_from_row(row)}"
+        for row in rows
+    ]
+    return {
+        "manifest_path": str(manifest_path) if str(manifest_path) else "",
+        "manifest_sha256": _sha("\n".join(row_keys), 24),
+        "manifest_size": 0,
+        "manifest_mtime_ns": 0,
+    }
+
+
+def _candidate_seed_marker_matches(output_root: Path, *, task_manifest: Path | None, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    loaded_rows = rows if rows is not None else _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    identity = _manifest_identity(task_manifest or _candidate_queue_manifest(output_root), loaded_rows, include_hash=False)
+    marker = _read_json(_queue_paths(output_root)["candidate_seed_complete"], {})
+    matches = (
+        bool(marker)
+        and marker.get("schema_version") == "candidate_seed_complete_v1"
+        and int(marker.get("logical_task_count") or -1) == len(loaded_rows)
+        and str(marker.get("manifest_path") or "") == str(identity.get("manifest_path") or "")
+        and int(marker.get("manifest_size") or -1) == int(identity.get("manifest_size") or -2)
+        and int(marker.get("manifest_mtime_ns") or -1) == int(identity.get("manifest_mtime_ns") or -2)
+    )
+    return {"status": "MATCH" if matches else "MISSING_OR_STALE", "marker": marker, "identity": identity, "logical_task_count": len(loaded_rows)}
+
+
 def _write_array_sbatch(path: Path, *, python: Path, output_root: Path, task_manifest: Path, state_root: Path | None = None) -> None:
     state_arg = f"  --state-root {shlex.quote(str(state_root))} \\\n" if state_root else ""
     content = f"""#!/usr/bin/env bash
@@ -509,6 +559,7 @@ def build_submission_manifest(
     slurm_root = output_root / "slurm"
     task_manifest = _candidate_queue_manifest(output_root)
     write_csv(task_manifest, rows, list(rows[0].keys()) if rows else ["task_index", "case_id", "target", "teacher", "candidate_id"])
+    candidate_seed = seed_candidate_states(output_root, task_manifest=task_manifest)
     sbatch = slurm_root / "full373_multiteacher_array.sbatch"
     _write_array_sbatch(sbatch, python=python, output_root=output_root, task_manifest=task_manifest, state_root=state_root)
     summary = {
@@ -518,6 +569,7 @@ def build_submission_manifest(
         "scope": str(output_root / "full_round1_submission_scope.json"),
         "scope_status": scope,
         "task_count": len(rows),
+        "candidate_seed": candidate_seed,
         "scientific_task_unit": "case_id x canonical_target x eligible_teacher",
         "scheduler_array_unit": "generic GPU worker array consuming shared READY candidate queue",
         "groups": {
@@ -651,7 +703,17 @@ def seed_candidate_states(output_root: Path, *, task_manifest: Path | None = Non
                 "published_at": utc_now(),
             },
         )
-    return {"status": "READY", "seeded": seeded, "retained": retained, "total": len(rows)}
+    identity = _manifest_identity(task_manifest or _candidate_queue_manifest(output_root), rows)
+    marker = {
+        "schema_version": "candidate_seed_complete_v1",
+        "logical_task_count": len(rows),
+        **identity,
+        "seeded": seeded,
+        "retained": retained,
+        "completed_at": utc_now(),
+    }
+    atomic_write_json(_queue_paths(output_root)["candidate_seed_complete"], marker)
+    return {"status": "READY", **marker}
 
 
 def claim_next_ready_candidate(
@@ -663,20 +725,57 @@ def claim_next_ready_candidate(
     resource_class: str = "GPU_INFERENCE_COMPATIBLE",
     lease_sec: int = 7200,
 ) -> dict[str, Any]:
-    seed_candidate_states(output_root, task_manifest=task_manifest)
     manifest_rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
-    row_by_candidate_id: dict[str, dict[str, Any]] = {}
-    candidates: list[dict[str, Any]] = []
+    return claim_next_ready_candidate_from_rows(
+        output_root,
+        manifest_rows=manifest_rows,
+        worker_id=worker_id,
+        profile=profile,
+        resource_class=resource_class,
+        lease_sec=lease_sec,
+        task_manifest=task_manifest,
+    )
+
+
+def claim_next_ready_candidate_from_rows(
+    output_root: Path,
+    *,
+    manifest_rows: list[dict[str, Any]],
+    worker_id: str,
+    profile: str,
+    resource_class: str = "GPU_INFERENCE_COMPATIBLE",
+    lease_sec: int = 7200,
+    task_manifest: Path | None = None,
+    start_index: int = 0,
+    seed_marker_check: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    marker_check = seed_marker_check or _candidate_seed_marker_matches(output_root, task_manifest=task_manifest, rows=manifest_rows)
+    if marker_check["status"] != "MATCH":
+        return {
+            "status": "WAITING_FOR_CANDIDATE_SEED",
+            "queue_depth": 0,
+            "seed_marker": marker_check,
+        }
+    state_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+    queue_depth = 0
     now = time.time()
-    for row in manifest_rows:
+    if not manifest_rows:
+        return {"status": "NO_READY_CANDIDATES", "next_cursor": 0, "seed_marker": marker_check}
+    start = max(0, int(start_index or 0)) % len(manifest_rows)
+    indexed_rows = list(enumerate(manifest_rows))
+    ordered_rows = indexed_rows[start:] + indexed_rows[:start]
+    for row_index, row in ordered_rows:
         case_id = str(row.get("case_id") or "").strip()
         target = _norm(str(row.get("target") or ""))
         teacher = str(row.get("teacher") or "").strip()
         if not case_id or not target or not teacher:
             continue
         candidate_id = _candidate_id_from_row(row)
-        row_by_candidate_id[candidate_id] = row
-        state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+        state_key = (case_id, target, teacher)
+        state = state_cache.get(state_key)
+        if state is None:
+            state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+            state_cache[state_key] = state
         if _candidate_terminal(state):
             continue
         claim_path = _claim_path(output_root, claim_kind="candidate", claim_key=candidate_id)
@@ -692,24 +791,11 @@ def claim_next_ready_candidate(
             publish_candidate_state(output_root, state)
         if not _candidate_pending_like(state):
             continue
-        candidates.append(
-            {
-                "case_id": case_id,
-                "target": target,
-                "teacher": teacher,
-                "candidate_id": candidate_id,
-                "state": state,
-                "row": row,
-            }
-        )
-    if not candidates:
-        return {"status": "NO_READY_CANDIDATES"}
-    candidates.sort(key=lambda item: (str(item["case_id"]), str(item["target"]), str(item["teacher"])))
-    for item in candidates:
+        queue_depth += 1
         claim = claim_work(
             output_root,
             claim_kind="candidate",
-            claim_key=str(item["candidate_id"]),
+            claim_key=str(candidate_id),
             worker_id=worker_id,
             lease_sec=lease_sec,
             execution_id=f"{re_safe(worker_id)}_{_sha(str(time.time()), 12)}",
@@ -719,7 +805,7 @@ def claim_next_ready_candidate(
         if claim["status"] != "CLAIMED":
             continue
         claimed_state = {
-            **item["state"],
+            **state,
             "status": "CLAIMED",
             "claim": claim["claim"],
             "worker_id": worker_id,
@@ -727,9 +813,19 @@ def claim_next_ready_candidate(
             "resource_class": resource_class,
             "updated_at": utc_now(),
         }
+        state_cache[state_key] = claimed_state
         publish_candidate_state(output_root, claimed_state)
-        return {"status": "CLAIMED", "candidate": claimed_state, "claim": claim, "row": row_by_candidate_id.get(str(item["candidate_id"]), item["row"])}
-    return {"status": "NO_CLAIMABLE_READY_CANDIDATES", "queue_depth": len(candidates)}
+        return {
+            "status": "CLAIMED",
+            "candidate": claimed_state,
+            "claim": claim,
+            "row": row,
+            "row_index": int(row_index),
+            "next_cursor": (int(row_index) + 1) % len(manifest_rows),
+        }
+    if queue_depth <= 0:
+        return {"status": "NO_READY_CANDIDATES", "next_cursor": start, "seed_marker": marker_check}
+    return {"status": "NO_CLAIMABLE_READY_CANDIDATES", "queue_depth": queue_depth, "next_cursor": start, "seed_marker": marker_check}
 
 
 def recompute_case_target_readiness(output_root: Path, *, case_id: str, target: str) -> dict[str, Any]:
@@ -898,15 +994,23 @@ def run_candidate_queue_worker(
     started = time.time()
     completed = 0
     idle_since: float | None = None
+    manifest_rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    seed_marker_check = _candidate_seed_marker_matches(output_root, task_manifest=task_manifest, rows=manifest_rows)
+    cursor = _manifest_cursor_offset(output_root, worker_id=worker_id, manifest_rows=manifest_rows)
     while True:
-        claim = claim_next_ready_candidate(
+        claim = claim_next_ready_candidate_from_rows(
             output_root,
+            manifest_rows=manifest_rows,
             task_manifest=task_manifest,
             worker_id=worker_id,
             profile=profile,
             resource_class=resource_class,
             lease_sec=lease_sec,
+            start_index=cursor,
+            seed_marker_check=seed_marker_check,
         )
+        if "next_cursor" in claim:
+            cursor = int(claim.get("next_cursor") or cursor)
         if claim["status"] == "CLAIMED":
             idle_since = None
             result = _execute_candidate_row(

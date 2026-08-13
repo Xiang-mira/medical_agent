@@ -626,6 +626,7 @@ def test_dynamic_submitter_preserves_full_61697_t4_reachability_when_h100_reserv
     assert plan["t4_only_reachability_logical_task_count"] == 61697
     assert plan["task_ownership"] == "shared_queue"
     assert plan["profile_binding"] is False
+    assert plan["candidate_seed"]["logical_task_count"] == 61697
     assert plan["primary_teacher_profile"] == "gpu_t4"
     assert plan["desired_teacher_h100_workers"] == 0
 

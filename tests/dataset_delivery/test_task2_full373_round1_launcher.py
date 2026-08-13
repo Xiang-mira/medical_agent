@@ -250,6 +250,16 @@ def _write_scope(root: Path, *, cases: list[str], routes: dict[str, list[str]]) 
     )
 
 
+def _write_candidate_manifest(path: Path, rows: list[dict[str, str]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["task_index", "case_id", "target", "teacher", "candidate_id", "ct_path", "annotation_folder"]
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(",".join(fieldnames) + "\n")
+        for row in rows:
+            handle.write(",".join(str(row.get(field, "")) for field in fieldnames) + "\n")
+    return path
+
+
 def _candidate(root: Path, case_id: str, target: str, teacher: str, status: str = "SUCCESS") -> dict:
     mask = root / "masks" / case_id / target / f"{teacher}.nii.gz"
     if status == "SUCCESS":
@@ -383,6 +393,7 @@ def test_shared_ready_queue_claim_is_not_profile_bound(tmp_path: Path):
             "total_logical_candidate_tasks": 2,
         },
     )
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
     claim = full373.claim_next_ready_candidate(
         tmp_path,
         task_manifest=manifest,
@@ -394,6 +405,98 @@ def test_shared_ready_queue_claim_is_not_profile_bound(tmp_path: Path):
     assert claim["status"] == "CLAIMED"
     assert claim["candidate"]["profile"] == "gpu_a100"
     assert claim["candidate"]["status"] == "CLAIMED"
+
+
+def test_queue_worker_does_not_call_global_seed_and_loads_manifest_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "1", "case_id": "CASE002", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_b", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001", "CASE002"], routes={"organ_a": ["teacher1"]})
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    seed_calls = {"count": 0}
+    manifest_loads = {"count": 0}
+    original_rows = full373._candidate_queue_rows
+
+    def fail_seed(*args, **kwargs):
+        seed_calls["count"] += 1
+        raise AssertionError("queue worker must not perform global candidate seed")
+
+    def counted_rows(*args, **kwargs):
+        manifest_loads["count"] += 1
+        return original_rows(*args, **kwargs)
+
+    def fake_execute(row, output_root, **kwargs):
+        full373.publish_candidate_state(
+            output_root,
+            {
+                "status": "SUCCESS",
+                "case_id": row["case_id"],
+                "target": row["target"],
+                "teacher": row["teacher"],
+                "candidate_id": row["candidate_id"],
+                "candidate_exists": False,
+                "prediction": "",
+            },
+        )
+        return {"status": "COMPLETED", "candidate_status": "SUCCESS"}
+
+    monkeypatch.setattr(full373, "seed_candidate_states", fail_seed)
+    monkeypatch.setattr(full373, "_candidate_queue_rows", counted_rows)
+    monkeypatch.setattr(full373, "_execute_candidate_row", fake_execute)
+
+    result = full373.run_candidate_queue_worker(
+        tmp_path,
+        task_manifest=manifest,
+        worker_id="worker_a",
+        profile="gpu_t4",
+        resource_class="GPU_LIGHT_T4",
+        max_tasks=2,
+        max_idle_sec=0,
+    )
+
+    assert result["status"] == "MAX_TASKS_REACHED"
+    assert result["completed"] == 2
+    assert seed_calls["count"] == 0
+    assert manifest_loads["count"] == 1
+
+
+def test_two_workers_share_one_seed_and_keep_o_excl_claim_authority(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    seed = full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    rows = full373._candidate_queue_rows(tmp_path, task_manifest=manifest)
+
+    first = full373.claim_next_ready_candidate_from_rows(
+        tmp_path,
+        manifest_rows=rows,
+        task_manifest=manifest,
+        worker_id="worker_a",
+        profile="gpu_t4",
+        resource_class="GPU_LIGHT_T4",
+    )
+    second = full373.claim_next_ready_candidate_from_rows(
+        tmp_path,
+        manifest_rows=rows,
+        task_manifest=manifest,
+        worker_id="worker_b",
+        profile="gpu_a100",
+        resource_class="GPU_HIGH_MEMORY_A100",
+    )
+
+    assert seed["logical_task_count"] == 1
+    assert first["status"] == "CLAIMED"
+    assert second["status"] != "CLAIMED"
+    marker = json.loads((tmp_path / "queues" / "candidate_seed_complete.json").read_text(encoding="utf-8"))
+    assert marker["seeded"] == 1
 
 
 def test_expired_candidate_claim_returns_to_retry_pending_and_reclaims(tmp_path: Path):
@@ -413,6 +516,7 @@ def test_expired_candidate_claim_returns_to_retry_pending_and_reclaims(tmp_path:
             "total_logical_candidate_tasks": 1,
         },
     )
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
     full373.publish_candidate_state(
         tmp_path,
         {

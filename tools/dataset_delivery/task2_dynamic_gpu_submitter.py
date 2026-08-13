@@ -976,6 +976,9 @@ def build_dynamic_submission_plan(
 
     shared_manifest = dynamic_root / "shared_ready_candidate_manifest.csv"
     shared_rows = _write_shared_manifest(manifest_reference, shared_manifest, all_source_rows)
+    from tools.dataset_delivery.task2_full373_round1_launcher import seed_candidate_states
+
+    candidate_seed = seed_candidate_states(output_root, task_manifest=shared_manifest)
     all_logical_ids = [_logical_task_id(row) for row in all_source_rows]
     sharded_logical_ids = [str(row.get("logical_task_id") or "") for row in shared_rows]
     unique_logical_ids = sorted(set(all_logical_ids))
@@ -1412,6 +1415,7 @@ def build_dynamic_submission_plan(
         "max_array_size_source": max_array_size_info.get("source"),
         "max_new_shards_per_round": per_round_limit,
         "total_task_count": len(shared_rows),
+        "candidate_seed": candidate_seed,
         "logical_task_count": len(all_logical_ids),
         "sharded_task_count": len(sharded_logical_ids),
         "unique_logical_task_count": len(sharded_unique_ids),
