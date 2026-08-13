@@ -84,6 +84,11 @@ def _audit(workspace: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _outputs(workspace: Path) -> list[dict[str, str]]:
+    with (workspace / "manifests" / "task1_373_canonical_outputs.csv").open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
 def test_task1_canonical_dry_run_classifies_source_masks_without_writing(tmp_path: Path):
     cfg = _config(tmp_path)
     workspace = tmp_path / "workspace"
@@ -98,12 +103,12 @@ def test_task1_canonical_dry_run_classifies_source_masks_without_writing(tmp_pat
     rows = {row["source_name"]: row for row in _audit(workspace)}
 
     assert summary["status"] == "READY"
-    assert rows["left_gluteus_medius"]["action"] == "RENAMED"
+    assert rows["left_gluteus_medius"]["action"] == "SELECTED_CONFIRMED_ALIAS"
     assert rows["left_gluteus_medius"]["canonical_name"] == "gluteus_medius_left"
-    assert rows["vertebrae_t12"]["action"] == "KEEP_CANONICAL"
+    assert rows["vertebrae_t12"]["action"] == "CANONICAL_SOURCE_SELECTED"
     assert rows["vertebrae_t12"]["canonical_name"] == "vertebrae_t12"
-    assert rows["iliac_vena_left"]["action"] == "KEEP_CANONICAL"
-    assert rows["kidney"]["action"] == "KEEP_CANONICAL"
+    assert rows["iliac_vena_left"]["action"] == "CANONICAL_SOURCE_SELECTED"
+    assert rows["kidney"]["action"] == "CANONICAL_SOURCE_SELECTED"
     assert rows["lesion"]["action"] == "EXCLUDED_NON_ANATOMY"
     assert rows["mystery_label"]["action"] == "UNMAPPED"
     assert not (workspace / "inputs" / "masks_373_canonical").exists()
@@ -128,22 +133,80 @@ def test_task1_apply_is_checksum_identity_idempotent_and_restart_safe(tmp_path: 
     assert source.read_bytes() == b"same-bytes"
 
 
-def test_task1_collision_fails_closed_even_for_approved_alias_group(tmp_path: Path):
+def test_confirmed_alias_checksum_mismatch_resolves_without_blocking_or_union(tmp_path: Path):
     cfg = _config(tmp_path)
     workspace = tmp_path / "workspace"
     _mask(workspace, "CASE001", "right_lung_upper_lobe", b"a")
     _mask(workspace, "CASE001", "lung_lobe_upper_right", b"b")
 
     summary = _run(workspace, cfg, allow_unmapped=True)
-    rows = _audit(workspace)
+    rows = {row["source_name"]: row for row in _audit(workspace)}
+
+    assert summary["status"] == "READY"
+    assert summary["unapproved_collision_count"] == 0
+    assert rows["right_lung_upper_lobe"]["action"] == "SELECTED_CONFIRMED_ALIAS"
+    assert rows["lung_lobe_upper_right"]["action"] == "REDUNDANT_CONFIRMED_ALIAS"
+    assert rows["right_lung_upper_lobe"]["selection_policy"] == "confirmed_alias_priority_alias_groups_then_mapping_order"
+
+    applied = _run(workspace, cfg, mode="apply", allow_unmapped=True)
+    dest = workspace / "inputs" / "masks_373_canonical" / "CASE001" / "segmentations" / "lung_upper_right_lobe.nii.gz"
+    assert applied["status"] == "READY"
+    assert dest.read_bytes() == b"a"
+    assert dest.read_bytes() != b"ab"
+
+
+def test_canonical_source_exists_over_confirmed_alias_without_checksum_comparison(tmp_path: Path):
+    cfg = _config(tmp_path)
+    workspace = tmp_path / "workspace"
+    _mask(workspace, "CASE001", "lung_upper_right_lobe", b"canonical")
+    _mask(workspace, "CASE001", "right_lung_upper_lobe", b"alias")
+
+    _run(workspace, cfg, mode="apply", allow_unmapped=True)
+    rows = {row["source_name"]: row for row in _audit(workspace)}
+    outputs = _outputs(workspace)
+    dest = workspace / "inputs" / "masks_373_canonical" / "CASE001" / "segmentations" / "lung_upper_right_lobe.nii.gz"
+
+    assert rows["lung_upper_right_lobe"]["action"] == "CANONICAL_SOURCE_SELECTED"
+    assert rows["right_lung_upper_lobe"]["action"] == "REDUNDANT_CONFIRMED_ALIAS"
+    assert rows["lung_upper_right_lobe"]["selection_policy"] == "canonical_source_over_confirmed_aliases"
+    assert outputs[0]["resolution_type"] == "CANONICAL_SOURCE_OVER_ALIAS"
+    assert dest.read_bytes() == b"canonical"
+
+
+def test_confirmed_alias_selection_is_independent_of_filesystem_order(tmp_path: Path):
+    cfg = _config(tmp_path)
+    selections = []
+    for index, names in enumerate((["lung_lobe_upper_right", "right_lung_upper_lobe"], ["right_lung_upper_lobe", "lung_lobe_upper_right"])):
+        workspace = tmp_path / f"workspace_{index}"
+        for name in names:
+            _mask(workspace, "CASE001", name, name.encode())
+        _run(workspace, cfg, mode="apply", allow_unmapped=True)
+        outputs = _outputs(workspace)
+        selections.append(outputs[0]["selected_source_name"])
+
+    assert selections == ["right_lung_upper_lobe", "right_lung_upper_lobe"]
+
+
+def test_non_confirmed_many_to_one_still_blocks_as_unapproved_collision(tmp_path: Path):
+    cfg = _config(tmp_path)
+    mapping_text = cfg["mapping"].read_text(encoding="utf-8")
+    cfg["mapping"].write_text(
+        mapping_text + "unapproved_alias,lung_upper_right_lobe,pending_review,needs_review,not confirmed\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    _mask(workspace, "CASE001", "right_lung_upper_lobe", b"a")
+    _mask(workspace, "CASE001", "unapproved_alias", b"b")
+
+    summary = _run(workspace, cfg, allow_unmapped=True)
+    rows = {row["source_name"]: row for row in _audit(workspace)}
     collisions = list(csv.DictReader((workspace / "manifests" / "task1_373_collision_report.csv").open("r", encoding="utf-8")))
 
     assert summary["status"] == "BLOCKED"
-    assert summary["collision_count"] == 1
-    assert {row["action"] for row in rows} == {"COLLISION"}
-    assert collisions[0]["collision_status"] == "APPROVED_ALIAS_COLLISION"
-    with pytest.raises(Exception, match="collision"):
-        _run(workspace, cfg, mode="apply", allow_unmapped=True)
+    assert summary["unapproved_collision_count"] == 1
+    assert rows["right_lung_upper_lobe"]["action"] == "UNAPPROVED_COLLISION"
+    assert rows["unapproved_alias"]["action"] == "UNAPPROVED_COLLISION"
+    assert collisions[0]["collision_status"] == "UNAPPROVED_COLLISION"
 
 
 def test_task1_unmapped_blocks_apply_unless_explicitly_allowed(tmp_path: Path):
@@ -167,7 +230,21 @@ def test_task1_non_rename_coarse_to_fine_is_forbidden_not_renamed(tmp_path: Path
     _run(workspace, cfg, allow_unmapped=True)
     rows = {row["source_name"]: row for row in _audit(workspace)}
 
-    assert rows["iliac_vena_left"]["action"] == "KEEP_CANONICAL"
-    assert rows["kidney"]["action"] == "KEEP_CANONICAL"
+    assert rows["iliac_vena_left"]["action"] == "CANONICAL_SOURCE_SELECTED"
+    assert rows["kidney"]["action"] == "CANONICAL_SOURCE_SELECTED"
     assert not any(row["canonical_name"] == "common_iliac_vein_left" for row in rows.values())
     assert not any(row["canonical_name"] == "kidney_cortex" for row in rows.values())
+
+
+def test_pathology_labels_are_excluded_from_373_canonical_tree(tmp_path: Path):
+    cfg = _config(tmp_path)
+    workspace = tmp_path / "workspace"
+    for name in ("colon_cancer_primaries", "pancreatic_pdac", "pancreatic_pnet"):
+        _mask(workspace, "CASE001", name)
+
+    summary = _run(workspace, cfg, allow_unmapped=True)
+    rows = {row["source_name"]: row for row in _audit(workspace)}
+
+    assert summary["excluded_non_anatomy_count"] == 3
+    assert all(rows[name]["action"] == "EXCLUDED_NON_ANATOMY" for name in rows)
+    assert _outputs(workspace) == []

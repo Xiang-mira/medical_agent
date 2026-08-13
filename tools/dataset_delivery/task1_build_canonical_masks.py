@@ -51,6 +51,9 @@ AUDIT_FIELDS = [
     "source_checksum",
     "destination_checksum",
     "collision_status",
+    "selected_source_name",
+    "all_source_aliases",
+    "selection_policy",
 ]
 COLLISION_FIELDS = [
     "case_id",
@@ -62,8 +65,33 @@ COLLISION_FIELDS = [
     "destination_path",
     "reason",
 ]
+OUTPUT_FIELDS = [
+    "case_id",
+    "canonical_target",
+    "destination_path",
+    "selected_source_path",
+    "selected_source_name",
+    "resolution_type",
+    "all_source_aliases",
+    "mapping_source",
+    "selection_policy",
+    "source_checksum",
+    "destination_checksum",
+]
 UNMAPPED_FIELDS = ["case_id", "source_name", "source_path", "action", "reason", "source_checksum"]
-NON_ANATOMY_TOKENS = ("lesion", "tumor", "tumour", "metastasis", "metastases", "nodule", "cyst", "mass")
+NON_ANATOMY_TOKENS = (
+    "cancer",
+    "lesion",
+    "metastases",
+    "metastasis",
+    "nodule",
+    "pdac",
+    "pnet",
+    "primaries",
+    "primary",
+    "tumor",
+    "tumour",
+)
 
 
 def _canonical_target_contract(target_config: Path) -> tuple[set[str], int]:
@@ -108,18 +136,20 @@ def _load_non_rename(path: Path) -> dict[str, list[dict[str, str]]]:
     return out
 
 
-def _mapping_indexes(mapping: Path) -> tuple[dict[str, Any], dict[str, list[Any]], dict[str, list[Any]]]:
+def _mapping_indexes(mapping: Path) -> tuple[dict[str, Any], dict[str, list[Any]], dict[str, list[Any]], dict[tuple[str, str], int]]:
     confirmed: dict[str, Any] = {}
     pending: dict[str, list[Any]] = {}
     rejected: dict[str, list[Any]] = {}
-    for row in read_rename_mapping(mapping):
+    order: dict[tuple[str, str], int] = {}
+    for index, row in enumerate(read_rename_mapping(mapping)):
+        order[(row.source_name, row.target_name)] = index
         if row.status == "confirmed":
             confirmed[row.source_name] = row
         elif row.status == "pending_review":
             pending.setdefault(row.source_name, []).append(row)
         elif row.status == "rejected":
             rejected.setdefault(row.source_name, []).append(row)
-    return confirmed, pending, rejected
+    return confirmed, pending, rejected, order
 
 
 def _non_rename_action(rows: list[dict[str, str]]) -> tuple[str, str, str]:
@@ -149,6 +179,9 @@ def _audit_row(
     reason: str,
     destination_path: Path | None,
     collision_status: str = "",
+    selected_source_name: str = "",
+    all_source_aliases: str = "",
+    selection_policy: str = "",
 ) -> dict[str, Any]:
     return {
         "case_id": case_id,
@@ -163,7 +196,53 @@ def _audit_row(
         "source_checksum": sha256_file_if_exists(source_path),
         "destination_checksum": sha256_file_if_exists(destination_path) if destination_path else "",
         "collision_status": collision_status,
+        "selected_source_name": selected_source_name,
+        "all_source_aliases": all_source_aliases,
+        "selection_policy": selection_policy,
     }
+
+
+def _confirmed_alias_sources(alias_groups: dict[str, dict[str, Any]], canonical_name: str) -> set[str]:
+    alias = alias_groups.get(canonical_name, {})
+    return {
+        safe_label_name(str(row.get("source_name", "")))
+        for row in alias.get("rows", [])
+        if str(row.get("status") or "").strip().lower() == "confirmed"
+    }
+
+
+def _alias_order(alias_groups: dict[str, dict[str, Any]], canonical_name: str) -> dict[str, int]:
+    alias = alias_groups.get(canonical_name, {})
+    return {
+        safe_label_name(str(row.get("source_name", ""))): index
+        for index, row in enumerate(alias.get("rows", []))
+    }
+
+
+def _select_canonical_entry(
+    *,
+    canonical_name: str,
+    entries: list[tuple[Path, str, str, str, str, str]],
+    alias_groups: dict[str, dict[str, Any]],
+    mapping_order: dict[tuple[str, str], int],
+) -> tuple[tuple[Path, str, str, str, str, str], str]:
+    alias_rank = _alias_order(alias_groups, canonical_name)
+
+    def rank(entry: tuple[Path, str, str, str, str, str]) -> tuple[int, int, int, str]:
+        _source_path, source_name, action, _mapping_status, _mapping_source, _reason = entry
+        canonical_source = 0 if action == "KEEP_CANONICAL" and source_name == canonical_name else 1
+        alias_position = alias_rank.get(source_name, 9999)
+        mapping_position = mapping_order.get((source_name, canonical_name), 9999)
+        return canonical_source, alias_position, mapping_position, source_name
+
+    selected = sorted(entries, key=rank)[0]
+    if selected[2] == "KEEP_CANONICAL" and selected[1] == canonical_name and len(entries) > 1:
+        policy = "canonical_source_over_confirmed_aliases"
+    elif len(entries) > 1:
+        policy = "confirmed_alias_priority_alias_groups_then_mapping_order"
+    else:
+        policy = "single_source"
+    return selected, policy
 
 
 def _plan_case(
@@ -175,6 +254,7 @@ def _plan_case(
     confirmed: dict[str, Any],
     pending: dict[str, list[Any]],
     rejected: dict[str, list[Any]],
+    mapping_order: dict[tuple[str, str], int],
     non_rename: dict[str, list[dict[str, str]]],
     alias_groups: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -198,6 +278,8 @@ def _plan_case(
         if source_name in confirmed:
             row = confirmed[source_name]
             canonical_name = canonical_target_name(row.target_name)
+            if canonical_name not in target_set:
+                raise DeliveryError(f"confirmed mapping target is outside authoritative target contract: {source_name}->{canonical_name}")
             planned.setdefault(canonical_name, []).append((source_path, source_name, "RENAMED", row.status, "organ_rename_mapping_373.csv", row.reason or "confirmed_task1_rename"))
             continue
         if source_name in non_rename:
@@ -232,13 +314,15 @@ def _plan_case(
             )
             continue
         if source_name in pending:
-            reason = ";".join(row.reason for row in pending[source_name] if row.reason)
-            action = "PENDING_MAPPING"
-            status = "pending_review"
-        elif source_name in rejected:
-            reason = ";".join(row.reason for row in rejected[source_name] if row.reason)
-            action = "PENDING_MAPPING"
-            status = "rejected"
+            row = pending[source_name][0]
+            canonical_name = canonical_target_name(row.target_name)
+            planned.setdefault(canonical_name, []).append((source_path, source_name, "PENDING_MAPPING", "pending_review", "organ_rename_mapping_373.csv", row.reason or "mapping_status_pending_review"))
+            continue
+        if source_name in rejected:
+            row = rejected[source_name][0]
+            canonical_name = canonical_target_name(row.target_name)
+            planned.setdefault(canonical_name, []).append((source_path, source_name, "PENDING_MAPPING", "rejected", "organ_rename_mapping_373.csv", row.reason or "mapping_status_rejected"))
+            continue
         else:
             reason = "no_confirmed_task1_mapping_or_formal_target"
             action = "UNMAPPED"
@@ -259,53 +343,97 @@ def _plan_case(
 
     for canonical_name, entries in sorted(planned.items()):
         destination = dest_dir / f"{canonical_name}{NIFTI_SUFFIX}"
-        collision_status = ""
+        selected_entry, selection_policy = _select_canonical_entry(
+            canonical_name=canonical_name,
+            entries=entries,
+            alias_groups=alias_groups,
+            mapping_order=mapping_order,
+        )
+        selected_source_name = selected_entry[1]
+        all_source_aliases = ";".join(entry[1] for entry in entries)
         if len(entries) > 1:
-            alias = alias_groups.get(canonical_name, {})
-            approved = set(alias.get("sources") or [])
             sources = {entry[1] for entry in entries}
-            collision_status = "APPROVED_ALIAS_COLLISION" if sources <= approved else "COLLISION"
-            reason = "approved_alias_group_requires_manual_policy_no_union" if collision_status == "APPROVED_ALIAS_COLLISION" else "multiple_sources_map_to_same_canonical_target"
-            collision_rows.append(
-                {
-                    "case_id": case_id,
-                    "canonical_name": canonical_name,
-                    "collision_status": collision_status,
-                    "source_names": ";".join(sorted(sources)),
-                    "source_paths": ";".join(str(entry[0]) for entry in entries),
-                    "source_checksums": json.dumps({entry[1]: sha256_file(entry[0]) for entry in entries}, sort_keys=True),
-                    "destination_path": str(destination),
-                    "reason": reason,
-                }
-            )
+            confirmed_aliases = _confirmed_alias_sources(alias_groups, canonical_name)
+            unapproved = {
+                source
+                for source_path, source, action, mapping_status, _mapping_source, _reason in entries
+                if action != "KEEP_CANONICAL" and (mapping_status != "confirmed" or source not in confirmed_aliases)
+            }
+            if unapproved:
+                reason = "multiple_sources_map_to_same_canonical_target_without_confirmed_alias_identity"
+                collision_rows.append(
+                    {
+                        "case_id": case_id,
+                        "canonical_name": canonical_name,
+                        "collision_status": "UNAPPROVED_COLLISION",
+                        "source_names": ";".join(sorted(sources)),
+                        "source_paths": ";".join(str(entry[0]) for entry in entries),
+                        "source_checksums": json.dumps({entry[1]: sha256_file(entry[0]) for entry in entries}, sort_keys=True),
+                        "destination_path": str(destination),
+                        "reason": reason,
+                    }
+                )
+                for source_path, source_name, action, mapping_status, mapping_source, _reason in entries:
+                    audit_rows.append(
+                        _audit_row(
+                            case_id=case_id,
+                            source_name=source_name,
+                            source_path=source_path,
+                            canonical_name=canonical_name,
+                            action="UNAPPROVED_COLLISION",
+                            mapping_status=mapping_status,
+                            mapping_source=mapping_source,
+                            reason=reason,
+                            destination_path=destination,
+                            collision_status="UNAPPROVED_COLLISION",
+                            selected_source_name=selected_source_name,
+                            all_source_aliases=all_source_aliases,
+                            selection_policy=selection_policy,
+                        )
+                    )
+                continue
             for source_path, source_name, action, mapping_status, mapping_source, _reason in entries:
+                if source_name == selected_source_name:
+                    resolved_action = "CANONICAL_SOURCE_SELECTED" if action == "KEEP_CANONICAL" else "SELECTED_CONFIRMED_ALIAS"
+                    reason = "selected_for_canonical_output"
+                else:
+                    resolved_action = "REDUNDANT_CONFIRMED_ALIAS"
+                    reason = "confirmed_alias_not_selected_by_deterministic_precedence"
                 audit_rows.append(
                     _audit_row(
                         case_id=case_id,
                         source_name=source_name,
                         source_path=source_path,
                         canonical_name=canonical_name,
-                        action="COLLISION",
+                        action=resolved_action,
                         mapping_status=mapping_status,
                         mapping_source=mapping_source,
                         reason=reason,
                         destination_path=destination,
-                        collision_status=collision_status,
+                        selected_source_name=selected_source_name,
+                        all_source_aliases=all_source_aliases,
+                        selection_policy=selection_policy,
                     )
                 )
             continue
         source_path, source_name, action, mapping_status, mapping_source, reason = entries[0]
+        resolved_action = "CANONICAL_SOURCE_SELECTED" if action == "KEEP_CANONICAL" else "SELECTED_CONFIRMED_ALIAS" if action == "RENAMED" else action
+        if resolved_action == "PENDING_MAPPING":
+            unmapped_rows.append({"case_id": case_id, "source_name": source_name, "source_path": str(source_path), "action": resolved_action, "reason": reason, "source_checksum": sha256_file_if_exists(source_path)})
         audit_rows.append(
             _audit_row(
                 case_id=case_id,
                 source_name=source_name,
                 source_path=source_path,
                 canonical_name=canonical_name,
-                action=action,
+                action=resolved_action,
                 mapping_status=mapping_status,
                 mapping_source=mapping_source,
                 reason=reason,
                 destination_path=destination,
+                selected_source_name=source_name,
+                all_source_aliases=source_name,
+                selection_policy=selection_policy,
             )
         )
     audit_rows.extend(deferred_rows)
@@ -314,7 +442,7 @@ def _plan_case(
 
 def _copy_planned_rows(rows: list[dict[str, Any]], *, resume: bool) -> None:
     for row in rows:
-        if row["action"] not in {"KEEP_CANONICAL", "RENAMED"}:
+        if row["action"] not in {"CANONICAL_SOURCE_SELECTED", "SELECTED_CONFIRMED_ALIAS"}:
             continue
         src = Path(str(row["source_path"]))
         dst = Path(str(row["destination_path"]))
@@ -330,6 +458,34 @@ def _copy_planned_rows(rows: list[dict[str, Any]], *, resume: bool) -> None:
         shutil.copy2(src, dst)
         if sha256_file(dst) != src_hash:
             raise DeliveryError(f"checksum mismatch after copy: {src} -> {dst}")
+
+
+def _output_rows(audit_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    for row in audit_rows:
+        if row["action"] not in {"CANONICAL_SOURCE_SELECTED", "SELECTED_CONFIRMED_ALIAS"}:
+            continue
+        resolution_type = "KEEP_CANONICAL" if row["action"] == "CANONICAL_SOURCE_SELECTED" else "CONFIRMED_RENAME"
+        if row["selection_policy"] == "canonical_source_over_confirmed_aliases":
+            resolution_type = "CANONICAL_SOURCE_OVER_ALIAS"
+        elif row["selection_policy"] == "confirmed_alias_priority_alias_groups_then_mapping_order":
+            resolution_type = "CONFIRMED_ALIAS_PRIORITY"
+        rows.append(
+            {
+                "case_id": row["case_id"],
+                "canonical_target": row["canonical_name"],
+                "destination_path": row["destination_path"],
+                "selected_source_path": row["source_path"],
+                "selected_source_name": row["source_name"],
+                "resolution_type": resolution_type,
+                "all_source_aliases": row["all_source_aliases"],
+                "mapping_source": row["mapping_source"],
+                "selection_policy": row["selection_policy"],
+                "source_checksum": row["source_checksum"],
+                "destination_checksum": row["destination_checksum"],
+            }
+        )
+    return rows
 
 
 def build_task1_canonical_masks(
@@ -350,7 +506,7 @@ def build_task1_canonical_masks(
     workspace_root = workspace_root.resolve()
     paths = _workspace_paths(workspace_root)
     target_set, raw_target_count = _canonical_target_contract(target_config)
-    confirmed, pending, rejected = _mapping_indexes(mapping)
+    confirmed, pending, rejected, mapping_order = _mapping_indexes(mapping)
     non_rename = _load_non_rename(non_rename_decisions)
     aliases = read_alias_groups(alias_groups)
     case_dirs = _case_dirs(paths["original"], case_manifest)
@@ -368,6 +524,7 @@ def build_task1_canonical_masks(
             confirmed=confirmed,
             pending=pending,
             rejected=rejected,
+            mapping_order=mapping_order,
             non_rename=non_rename,
             alias_groups=aliases,
         )
@@ -376,6 +533,8 @@ def build_task1_canonical_masks(
         unmapped_rows.extend(unmapped)
 
     if mode == "apply":
+        if len(case_dirs) != expected_case_count:
+            raise DeliveryError(f"Task1 canonical apply requires {expected_case_count} cases, got {len(case_dirs)}")
         if collision_rows:
             raise DeliveryError(f"Task1 canonical apply blocked by {len(collision_rows)} collision(s)")
         if unmapped_rows and not allow_unmapped:
@@ -388,7 +547,7 @@ def build_task1_canonical_masks(
     if mode == "validate":
         missing = [
             row for row in audit_rows
-            if row["action"] in {"KEEP_CANONICAL", "RENAMED"}
+            if row["action"] in {"CANONICAL_SOURCE_SELECTED", "SELECTED_CONFIRMED_ALIAS"}
             and (not row["destination_path"] or row["source_checksum"] != sha256_file_if_exists(Path(str(row["destination_path"]))))
         ]
         if missing:
@@ -397,6 +556,7 @@ def build_task1_canonical_masks(
             if row["destination_path"]:
                 row["destination_checksum"] = sha256_file_if_exists(Path(str(row["destination_path"])))
 
+    output_rows = _output_rows(audit_rows)
     status_counts: dict[str, int] = {}
     for row in audit_rows:
         status_counts[str(row["action"])] = status_counts.get(str(row["action"]), 0) + 1
@@ -416,12 +576,17 @@ def build_task1_canonical_masks(
         "case_count_ok": len(case_dirs) == expected_case_count,
         "audit_row_count": len(audit_rows),
         "status_counts": status_counts,
-        "confirmed_rename_count": status_counts.get("RENAMED", 0),
-        "keep_canonical_count": status_counts.get("KEEP_CANONICAL", 0),
+        "source_mask_count": len(audit_rows),
+        "confirmed_rename_count": status_counts.get("SELECTED_CONFIRMED_ALIAS", 0),
+        "keep_canonical_count": status_counts.get("CANONICAL_SOURCE_SELECTED", 0),
+        "canonical_source_selected_count": status_counts.get("CANONICAL_SOURCE_SELECTED", 0),
+        "selected_alias_count": status_counts.get("SELECTED_CONFIRMED_ALIAS", 0),
+        "redundant_confirmed_alias_count": status_counts.get("REDUNDANT_CONFIRMED_ALIAS", 0),
         "nonrename_task2_count": status_counts.get("NON_RENAME_TASK2", 0),
         "pending_mapping_count": status_counts.get("PENDING_MAPPING", 0),
         "excluded_non_anatomy_count": status_counts.get("EXCLUDED_NON_ANATOMY", 0),
         "unmapped_count": len(unmapped_rows),
+        "unapproved_collision_count": len(collision_rows),
         "collision_count": len(collision_rows),
         "mapping_artifacts": {
             "organ_rename_mapping_373": str(mapping),
@@ -432,6 +597,7 @@ def build_task1_canonical_masks(
     }
     paths["manifests"].mkdir(parents=True, exist_ok=True)
     write_csv(paths["manifests"] / "task1_373_rename_audit.csv", audit_rows, AUDIT_FIELDS)
+    write_csv(paths["manifests"] / "task1_373_canonical_outputs.csv", output_rows, OUTPUT_FIELDS)
     write_json(paths["manifests"] / "task1_373_rename_summary.json", summary)
     write_csv(paths["manifests"] / "task1_373_collision_report.csv", collision_rows, COLLISION_FIELDS)
     write_csv(paths["manifests"] / "task1_373_unmapped.csv", unmapped_rows, UNMAPPED_FIELDS)
