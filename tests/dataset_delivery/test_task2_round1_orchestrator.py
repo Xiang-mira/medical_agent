@@ -38,6 +38,7 @@ def _args(tmp_path: Path) -> SimpleNamespace:
         checkpoint_root=tmp_path / "checkpoints",
         nnunet_predict_executable=tmp_path / "nnUNetv2_predict",
         unest_python_executable=tmp_path / "unest_python",
+        totalsegmentator_executable="",
         registry=tmp_path / "model_registry.yaml",
         target_config=tmp_path / "targets.json",
         gpu_target_workers=30,
@@ -752,6 +753,94 @@ def test_static_preflight_pytest_uses_sanitized_environment(tmp_path, monkeypatc
     assert report["status"] == "PASSED"
     assert captured_env
     assert not any(key in captured_env for key in orch.STATIC_TEST_ENV_DROP)
+
+
+def test_static_preflight_requires_totalsegmentator_executable_when_routed(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    args.skip_sbatch_test_only = True
+    args.workspace_root.mkdir(parents=True)
+    args.case_manifest.write_text("case_id,ct_path,annotation_folder\n", encoding="utf-8")
+    args.base_manifest.write_text("case_id,ct_path,annotation_folder\n", encoding="utf-8")
+    args.checkpoint_root.mkdir()
+    args.nnunet_predict_executable.write_text("", encoding="utf-8")
+    args.unest_python_executable.write_text("", encoding="utf-8")
+    args.registry.write_text("models: {}\n", encoding="utf-8")
+    args.target_config.write_text('{"target_organs":["liver"]}\n', encoding="utf-8")
+    monkeypatch.setenv("TOTAL_SEGMENTATOR_EXECUTABLE", str(tmp_path / "missing" / "TotalSegmentator"))
+    monkeypatch.setattr(orch, "ensure_case_level_manifests", lambda args: {"source_manifest": str(args.case_manifest), "staged_manifest": str(args.case_manifest), "case_count": orch.FORMAL_CASE_COUNT, "unique_case_count": orch.FORMAL_CASE_COUNT})
+    monkeypatch.setattr(orch, "validate_formal_manifest", lambda **kwargs: {"rows": orch.FORMAL_CASE_COUNT, "unique_case_count": orch.FORMAL_CASE_COUNT})
+    monkeypatch.setattr(
+        orch,
+        "build_full_round1_scope",
+        lambda **kwargs: {
+            "status": "READY",
+            "case_count": orch.FORMAL_CASE_COUNT,
+            "canonical_target_count": 373,
+            "enabled_teacher_count": 1,
+            "target_teacher_pairs": 1,
+            "total_logical_candidate_tasks": orch.FORMAL_CASE_COUNT,
+            "unroutable_target_count": 0,
+            "routes": {"liver": ["totalsegmentator"]},
+        },
+    )
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["git", "status"]:
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if command[:2] == ["git", "branch"]:
+            return {"ok": True, "stdout": "main", "stderr": "", "return_code": 0}
+        if command[:2] == ["git", "rev-parse"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+
+    report = orch.run_static_preflight(args)
+
+    assert report["status"] == "FAILED"
+    check = next(item for item in report["checks"] if item["name"] == "totalsegmentator_executable")
+    assert check["detail"]["status"] == "failed"
+
+
+def test_static_preflight_accepts_absolute_totalsegmentator_executable_when_routed(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    args.skip_sbatch_test_only = True
+    exe = tmp_path / "bin" / "TotalSegmentator"
+    exe.parent.mkdir()
+    exe.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    exe.chmod(0o755)
+    args.totalsegmentator_executable = str(exe)
+    args.workspace_root.mkdir(parents=True)
+    args.case_manifest.write_text("case_id,ct_path,annotation_folder\n", encoding="utf-8")
+    args.base_manifest.write_text("case_id,ct_path,annotation_folder\n", encoding="utf-8")
+    args.checkpoint_root.mkdir()
+    args.nnunet_predict_executable.write_text("", encoding="utf-8")
+    args.unest_python_executable.write_text("", encoding="utf-8")
+    args.registry.write_text("models: {}\n", encoding="utf-8")
+    args.target_config.write_text('{"target_organs":["liver"]}\n', encoding="utf-8")
+    monkeypatch.setattr(orch, "ensure_case_level_manifests", lambda args: {"source_manifest": str(args.case_manifest), "staged_manifest": str(args.case_manifest), "case_count": orch.FORMAL_CASE_COUNT, "unique_case_count": orch.FORMAL_CASE_COUNT})
+    monkeypatch.setattr(orch, "validate_formal_manifest", lambda **kwargs: {"rows": orch.FORMAL_CASE_COUNT, "unique_case_count": orch.FORMAL_CASE_COUNT})
+    monkeypatch.setattr(
+        orch,
+        "build_full_round1_scope",
+        lambda **kwargs: {
+            "status": "READY",
+            "case_count": orch.FORMAL_CASE_COUNT,
+            "canonical_target_count": 373,
+            "enabled_teacher_count": 1,
+            "target_teacher_pairs": 1,
+            "total_logical_candidate_tasks": orch.FORMAL_CASE_COUNT,
+            "unroutable_target_count": 0,
+            "routes": {"liver": ["totalsegmentator"]},
+        },
+    )
+    monkeypatch.setattr(orch, "_run", lambda command, **kwargs: {"ok": True, "stdout": "main" if command[:2] == ["git", "branch"] else ("abc123" if command[:2] == ["git", "rev-parse"] else ""), "stderr": "", "return_code": 0})
+
+    report = orch.run_static_preflight(args)
+
+    check = next(item for item in report["checks"] if item["name"] == "totalsegmentator_executable")
+    assert report["status"] == "PASSED"
+    assert check["detail"]["executable"] == str(exe)
 
 
 def test_expected_commit_pin_matches_and_mismatch_are_local(monkeypatch, tmp_path):

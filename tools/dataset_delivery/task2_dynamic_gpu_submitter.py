@@ -1015,11 +1015,33 @@ def build_dynamic_submission_plan(
 
     shared_manifest = dynamic_root / "shared_ready_candidate_manifest.csv"
     shared_rows = _write_shared_manifest(manifest_reference, shared_manifest, all_source_rows)
-    from tools.dataset_delivery.task2_full373_round1_launcher import recover_candidate_seed_marker, recover_stale_candidate_claims, seed_candidate_states
+    from cli_anything.medai.core.totalseg_runner import preflight_totalseg_executable
+    from tools.dataset_delivery.task2_full373_round1_launcher import recover_candidate_seed_marker, recover_stale_candidate_claims, repair_recoverable_failed_candidates, seed_candidate_states
 
     seed_recovery = recover_candidate_seed_marker(output_root, task_manifest=shared_manifest)
     candidate_seed = seed_recovery if seed_recovery.get("status") == "READY" else seed_candidate_states(output_root, task_manifest=shared_manifest)
     stale_claim_recovery = recover_stale_candidate_claims(output_root, task_manifest=shared_manifest)
+    target_config_value = next((str(row.get("target_config") or "").strip() for row in shared_rows if str(row.get("target_config") or "").strip()), "")
+    target_config_for_repair = Path(target_config_value) if target_config_value else None
+    configured_totalseg = next((str(row.get("totalsegmentator_executable") or "") for row in shared_rows if str(row.get("totalsegmentator_executable") or "")), "")
+    previous_totalseg = os.environ.get("TOTAL_SEGMENTATOR_EXECUTABLE")
+    if configured_totalseg:
+        os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = configured_totalseg
+    try:
+        totalseg_preflight = preflight_totalseg_executable()
+    finally:
+        if configured_totalseg:
+            if previous_totalseg is None:
+                os.environ.pop("TOTAL_SEGMENTATOR_EXECUTABLE", None)
+            else:
+                os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = previous_totalseg
+    failed_candidate_repair = repair_recoverable_failed_candidates(
+        output_root,
+        task_manifest=shared_manifest,
+        target_config=target_config_for_repair if target_config_for_repair and target_config_for_repair.exists() else None,
+        totalseg_executable_ready=totalseg_preflight.get("status") == "ok",
+        execution_attempt_id=safe_execution_attempt_id,
+    )
     all_logical_ids = [_logical_task_id(row) for row in all_source_rows]
     sharded_logical_ids = [str(row.get("logical_task_id") or "") for row in shared_rows]
     unique_logical_ids = sorted(set(all_logical_ids))
@@ -1468,6 +1490,8 @@ def build_dynamic_submission_plan(
         "candidate_seed": candidate_seed,
         "candidate_seed_recovery": seed_recovery,
         "stale_claim_recovery": stale_claim_recovery,
+        "totalsegmentator_executable_preflight": totalseg_preflight,
+        "failed_candidate_repair": failed_candidate_repair,
         "logical_task_count": len(all_logical_ids),
         "sharded_task_count": len(sharded_logical_ids),
         "unique_logical_task_count": len(sharded_unique_ids),

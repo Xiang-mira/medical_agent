@@ -25,6 +25,7 @@ if str(HARNESS) not in sys.path:
 from cli_anything.medai.core.model_registry import candidate_models_for_organs, load_registry  # noqa: E402
 from cli_anything.medai.core.continual_learning import TRAINING_CONTRACT_VERSION, canonicalize_training_record  # noqa: E402
 from cli_anything.medai.core.multimodel_loop import _select_candidate  # noqa: E402
+from cli_anything.medai.core.target_space import validate_formal_373_target_space  # noqa: E402
 from tools.dataset_delivery.delivery_lib import read_csv_rows, utc_now, write_csv, write_json  # noqa: E402
 from tools.dataset_delivery.delivery_lib import write_binary_mask_nifti_from_source  # noqa: E402
 from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1  # noqa: E402
@@ -521,6 +522,7 @@ def build_submission_manifest(
     checkpoint_root: Path,
     nnunet_predict_executable: Path,
     unest_python_executable: Path,
+    totalsegmentator_executable: Path | str | None = None,
     state_root: Path | None = None,
     cache_roots: list[Path] | None = None,
     expected_case_count: int = 103,
@@ -559,6 +561,7 @@ def build_submission_manifest(
                 "checkpoint_root": str(checkpoint_root),
                 "nnunet_predict_executable": str(nnunet_predict_executable),
                 "unest_python_executable": str(unest_python_executable),
+                "totalsegmentator_executable": str(totalsegmentator_executable or os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE", "")),
                 "python": str(python),
             }
         )
@@ -809,6 +812,66 @@ def recover_stale_candidate_claims(output_root: Path, *, task_manifest: Path | N
     return {"status": "READY", "recovered_count": len(recovered), "recovered": recovered[:100], "logical_task_count": len(rows)}
 
 
+FORMAL_TARGET_CONTRACT_FAILURE = "Requested organs include non-target organs for the formal 373-organ mainline"
+TOTALSEG_EXECUTABLE_FAILURE_TOKENS = ("FileNotFoundError", "No such file or directory: 'TotalSegmentator'")
+
+
+def repair_recoverable_failed_candidates(
+    output_root: Path,
+    *,
+    task_manifest: Path | None = None,
+    target_config: Path | None = None,
+    totalseg_executable_ready: bool = False,
+    execution_attempt_id: str = "",
+) -> dict[str, Any]:
+    rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
+    repaired = []
+    retained_terminal = 0
+    target_config = target_config or (REPO_ROOT / "configs/student_3d_prompt_target_organs.json")
+    for row in rows:
+        case_id = str(row.get("case_id") or "").strip()
+        target = _norm(str(row.get("target") or ""))
+        teacher = str(row.get("teacher") or "").strip()
+        if not case_id or not target or not teacher:
+            continue
+        state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
+        status = str(state.get("status") or "")
+        if status in {"SUCCESS", "COMPLETED_NO_NONZERO"}:
+            retained_terminal += 1
+        if status != "FAILED_FINAL":
+            continue
+        failure_text = "\n".join(str(state.get(key) or "") for key in ("failure_reason", "stderr_tail", "stdout_tail"))
+        recovery_reason = ""
+        if FORMAL_TARGET_CONTRACT_FAILURE in failure_text:
+            validation = validate_formal_373_target_space(target_config, requested_organs=[target])
+            if validation.get("status") == "success":
+                recovery_reason = "formal_target_contract_fixed"
+        elif all(token in failure_text for token in TOTALSEG_EXECUTABLE_FAILURE_TOKENS) and totalseg_executable_ready:
+            recovery_reason = "totalsegmentator_executable_fixed"
+        if not recovery_reason:
+            continue
+        updated = {
+            **state,
+            "status": "RETRY_PENDING",
+            "previous_status": status,
+            "recovery_reason": recovery_reason,
+            "previous_failure_reason": str(state.get("failure_reason") or ""),
+            "recovered_at": utc_now(),
+            "execution_attempt_id": execution_attempt_id,
+            "updated_at": utc_now(),
+        }
+        publish_candidate_state(output_root, updated, recompute_target=False)
+        recompute_case_target_readiness(output_root, case_id=case_id, target=target, force=True)
+        repaired.append({"case_id": case_id, "target": target, "teacher": teacher, "candidate_id": _candidate_id_from_row(row), "recovery_reason": recovery_reason})
+    return {
+        "status": "READY",
+        "logical_task_count": len(rows),
+        "repaired_count": len(repaired),
+        "repaired": repaired[:100],
+        "retained_success_or_completed_no_nonzero_count": retained_terminal,
+    }
+
+
 def claim_next_ready_candidate(
     output_root: Path,
     *,
@@ -921,7 +984,7 @@ def claim_next_ready_candidate_from_rows(
     return {"status": "NO_CLAIMABLE_READY_CANDIDATES", "queue_depth": queue_depth, "next_cursor": start, "seed_marker": marker_check}
 
 
-def recompute_case_target_readiness(output_root: Path, *, case_id: str, target: str) -> dict[str, Any]:
+def recompute_case_target_readiness(output_root: Path, *, case_id: str, target: str, force: bool = False) -> dict[str, Any]:
     scope = _read_json(output_root / "full_round1_submission_scope.json", {}) or _read_json(output_root / "full_round1_scope.json", {})
     routes = scope.get("routes") or {}
     teachers = [str(item) for item in routes.get(_norm(target), [])]
@@ -953,7 +1016,7 @@ def recompute_case_target_readiness(output_root: Path, *, case_id: str, target: 
         "updated_at": utc_now(),
     }
     existing = _read_json(_state_path(output_root, case_id, _norm(target), kind="target"), {})
-    if str(existing.get("status") or "") in VALID_TERMINAL_TARGET_STATES:
+    if not force and str(existing.get("status") or "") in VALID_TERMINAL_TARGET_STATES:
         return existing
     atomic_write_json(_state_path(output_root, case_id, _norm(target), kind="target"), target_state)
     _append_event(output_root, {"event": "case_target_readiness", "case_id": case_id, "target": _norm(target), "status": status})
@@ -1018,6 +1081,8 @@ def _execute_candidate_row(
         ]
         env = os.environ.copy()
         env.update({"RUNTIME_NO_GIT": "1", "SKIP_GIT_SYNC": "1", "GIT_TERMINAL_PROMPT": "0"})
+        if str(row.get("totalsegmentator_executable") or "").strip():
+            env["TOTAL_SEGMENTATOR_EXECUTABLE"] = str(row.get("totalsegmentator_executable"))
         if state_root:
             env["STATE_ROOT"] = str(state_root)
         for key in ("DISPLAY", "GITHUB_TOKEN", "GH_TOKEN", "GIT_ASKPASS", "SSH_ASKPASS"):
@@ -1611,6 +1676,7 @@ def main() -> int:
     parser.add_argument("--checkpoint-root", default=REPO_ROOT / "checkpoints", type=Path)
     parser.add_argument("--nnunet-predict-executable", default=Path("nnUNetv2_predict"), type=Path)
     parser.add_argument("--unest-python-executable", default=Path(sys.executable), type=Path)
+    parser.add_argument("--totalsegmentator-executable", default=os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE", ""))
     parser.add_argument("--cache-root", action="append", default=[], type=Path)
     parser.add_argument("--execute-task-index", type=int)
     parser.add_argument("--task-manifest", type=Path)
@@ -1678,6 +1744,7 @@ def main() -> int:
         checkpoint_root=args.checkpoint_root,
         nnunet_predict_executable=args.nnunet_predict_executable,
         unest_python_executable=args.unest_python_executable,
+        totalsegmentator_executable=args.totalsegmentator_executable,
         state_root=args.state_root,
         cache_roots=[path.resolve() for path in args.cache_root],
     )

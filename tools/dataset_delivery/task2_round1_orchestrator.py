@@ -46,6 +46,7 @@ from tools.dataset_delivery.task2_full373_round1_launcher import (  # noqa: E402
     build_full_round1_scope,
 )
 from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
+from cli_anything.medai.core.totalseg_runner import preflight_totalseg_executable  # noqa: E402
 
 
 LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
@@ -933,6 +934,22 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
                 "unroutable_target_count": full_scope.get("unroutable_target_count"),
             },
         )
+        routes = full_scope.get("routes") or {}
+        requires_totalseg = any("totalsegmentator" in [str(teacher) for teacher in teachers] for teachers in routes.values())
+        if requires_totalseg:
+            configured = str(getattr(args, "totalsegmentator_executable", "") or "").strip()
+            previous = os.environ.get("TOTAL_SEGMENTATOR_EXECUTABLE")
+            if configured:
+                os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = configured
+            try:
+                totalseg = preflight_totalseg_executable()
+            finally:
+                if configured:
+                    if previous is None:
+                        os.environ.pop("TOTAL_SEGMENTATOR_EXECUTABLE", None)
+                    else:
+                        os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = previous
+            add("totalsegmentator_executable", totalseg.get("status") == "ok", totalseg)
     except Exception as exc:
         add("full_373_multiteacher_scope", False, f"{type(exc).__name__}: {exc}")
     add("personal_workspace_writable", os.access(args.workspace_root.resolve(), os.W_OK) if args.workspace_root.exists() else os.access(args.workspace_root.parent.resolve(), os.W_OK), str(args.workspace_root))
@@ -1460,6 +1477,8 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "--state-root", str(state_root),
         "--cache-root", str(paths["root"] / "formal_task2_round1"),
     ]
+    if str(getattr(args, "totalsegmentator_executable", "") or "").strip():
+        plan_cmd.extend(["--totalsegmentator-executable", str(args.totalsegmentator_executable)])
     plan_result = _run(plan_cmd, env=env, timeout=600)
     if not plan_result["ok"]:
         log_failure(state_root, stage="teacher_batch_plan", failure_reason=plan_result["stderr"] or "teacher_batch_plan_failed", details=plan_result)
@@ -2273,6 +2292,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--checkpoint-root", default=os.getenv("CHECKPOINT_ROOT", "/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints"), type=Path)
     parser.add_argument("--nnunet-predict-executable", default=os.getenv("NNUNETV2_PREDICT_EXECUTABLE", "/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict"), type=Path)
     parser.add_argument("--unest-python-executable", default=os.getenv("UNEST_PYTHON_EXECUTABLE", "/home/xhan74/envs/medical_agent_train_py311/bin/python"), type=Path)
+    parser.add_argument("--totalsegmentator-executable", default=os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE", ""))
     parser.add_argument("--registry", default=REPO_ROOT / "configs" / "model_registry.yaml", type=Path)
     parser.add_argument("--target-config", default=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json", type=Path)
     parser.add_argument("--gpu-target-workers", default=int(os.getenv("GPU_TARGET_WORKERS", "0")), type=int)

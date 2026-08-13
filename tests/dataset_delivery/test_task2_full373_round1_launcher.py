@@ -253,6 +253,10 @@ def _write_scope(root: Path, *, cases: list[str], routes: dict[str, list[str]]) 
 def _write_candidate_manifest(path: Path, rows: list[dict[str, str]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["task_index", "case_id", "target", "teacher", "candidate_id", "ct_path", "annotation_folder"]
+    for row in rows:
+        for field in row:
+            if field not in fieldnames:
+                fieldnames.append(field)
     with path.open("w", encoding="utf-8") as handle:
         handle.write(",".join(fieldnames) + "\n")
         for row in rows:
@@ -644,6 +648,89 @@ def test_stale_running_candidate_with_missing_claim_requeues_and_reclaims(tmp_pa
     assert claim["candidate"]["status"] == "CLAIMED"
 
 
+def test_targeted_failed_final_repair_requeues_known_infra_failures_only(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "vertebrae_t2", "teacher": "vista3d", "candidate_id": "cand_target", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "1", "case_id": "CASE001", "target": "liver", "teacher": "totalsegmentator", "candidate_id": "cand_ts", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "2", "case_id": "CASE001", "target": "spleen", "teacher": "teacher1", "candidate_id": "cand_other", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "3", "case_id": "CASE001", "target": "pancreas", "teacher": "teacher1", "candidate_id": "cand_success", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "4", "case_id": "CASE001", "target": "kidney_left", "teacher": "teacher1", "candidate_id": "cand_empty", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(
+        tmp_path,
+        cases=["CASE001"],
+        routes={
+            "vertebrae_t2": ["vista3d"],
+            "liver": ["totalsegmentator"],
+            "spleen": ["teacher1"],
+            "pancreas": ["teacher1"],
+            "kidney_left": ["teacher1"],
+        },
+    )
+    full373.publish_candidate_state(tmp_path, {"status": "FAILED_FINAL", "case_id": "CASE001", "target": "vertebrae_t2", "teacher": "vista3d", "candidate_id": "cand_target", "failure_reason": full373.FORMAL_TARGET_CONTRACT_FAILURE}, recompute_target=False)
+    full373.publish_candidate_state(tmp_path, {"status": "FAILED_FINAL", "case_id": "CASE001", "target": "liver", "teacher": "totalsegmentator", "candidate_id": "cand_ts", "failure_reason": "FileNotFoundError: [Errno 2] No such file or directory: 'TotalSegmentator'"}, recompute_target=False)
+    full373.publish_candidate_state(tmp_path, {"status": "FAILED_FINAL", "case_id": "CASE001", "target": "spleen", "teacher": "teacher1", "candidate_id": "cand_other", "failure_reason": "model crashed"}, recompute_target=False)
+    _candidate(tmp_path, "CASE001", "pancreas", "teacher1", status="SUCCESS")
+    _candidate(tmp_path, "CASE001", "kidney_left", "teacher1", status="COMPLETED_NO_NONZERO")
+    full373.recompute_case_target_readiness(tmp_path, case_id="CASE001", target="vertebrae_t2")
+
+    repair = full373.repair_recoverable_failed_candidates(
+        tmp_path,
+        task_manifest=manifest,
+        target_config=Path("configs/student_3d_prompt_target_organs.json"),
+        totalseg_executable_ready=True,
+        execution_attempt_id="attempt_b",
+    )
+
+    assert repair["repaired_count"] == 2
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="vertebrae_t2", teacher="vista3d")["status"] == "RETRY_PENDING"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="liver", teacher="totalsegmentator")["recovery_reason"] == "totalsegmentator_executable_fixed"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="spleen", teacher="teacher1")["status"] == "FAILED_FINAL"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="pancreas", teacher="teacher1")["status"] == "SUCCESS"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="kidney_left", teacher="teacher1")["status"] == "COMPLETED_NO_NONZERO"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="vertebrae_t2", teacher="vista3d")["execution_attempt_id"] == "attempt_b"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="vertebrae_t2", teacher="vista3d")["previous_status"] == "FAILED_FINAL"
+    assert full373.load_candidate_state(tmp_path, case_id="CASE001", target="vertebrae_t2", teacher="vista3d")["previous_failure_reason"]
+    assert full373._read_json(tmp_path / "queues" / "case_target_states" / "CASE001" / "vertebrae_t2.json")["status"] == "WAITING_FOR_CANDIDATES"
+
+    full373.recover_candidate_seed_marker(tmp_path, task_manifest=manifest)
+    claim = full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="worker", profile="gpu_t4")
+    assert claim["status"] == "CLAIMED"
+    assert claim["candidate"]["candidate_id"] in {"cand_target", "cand_ts"}
+
+
+def test_worker_exports_configured_totalsegmentator_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "liver", "teacher": "totalsegmentator", "candidate_id": "cand_ts", "ct_path": "/ct", "annotation_folder": "/ann", "totalsegmentator_executable": "/opt/totalseg/bin/TotalSegmentator"},
+        ],
+    )
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    captured_env = {}
+
+    def fake_run(command, **kwargs):
+        captured_env.update(kwargs.get("env") or {})
+        case_output = tmp_path / "candidate_runs" / "CASE001" / "liver" / "totalsegmentator"
+        mask = case_output / "annotation_versions" / "CASE001" / "updated" / "liver.nii.gz"
+        _save_mask(mask)
+        full373.write_json(
+            case_output / "annotation_versions" / "CASE001" / "selection_metadata.json",
+            {"selected_organs": [{"organ": "liver", "final_mask": str(mask)}], "selection_rows": []},
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(full373.subprocess, "run", fake_run)
+
+    result = full373.execute_task_index(0, manifest, tmp_path, worker_id="worker")
+
+    assert result["status"] == "COMPLETED"
+    assert captured_env["TOTAL_SEGMENTATOR_EXECUTABLE"] == "/opt/totalseg/bin/TotalSegmentator"
+
+
 def test_build_submission_manifest_does_not_seed_before_dynamic_worker_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     targets = [f"organ_{index:03d}" for index in range(373)]
     _patch_routes(monkeypatch, {target: ["teacher1"] for target in targets})
@@ -664,12 +751,15 @@ def test_build_submission_manifest_does_not_seed_before_dynamic_worker_manifest(
         checkpoint_root=tmp_path / "checkpoints",
         nnunet_predict_executable=tmp_path / "nnUNetv2_predict",
         unest_python_executable=tmp_path / "unest_python",
+        totalsegmentator_executable="/opt/totalseg/bin/TotalSegmentator",
         expected_case_count=1,
     )
 
     assert summary["status"] == "READY"
     assert summary["task_count"] == 373
     assert "candidate_seed" not in summary
+    rows = full373.read_csv_rows(Path(summary["groups"][full373.FULL373_GROUP]["task_manifest"]))
+    assert rows[0]["totalsegmentator_executable"] == "/opt/totalseg/bin/TotalSegmentator"
 
 
 def test_two_workers_share_one_seed_and_keep_o_excl_claim_authority(tmp_path: Path):

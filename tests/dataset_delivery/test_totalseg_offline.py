@@ -7,6 +7,7 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENT_HARNESS = REPO_ROOT / "agent-harness"
@@ -164,6 +165,39 @@ def test_totalseg_offline_command_uses_guarded_python_api(tmp_path: Path, monkey
     assert "brain_structures" in cmd
     assert "--device" in cmd
     assert "cpu" in cmd
+
+
+def test_totalseg_online_command_requires_absolute_configured_executable(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core.totalseg_runner import build_totalseg_command, preflight_totalseg_executable
+
+    exe = tmp_path / "bin" / "TotalSegmentator"
+    exe.parent.mkdir()
+    exe.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    exe.chmod(0o755)
+    monkeypatch.delenv("MEDAI_TOTALSEG_OFFLINE", raising=False)
+    monkeypatch.setenv("TOTAL_SEGMENTATOR_EXECUTABLE", str(exe))
+
+    preflight = preflight_totalseg_executable()
+    cmd = build_totalseg_command(tmp_path / "ct.nii.gz", tmp_path / "out", fast=True, task="total")
+
+    assert preflight["status"] == "ok"
+    assert preflight["executable"] == str(exe)
+    assert cmd[0] == str(exe)
+    assert Path(cmd[0]).is_absolute()
+
+
+def test_totalseg_online_missing_executable_fails_before_subprocess(tmp_path: Path, monkeypatch):
+    from cli_anything.medai.core import totalseg_runner
+
+    monkeypatch.delenv("MEDAI_TOTALSEG_OFFLINE", raising=False)
+    monkeypatch.setenv("TOTAL_SEGMENTATOR_EXECUTABLE", str(tmp_path / "missing" / "TotalSegmentator"))
+    monkeypatch.setattr(totalseg_runner.subprocess, "run", lambda *args, **kwargs: pytest.fail("missing executable must fail before subprocess"))
+
+    result = totalseg_runner.run_totalsegmentator(str(tmp_path / "ct.nii.gz"), str(tmp_path / "out"), case_id="case")
+
+    assert result["status"] == "failed"
+    assert result["reason"] == "TOTALSEG_EXECUTABLE_NOT_FOUND"
+    assert result["executable_preflight"]["status"] == "failed"
 
 
 def test_totalseg_valid_offline_cached_mask_writes_identity_provenance(tmp_path: Path, monkeypatch):

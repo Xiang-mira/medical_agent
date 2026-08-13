@@ -366,7 +366,11 @@ class TestTotalSegmentatorTimeoutContract:
             _make_nii(np.ones((4, 4, 4), dtype=np.uint8), out_dir / "liver.nii.gz")
             return __import__("subprocess").CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        monkeypatch.setattr(ts, "find_totalseg_executable", lambda: "TotalSegmentator")
+        fake_exe = tmp_path / "bin" / "TotalSegmentator"
+        fake_exe.parent.mkdir()
+        fake_exe.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        fake_exe.chmod(0o755)
+        monkeypatch.setattr(ts, "find_totalseg_executable", lambda: str(fake_exe))
         monkeypatch.setattr(ts.subprocess, "run", fake_run)
 
         result = ts.run_totalseg_with_contract(
@@ -437,6 +441,40 @@ class TestFormal373TargetAndAutoFineLabels:
         )
         assert result["status"] == "failed"
         assert result["blocking"]["requested_non_target_organs"] == ["not_a_real_organ"]
+
+    def test_target_validation_accepts_lowercase_vertebrae_aliases_from_planning(self):
+        from cli_anything.medai.core.target_space import validate_formal_373_target_space
+
+        requested = ["vertebrae_t2", "vertebrae_t3", "vertebrae_t4", "vertebrae_t11", "vertebrae_t12"]
+        result = validate_formal_373_target_space(
+            "configs/student_3d_prompt_target_organs.json",
+            requested_organs=requested,
+            require_full_target=False,
+        )
+
+        assert result["status"] == "success"
+        assert result["blocking"]["requested_non_target_organs"] == []
+
+    def test_full373_config_and_execution_validator_target_sets_match(self):
+        import json
+        from pathlib import Path
+        from cli_anything.medai.core.target_space import canonical_target_name, validate_formal_373_target_space
+
+        targets = json.loads(Path("configs/student_3d_prompt_target_organs.json").read_text(encoding="utf-8"))["target_organs"]
+        planning_set = {canonical_target_name(target) for target in targets}
+        validation = validate_formal_373_target_space(
+            "configs/student_3d_prompt_target_organs.json",
+            requested_organs=targets,
+            require_full_target=True,
+        )
+        validator_non_targets = set(validation["blocking"]["requested_non_target_organs"])
+        validator_missing = set(validation["blocking"]["target_organs_not_requested"])
+
+        assert validation["status"] == "success"
+        assert len(targets) == 373
+        assert len(planning_set) == validation["counts"]["effective_target_organs"]
+        assert validator_non_targets == set()
+        assert validator_missing == set()
 
     def test_label_passport_maps_grade_to_training_weight(self, tmp_path):
         from cli_anything.medai.core.auto_fine_label import build_label_passport

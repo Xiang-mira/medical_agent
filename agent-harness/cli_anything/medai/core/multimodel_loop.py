@@ -43,7 +43,7 @@ from .runtime_resolver import (
 from .organ_taxonomy import identity_contract, load_taxonomy, taxonomy_entry, topological_order_organs
 from .hierarchical_roi import HIERARCHICAL_PIPELINE_VERSION, execute_roi_tasks, plan_roi_tasks, write_hierarchical_manifest
 from .shapekit_runner import run_shapekit, _SHAPEKIT_TARGET_REQUIREMENTS
-from .target_space import validate_formal_373_target_space
+from .target_space import canonical_target_name, validate_formal_373_target_space
 from .backend_capabilities import OFFICIAL_VOXTELL_PRETRAINED, profile_runtime_policy
 from .organ_prompt_bank import _infer_region_and_landmarks
 from .scan_coverage import infer_scan_coverage
@@ -360,7 +360,7 @@ def _load_student_target_ids(root: Path) -> dict[str, Any]:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
-    return {str(k): v for k, v in (doc.get("organ_to_student_id", {}) or {}).items()}
+    return {canonical_target_name(str(k)): v for k, v in (doc.get("organ_to_student_id", {}) or {}).items()}
 
 
 ABDOMEN_PELVIS_COVERAGE_TERMS = {
@@ -6085,7 +6085,10 @@ def run_multimodel_annotation_loop(
         )
     target_validation = _target_validation_for_run(project_root, organs)
     student_target_ids = _load_student_target_ids(project_root)
-    non_taxonomy_override_organs = sorted(set(strict_delivery_fov_override_organs) - set(student_target_ids))
+    non_taxonomy_override_organs = sorted(
+        set(canonical_target_name(organ) for organ in strict_delivery_fov_override_organs)
+        - set(student_target_ids)
+    )
     if non_taxonomy_override_organs:
         raise ValueError(
             "strict_delivery_fov_override_organs include non-target organs for the formal 373-organ mainline: "

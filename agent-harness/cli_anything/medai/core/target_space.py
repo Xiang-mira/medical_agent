@@ -13,7 +13,9 @@ EXPECTED_EFFECTIVE_TARGET_COUNT = 372
 
 
 def canonical_target_name(name: str) -> str:
-    return CANONICAL_TARGET_ALIASES.get(str(name), str(name))
+    normalized = str(name).strip()
+    normalized = normalized.lower()
+    return CANONICAL_TARGET_ALIASES.get(normalized, normalized)
 
 
 def load_student_target_space(target_config: str | Path = "configs/student_3d_prompt_target_organs.json") -> dict[str, Any]:

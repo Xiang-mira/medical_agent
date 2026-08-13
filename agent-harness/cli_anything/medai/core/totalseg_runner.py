@@ -51,7 +51,30 @@ TASK_OFFLINE_REQUIREMENTS: dict[str, dict] = {
 
 
 def find_totalseg_executable() -> str | None:
-    return shutil.which("TotalSegmentator") or shutil.which("totalsegmentator")
+    configured = os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE") or os.getenv("TOTALSEGMENTATOR_EXECUTABLE") or os.getenv("MEDAI_TOTALSEG_EXECUTABLE")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_absolute() and path.is_file() and os.access(path, os.X_OK):
+            return str(path.resolve())
+        return None
+    discovered = shutil.which("TotalSegmentator") or shutil.which("totalsegmentator")
+    return str(Path(discovered).resolve()) if discovered else None
+
+
+def preflight_totalseg_executable() -> dict:
+    configured = os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE") or os.getenv("TOTALSEGMENTATOR_EXECUTABLE") or os.getenv("MEDAI_TOTALSEG_EXECUTABLE")
+    executable = find_totalseg_executable()
+    failures: list[str] = []
+    if configured and not Path(configured).expanduser().is_absolute():
+        failures.append("TOTALSEG_EXECUTABLE_NOT_ABSOLUTE")
+    if not executable:
+        failures.append("TOTALSEG_EXECUTABLE_NOT_FOUND")
+    return {
+        "status": "ok" if not failures else "failed",
+        "executable": executable or "",
+        "configured_executable": configured or "",
+        "failures": failures,
+    }
 
 
 def totalseg_offline_enabled() -> bool:
@@ -241,7 +264,9 @@ def build_totalseg_command(image_path: str | Path, output_dir: str | Path, fast:
             cmd.append("--preview")
         return cmd
 
-    exe = find_totalseg_executable() or "TotalSegmentator"
+    exe = find_totalseg_executable()
+    if not exe or not Path(exe).is_absolute():
+        raise FileNotFoundError("TotalSegmentator executable not resolved; set TOTAL_SEGMENTATOR_EXECUTABLE to an absolute executable path")
     cmd = [exe, "-i", str(image_path), "-o", str(output_dir)]
     task_no_fast = task in _NO_FAST_TASKS if task else False
     if fast and not task_no_fast:
@@ -270,6 +295,19 @@ def run_totalsegmentator(image_path: str, output_folder: str, case_id: str | Non
         case_id = image.parent.name or image.stem
     case_out = Path(output_folder).resolve() / case_id
     seg_out = case_out / "segmentations"
+    if not totalseg_offline_enabled():
+        executable_preflight = preflight_totalseg_executable()
+        if executable_preflight["status"] != "ok":
+            return {
+                "stage": "infer",
+                "backend": "TotalSegmentator",
+                "status": "failed",
+                "case_id": case_id,
+                "reason": ";".join(executable_preflight["failures"]),
+                "executable_preflight": executable_preflight,
+                "command": [],
+                "segmentation_output": str(seg_out),
+            }
     cmd = build_totalseg_command(image, seg_out, fast, task, roi_preset, roi_subset, device, statistics, preview)
     if dry_run:
         return {"stage": "infer", "backend": "TotalSegmentator", "status": "dry_run", "case_id": case_id, "command": cmd, "segmentation_output": str(seg_out)}
@@ -347,6 +385,19 @@ def run_totalseg_with_contract(
                 "case_id": case_id,
                 "reason": ";".join(preflight["failures"]),
                 "offline_preflight": preflight,
+                "subtasks": subtasks_to_run,
+                "per_model_dir": str(per_model_dir),
+            }
+    else:
+        executable_preflight = preflight_totalseg_executable()
+        if executable_preflight["status"] != "ok":
+            return {
+                "stage": "infer",
+                "backend": "TotalSegmentator",
+                "status": "failed",
+                "case_id": case_id,
+                "reason": ";".join(executable_preflight["failures"]),
+                "executable_preflight": executable_preflight,
                 "subtasks": subtasks_to_run,
                 "per_model_dir": str(per_model_dir),
             }
