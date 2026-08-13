@@ -287,6 +287,29 @@ def test_pathology_labels_are_excluded_from_373_canonical_tree(tmp_path: Path):
     assert _outputs(workspace) == []
 
 
+def test_cyst_source_labels_are_excluded_nonblocking_without_canonical_outputs(tmp_path: Path):
+    cfg = _config(tmp_path)
+    workspace = tmp_path / "workspace"
+    pancreatic = _mask(workspace, "CASE001", "pancreatic_cyst", b"pancreatic-cyst")
+    kidney = _mask(workspace, "CASE001", "kidney_cyst", b"kidney-cyst")
+
+    summary = _run(workspace, cfg, mode="apply")
+    rows = {row["source_name"]: row for row in _audit(workspace)}
+
+    assert summary["status"] == "READY"
+    assert summary["excluded_non_anatomy_count"] == 2
+    assert summary["unmapped_count"] == 0
+    assert rows["pancreatic_cyst"]["action"] == "EXCLUDED_NON_ANATOMY"
+    assert rows["kidney_cyst"]["action"] == "EXCLUDED_NON_ANATOMY"
+    assert rows["pancreatic_cyst"]["destination_path"] == ""
+    assert rows["kidney_cyst"]["destination_path"] == ""
+    assert _outputs(workspace) == []
+    assert pancreatic.read_bytes() == b"pancreatic-cyst"
+    assert kidney.read_bytes() == b"kidney-cyst"
+    assert not (workspace / "inputs" / "masks_373_canonical" / "CASE001" / "segmentations" / "pancreas.nii.gz").exists()
+    assert not (workspace / "inputs" / "masks_373_canonical" / "CASE001" / "segmentations" / "kidney.nii.gz").exists()
+
+
 def test_canonical_source_without_self_mapping_is_authoritative_for_celiac_and_rib_aliases(tmp_path: Path):
     cfg = _config(tmp_path)
     workspace = tmp_path / "workspace"

@@ -103,6 +103,10 @@ NON_ANATOMY_TOKENS = (
     "tumor",
     "tumour",
 )
+NON_ANATOMY_SOURCE_NAMES = {
+    "kidney_cyst",
+    "pancreatic_cyst",
+}
 OUTSIDE_373_SOURCE_NAMES = {
     "abdominal_tissue",
     "intermuscular_adipose_tissue",
@@ -191,6 +195,8 @@ def _non_rename_action(rows: list[dict[str, str]]) -> tuple[str, str, str]:
 
 
 def _is_non_anatomy(name: str) -> bool:
+    if name in NON_ANATOMY_SOURCE_NAMES:
+        return True
     parts = set(name.split("_"))
     return any(token in parts or token in name for token in NON_ANATOMY_TOKENS)
 
