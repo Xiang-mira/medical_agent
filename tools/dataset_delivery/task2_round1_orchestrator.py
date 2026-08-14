@@ -53,7 +53,7 @@ LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE"}
 ACTIVE_STATES = {"PENDING", "CONFIGURING", "COMPLETING", "RUNNING", "REQUEUED", "RESIZING", "SUSPENDED"}
 SUCCESS_STATES = {"COMPLETED"}
-BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY", "READY_WORKER_QUEUE"}
+BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY", "READY_WORKER_QUEUE", "RETRY_READY"}
 TEACHER_JOB_GROUPS = {"cads", "atm", "airrc", "unest", "full373"}
 LABELCRITIC_JOB_NAME = "labelcritic_72b_service"
 STATIC_TEST_ENV_DROP = {
@@ -90,6 +90,14 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _coerce_process_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    return str(value).strip()
+
+
 def _run(command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | None = None, timeout: int | None = None) -> dict[str, Any]:
     try:
         proc = subprocess.run(
@@ -112,7 +120,15 @@ def _run(command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | Non
     except FileNotFoundError as exc:
         return {"command": command, "return_code": 127, "stdout": "", "stderr": str(exc), "ok": False}
     except subprocess.TimeoutExpired as exc:
-        return {"command": command, "return_code": 124, "stdout": exc.stdout or "", "stderr": exc.stderr or "timeout", "ok": False}
+        return {
+            "command": command,
+            "return_code": 124,
+            "stdout": _coerce_process_text(exc.stdout),
+            "stderr": _coerce_process_text(exc.stderr) or f"timeout after {timeout}s",
+            "ok": False,
+            "timed_out": True,
+            "timeout_sec": timeout,
+        }
 
 
 def sanitized_static_test_env() -> dict[str, str]:
@@ -1403,6 +1419,18 @@ def _append_teacher_batch(paths: dict[str, Path], payload: dict[str, Any]) -> No
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+def _dynamic_submit_timeout_sec() -> int:
+    raw = os.getenv("TASK2_DYNAMIC_GPU_SUBMIT_TIMEOUT_SEC", os.getenv("DYNAMIC_GPU_SUBMIT_TIMEOUT_SEC", "900"))
+    try:
+        return max(60, int(raw))
+    except ValueError:
+        return 900
+
+
+def _dynamic_submit_timed_out(result: dict[str, Any]) -> bool:
+    return bool(result.get("timed_out")) or int(result.get("return_code") or 0) == 124
+
+
 def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
     state_root = args.state_root.resolve()
     paths = _state_paths(state_root)
@@ -1421,7 +1449,7 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
             "staging_failed_count": sum(1 for row in statuses if row["status"] == "STAGING_FAILED"),
         }
     active_submission_id = str(state.get("teacher_active_submission_id") or "").strip()
-    if active_submission_id and state.get("scheduler_status") in {"BACKPRESSURED", "WAITING_FOR_SUBMISSION_CAPACITY", "PARTIALLY_SUBMITTED"}:
+    if active_submission_id and state.get("scheduler_status") in BACKPRESSURE_STATUSES:
         submission_id = active_submission_id
         match = re.search(r"ready_batch_(\d+)", submission_id)
         batch_index = int(match.group(1)) if match else int(state.get("teacher_batch_index") or 0)
@@ -1513,11 +1541,84 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
     ]
     if os.getenv("DYNAMIC_SBATCH_TEST_ONLY", "1") != "1":
         dynamic_cmd.append("--skip-sbatch-test-only")
-    dynamic_result = _run(dynamic_cmd, env=env, timeout=600)
+    safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", submission_id).strip("_")
+    dynamic_timeout_sec = _dynamic_submit_timeout_sec()
+    dynamic_result = _run(dynamic_cmd, env=env, timeout=dynamic_timeout_sec)
     if not dynamic_result["ok"]:
+        if _dynamic_submit_timed_out(dynamic_result):
+            reconcile = reconcile_active_teacher_jobs(args, formal_root)
+            dynamic_plan = _read_json(formal_root / "slurm" / f"dynamic_gpu_submission_plan_{safe_submission_id}.json", {})
+            telemetry = {
+                "status": "RETRY_READY",
+                "scheduler_status": "RETRY_READY",
+                "failure_class": "RETRYABLE_SCHEDULER_CONTROL_TIMEOUT",
+                "failure_reason": "dynamic_gpu_submitter_timeout",
+                "timeout_sec": dynamic_timeout_sec,
+                "submission_id": submission_id,
+                "execution_attempt_id": execution_attempt_id,
+                "scientific_run_id": run_id,
+                "formal_root": str(formal_root),
+                "ready_case_count": len(ready_cases),
+                "planned_task_count": int(summary.get("task_count") or 0),
+                "command": dynamic_cmd,
+                "stdout_tail": _tail_text(dynamic_result.get("stdout")),
+                "stderr_tail": _tail_text(dynamic_result.get("stderr")),
+                "partial_dynamic_plan": dynamic_plan,
+                "reconcile": reconcile,
+                "recorded_at": utc_now(),
+            }
+            batch = {
+                "status": "RETRY_READY",
+                "scheduler_status": "RETRY_READY",
+                "submission_id": submission_id,
+                "execution_attempt_id": execution_attempt_id,
+                "case_ids": ready_cases,
+                "case_count": len(ready_cases),
+                "previously_submitted_case_count": len(submitted_cases),
+                "planned_task_count": int(summary.get("task_count") or 0),
+                "formal_root": str(formal_root),
+                "plan": plan_result,
+                "dynamic": dynamic_result,
+                "dynamic_plan": dynamic_plan,
+                "dynamic_submit_timeout": telemetry,
+                "teacher_h100_policy": dynamic_plan.get("teacher_h100_policy") or h100_policy,
+                "created_at": utc_now(),
+            }
+            _append_teacher_batch(paths, batch)
+            current_estep_status = str(state.get("e_step_status") or "")
+            retry_estep_status = current_estep_status if current_estep_status in {"RUNNING", "SUBMITTED", "PASSED"} else "SUBMITTED"
+            _save_state(
+                state_root,
+                e_step_status=retry_estep_status,
+                teacher_batch_index=batch_index,
+                teacher_active_submission_id=submission_id,
+                formal_root=str(formal_root),
+                last_teacher_batch=batch,
+                dynamic_submit_timeout=telemetry,
+                scheduler_status="RETRY_READY",
+                teacher_h100_policy=batch["teacher_h100_policy"],
+            )
+            record_job_lifecycle(
+                state_root,
+                {
+                    "status": "RETRY_READY",
+                    "scheduler_status": "RETRY_READY",
+                    "failure_class": "RETRYABLE_SCHEDULER_CONTROL_TIMEOUT",
+                    "failure_reason": "dynamic_gpu_submitter_timeout",
+                    "submission_id": submission_id,
+                    "execution_attempt_id": execution_attempt_id,
+                    "logical_task_id": f"{run_id}:{submission_id}:dynamic_gpu_submit",
+                    "stage": "teacher_batch_submit",
+                    "formal_root": str(formal_root),
+                    "timeout_sec": dynamic_timeout_sec,
+                    "reconcile_adopted_count": reconcile.get("adopted_count"),
+                    "stdout": _tail_text(dynamic_result.get("stdout")),
+                    "stderr": _tail_text(dynamic_result.get("stderr")),
+                },
+            )
+            return batch
         log_failure(state_root, stage="teacher_batch_submit", failure_reason=dynamic_result["stderr"] or "teacher_batch_submit_failed", details=dynamic_result)
         return {"status": "FAILED", "failure_reason": dynamic_result["stderr"] or "teacher_batch_submit_failed", "dynamic": dynamic_result}
-    safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", submission_id).strip("_")
     dynamic_plan = _read_json(formal_root / "slurm" / f"dynamic_gpu_submission_plan_{safe_submission_id}.json", {})
     if not dynamic_plan:
         try:

@@ -612,28 +612,47 @@ def _candidate_from_single_teacher_run(case_output: Path, *, case_id: str, targe
         if candidate:
             break
     selected = selected_target_rows[0] if selected_target_rows else {}
-    prediction = (
-        candidate.get("candidate_cleaned_prediction")
-        or candidate.get("candidate_raw_prediction")
-        or candidate.get("prediction")
-        or selected.get("pre_shapekit_mask")
-        or selected.get("final_mask")
-        or selected.get("mask_path")
-    )
+    cleaned_prediction = str(candidate.get("candidate_cleaned_prediction") or selected.get("final_mask") or "")
+    raw_prediction = str(candidate.get("candidate_raw_prediction") or candidate.get("prediction") or selected.get("pre_shapekit_mask") or "")
+    selected_prediction = str(selected.get("mask_path") or "")
+    prediction = cleaned_prediction or raw_prediction or selected_prediction
     path = Path(str(prediction or ""))
     exists = bool(prediction and path.is_file())
     qc_status = str(candidate.get("candidate_qc_status") or selected.get("selected_candidate_qc_status") or selected.get("candidate_qc_status") or "")
+    qc_flags = candidate.get("candidate_qc_flags") or selected.get("selected_candidate_qc_flags") or []
+    if isinstance(qc_flags, str):
+        qc_flags = [qc_flags]
+    qc_failed = qc_status.lower() in {"fail", "failed", "unusable"}
+    shapekit_status = str(candidate.get("candidate_shapekit_status") or selected.get("shapekit_status") or "")
+    shapekit_reason = str(
+        candidate.get("candidate_shapekit_reason")
+        or selected.get("shapekit_reason")
+        or candidate.get("postprocess_failure_reason")
+        or selected.get("postprocess_failure_reason")
+        or ""
+    )
+    shapekit_failed = (
+        shapekit_status.lower() in {"postprocess_failed", "fallback_original", "failed", "error"}
+        or shapekit_status.lower().startswith("warning_")
+        or any(str(flag).lower() == "postprocess_failed" for flag in qc_flags)
+    )
+    if shapekit_failed:
+        shapekit_status = "postprocess_failed"
+        shapekit_reason = shapekit_reason or "ShapeKit postprocess failed; raw candidate preserved"
     target_type = str(selected.get("target_type") or "")
-    if exists and qc_status != "fail":
+    if exists:
         state = "SUCCESS"
     elif target_type in {"absent_negative", "negative_absent"}:
         state = "ABSENT"
     elif target_type in {"out_of_fov", "partial_fov"}:
         state = "OUT_OF_FOV"
-    elif exists:
-        state = "FAILED_FINAL"
     else:
         state = "COMPLETED_NO_NONZERO"
+    explicit_eligible = candidate.get("eligible_for_labelcritic")
+    if isinstance(explicit_eligible, str):
+        eligible_for_labelcritic = explicit_eligible.strip().lower() in {"1", "true", "yes"}
+    else:
+        eligible_for_labelcritic = bool(explicit_eligible) if explicit_eligible is not None else bool(exists and not qc_failed)
     return {
         "status": state,
         "candidate_exists": exists,
@@ -642,16 +661,17 @@ def _candidate_from_single_teacher_run(case_output: Path, *, case_id: str, targe
         "teacher": teacher,
         "model": teacher,
         "prediction": str(path) if exists else "",
-        "candidate_cleaned_prediction": str(candidate.get("candidate_cleaned_prediction") or ""),
-        "candidate_raw_prediction": str(candidate.get("candidate_raw_prediction") or ""),
+        "candidate_cleaned_prediction": cleaned_prediction,
+        "candidate_raw_prediction": raw_prediction,
         "candidate_id": candidate.get("candidate_id") or f"cand_{_sha(case_id + '|' + target + '|' + teacher)}",
         "candidate_qc_status": qc_status,
         "candidate_qc_score": candidate.get("candidate_qc_score") or selected.get("selected_candidate_qc_score"),
-        "candidate_qc_flags": candidate.get("candidate_qc_flags") or selected.get("selected_candidate_qc_flags") or [],
+        "candidate_qc_flags": qc_flags,
         "candidate_qc": candidate.get("candidate_qc") or selected.get("selected_candidate_qc_checks") or {},
-        "candidate_shapekit_status": candidate.get("candidate_shapekit_status") or selected.get("shapekit_status"),
-        "candidate_shapekit_reason": candidate.get("candidate_shapekit_reason") or selected.get("shapekit_reason"),
-        "eligible_for_labelcritic": bool(candidate.get("eligible_for_labelcritic", exists)),
+        "candidate_shapekit_status": shapekit_status,
+        "candidate_shapekit_reason": shapekit_reason,
+        "raw_candidate_survived_shapekit_failure": bool(exists and shapekit_failed and not Path(cleaned_prediction).is_file()),
+        "eligible_for_labelcritic": eligible_for_labelcritic,
         "source_run_loop": str(case_output),
         "selection_metadata": str(_selection_metadata_path(case_output, case_id)),
         "published_at": utc_now(),

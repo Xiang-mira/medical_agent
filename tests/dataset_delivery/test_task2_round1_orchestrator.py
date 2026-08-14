@@ -1414,6 +1414,94 @@ def test_teacher_submit_backpressure_is_not_round1_failure_and_keeps_submission_
     assert state.get("teacher_submitted_case_ids") in (None, [])
 
 
+def test_dynamic_submit_timeout_is_retryable_and_reconciles_partial_jobs_without_duplicate(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001"])
+    _stage_ready_case(args.workspace_root, "CASE001")
+    formal_root = tmp_path / "formal"
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_science_stable", e_step_status="RUNNING")
+    dynamic_calls: list[dict[str, object]] = []
+    reconcile_calls: list[str] = []
+
+    def fake_reconcile(call_args, root=None):
+        resolved_root = Path(root or formal_root)
+        reconcile_calls.append(str(resolved_root))
+        reliability.persist_submitted_job(
+            resolved_root / "slurm",
+            {
+                "run_id": "round1_science_stable",
+                "execution_attempt_id": orch._execution_attempt_id(call_args.state_root),
+                "worker_generation": orch._execution_attempt_id(call_args.state_root),
+                "submission_id": "ready_batch_001",
+                "job_id": "777777",
+                "group": "full373",
+                "model_group": "full373",
+                "profile": "generic_gpu",
+                "shard_id": "shard_000",
+                "execution_schema_version": CANDIDATE_TASK_V1,
+                "submission_status": "adopted",
+                "scheduler_status": "ADOPTED_ACTIVE_JOB",
+                "slurm_state": "RUNNING",
+            },
+        )
+        return {"status": "RECONCILED", "adopted_count": 1, "jobs": [{"job_id": "777777"}]}
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["squeue", "-h"]:
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if command == ["git", "rev-parse", "HEAD"]:
+            return {"ok": True, "stdout": "abc123", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_full373_round1_launcher.py") for part in command):
+            formal_root.mkdir(parents=True, exist_ok=True)
+            (formal_root / "formal_task2_submission_manifest.json").write_text(
+                json.dumps({"status": "READY", "task_count": 1, "groups": {"full373": {"task_count": 1}}}),
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+        if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command):
+            dynamic_calls.append({"command": [str(part) for part in command], "timeout": kwargs.get("timeout")})
+            if len(dynamic_calls) == 1:
+                return {
+                    "ok": False,
+                    "stdout": "submitted job 777777",
+                    "stderr": "TimeoutExpired",
+                    "return_code": 124,
+                    "timed_out": True,
+                    "timeout_sec": kwargs.get("timeout"),
+                }
+            (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+            (formal_root / "slurm" / "dynamic_gpu_submission_plan_ready_batch_001.json").write_text(
+                json.dumps({"status": "SUBMITTED", "scheduler_status": "ACTIVE"}),
+                encoding="utf-8",
+            )
+            return {"ok": True, "stdout": '{"status":"SUBMITTED"}', "stderr": "", "return_code": 0}
+        return {"ok": True, "stdout": "", "stderr": "", "return_code": 0}
+
+    monkeypatch.setenv("TASK2_DYNAMIC_GPU_SUBMIT_TIMEOUT_SEC", "60")
+    monkeypatch.setattr(orch, "reconcile_active_teacher_jobs", fake_reconcile)
+    monkeypatch.setattr(orch, "_run", fake_run)
+
+    first = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
+    state_after_timeout = orch._load_state(args.state_root)
+    second = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
+    jobs = reliability.load_submitted_jobs(formal_root / "slurm")
+
+    assert first["status"] == "RETRY_READY"
+    assert state_after_timeout["scheduler_status"] == "RETRY_READY"
+    assert state_after_timeout["e_step_status"] == "RUNNING"
+    assert state_after_timeout.get("terminal_state") != "ROUND1_FAILED"
+    assert state_after_timeout["dynamic_submit_timeout"]["reconcile"]["adopted_count"] == 1
+    assert second["status"] == "SUBMITTED"
+    assert second["submission_id"] == "ready_batch_001"
+    assert orch._load_state(args.state_root)["run_id"] == "round1_science_stable"
+    assert orch._load_state(args.state_root)["formal_root"] == str(formal_root)
+    assert len([row for row in jobs if row["job_id"] == "777777"]) == 1
+    assert len(dynamic_calls) == 2
+    assert all("ready_batch_001" in call["command"] for call in dynamic_calls)
+    assert dynamic_calls[0]["timeout"] == 60
+    assert reconcile_calls
+
+
 def test_reconcile_active_teacher_jobs_adopts_matching_slurm_job_without_hardcoded_id(tmp_path, monkeypatch):
     args = _args(tmp_path)
     formal_root = tmp_path / "formal"

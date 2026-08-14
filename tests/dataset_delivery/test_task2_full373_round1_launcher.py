@@ -702,6 +702,68 @@ def test_targeted_failed_final_repair_requeues_known_infra_failures_only(tmp_pat
     assert claim["candidate"]["candidate_id"] in {"cand_target", "cand_ts"}
 
 
+def test_raw_candidate_survives_shapekit_failure_without_failed_final(tmp_path: Path):
+    case_output = tmp_path / "case_runs" / "BDMAP_00003038" / "portal_vein_and_splenic_vein" / "vsmtrans"
+    raw_mask = _save_mask(case_output / "annotation_versions" / "BDMAP_00003038" / "raw" / "portal_vein_and_splenic_vein.nii.gz")
+    metadata_path = case_output / "annotation_versions" / "BDMAP_00003038" / "selection_metadata.json"
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "selection_rows": [
+                    {
+                        "organ": "portal_vein_and_splenic_vein",
+                        "candidate_predictions": [
+                            {
+                                "model": "vsmtrans",
+                                "candidate_id": "cand_portal",
+                                "prediction": str(raw_mask),
+                                "candidate_raw_prediction": str(raw_mask),
+                                "candidate_cleaned_prediction": "",
+                                "candidate_qc_status": "fail",
+                                "candidate_qc_flags": ["high_risk_postprocess_required", "postprocess_failed"],
+                                "candidate_shapekit_status": "postprocess_failed",
+                                "candidate_shapekit_reason": "ShapeKit returned non-zero code 1",
+                                "eligible_for_labelcritic": False,
+                            }
+                        ],
+                    }
+                ],
+                "selected_organs": [
+                    {
+                        "organ": "portal_vein_and_splenic_vein",
+                        "pre_shapekit_mask": str(raw_mask),
+                        "shapekit_status": "postprocess_failed",
+                        "shapekit_reason": "ShapeKit returned non-zero code 1",
+                        "selected_candidate_qc_status": "fail",
+                        "selected_candidate_qc_flags": ["high_risk_postprocess_required", "postprocess_failed"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidate = full373._candidate_from_single_teacher_run(
+        case_output,
+        case_id="BDMAP_00003038",
+        target="portal_vein_and_splenic_vein",
+        teacher="vsmtrans",
+    )
+
+    assert candidate["status"] == "SUCCESS"
+    assert candidate["candidate_exists"] is True
+    assert candidate["prediction"] == str(raw_mask)
+    assert candidate["candidate_raw_prediction"] == str(raw_mask)
+    assert candidate["candidate_cleaned_prediction"] == ""
+    assert candidate["candidate_qc_status"] == "fail"
+    assert "postprocess_failed" in candidate["candidate_qc_flags"]
+    assert candidate["candidate_shapekit_status"] == "postprocess_failed"
+    assert candidate["candidate_shapekit_reason"] == "ShapeKit returned non-zero code 1"
+    assert candidate["raw_candidate_survived_shapekit_failure"] is True
+    assert candidate["eligible_for_labelcritic"] is False
+
+
 def test_worker_exports_configured_totalsegmentator_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     manifest = _write_candidate_manifest(
         tmp_path / "shared.csv",
