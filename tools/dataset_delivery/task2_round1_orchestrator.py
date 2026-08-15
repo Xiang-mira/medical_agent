@@ -32,6 +32,7 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     RETRYABLE_TERMINAL_STATES,
     classify_sbatch_failure,
     persist_submitted_job,
+    reconcile_submitted_worker_accounting,
     record_job_lifecycle,
     slurm_comment,
     student_pretimeout,
@@ -486,6 +487,10 @@ def refresh_lifecycle_for_submitted_jobs(args: argparse.Namespace, formal_root: 
             "current_execution_attempt_id": current_attempt,
             "is_current_execution_attempt": is_current_attempt,
             "slurm_state": state,
+            "scheduler_current_running": state == "RUNNING",
+            "scheduler_current_pending": state == "PENDING",
+            "scheduler_current_active": state in ACTIVE_STATES,
+            "scheduler_current_terminal": state in (SUCCESS_STATES | RETRYABLE_TERMINAL_STATES | TERMINAL_FAILURE_STATES),
             "elapsed": timing.get("elapsed", ""),
             "time_limit": timing.get("time_limit", ""),
             "time_left": timing.get("time_left", ""),
@@ -2353,23 +2358,57 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
         "h100_running": 0,
         "h100_pending": 0,
     }
+    worker_current = {
+        "by_profile": {},
+        "diagnostics": {
+            "lifecycle_adopted": 0,
+            "lifecycle_terminal": 0,
+            "unknown": 0,
+            "invalid_pending": 0,
+        },
+    }
     if jobs_csv.exists():
-        for row in read_csv_rows(jobs_csv):
-            job_state = slurm_job_state(str(row.get("job_id") or ""))
-            if job_state.get("state") not in ACTIVE_STATES:
+        reconciled = reconcile_submitted_worker_accounting(
+            jobs_csv.parent,
+            execution_attempt_id=str(state.get("execution_attempt_id") or ""),
+            job_state_fn=lambda row: slurm_job_state(str(row.get("job_id") or row.get("display_id") or "")),
+        )
+        worker_current["by_profile"] = reconciled.get("counts") or {}
+        for profile_counts in (reconciled.get("counts") or {}).values():
+            worker_current["diagnostics"]["lifecycle_adopted"] += int(profile_counts.get("lifecycle_adopted") or 0)
+            worker_current["diagnostics"]["lifecycle_terminal"] += int(profile_counts.get("lifecycle_terminal") or 0)
+            worker_current["diagnostics"]["unknown"] += int(profile_counts.get("unknown") or 0)
+            worker_current["diagnostics"]["invalid_pending"] += int(profile_counts.get("invalid_pending") or 0)
+        for row in reconciled.get("rows") or []:
+            active = int(row.get("scheduler_current_active") or 0)
+            if active <= 0:
                 continue
             gres = str(row.get("gres") or row.get("profile") or "").upper()
             profile = str(row.get("profile") or "").lower()
-            is_running = str(job_state.get("state") or "") == "RUNNING"
-            suffix = "running" if is_running else "pending"
+            running = int(row.get("scheduler_current_running") or 0)
+            pending = int(row.get("scheduler_current_pending") or 0) + int(row.get("scheduler_current_transitional") or 0)
             if "INTERACTIVE" in gres or "interactive" in profile:
-                worker_counts[f"interactive_{suffix}"] += 1
+                worker_counts["interactive_running"] += running
+                worker_counts["interactive_pending"] += pending
             elif "A100" in gres or "a100" in profile:
-                worker_counts[f"a100_{suffix}"] += 1
+                worker_counts["a100_running"] += running
+                worker_counts["a100_pending"] += pending
             elif "H100" in gres or "h100" in profile:
-                worker_counts[f"h100_{suffix}"] += 1
+                worker_counts["h100_running"] += running
+                worker_counts["h100_pending"] += pending
             else:
-                worker_counts[f"t4_{suffix}"] += 1
+                worker_counts["t4_running"] += running
+                worker_counts["t4_pending"] += pending
+    worker_counts.update(
+        {
+            "t4_running_real": worker_counts["t4_running"],
+            "t4_pending_real": worker_counts["t4_pending"],
+            "t4_active_real": worker_counts["t4_running"] + worker_counts["t4_pending"],
+            "a100_active_real": worker_counts["a100_running"] + worker_counts["a100_pending"],
+            "interactive_active_real": worker_counts["interactive_running"] + worker_counts["interactive_pending"],
+            "h100_active_real": worker_counts["h100_running"] + worker_counts["h100_pending"],
+        }
+    )
     labelcritic = state.get("labelcritic") or {}
     label_job = slurm_job_state(str(labelcritic.get("job_id") or "")) if isinstance(labelcritic, dict) else {"state": "UNKNOWN"}
     mstep_job = slurm_job_state(str(state.get("mstep_job_id") or "")) if state.get("mstep_job_id") else {"state": "NOT_SUBMITTED"}
@@ -2386,9 +2425,23 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
     )
     return {
         "teacher_workers": worker_counts,
+        "teacher_worker_current": worker_current,
         "task_ownership": dynamic_plan.get("task_ownership", ""),
         "profile_binding": dynamic_plan.get("profile_binding"),
         "primary_teacher_profile": dynamic_plan.get("primary_teacher_profile", ""),
+        "desired_teacher_workers_by_profile": {
+            str(row.get("profile") or ""): int(row.get("desired_workers") or 0)
+            for row in dynamic_plan.get("worker_pool", {}).get("profile_reports", [])
+            if isinstance(row, dict)
+        },
+        "replenishment_deficit_by_profile": {
+            str(row.get("profile") or ""): int(row.get("new_worker_deficit") or 0)
+            for row in dynamic_plan.get("worker_pool", {}).get("profile_reports", [])
+            if isinstance(row, dict)
+        },
+        "last_submit_count": len(dynamic_plan.get("jobs") or []),
+        "last_submit_reason": dynamic_plan.get("status", ""),
+        "last_backpressure_reason": dynamic_plan.get("failure_reason", "") or dynamic_plan.get("scheduler_status", ""),
         "allow_h100_teacher_overflow": h100_policy.get("allow_h100_teacher_overflow"),
         "labelcritic_required": h100_policy.get("labelcritic_required"),
         "labelcritic_job_found": h100_policy.get("labelcritic_job_found"),

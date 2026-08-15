@@ -1687,9 +1687,9 @@ def test_status_reports_shared_queue_worker_and_qos_telemetry(tmp_path):
         encoding="utf-8",
     )
     (formal_root / "slurm" / "submitted_jobs.csv").write_text(
-        "job_id,profile,gres,submission_status,scheduler_status\n"
-        "91001,gpu_t4,gpu:T4:1,submitted,ACTIVE\n"
-        "91002,gpu_a100,gpu:A100:1,submitted,ACTIVE\n",
+        "job_id,model_group,profile,gres,submission_status,scheduler_status,execution_schema_version\n"
+        f"91001,full373,gpu_t4,gpu:T4:1,submitted,ACTIVE,{CANDIDATE_TASK_V1}\n"
+        f"91002,full373,gpu_a100,gpu:A100:1,submitted,ACTIVE,{CANDIDATE_TASK_V1}\n",
         encoding="utf-8",
     )
     orch._save_state(args.state_root, formal_root=str(formal_root), labelcritic={"job_id": "777777"})

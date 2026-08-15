@@ -25,14 +25,17 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     CANDIDATE_TASK_V1,
     DEFAULT_LOGICAL_TASK_NAMESPACE,
     DEFAULT_MANIFEST_SCHEMA_VERSION,
+    IMPOSSIBLE_PENDING_REASONS,
     SUBMITTED_JOB_FIELDS,
     append_submission_attempt,
     classify_sbatch_failure,
     existing_active_logical_keys,
     load_submitted_jobs,
+    normalize_slurm_job_identifier,
     parse_sbatch_job_id,
     persist_submitted_job,
     record_job_lifecycle,
+    reconcile_submitted_worker_accounting,
     slurm_comment,
 )
 from tools.dataset_delivery.task2_h100_policy import resolve_teacher_h100_policy  # noqa: E402
@@ -60,14 +63,6 @@ GPU_VRAM_ESTIMATE_GB = {
     "GPU": 16,
 }
 QOS_CACHE_FILENAME = "qos_capacity_cache.json"
-IMPOSSIBLE_PENDING_REASONS = {
-    "PartitionTimeLimit",
-    "DependencyNeverSatisfied",
-    "BadConstraints",
-    "InvalidAccount",
-    "InvalidQOS",
-}
-
 
 @dataclass(frozen=True)
 class GpuSubmitProfile:
@@ -183,6 +178,16 @@ def _memory_to_gb(value: Any) -> int:
         return int(float(raw) / 1024) if float(raw) > 512 else int(float(raw))
     except Exception:
         return 0
+
+
+def _int_first(mapping: dict[str, Any], keys: list[str], default: int = 0) -> int:
+    for key in keys:
+        if key in mapping and mapping.get(key) not in (None, ""):
+            try:
+                return int(mapping.get(key) or 0)
+            except Exception:
+                return default
+    return default
 
 
 def _effective_profile_time_limit(partition_row: dict[str, Any], *, requested: str, interactive_short: bool) -> str:
@@ -521,14 +526,20 @@ def _profile_capacity_hint(profile: GpuSubmitProfile, resource_inventory: dict[s
 def _profile_feasible_slots(profile: GpuSubmitProfile, resource_inventory: dict[str, Any]) -> dict[str, Any]:
     partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
     part = partitions.get(profile.partition) or {}
-    gpu_slots = int(part.get("idle_estimate") or part.get("gpus_idle_estimate") or part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
-    cpu_idle = int(part.get("cpus_idle_estimate") or part.get("cpus_total") or 0)
-    mem_idle_gb = int(part.get("memory_idle_gb_estimate") or part.get("memory_free_gb_estimate") or part.get("memory_total_gb") or 0)
+    gpu_capacity_slots = _int_first(part, ["allocatable_configured_total", "gpus_configured_total"], 0)
+    gpu_slots = _int_first(part, ["idle_estimate", "gpus_idle_estimate"], gpu_capacity_slots)
+    cpu_total = _int_first(part, ["cpus_total", "cpus_idle_estimate"], 0)
+    cpu_idle = _int_first(part, ["cpus_idle_estimate"], cpu_total)
+    mem_total_gb = _int_first(part, ["memory_total_gb", "memory_idle_gb_estimate", "memory_free_gb_estimate"], 0)
+    mem_idle_gb = _int_first(part, ["memory_idle_gb_estimate", "memory_free_gb_estimate"], mem_total_gb)
     mem_margin = int(os.getenv("NODE_MEMORY_SAFETY_MARGIN_GB", "8"))
     mem_per_worker = max(1, _memory_to_gb(profile.mem))
     cpu_slots = cpu_idle // max(1, int(profile.cpus_per_task)) if cpu_idle > 0 else gpu_slots
     memory_slots = max(0, mem_idle_gb - mem_margin) // mem_per_worker if mem_idle_gb > 0 else gpu_slots
     feasible = max(0, min(gpu_slots, cpu_slots, memory_slots))
+    cpu_capacity_slots = cpu_total // max(1, int(profile.cpus_per_task)) if cpu_total > 0 else gpu_capacity_slots
+    memory_capacity_slots = max(0, mem_total_gb - mem_margin) // mem_per_worker if mem_total_gb > 0 else gpu_capacity_slots
+    capacity = max(0, min(gpu_capacity_slots, cpu_capacity_slots, memory_capacity_slots))
     return {
         "profile": profile.name,
         "partition_resource_known": bool(part),
@@ -536,6 +547,10 @@ def _profile_feasible_slots(profile: GpuSubmitProfile, resource_inventory: dict[
         "cpu_slots": cpu_slots,
         "memory_slots": memory_slots,
         "feasible_slots": feasible,
+        "gpu_capacity_slots": gpu_capacity_slots,
+        "cpu_capacity_slots": cpu_capacity_slots,
+        "memory_capacity_slots": memory_capacity_slots,
+        "capacity_slots": capacity,
         "memory_per_worker_gb": mem_per_worker,
         "memory_safety_margin_gb": mem_margin,
         "cpu_per_worker": int(profile.cpus_per_task),
@@ -560,7 +575,7 @@ def _profile_desired_ceiling(profile: GpuSubmitProfile, *, planned_workers: int,
     feasible = _profile_feasible_slots(profile, resource_inventory)
     physical = _profile_capacity_hint(profile, resource_inventory)
     if feasible.get("partition_resource_known"):
-        ceiling = int(feasible.get("feasible_slots") or 0)
+        ceiling = int(feasible.get("capacity_slots") or 0)
     else:
         ceiling = physical if physical > 0 else int(planned_workers)
     if "H100" in upper:
@@ -572,9 +587,9 @@ def _profile_desired_ceiling(profile: GpuSubmitProfile, *, planned_workers: int,
             return 0
         partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
         part = partitions.get(profile.partition) or {}
-        idle = int(part.get("idle_estimate") or part.get("gpus_idle_estimate") or 0)
-        physical = int(part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
-        available = int(feasible.get("feasible_slots") or 0)
+        idle = _int_first(part, ["idle_estimate", "gpus_idle_estimate"], int(feasible.get("capacity_slots") or 0))
+        physical = _int_first(part, ["allocatable_configured_total", "gpus_configured_total"], 0)
+        available = min(int(feasible.get("capacity_slots") or 0), idle)
         cap = int(os.getenv("TASK2_INTERACTIVE_T4_DESIRED_MAX", os.getenv("TASK2_INTERACTIVE_DESIRED_MAX", str(max(1, physical or ceiling)))))
         return min(ceiling, max(0, available), max(1, cap))
     return ceiling
@@ -644,47 +659,108 @@ def _slurm_job_state(job_id: str) -> dict[str, Any]:
     return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "unknown"}
 
 
+def _array_display_count(display_id: str) -> int:
+    raw = str(display_id or "").strip()
+    match = re.match(r"^\d+_\[(?P<body>.+)\]$", raw)
+    if not match:
+        return 1
+    body = match.group("body").split("%", 1)[0]
+    total = 0
+    for item in body.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "-" in item:
+            start, end = item.split("-", 1)
+            try:
+                total += max(0, int(end) - int(start) + 1)
+            except ValueError:
+                total += 1
+        else:
+            total += 1
+    return max(1, total)
+
+
+def _slurm_worker_units(row: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(row.get("job_id") or row.get("display_id") or "")
+    query_id = str(row.get("array_job_id") or "").strip() or job_id.split("_", 1)[0].strip()
+    if not query_id:
+        return {"state": "UNKNOWN", "job_id": job_id, "source": "missing_job_id", "units": []}
+    try:
+        proc = subprocess.run(
+            ["squeue", "-h", "-j", query_id, "-o", "%i|%T|%R"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {"state": "UNKNOWN", "job_id": job_id, "source": "squeue_error", "error": f"{type(exc).__name__}: {exc}", "units": []}
+    if proc.returncode == 0 and proc.stdout.strip():
+        units: list[dict[str, Any]] = []
+        for line in proc.stdout.splitlines():
+            parts = line.split("|", 2)
+            display_id = parts[0].strip() if len(parts) > 0 else ""
+            state = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+            reason = parts[2].strip() if len(parts) > 2 else ""
+            parsed = normalize_slurm_job_identifier(display_id)
+            units.append(
+                {
+                    "job_id": parsed.get("job_id") or display_id,
+                    "array_job_id": parsed.get("array_job_id") or query_id,
+                    "array_task_id": parsed.get("array_task_id") or "",
+                    "display_id": parsed.get("display_id") or display_id,
+                    "state": state,
+                    "reason": reason,
+                    "unit_count": _array_display_count(display_id),
+                }
+            )
+        return {"state": units[0]["state"], "reason": units[0].get("reason", ""), "job_id": job_id, "source": "squeue", "units": units}
+    try:
+        proc = subprocess.run(
+            ["sacct", "-n", "-j", query_id, "--format=JobIDRaw,State,Reason", "-P"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {"state": "UNKNOWN", "job_id": job_id, "source": "sacct_error", "error": f"{type(exc).__name__}: {exc}", "units": []}
+    if proc.returncode == 0 and proc.stdout.strip():
+        units = []
+        for line in proc.stdout.splitlines():
+            parts = line.split("|")
+            display_id = parts[0].strip() if len(parts) > 0 else ""
+            state = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+            reason = parts[2].strip() if len(parts) > 2 else ""
+            if "." in display_id:
+                continue
+            parsed = normalize_slurm_job_identifier(display_id)
+            units.append(
+                {
+                    "job_id": parsed.get("job_id") or display_id,
+                    "array_job_id": parsed.get("array_job_id") or query_id,
+                    "array_task_id": parsed.get("array_task_id") or "",
+                    "display_id": parsed.get("display_id") or display_id,
+                    "state": state,
+                    "reason": reason,
+                    "unit_count": _array_display_count(display_id),
+                }
+            )
+        if units:
+            return {"state": units[0]["state"], "reason": units[0].get("reason", ""), "job_id": job_id, "source": "sacct", "units": units}
+    return {"state": "UNKNOWN", "job_id": job_id, "source": "unknown", "units": []}
+
+
 def _worker_pool_counts(slurm_root: Path, profiles: list[GpuSubmitProfile], *, execution_attempt_id: str = "") -> dict[str, dict[str, int]]:
     profile_names = {profile.name for profile in profiles}
-    counts = {name: {"running": 0, "pending": 0, "active": 0, "invalid_pending": 0} for name in profile_names}
-    rows = [
-        row
-        for row in load_submitted_jobs(slurm_root)
-        if str(row.get("execution_schema_version") or "") == CANDIDATE_TASK_V1
-        and (not execution_attempt_id or str(row.get("execution_attempt_id") or "") == str(execution_attempt_id))
-        and str(row.get("profile") or "") in profile_names
-    ]
-    child_arrays = {str(row.get("array_job_id") or "").strip() for row in rows if str(row.get("array_task_id") or "").strip()}
-    seen_units: set[tuple[str, str, str]] = set()
-    for row in rows:
-        if str(row.get("execution_schema_version") or "") != CANDIDATE_TASK_V1:
-            continue
-        profile_name = str(row.get("profile") or "")
-        if profile_name not in counts:
-            continue
-        job_id = str(row.get("job_id") or "")
-        array_job_id = str(row.get("array_job_id") or job_id.split("_", 1)[0]).strip()
-        array_task_id = str(row.get("array_task_id") or "").strip()
-        if not array_task_id and array_job_id in child_arrays:
-            continue
-        unit_key = (profile_name, array_job_id or job_id, array_task_id or "parent")
-        if unit_key in seen_units:
-            continue
-        seen_units.add(unit_key)
-        slurm = _slurm_job_state(job_id)
-        slurm_state = str(slurm.get("state") or row.get("slurm_state") or "")
-        reason = str(slurm.get("reason") or row.get("failure_reason") or "")
-        unit_count = 1 if array_task_id else int(row.get("task_count") or 0 or 1)
-        if slurm_state == "PENDING" and reason in IMPOSSIBLE_PENDING_REASONS:
-            counts[profile_name]["invalid_pending"] += unit_count
-            continue
-        if slurm_state in ACTIVE_STATES:
-            counts[profile_name]["active"] += unit_count
-            if slurm_state == "RUNNING":
-                counts[profile_name]["running"] += unit_count
-            else:
-                counts[profile_name]["pending"] += unit_count
-    return counts
+    reconciled = reconcile_submitted_worker_accounting(
+        slurm_root,
+        profiles=profile_names,
+        execution_attempt_id=execution_attempt_id,
+        job_state_fn=_slurm_worker_units,
+    )
+    return reconciled["counts"]
 
 
 def _render_queue_worker_sbatch(
@@ -1397,7 +1473,11 @@ def build_dynamic_submission_plan(
     backpressured: list[dict[str, Any]] = []
     fatal_failures: list[dict[str, Any]] = []
     reused: list[dict[str, Any]] = []
-    active_logical_keys = existing_active_logical_keys(slurm_root, execution_attempt_id=safe_execution_attempt_id)
+    active_logical_keys = existing_active_logical_keys(
+        slurm_root,
+        execution_attempt_id=safe_execution_attempt_id,
+        job_state_fn=_slurm_worker_units,
+    )
 
     if not dry_run:
         preflight_failures = []

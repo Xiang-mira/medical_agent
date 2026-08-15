@@ -52,6 +52,18 @@ def _rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _mock_slurm_units(monkeypatch: pytest.MonkeyPatch, states: dict[str, tuple[str, str, int] | list[dict[str, str | int]]]) -> None:
+    def fake_units(row):
+        job_id = str(row.get("job_id") or row.get("display_id") or "")
+        value = states.get(job_id)
+        if isinstance(value, list):
+            return {"state": str(value[0].get("state") if value else "UNKNOWN"), "job_id": job_id, "units": value}
+        state, reason, count = value or ("UNKNOWN", "", 1)
+        return {"state": state, "reason": reason, "job_id": job_id, "units": [{"job_id": job_id, "state": state, "reason": reason, "unit_count": count}]}
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_worker_units", fake_units)
+
+
 def test_dynamic_submitter_overrequests_target_30_to_40_and_uses_generic_gpu(tmp_path: Path):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
 
@@ -114,10 +126,7 @@ def test_dynamic_submitter_replenishes_current_attempt_when_only_historical_work
         f"run_a,attempt_a,batch_a,4584475,cads,generic_gpu,4,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_job_state",
-        lambda job_id: {"state": "CANCELLED", "job_id": str(job_id)},
-    )
+    _mock_slurm_units(monkeypatch, {"4584475": ("CANCELLED", "", 4)})
 
     plan = build_dynamic_submission_plan(
         summary_path=summary,
@@ -276,7 +285,7 @@ def test_dynamic_submitter_subtracts_existing_interactive_workers_without_duplic
         }
     }
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
-    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_job_state", lambda job_id: {"state": "RUNNING" if str(job_id) == "700001" else "PENDING", "reason": ""})
+    _mock_slurm_units(monkeypatch, {"700001": ("RUNNING", "", 3), "700002": ("PENDING", "Resources", 2)})
     (tmp_path / "slurm").mkdir(parents=True, exist_ok=True)
     (tmp_path / "slurm" / "submitted_jobs.csv").write_text(
         "run_id,execution_attempt_id,submission_id,job_id,array_job_id,array_task_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
@@ -323,7 +332,7 @@ def test_worker_pool_counts_child_array_tasks_without_double_counting_parent(tmp
         f"run_a,attempt_a,batch_a,800000_1,800000,1,full373,gpu_t4,1,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_job_state", lambda job_id: {"state": "RUNNING", "reason": ""})
+    _mock_slurm_units(monkeypatch, {"800000_0": ("RUNNING", "", 1), "800000_1": ("RUNNING", "", 1), "800000": ("RUNNING", "", 10)})
 
     counts = _worker_pool_counts(
         slurm_root,
@@ -345,7 +354,7 @@ def test_impossible_pending_partition_time_limit_does_not_count_as_active_capaci
         f"run_a,attempt_a,batch_a,900000,900000,,full373,interactive_t4_short,6,{CANDIDATE_TASK_V1},submitted,ACTIVE,PENDING\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_job_state", lambda job_id: {"state": "PENDING", "reason": "PartitionTimeLimit"})
+    _mock_slurm_units(monkeypatch, {"900000": ("PENDING", "PartitionTimeLimit", 6)})
 
     counts = _worker_pool_counts(
         slurm_root,
@@ -355,6 +364,302 @@ def test_impossible_pending_partition_time_limit_does_not_count_as_active_capaci
 
     assert counts["interactive_t4_short"]["active"] == 0
     assert counts["interactive_t4_short"]["invalid_pending"] == 6
+
+
+def test_stale_adopted_completed_workers_do_not_suppress_replenishment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"full373": 200})
+    slurm_root = tmp_path / "slurm"
+    slurm_root.mkdir(parents=True, exist_ok=True)
+    lines = ["run_id,execution_attempt_id,submission_id,job_id,array_job_id,array_task_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state"]
+    states = {}
+    for index in range(75):
+        job_id = f"880000_{index}"
+        state = "RUNNING" if index < 5 else "COMPLETED"
+        states[job_id] = (state, "", 1)
+        lines.append(f"run_a,attempt_a,batch_old,{job_id},880000,{index},full373,gpu_t4,1,{CANDIDATE_TASK_V1},adopted,ADOPTED_ACTIVE_JOB,{state}")
+    (slurm_root / "submitted_jobs.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _mock_slurm_units(monkeypatch, states)
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=75,
+        overrequest_workers=75,
+        profile_specs="gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00",
+        groups=["full373"],
+        dry_run=True,
+        run_id="run_a",
+        submission_id="batch_new",
+        execution_attempt_id="attempt_a",
+    )
+
+    report = plan["worker_pool"]["profile_reports"][0]
+    assert report["running_workers"] == 5
+    assert report["pending_workers"] == 0
+    assert report["active_workers"] == 5
+    assert report["new_worker_deficit"] == 70
+    assert plan["total_array_concurrency"] == 70
+
+
+@pytest.mark.parametrize("state", ["COMPLETED", "FAILED", "OUT_OF_MEMORY", "CANCELLED", "TIMEOUT", "NODE_FAIL", "PREEMPTED", "BOOT_FAIL", "DEADLINE"])
+def test_terminal_slurm_states_never_count_as_active(tmp_path: Path, state: str):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    row = {
+        "run_id": "run_a",
+        "execution_attempt_id": "attempt_a",
+        "submission_id": "batch_a",
+        "job_id": "990001",
+        "model_group": "full373",
+        "profile": "gpu_t4",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "submission_status": "adopted",
+        "scheduler_status": "ADOPTED_ACTIVE_JOB",
+        "slurm_state": "RUNNING",
+    }
+    result = current_worker_accounting_from_rows(
+        [row],
+        profiles={"gpu_t4"},
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda _row: {"state": state, "job_id": "990001", "units": [{"job_id": "990001", "state": state, "unit_count": 1}]},
+    )
+
+    counts = result["counts"]["gpu_t4"]
+    assert counts["running"] == 0
+    assert counts["pending"] == 0
+    assert counts["active"] == 0
+    assert counts["terminal"] == 1
+    assert result["rows"][0]["scheduler_current_active"] == 0
+
+
+def test_adopted_active_job_counts_only_when_slurm_running(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    row = {
+        "run_id": "run_a",
+        "execution_attempt_id": "attempt_a",
+        "submission_id": "batch_a",
+        "job_id": "990002",
+        "model_group": "full373",
+        "profile": "gpu_t4",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "submission_status": "adopted",
+        "scheduler_status": "ADOPTED_ACTIVE_JOB",
+    }
+    result = current_worker_accounting_from_rows(
+        [row],
+        profiles={"gpu_t4"},
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda _row: {"state": "RUNNING", "job_id": "990002", "units": [{"job_id": "990002", "state": "RUNNING", "unit_count": 1}]},
+    )
+
+    assert result["counts"]["gpu_t4"]["running"] == 1
+    assert result["counts"]["gpu_t4"]["active"] == 1
+
+
+def test_valid_pending_counts_as_bounded_active_demand(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    row = {
+        "run_id": "run_a",
+        "execution_attempt_id": "attempt_a",
+        "submission_id": "batch_a",
+        "job_id": "990003",
+        "model_group": "full373",
+        "profile": "gpu_t4",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "submission_status": "submitted",
+        "scheduler_status": "ACTIVE",
+    }
+    result = current_worker_accounting_from_rows(
+        [row],
+        profiles={"gpu_t4"},
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda _row: {"state": "PENDING", "reason": "Priority", "job_id": "990003", "units": [{"job_id": "990003", "state": "PENDING", "reason": "Priority", "unit_count": 4}]},
+    )
+
+    assert result["counts"]["gpu_t4"]["pending"] == 4
+    assert result["counts"]["gpu_t4"]["valid_pending"] == 4
+    assert result["counts"]["gpu_t4"]["active"] == 4
+
+
+def test_squeue_missing_sacct_terminal_adopted_job_is_not_reused(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import existing_active_logical_keys, persist_submitted_job
+
+    persist_submitted_job(
+        tmp_path / "slurm",
+        {
+            "run_id": "run_a",
+            "execution_attempt_id": "attempt_a",
+            "submission_id": "batch_a",
+            "job_id": "990004",
+            "model_group": "full373",
+            "group": "full373",
+            "profile": "gpu_t4",
+            "shard_id": "worker_shard_000",
+            "execution_schema_version": CANDIDATE_TASK_V1,
+            "submission_status": "adopted",
+            "scheduler_status": "ADOPTED_ACTIVE_JOB",
+            "slurm_state": "RUNNING",
+        },
+    )
+
+    keys = existing_active_logical_keys(
+        tmp_path / "slurm",
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda _row: {"state": "COMPLETED", "source": "sacct", "units": [{"job_id": "990004", "state": "COMPLETED", "unit_count": 1}]},
+    )
+
+    assert keys == set()
+
+
+def test_slurm_worker_units_parses_compressed_pending_array(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import _slurm_worker_units
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["squeue", "-h"]:
+            return subprocess.CompletedProcess(command, 0, "990100_[0-9%4]|PENDING|Resources\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    result = _slurm_worker_units({"job_id": "990100", "array_job_id": "990100"})
+
+    assert result["source"] == "squeue"
+    assert result["units"][0]["state"] == "PENDING"
+    assert result["units"][0]["unit_count"] == 10
+
+
+def test_slurm_worker_units_uses_sacct_terminal_when_squeue_missing(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import _slurm_worker_units
+
+    def fake_run(command, **kwargs):
+        if command[:2] == ["squeue", "-h"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:2] == ["sacct", "-n"]:
+            return subprocess.CompletedProcess(command, 0, "990101|COMPLETED|\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    result = _slurm_worker_units({"job_id": "990101"})
+
+    assert result["source"] == "sacct"
+    assert result["units"][0]["state"] == "COMPLETED"
+
+
+def test_valid_pending_window_prevents_duplicate_replenishment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"full373": 200})
+    slurm_root = tmp_path / "slurm"
+    slurm_root.mkdir(parents=True, exist_ok=True)
+    (slurm_root / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,array_task_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"run_a,attempt_a,batch_a,991000,991000,,full373,gpu_t4,32,{CANDIDATE_TASK_V1},submitted,ACTIVE,PENDING\n",
+        encoding="utf-8",
+    )
+    _mock_slurm_units(monkeypatch, {"991000": ("PENDING", "Resources", 32)})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=32,
+        overrequest_workers=32,
+        profile_specs="gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00",
+        groups=["full373"],
+        dry_run=True,
+        run_id="run_a",
+        submission_id="batch_b",
+        execution_attempt_id="attempt_a",
+    )
+
+    report = plan["worker_pool"]["profile_reports"][0]
+    assert report["active_workers"] == 32
+    assert report["new_worker_deficit"] == 0
+    assert plan["total_array_concurrency"] == 0
+
+
+def test_completed_workers_release_capacity_on_next_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import GpuSubmitProfile, _worker_pool_counts
+
+    slurm_root = tmp_path / "slurm"
+    slurm_root.mkdir()
+    (slurm_root / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,array_task_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"run_a,attempt_a,batch_a,992000,992000,,full373,gpu_t4,25,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
+        encoding="utf-8",
+    )
+    profile = GpuSubmitProfile("gpu_t4", "gpu", "gpu:T4:1", 8, "64G", "06:00:00")
+    _mock_slurm_units(monkeypatch, {"992000": ("RUNNING", "", 25)})
+    first = _worker_pool_counts(slurm_root, [profile], execution_attempt_id="attempt_a")
+    _mock_slurm_units(monkeypatch, {"992000": ("COMPLETED", "", 25)})
+    second = _worker_pool_counts(slurm_root, [profile], execution_attempt_id="attempt_a")
+
+    assert first["gpu_t4"]["active"] == 25
+    assert second["gpu_t4"]["active"] == 0
+    assert second["gpu_t4"]["terminal"] == 25
+
+
+def test_no_backlog_submits_no_replenishment(tmp_path: Path):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"full373": 0})
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=32,
+        overrequest_workers=32,
+        profile_specs="gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00",
+        groups=["full373"],
+        dry_run=True,
+    )
+
+    assert plan["logical_task_count"] == 0
+    assert plan["total_array_concurrency"] == 0
+
+
+def test_no_idle_gpu_still_maintains_bounded_pending_demand_when_partition_capable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    snapshot = {
+        "partitions": {
+            "gpu": {
+                "partition": "gpu",
+                "gpu_type": "T4",
+                "allocatable_configured_total": 32,
+                "gpus_configured_total": 32,
+                "idle_estimate": 0,
+                "gpus_idle_estimate": 0,
+                "cpus_total": 256,
+                "cpus_idle_estimate": 0,
+                "memory_total_gb": 4096,
+                "memory_idle_gb_estimate": 0,
+            }
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"full373": 200})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=32,
+        overrequest_workers=32,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+    )
+
+    report = plan["worker_pool"]["profile_reports"][0]
+    assert report["feasible_slots"]["feasible_slots"] == 0
+    assert report["feasible_slots"]["capacity_slots"] == 32
+    assert report["desired_workers"] == 32
+    assert report["new_worker_deficit"] == 32
 
 
 def test_t4_running_72_desired_114_deficit_42(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -367,7 +672,7 @@ def test_t4_running_72_desired_114_deficit_42(tmp_path: Path, monkeypatch: pytes
         f"run_a,attempt_a,batch_a,710000,710000,,full373,gpu_t4,72,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_job_state", lambda job_id: {"state": "RUNNING", "reason": ""})
+    _mock_slurm_units(monkeypatch, {"710000": ("RUNNING", "", 72)})
 
     plan = build_dynamic_submission_plan(
         summary_path=summary,
@@ -711,6 +1016,7 @@ def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_s
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    _mock_slurm_units(monkeypatch, {"91003": ("RUNNING", "", 1)})
     plan = build_dynamic_submission_plan(
         summary_path=summary,
         output_root=tmp_path,

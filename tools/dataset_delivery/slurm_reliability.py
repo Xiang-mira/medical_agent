@@ -15,6 +15,17 @@ SUCCESS_STATES = {"COMPLETED"}
 RETRYABLE_TERMINAL_STATES = {"TIMEOUT", "PREEMPTED", "NODE_FAIL", "OUT_OF_MEMORY", "OOM"}
 FATAL_TERMINAL_STATES = {"FAILED", "CANCELLED", "BOOT_FAIL", "DEADLINE"}
 TERMINAL_STATES = SUCCESS_STATES | RETRYABLE_TERMINAL_STATES | FATAL_TERMINAL_STATES
+IMPOSSIBLE_PENDING_REASONS = {
+    "PartitionTimeLimit",
+    "DependencyNeverSatisfied",
+    "BadConstraints",
+    "InvalidAccount",
+    "InvalidQOS",
+    "InvalidPartition",
+    "InvalidQoS",
+    "QOSGrpGRES",
+    "QOSMaxGRESPerUser",
+}
 
 LEGACY_CASE_FULL373_V1 = "legacy_case_full373_v1"
 CANDIDATE_TASK_V1 = "candidate_task_v1"
@@ -307,18 +318,174 @@ def job_query_id(row: dict[str, Any]) -> str:
     return parsed["query_id"]
 
 
-def existing_active_logical_keys(slurm_root: Path, *, execution_attempt_id: str = "") -> set[tuple[str, str, str, str, str]]:
-    keys: set[tuple[str, str, str, str, str]] = set()
-    for row in load_submitted_jobs(slurm_root):
-        status = str(row.get("submission_status") or row.get("status") or "").lower()
-        scheduler_status = str(row.get("scheduler_status") or "")
-        slurm_state = str(row.get("slurm_state") or "")
+def is_terminal_slurm_state(state: str) -> bool:
+    return str(state or "").strip().upper() in TERMINAL_STATES
+
+
+def is_impossible_pending_reason(reason: str) -> bool:
+    raw = str(reason or "").strip()
+    lower = raw.lower()
+    return any(str(item).lower() == lower or str(item).lower() in lower for item in IMPOSSIBLE_PENDING_REASONS)
+
+
+def current_worker_accounting_from_rows(
+    rows: list[dict[str, Any]],
+    *,
+    profiles: set[str] | None = None,
+    execution_attempt_id: str = "",
+    job_state_fn: Any | None = None,
+) -> dict[str, Any]:
+    profile_names = set(profiles or [])
+    counts: dict[str, dict[str, int]] = {}
+
+    def ensure_profile(name: str) -> dict[str, int]:
+        if name not in counts:
+            counts[name] = {
+                "running": 0,
+                "pending": 0,
+                "active": 0,
+                "valid_pending": 0,
+                "transitional": 0,
+                "terminal": 0,
+                "invalid_pending": 0,
+                "unknown": 0,
+                "lifecycle_adopted": 0,
+                "lifecycle_terminal": 0,
+            }
+        return counts[name]
+
+    for name in profile_names:
+        ensure_profile(name)
+
+    filtered = []
+    for row in rows:
         schema = str(row.get("execution_schema_version") or "")
+        profile = str(row.get("profile") or "")
         if schema != CANDIDATE_TASK_V1:
             continue
         if execution_attempt_id and str(row.get("execution_attempt_id") or "") != str(execution_attempt_id):
             continue
-        if slurm_state not in ACTIVE_STATES and scheduler_status not in {"ACTIVE", "ADOPTED_ACTIVE_JOB"}:
+        if profile_names and profile not in profile_names:
+            continue
+        filtered.append(row)
+
+    child_arrays = {str(row.get("array_job_id") or "").strip() for row in filtered if str(row.get("array_task_id") or "").strip()}
+    seen_units: set[tuple[str, str, str]] = set()
+    reconciled_rows: list[dict[str, Any]] = []
+    for row in filtered:
+        profile = str(row.get("profile") or "")
+        profile_counts = ensure_profile(profile)
+        scheduler_status = str(row.get("scheduler_status") or "")
+        if scheduler_status == "ADOPTED_ACTIVE_JOB":
+            profile_counts["lifecycle_adopted"] += 1
+        job_id = str(row.get("job_id") or row.get("display_id") or "")
+        array_job_id = str(row.get("array_job_id") or job_id.split("_", 1)[0]).strip()
+        array_task_id = str(row.get("array_task_id") or "").strip()
+        if not array_task_id and array_job_id in child_arrays:
+            continue
+        slurm = job_state_fn(row) if job_state_fn else {}
+        units = slurm.get("units") if isinstance(slurm, dict) and isinstance(slurm.get("units"), list) else []
+        if not units:
+            units = [
+                {
+                    "job_id": job_id,
+                    "array_job_id": array_job_id,
+                    "array_task_id": array_task_id,
+                    "state": (slurm or {}).get("state") or row.get("slurm_state") or "UNKNOWN",
+                    "reason": (slurm or {}).get("reason") or row.get("failure_reason") or "",
+                    "unit_count": 1,
+                }
+            ]
+        row_running = row_pending = row_active = row_terminal = row_invalid_pending = row_unknown = row_transitional = 0
+        last_state = ""
+        last_reason = ""
+        for unit in units:
+            state = str(unit.get("state") or "UNKNOWN").split("+", 1)[0].strip().upper()
+            reason = str(unit.get("reason") or "")
+            parsed = normalize_slurm_job_identifier(str(unit.get("job_id") or job_id))
+            unit_array = str(unit.get("array_job_id") or parsed.get("array_job_id") or array_job_id or parsed.get("job_id") or "").strip()
+            unit_task = str(unit.get("array_task_id") or parsed.get("array_task_id") or array_task_id or "").strip()
+            unit_key = (profile, unit_array or str(unit.get("job_id") or job_id), unit_task or str(unit.get("display_id") or unit.get("job_id") or job_id or "parent"))
+            if unit_key in seen_units:
+                continue
+            seen_units.add(unit_key)
+            unit_count = max(1, int(unit.get("unit_count") or 1))
+            last_state = state
+            last_reason = reason
+            if state in TERMINAL_STATES:
+                profile_counts["terminal"] += unit_count
+                row_terminal += unit_count
+                if scheduler_status == "ADOPTED_ACTIVE_JOB":
+                    profile_counts["lifecycle_terminal"] += unit_count
+                continue
+            if state == "PENDING" and is_impossible_pending_reason(reason):
+                profile_counts["invalid_pending"] += unit_count
+                row_invalid_pending += unit_count
+                continue
+            if state == "RUNNING":
+                profile_counts["running"] += unit_count
+                profile_counts["active"] += unit_count
+                row_running += unit_count
+                row_active += unit_count
+                continue
+            if state == "PENDING":
+                profile_counts["pending"] += unit_count
+                profile_counts["valid_pending"] += unit_count
+                profile_counts["active"] += unit_count
+                row_pending += unit_count
+                row_active += unit_count
+                continue
+            if state in ACTIVE_STATES:
+                profile_counts["transitional"] += unit_count
+                profile_counts["active"] += unit_count
+                row_transitional += unit_count
+                row_active += unit_count
+                continue
+            profile_counts["unknown"] += unit_count
+            row_unknown += unit_count
+        reconciled = dict(row)
+        reconciled.update(
+            {
+                "slurm_state": last_state or str(row.get("slurm_state") or "UNKNOWN"),
+                "slurm_reason": last_reason,
+                "scheduler_current_running": row_running,
+                "scheduler_current_pending": row_pending,
+                "scheduler_current_active": row_active,
+                "scheduler_current_terminal": row_terminal,
+                "scheduler_current_invalid_pending": row_invalid_pending,
+                "scheduler_current_unknown": row_unknown,
+                "scheduler_current_transitional": row_transitional,
+            }
+        )
+        reconciled_rows.append(reconciled)
+    return {"counts": counts, "rows": reconciled_rows}
+
+
+def reconcile_submitted_worker_accounting(
+    slurm_root: Path,
+    *,
+    profiles: set[str] | None = None,
+    execution_attempt_id: str = "",
+    job_state_fn: Any | None = None,
+) -> dict[str, Any]:
+    return current_worker_accounting_from_rows(
+        load_submitted_jobs(slurm_root),
+        profiles=profiles,
+        execution_attempt_id=execution_attempt_id,
+        job_state_fn=job_state_fn,
+    )
+
+
+def existing_active_logical_keys(slurm_root: Path, *, execution_attempt_id: str = "", job_state_fn: Any | None = None) -> set[tuple[str, str, str, str, str]]:
+    keys: set[tuple[str, str, str, str, str]] = set()
+    reconciled = reconcile_submitted_worker_accounting(slurm_root, execution_attempt_id=execution_attempt_id, job_state_fn=job_state_fn)
+    for row in reconciled.get("rows") or []:
+        status = str(row.get("submission_status") or row.get("status") or "").lower()
+        scheduler_status = str(row.get("scheduler_status") or "")
+        schema = str(row.get("execution_schema_version") or "")
+        if schema != CANDIDATE_TASK_V1:
+            continue
+        if int(row.get("scheduler_current_active") or 0) <= 0:
             continue
         if status not in {"submitted", "adopted", "reused"} and scheduler_status not in {"ACTIVE", "ADOPTED_ACTIVE_JOB"}:
             continue
