@@ -379,6 +379,11 @@ def discover_resource_snapshot(
         allocatable_total = sum(int(n.get("gpus_configured") or 0) for n in sched_gpu_nodes)
         allocated = min(physical_total, sum(int(n.get("gpus_allocated") or 0) for n in sched_gpu_nodes))
         idle = max(0, allocatable_total - allocated)
+        cpus_total = sum(int(n.get("cpus") or 0) for n in sched_gpu_nodes)
+        cpus_alloc = sum(int(n.get("alloc_cpus") or 0) for n in sched_gpu_nodes)
+        mem_total_mb = sum(int(n.get("real_memory_mb") or 0) for n in sched_gpu_nodes)
+        mem_alloc_mb = sum(int(n.get("alloc_memory_mb") or 0) for n in sched_gpu_nodes)
+        mem_idle_mb = max(0, mem_total_mb - mem_alloc_mb)
         free_by_node = [max(0, int(n.get("gpus_configured") or 0) - int(n.get("gpus_allocated") or 0)) for n in sched_gpu_nodes]
         qsummary = _queue_summary(pending, by_partition_details.get(part, []))
         partition_rows[part] = {
@@ -389,6 +394,10 @@ def discover_resource_snapshot(
             "allocatable_configured_total": allocatable_total,
             "allocated_estimate": allocated,
             "idle_estimate": idle,
+            "cpus_total": cpus_total,
+            "cpus_idle_estimate": max(0, cpus_total - cpus_alloc),
+            "memory_total_gb": int(mem_total_mb / 1024) if mem_total_mb else 0,
+            "memory_idle_gb_estimate": int(mem_idle_mb / 1024) if mem_idle_mb else 0,
             "down_or_drain_gpu_count": sum(int(n.get("gpus_configured") or 0) for n in physical_nodes if not n.get("schedulable")),
             "unknown_state_gpu_count": sum(int(n.get("gpus_configured") or 0) for n in physical_nodes if not n.get("state")),
             "gpus_configured_total": physical_total,

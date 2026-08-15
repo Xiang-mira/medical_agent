@@ -169,6 +169,22 @@ def _seconds_to_time(seconds: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{sec:02d}"
 
 
+def _memory_to_gb(value: Any) -> int:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return 0
+    try:
+        if raw.endswith("G"):
+            return int(float(raw[:-1]))
+        if raw.endswith("M"):
+            return max(1, int(float(raw[:-1]) / 1024))
+        if raw.endswith("T"):
+            return int(float(raw[:-1]) * 1024)
+        return int(float(raw) / 1024) if float(raw) > 512 else int(float(raw))
+    except Exception:
+        return 0
+
+
 def _effective_profile_time_limit(partition_row: dict[str, Any], *, requested: str, interactive_short: bool) -> str:
     requested_sec = _time_to_seconds(requested) or 6 * 3600
     max_sec = _time_to_seconds(partition_row.get("time_limit") or partition_row.get("time"))
@@ -496,8 +512,34 @@ def _update_qos_cache(
 def _profile_capacity_hint(profile: GpuSubmitProfile, resource_inventory: dict[str, Any]) -> int:
     partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
     part = partitions.get(profile.partition) or {}
-    capacity = int(part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
+    capacity = int(part.get("resource_feasible_gpu_slots_by_profile", {}).get(profile.name) or 0)
+    if capacity <= 0:
+        capacity = int(part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
     return capacity if capacity > 0 else 0
+
+
+def _profile_feasible_slots(profile: GpuSubmitProfile, resource_inventory: dict[str, Any]) -> dict[str, Any]:
+    partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
+    part = partitions.get(profile.partition) or {}
+    gpu_slots = int(part.get("idle_estimate") or part.get("gpus_idle_estimate") or part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
+    cpu_idle = int(part.get("cpus_idle_estimate") or part.get("cpus_total") or 0)
+    mem_idle_gb = int(part.get("memory_idle_gb_estimate") or part.get("memory_free_gb_estimate") or part.get("memory_total_gb") or 0)
+    mem_margin = int(os.getenv("NODE_MEMORY_SAFETY_MARGIN_GB", "8"))
+    mem_per_worker = max(1, _memory_to_gb(profile.mem))
+    cpu_slots = cpu_idle // max(1, int(profile.cpus_per_task)) if cpu_idle > 0 else gpu_slots
+    memory_slots = max(0, mem_idle_gb - mem_margin) // mem_per_worker if mem_idle_gb > 0 else gpu_slots
+    feasible = max(0, min(gpu_slots, cpu_slots, memory_slots))
+    return {
+        "profile": profile.name,
+        "partition_resource_known": bool(part),
+        "gpu_slots": gpu_slots,
+        "cpu_slots": cpu_slots,
+        "memory_slots": memory_slots,
+        "feasible_slots": feasible,
+        "memory_per_worker_gb": mem_per_worker,
+        "memory_safety_margin_gb": mem_margin,
+        "cpu_per_worker": int(profile.cpus_per_task),
+    }
 
 
 def _profile_desired_weight(profile: GpuSubmitProfile, *, h100_enabled: bool) -> float:
@@ -515,18 +557,24 @@ def _profile_desired_weight(profile: GpuSubmitProfile, *, h100_enabled: bool) ->
 
 def _profile_desired_ceiling(profile: GpuSubmitProfile, *, planned_workers: int, resource_inventory: dict[str, Any], h100_enabled: bool) -> int:
     upper = f"{profile.name} {profile.partition} {profile.gres}".upper()
+    feasible = _profile_feasible_slots(profile, resource_inventory)
     physical = _profile_capacity_hint(profile, resource_inventory)
-    ceiling = physical if physical > 0 else int(planned_workers)
+    if feasible.get("partition_resource_known"):
+        ceiling = int(feasible.get("feasible_slots") or 0)
+    else:
+        ceiling = physical if physical > 0 else int(planned_workers)
     if "H100" in upper:
         return 0 if not h100_enabled else min(ceiling, int(os.getenv("TASK2_H100_DESIRED_MAX", "2")))
     if "A100" in upper:
         return min(ceiling, int(os.getenv("TASK2_A100_DESIRED_MAX", "4")))
     if "INTERACTIVE" in upper and "T4" in upper:
+        if os.getenv("RESOURCE_ROUTING_MODE", "shadow").strip().lower() != "enforce":
+            return 0
         partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
         part = partitions.get(profile.partition) or {}
         idle = int(part.get("idle_estimate") or part.get("gpus_idle_estimate") or 0)
         physical = int(part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
-        available = idle if idle > 0 else physical
+        available = int(feasible.get("feasible_slots") or 0)
         cap = int(os.getenv("TASK2_INTERACTIVE_T4_DESIRED_MAX", os.getenv("TASK2_INTERACTIVE_DESIRED_MAX", str(max(1, physical or ceiling)))))
         return min(ceiling, max(0, available), max(1, cap))
     return ceiling
@@ -669,6 +717,10 @@ def _render_queue_worker_sbatch(
         "export RUNTIME_NO_GIT=1",
         "export SKIP_GIT_SYNC=1",
         "export GIT_TERMINAL_PROMPT=0",
+        f"export RESOURCE_ROUTING_MODE={shlex.quote(os.getenv('RESOURCE_ROUTING_MODE', 'shadow'))}",
+        f"export TASK2_WORKER_WALLTIME_SEC={_time_to_seconds(profile.time_limit) or 0}",
+        f"export TASK2_WORKER_PROFILE={shlex.quote(profile.name)}",
+        f"export TASK2_WORKER_REQUESTED_MEM={shlex.quote(profile.mem)}",
         f"cd {shlex.quote(str(REPO_ROOT))}",
         (
             "trap 'python tools/dataset_delivery/slurm_reliability.py worker-pretimeout "
@@ -1178,6 +1230,7 @@ def build_dynamic_submission_plan(
     )
     for profile in profiles:
         qos_state = qos_states.get(profile.name) or {}
+        feasible = _profile_feasible_slots(profile, resource_inventory)
         effective_limit = int(qos_state.get("effective_limit") or 0)
         active_workers = int((existing_workers.get(profile.name) or {}).get("active") or 0)
         pending_workers = int((existing_workers.get(profile.name) or {}).get("pending") or 0)
@@ -1191,6 +1244,10 @@ def build_dynamic_submission_plan(
             "known_good_size": qos_state.get("known_good_size"),
             "known_bad_size": qos_state.get("known_bad_size"),
             "effective_shard_size": effective_limit,
+            "requested_mem": profile.mem,
+            "requested_cpus": profile.cpus_per_task,
+            "time_limit": profile.time_limit,
+            "feasible_slots": feasible,
             "desired_workers": desired,
             "running_workers": running_workers,
             "pending_workers": pending_workers,

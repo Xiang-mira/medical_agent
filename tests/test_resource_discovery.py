@@ -64,3 +64,7 @@ NodeName=l40-01 State=IDLE CPUTot=64 CPUAlloc=0 RealMemory=500000 AllocMem=0 Gre
     row = snapshot["partitions"]["spare_l40"]
     assert row["gpu_type"] == "L40S"
     assert row["allocatable_configured_total"] == 4
+    assert row["cpus_total"] == 64
+    assert row["cpus_idle_estimate"] == 64
+    assert row["memory_total_gb"] == 488
+    assert row["memory_idle_gb_estimate"] == 488

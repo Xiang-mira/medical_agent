@@ -1013,3 +1013,168 @@ def test_estep_gate_requires_all_case_targets_terminal_not_just_candidates_ready
     report = full373.aggregate_full373_estep(tmp_path, expected_cases=1, expected_targets=2)
     assert report["status"] == "RUNNING"
     assert report["manifest_targets"] == 0
+
+
+def test_resource_metadata_does_not_change_scientific_candidate_identity():
+    base = {"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": ""}
+    lowmem = {
+        **base,
+        "resource_demand": {
+            "host_memory_tier": full373.LOWMEM_HOST_MEMORY_TIER,
+            "runtime_tier": "SHORT",
+        },
+    }
+
+    assert full373._candidate_id_from_row(base) == full373._candidate_id_from_row(lowmem)
+    assert full373._scientific_candidate_identity("CASE001", "organ_a", "teacher1") == "CASE001|organ_a|teacher1"
+
+
+def test_unknown_resource_defaults_to_standard64_and_standard_worker_claims(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [{"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": "/ct", "annotation_folder": "/ann"}],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    seed = full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    claim = full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="standard", profile="gpu_t4", resource_class="GPU_LIGHT_T4")
+
+    assert seed["logical_task_count"] == 1
+    assert claim["status"] == "CLAIMED"
+    assert claim["candidate"]["resource_decision"]["resource_demand"]["host_memory_tier"] == full373.STANDARD_HOST_MEMORY_TIER
+
+
+def test_lowmem_worker_only_claims_explicit_lowmem_qualified_candidate(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [
+            {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_standard", "ct_path": "/ct", "annotation_folder": "/ann"},
+            {"task_index": "1", "case_id": "CASE002", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_low", "ct_path": "/ct", "annotation_folder": "/ann"},
+        ],
+    )
+    _write_scope(tmp_path, cases=["CASE001", "CASE002"], routes={"organ_a": ["teacher1"]})
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    low_state = full373.load_candidate_state(tmp_path, case_id="CASE002", target="organ_a", teacher="teacher1")
+    low_state["resource_demand"] = full373._default_resource_demand(low_state)
+    low_state["resource_demand"]["host_memory_tier"] = full373.LOWMEM_HOST_MEMORY_TIER
+    full373.publish_candidate_state(tmp_path, low_state, recompute_target=False)
+    full373.atomic_write_json(
+        tmp_path / "queues" / "resource_policy" / "lowmem_qualifications.json",
+        {low_state["resource_demand"]["evidence_key"]: {"status": "QUALIFIED", "sample_count": 8, "oom_count": 0, "headroom": "ok"}},
+    )
+
+    claim = full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="lowmem", profile="gpu_t4_lowmem", resource_class="LOWMEM")
+
+    assert claim["status"] == "CLAIMED"
+    assert claim["candidate"]["case_id"] == "CASE002"
+
+
+def test_lowmem_without_qualification_falls_back_to_standard_worker(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [{"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_low", "ct_path": "/ct", "annotation_folder": "/ann"}],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+    state["resource_demand"] = full373._default_resource_demand(state)
+    state["resource_demand"]["host_memory_tier"] = full373.LOWMEM_HOST_MEMORY_TIER
+    full373.publish_candidate_state(tmp_path, state, recompute_target=False)
+
+    lowmem_claim = full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="lowmem", profile="gpu_t4_lowmem", resource_class="LOWMEM")
+    standard_claim = full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="standard", profile="gpu_t4", resource_class="GPU_LIGHT_T4")
+
+    assert lowmem_claim["status"] == "NO_READY_CANDIDATES"
+    assert standard_claim["status"] == "CLAIMED"
+
+
+def test_cpu_oom_escalates_memory_tiers_without_failed_final(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    row = {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": str(_save_mask(tmp_path / "ct.nii.gz")), "annotation_folder": str(tmp_path / "ann"), "profile": "gpu_t4"}
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 137, "", "slurmstepd: error: Detected 1 oom-kill event")
+
+    monkeypatch.setattr(full373.subprocess, "run", fake_run)
+    result = full373._execute_candidate_row(row, tmp_path, worker_id="worker", already_claimed=True)
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+
+    assert result["candidate_status"] == "RETRY_PENDING"
+    assert state["status"] == "RETRY_PENDING"
+    assert state["resource_demand"]["host_memory_tier"] == full373.HIGHMEM_96_TIER
+    assert state["resource_retry_reason"] == "CPU_OOM"
+    assert state["status"] != "FAILED_FINAL"
+    telemetry = (tmp_path / "queues" / "resource_policy" / "resource_telemetry.jsonl").read_text(encoding="utf-8")
+    assert '"resource_failure_class": "CPU_OOM"' in telemetry
+
+
+def test_oom_escalation_96_to_128_then_resource_blocked(tmp_path: Path):
+    base_state = {
+        "candidate_id": "cand_a",
+        "teacher": "teacher1",
+        "resource_demand": {"host_memory_tier": full373.HIGHMEM_96_TIER, "evidence_key": "ek", "runtime_tier": "STANDARD"},
+    }
+    escalated = full373._apply_resource_failure(tmp_path, base_state, failure_class="CPU_OOM", profile="gpu_highmem_96")
+    blocked = full373._apply_resource_failure(tmp_path, escalated, failure_class="CPU_OOM", profile="gpu_highmem_128")
+
+    assert escalated["status"] == "RETRY_PENDING"
+    assert escalated["resource_demand"]["host_memory_tier"] == full373.HIGHMEM_128_TIER
+    assert blocked["status"] == "RETRY_PENDING"
+    assert blocked["resource_demand"]["resource_blocked"] is True
+    assert blocked["resource_blocked_reason"] == "RESOURCE_BLOCKED_HIGHMEM"
+
+
+def test_lowmem_oom_revokes_qualification_and_retries_standard(tmp_path: Path):
+    state = {
+        "candidate_id": "cand_low",
+        "teacher": "teacher1",
+        "resource_demand": {"host_memory_tier": full373.LOWMEM_HOST_MEMORY_TIER, "evidence_key": "ek_low", "runtime_tier": "STANDARD"},
+    }
+    full373.atomic_write_json(tmp_path / "queues" / "resource_policy" / "lowmem_qualifications.json", {"ek_low": {"status": "QUALIFIED"}})
+
+    updated = full373._apply_resource_failure(tmp_path, state, failure_class="CPU_OOM", profile="gpu_t4_lowmem")
+    qualifications = json.loads((tmp_path / "queues" / "resource_policy" / "lowmem_qualifications.json").read_text(encoding="utf-8"))
+
+    assert updated["status"] == "RETRY_PENDING"
+    assert updated["resource_demand"]["host_memory_tier"] == full373.STANDARD_HOST_MEMORY_TIER
+    assert qualifications["ek_low"]["status"] == "REVOKED"
+
+
+def test_short_worker_requires_short_qualification_and_drains_before_deadline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [{"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_a", "ct_path": "/ct", "annotation_folder": "/ann"}],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+
+    assert full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="short", profile="interactive_t4_short", resource_class="SHORT")["status"] == "NO_READY_CANDIDATES"
+    monkeypatch.setenv("TASK2_WORKER_WALLTIME_SEC", "100")
+    result = full373.run_candidate_queue_worker(
+        tmp_path,
+        task_manifest=manifest,
+        worker_id="short",
+        profile="interactive_t4_short",
+        resource_class="SHORT",
+        max_tasks=1,
+        max_idle_sec=0,
+    )
+
+    assert result["status"] == "DRAINING"
+    assert result["reason"] == "remaining_walltime_below_claim_guard"
+
+
+def test_short_timeout_revokes_short_qualification_and_retries_normal(tmp_path: Path):
+    state = {
+        "candidate_id": "cand_short",
+        "teacher": "teacher1",
+        "resource_demand": {"host_memory_tier": full373.STANDARD_HOST_MEMORY_TIER, "evidence_key": "ek_short", "runtime_tier": "SHORT", "short_eligible": True},
+    }
+    full373.atomic_write_json(tmp_path / "queues" / "resource_policy" / "short_qualifications.json", {"ek_short": {"status": "QUALIFIED"}})
+
+    updated = full373._apply_resource_failure(tmp_path, state, failure_class="WALLTIME_EXCEEDED", profile="interactive_t4_short")
+    qualifications = json.loads((tmp_path / "queues" / "resource_policy" / "short_qualifications.json").read_text(encoding="utf-8"))
+
+    assert updated["status"] == "RETRY_PENDING"
+    assert updated["resource_demand"]["runtime_tier"] == "STANDARD"
+    assert updated["resource_demand"]["short_eligible"] is False
+    assert qualifications["ek_short"]["status"] == "REVOKED"

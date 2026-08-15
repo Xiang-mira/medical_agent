@@ -217,6 +217,7 @@ def test_dynamic_submitter_auto_profiles_use_cluster_inventory_without_fixed_30_
 def test_interactive_t4_auto_profile_uses_short_walltime_and_idle_capacity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
 
+    monkeypatch.setenv("RESOURCE_ROUTING_MODE", "enforce")
     snapshot = {
         "partitions": {
             "interactive": {
@@ -260,6 +261,7 @@ def test_interactive_t4_auto_profile_uses_short_walltime_and_idle_capacity(tmp_p
 def test_dynamic_submitter_subtracts_existing_interactive_workers_without_duplicate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
 
+    monkeypatch.setenv("RESOURCE_ROUTING_MODE", "enforce")
     snapshot = {
         "partitions": {
             "interactive": {
@@ -893,3 +895,108 @@ def test_dynamic_submitter_test_only_uses_real_array_argument(tmp_path: Path, mo
     test_only_calls = [call for call in calls if call[:2] == ["sbatch", "--test-only"]]
     assert any("--array=0-3999%4000" in call for call in test_only_calls)
     assert any("--array=0-0%1" in call for call in test_only_calls)
+
+
+def test_profile_feasible_slots_respects_gpu_cpu_and_memory_limits(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import GpuSubmitProfile, _profile_feasible_slots
+
+    monkeypatch.setenv("NODE_MEMORY_SAFETY_MARGIN_GB", "8")
+    inventory = {
+        "snapshot": {
+            "partitions": {
+                "gpu": {
+                    "idle_estimate": 5,
+                    "cpus_idle_estimate": 44,
+                    "memory_idle_gb_estimate": 72,
+                }
+            }
+        }
+    }
+
+    standard64 = GpuSubmitProfile("gpu_t4", "gpu", "gpu:T4:1", 8, "64G", "06:00:00")
+    lowmem16 = GpuSubmitProfile("gpu_t4_lowmem", "gpu", "gpu:T4:1", 8, "16G", "06:00:00")
+    cpu_heavy = GpuSubmitProfile("gpu_t4_cpuheavy", "gpu", "gpu:T4:1", 24, "16G", "06:00:00")
+
+    assert _profile_feasible_slots(standard64, inventory)["feasible_slots"] == 1
+    assert _profile_feasible_slots(lowmem16, inventory)["feasible_slots"] == 4
+    assert _profile_feasible_slots(cpu_heavy, inventory)["feasible_slots"] == 1
+
+
+def test_dynamic_submitter_does_not_fallback_to_gpu_count_when_memory_blocks_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    monkeypatch.setenv("NODE_MEMORY_SAFETY_MARGIN_GB", "8")
+    snapshot = {
+        "partitions": {
+            "gpu": {
+                "partition": "gpu",
+                "gpu_type": "T4",
+                "allocatable_configured_total": 5,
+                "gpus_configured_total": 5,
+                "idle_estimate": 5,
+                "cpus_idle_estimate": 44,
+                "memory_idle_gb_estimate": 40,
+            }
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"full373": 20})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=5,
+        overrequest_workers=5,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+    )
+
+    report = plan["worker_pool"]["profile_reports"][0]
+    assert report["feasible_slots"]["memory_slots"] == 0
+    assert report["desired_workers"] == 0
+    assert plan["total_array_concurrency"] == 0
+
+
+def test_interactive_t4_short_profile_is_shadowed_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    monkeypatch.delenv("RESOURCE_ROUTING_MODE", raising=False)
+    snapshot = {
+        "partitions": {
+            "interactive": {
+                "partition": "interactive",
+                "gpu_type": "T4",
+                "allocatable_configured_total": 10,
+                "gpus_configured_total": 10,
+                "idle_estimate": 8,
+                "gpus_idle_estimate": 8,
+                "cpus_idle_estimate": 80,
+                "memory_idle_gb_estimate": 640,
+                "time_limit": "04:00:00",
+            }
+        }
+    }
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    summary = _summary(tmp_path, {"full373": 20})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=0,
+        overrequest_workers=0,
+        profile_specs="auto",
+        groups=["full373"],
+        dry_run=True,
+        labelcritic_required=True,
+        labelcritic_job_id="111111",
+        labelcritic_job_state="PENDING",
+    )
+
+    report = plan["worker_pool"]["profile_reports"][0]
+    assert report["profile"] == "interactive_t4_short"
+    assert report["desired_workers"] == 0
+    assert report["new_worker_deficit"] == 0
+    assert plan["total_array_concurrency"] == 0

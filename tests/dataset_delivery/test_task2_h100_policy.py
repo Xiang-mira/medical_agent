@@ -127,6 +127,6 @@ def test_labelcritic_discovery_does_not_hardcode_runtime_job_id(tmp_path: Path):
     )
 
     assert policy["labelcritic_job_id"] == "987654"
-    assert policy["labelcritic_job_id"] != "4527698"
+    assert policy["labelcritic_job_id"] != "111111"
     assert policy["labelcritic_job_state"] == "RUNNING"
     assert policy["labelcritic_h100_reserved"] is True

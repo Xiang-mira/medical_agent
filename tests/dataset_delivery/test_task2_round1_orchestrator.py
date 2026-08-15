@@ -1061,7 +1061,7 @@ def test_retry_failed_fault_injection_preserves_scientific_state_and_replenishes
         _stage_ready_case(args.workspace_root, case_id)
     label_service = orch._service_paths(args.state_root)
     label_service["root"].mkdir(parents=True, exist_ok=True)
-    label_service["job"].write_text("4527698\n", encoding="utf-8")
+    label_service["job"].write_text("111111\n", encoding="utf-8")
     orch._save_state(
         args.state_root,
         run_id="round1_test_scientific",
@@ -1075,7 +1075,7 @@ def test_retry_failed_fault_injection_preserves_scientific_state_and_replenishes
         formal_root=str(formal_root),
         source_manifest=str(source_manifest),
         teacher_submitted_case_ids=case_ids,
-        labelcritic={"job_id": "4527698", "status": "SUBMITTED"},
+        labelcritic={"job_id": "111111", "status": "SUBMITTED"},
     )
     commands: list[list[str]] = []
 
@@ -1111,7 +1111,7 @@ def test_retry_failed_fault_injection_preserves_scientific_state_and_replenishes
 
     monkeypatch.setattr(orch, "run_static_preflight", fake_preflight)
     monkeypatch.setattr(orch, "_run", fake_run)
-    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "PENDING" if str(job_id) == "4527698" else "CANCELLED", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "PENDING" if str(job_id) == "111111" else "CANCELLED", "job_id": str(job_id)})
     monkeypatch.setattr(orch, "slurm_job_timing", lambda job_id: {"state": "CANCELLED", "job_id": str(job_id)})
     monkeypatch.setattr(orch, "slurm_job_record", lambda job_id: _labelcritic_record(str(job_id), state="PENDING"))
     monkeypatch.setattr(orch, "find_labelcritic_job_by_name", lambda: "")
@@ -1138,7 +1138,7 @@ def test_retry_failed_fault_injection_preserves_scientific_state_and_replenishes
     assert state["worker_generation"] != "attempt_A"
     assert state["controller_job_id"] == "999001"
     assert labelcritic["status"] == "REUSED_ACTIVE_JOB"
-    assert labelcritic["job_id"] == "4527698"
+    assert labelcritic["job_id"] == "111111"
     assert estep["status"] == "SUBMITTED"
     assert dynamic_commands
     assert check["status"] == "RUNNING"
@@ -1250,7 +1250,7 @@ def test_shared_queue_restart_replenishes_workers_even_when_all_cases_previously
     captured_ready: list[list[str]] = []
     _fake_teacher_submitter(monkeypatch, submitted_commands=commands, captured_ready_ids=captured_ready)
 
-    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "4527698"})
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "111111"})
 
     assert result["status"] == "SUBMITTED"
     assert result["case_count"] == 103

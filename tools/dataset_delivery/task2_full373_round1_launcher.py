@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import shlex
 import shutil
 import subprocess
@@ -33,6 +34,11 @@ from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1  # noqa: 
 
 FULL373_GROUP = "full373"
 FULL373_ROOT_NAME = "full_373_multiteacher_round1"
+RESOURCE_POLICY_VERSION = "teacher_resource_policy_v2_shadow"
+STANDARD_HOST_MEMORY_TIER = "STANDARD64"
+LOWMEM_HOST_MEMORY_TIER = "LOWMEM"
+HIGHMEM_96_TIER = "HOSTMEM96"
+HIGHMEM_128_TIER = "HOSTMEM128"
 TERMINAL_CANDIDATE_STATES = {
     "SUCCESS",
     "ABSENT",
@@ -80,6 +86,185 @@ def _norm(text: str) -> str:
 
 def _sha(text: str, n: int = 16) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:n]
+
+
+def _scientific_candidate_identity(case_id: str, target: str, teacher: str) -> str:
+    return "|".join([str(case_id), _norm(str(target)), str(teacher)])
+
+
+def _resource_paths(output_root: Path) -> dict[str, Path]:
+    root = output_root / "queues" / "resource_policy"
+    return {
+        "root": root,
+        "telemetry": root / "resource_telemetry.jsonl",
+        "lowmem": root / "lowmem_qualifications.json",
+        "short": root / "short_qualifications.json",
+        "revocations": root / "qualification_revocations.jsonl",
+    }
+
+
+def _resource_policy_mode() -> str:
+    return os.getenv("RESOURCE_ROUTING_MODE", "shadow").strip().lower() or "shadow"
+
+
+def _resource_evidence_key(row_or_state: dict[str, Any]) -> str:
+    teacher = str(row_or_state.get("teacher") or row_or_state.get("model") or "")
+    checkpoint = str(row_or_state.get("checkpoint_path") or row_or_state.get("checkpoint") or "")
+    mode = str(row_or_state.get("inference_mode") or os.getenv("MEDAI_TEACHER_INFERENCE_MODE", "hierarchical_roi"))
+    return "|".join([teacher, _sha(checkpoint or teacher, 12), mode, RESOURCE_POLICY_VERSION])
+
+
+def _default_resource_demand(row_or_state: dict[str, Any]) -> dict[str, Any]:
+    existing = dict(row_or_state.get("resource_demand") or {})
+    host_tier = str(existing.get("host_memory_tier") or STANDARD_HOST_MEMORY_TIER)
+    runtime_tier = str(existing.get("runtime_tier") or "STANDARD")
+    return {
+        "resource_policy_version": RESOURCE_POLICY_VERSION,
+        "gpu_class_requirement": str(existing.get("gpu_class_requirement") or "GPU_INFERENCE_COMPATIBLE"),
+        "host_memory_tier": host_tier,
+        "runtime_tier": runtime_tier,
+        "cpu_requirement": int(existing.get("cpu_requirement") or 8),
+        "confidence": str(existing.get("confidence") or "UNKNOWN_DEFAULT_STANDARD"),
+        "evidence_key": str(existing.get("evidence_key") or _resource_evidence_key(row_or_state)),
+        "memory_escalation_level": int(existing.get("memory_escalation_level") or 0),
+        "runtime_escalation_level": int(existing.get("runtime_escalation_level") or 0),
+        "short_eligible": bool(existing.get("short_eligible", False)),
+        "resource_blocked": bool(existing.get("resource_blocked", False)),
+        "last_resource_retry_reason": str(existing.get("last_resource_retry_reason") or ""),
+    }
+
+
+def _read_resource_qualification(path: Path) -> dict[str, Any]:
+    doc = _read_json(path, {})
+    return doc if isinstance(doc, dict) else {}
+
+
+def _qualified(output_root: Path, kind: str, evidence_key: str) -> bool:
+    paths = _resource_paths(output_root)
+    path = paths["lowmem"] if kind == "lowmem" else paths["short"]
+    doc = _read_resource_qualification(path)
+    item = doc.get(evidence_key)
+    return bool(isinstance(item, dict) and item.get("status") == "QUALIFIED")
+
+
+def _revoke_qualification(output_root: Path, *, kind: str, evidence_key: str, reason: str, candidate_id: str) -> None:
+    paths = _resource_paths(output_root)
+    path = paths["lowmem"] if kind == "lowmem" else paths["short"]
+    doc = _read_resource_qualification(path)
+    item = dict(doc.get(evidence_key) or {})
+    item.update({"status": "REVOKED", "revoked_at": utc_now(), "qualification_revoked_reason": reason, "candidate_id": candidate_id})
+    doc[evidence_key] = item
+    atomic_write_json(path, doc)
+    _append_event(output_root, {"event": "resource_qualification_revoked", "kind": kind, "evidence_key": evidence_key, "reason": reason, "candidate_id": candidate_id})
+    paths["revocations"].parent.mkdir(parents=True, exist_ok=True)
+    with paths["revocations"].open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"time": utc_now(), "kind": kind, "evidence_key": evidence_key, "reason": reason, "candidate_id": candidate_id}, ensure_ascii=False) + "\n")
+
+
+def _worker_capability(profile: str, resource_class: str = "") -> dict[str, Any]:
+    raw = f"{profile} {resource_class}".lower()
+    short = "interactive" in raw or "short" in raw
+    if "lowmem" in raw:
+        memory = [LOWMEM_HOST_MEMORY_TIER]
+    elif "highmem_128" in raw or "128" in raw:
+        memory = [HIGHMEM_128_TIER]
+    elif "highmem" in raw or "96" in raw:
+        memory = [HIGHMEM_96_TIER]
+    else:
+        memory = [STANDARD_HOST_MEMORY_TIER, LOWMEM_HOST_MEMORY_TIER]
+    return {
+        "profile": profile,
+        "resource_class": resource_class,
+        "short_worker": short,
+        "allowed_memory_classes": memory,
+        "allowed_runtime_classes": ["SHORT"] if short else ["STANDARD", "SHORT", "LONG"],
+        "walltime_sec": int(os.getenv("TASK2_WORKER_WALLTIME_SEC", "0") or 0),
+    }
+
+
+def _candidate_matches_worker(output_root: Path, state: dict[str, Any], row: dict[str, Any], *, profile: str, resource_class: str) -> tuple[bool, str, dict[str, Any]]:
+    demand = _default_resource_demand({**row, **state})
+    capability = _worker_capability(profile, resource_class)
+    if demand.get("resource_blocked"):
+        return False, "RESOURCE_BLOCKED", {"resource_demand": demand, "worker_capability": capability}
+    memory_tier = str(demand.get("host_memory_tier") or STANDARD_HOST_MEMORY_TIER)
+    if memory_tier == LOWMEM_HOST_MEMORY_TIER and not _qualified(output_root, "lowmem", str(demand["evidence_key"])):
+        memory_tier = STANDARD_HOST_MEMORY_TIER
+    if memory_tier not in capability["allowed_memory_classes"]:
+        return False, f"memory_tier_not_allowed:{memory_tier}", {"resource_demand": demand, "worker_capability": capability}
+    if capability["short_worker"]:
+        if not bool(demand.get("short_eligible")) or not _qualified(output_root, "short", str(demand["evidence_key"])):
+            return False, "short_worker_requires_short_qualified_candidate", {"resource_demand": demand, "worker_capability": capability}
+    return True, "MATCH", {"resource_demand": demand, "worker_capability": capability}
+
+
+def classify_resource_failure(*, return_code: int, stdout: str = "", stderr: str = "", slurm_state: str = "", profile: str = "") -> str:
+    text = "\n".join([str(stdout or ""), str(stderr or ""), str(slurm_state or ""), str(profile or "")]).lower()
+    if "out_of_memory" in text or "oom" in text or "killed" in text or int(return_code) in {125, 137}:
+        return "CPU_OOM"
+    if "timeout" in text or "time limit" in text or "timed out" in text or str(slurm_state).upper() == "TIMEOUT":
+        return "WALLTIME_EXCEEDED"
+    if "node_fail" in text or "node fail" in text:
+        return "NODE_FAIL"
+    if "preempt" in text:
+        return "PREEMPTED"
+    return ""
+
+
+def _apply_resource_failure(output_root: Path, state: dict[str, Any], *, failure_class: str, profile: str) -> dict[str, Any]:
+    demand = _default_resource_demand(state)
+    original_tier = str(demand.get("host_memory_tier") or STANDARD_HOST_MEMORY_TIER)
+    updates = {"status": "RETRY_PENDING", "resource_retry_reason": failure_class, "failure_reason": failure_class}
+    candidate_id = str(state.get("candidate_id") or "")
+    if failure_class == "CPU_OOM":
+        if "lowmem" in str(profile).lower() or original_tier == LOWMEM_HOST_MEMORY_TIER:
+            _revoke_qualification(output_root, kind="lowmem", evidence_key=str(demand["evidence_key"]), reason="LOWMEM_OOM", candidate_id=candidate_id)
+            demand.update({"host_memory_tier": STANDARD_HOST_MEMORY_TIER, "memory_escalation_level": 0, "confidence": "LOWMEM_REVOKED_AFTER_OOM"})
+        elif original_tier == HIGHMEM_96_TIER:
+            demand.update({"host_memory_tier": HIGHMEM_128_TIER, "memory_escalation_level": 2, "confidence": "OOM_AT_96G"})
+        elif original_tier == HIGHMEM_128_TIER:
+            demand.update({"host_memory_tier": HIGHMEM_128_TIER, "resource_blocked": True, "memory_escalation_level": 3, "confidence": "RESOURCE_BLOCKED_HIGHMEM"})
+            updates["resource_blocked_reason"] = "RESOURCE_BLOCKED_HIGHMEM"
+        else:
+            demand.update({"host_memory_tier": HIGHMEM_96_TIER, "memory_escalation_level": 1, "confidence": "OOM_AT_64G"})
+    elif failure_class == "WALLTIME_EXCEEDED":
+        if _worker_capability(profile).get("short_worker"):
+            _revoke_qualification(output_root, kind="short", evidence_key=str(demand["evidence_key"]), reason="SHORT_TIMEOUT", candidate_id=candidate_id)
+            demand.update({"short_eligible": False, "runtime_tier": "STANDARD", "runtime_escalation_level": int(demand.get("runtime_escalation_level") or 0) + 1, "confidence": "SHORT_REVOKED_AFTER_TIMEOUT"})
+        else:
+            demand.update({"runtime_tier": "LONG", "runtime_escalation_level": int(demand.get("runtime_escalation_level") or 0) + 1, "confidence": "NORMAL_WALLTIME_TIMEOUT"})
+    else:
+        demand.update({"confidence": f"RETRYABLE_RESOURCE_FAILURE:{failure_class}"})
+    updates["resource_demand"] = demand
+    return {**state, **updates, "updated_at": utc_now()}
+
+
+def _rss_kb() -> int:
+    try:
+        return int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+    except Exception:
+        return 0
+
+
+def _ct_geometry(path_text: str) -> dict[str, Any]:
+    if not path_text:
+        return {}
+    try:
+        import nibabel as nib
+
+        img = nib.load(path_text)
+        shape = tuple(int(v) for v in img.shape[:3])
+        zooms = tuple(float(v) for v in img.header.get_zooms()[:3])
+        return {"input_shape": list(shape), "input_voxel_count": int(shape[0] * shape[1] * shape[2]), "spacing": list(zooms)}
+    except Exception as exc:
+        return {"geometry_status": "UNAVAILABLE", "geometry_failure_reason": f"{type(exc).__name__}: {exc}"}
+
+
+def append_resource_telemetry(output_root: Path, payload: dict[str, Any]) -> None:
+    paths = _resource_paths(output_root)
+    paths["telemetry"].parent.mkdir(parents=True, exist_ok=True)
+    with paths["telemetry"].open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"time": utc_now(), **payload}, ensure_ascii=False, default=str) + "\n")
 
 
 def atomic_write_json(path: Path, payload: Any) -> None:
@@ -729,6 +914,8 @@ def seed_candidate_states(output_root: Path, *, task_manifest: Path | None = Non
                 "candidate_id": _candidate_id_from_row(row),
                 "execution_schema_version": CANDIDATE_TASK_V1,
                 "logical_task_id": f"{case_id}|{target}|{teacher}",
+                "resource_policy_version": RESOURCE_POLICY_VERSION,
+                "resource_demand": _default_resource_demand(row),
                 "updated_at": utc_now(),
                 "published_at": utc_now(),
             },
@@ -969,6 +1156,29 @@ def claim_next_ready_candidate_from_rows(
             publish_candidate_state(output_root, state)
         if not _candidate_pending_like(state):
             continue
+        matches, reason, resource_decision = _candidate_matches_worker(
+            output_root,
+            state,
+            row,
+            profile=profile,
+            resource_class=resource_class,
+        )
+        if not matches:
+            _append_event(
+                output_root,
+                {
+                    "event": "candidate_resource_claim_skipped",
+                    "case_id": case_id,
+                    "target": target,
+                    "teacher": teacher,
+                    "candidate_id": candidate_id,
+                    "profile": profile,
+                    "resource_class": resource_class,
+                    "reason": reason,
+                    "resource_policy_version": RESOURCE_POLICY_VERSION,
+                },
+            )
+            continue
         queue_depth += 1
         claim = claim_work(
             output_root,
@@ -989,6 +1199,8 @@ def claim_next_ready_candidate_from_rows(
             "worker_id": worker_id,
             "profile": profile,
             "resource_class": resource_class,
+            "resource_policy_version": RESOURCE_POLICY_VERSION,
+            "resource_decision": resource_decision,
             "updated_at": utc_now(),
         }
         state_cache[state_key] = claimed_state
@@ -1122,19 +1334,87 @@ def _execute_candidate_row(
             "worker_id": worker_id or f"pid_{os.getpid()}",
             "profile": str((claim.get("claim") or {}).get("profile") or row.get("profile") or ""),
             "resource_class": str((claim.get("claim") or {}).get("resource_class") or row.get("resource_class") or ""),
+            "resource_policy_version": RESOURCE_POLICY_VERSION,
+            "resource_demand": _default_resource_demand({**row, **existing}),
             "claim": claim.get("claim") or {},
             "command": command,
             "started_at": utc_now(),
         }
         publish_candidate_state(output_root, state)
         atomic_write_json(task_state_path, state)
+        candidate_start_wall = time.time()
+        rss_before_kb = _rss_kb()
         proc = subprocess.run(command, cwd=REPO_ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        candidate_end_wall = time.time()
+        rss_after_kb = _rss_kb()
         candidate_state = _candidate_from_single_teacher_run(case_output, case_id=case_id, target=target, teacher=teacher)
         candidate_state["ct_path"] = str(row.get("ct_path") or "")
-        if proc.returncode != 0 and candidate_state["status"] not in {"SUCCESS", "ABSENT", "OUT_OF_FOV"}:
+        profile = str(state.get("profile") or "")
+        resource_failure = classify_resource_failure(
+            return_code=int(proc.returncode),
+            stdout=proc.stdout[-4000:],
+            stderr=proc.stderr[-4000:],
+            profile=profile,
+        )
+        if proc.returncode != 0 and resource_failure and candidate_state["status"] not in {"SUCCESS", "ABSENT", "OUT_OF_FOV"}:
+            candidate_state = _apply_resource_failure(
+                output_root,
+                {
+                    **state,
+                    **candidate_state,
+                    "candidate_id": candidate_id,
+                    "case_id": case_id,
+                    "target": target,
+                    "teacher": teacher,
+                },
+                failure_class=resource_failure,
+                profile=profile,
+            )
+        elif proc.returncode != 0 and candidate_state["status"] not in {"SUCCESS", "ABSENT", "OUT_OF_FOV"}:
             candidate_state["status"] = "FAILED_FINAL"
             candidate_state["failure_reason"] = proc.stderr[-1000:] or proc.stdout[-1000:] or "candidate_worker_failed"
-        candidate_state.update({"return_code": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "finished_at": utc_now()})
+        telemetry = {
+            "schema_version": "candidate_resource_telemetry_v1",
+            "scientific_run_id": _scientific_run_id(output_root),
+            "execution_attempt_id": os.getenv("TASK2_EXECUTION_ATTEMPT_ID", ""),
+            "candidate_id": candidate_id,
+            "case_id": case_id,
+            "canonical_target": target,
+            "teacher_id": teacher,
+            "model_id": teacher,
+            "checkpoint_model_fingerprint": str(row.get("checkpoint_path") or row.get("checkpoint_root") or ""),
+            "git_commit": os.getenv("EXPECTED_GIT_COMMIT", ""),
+            "inference_mode": os.getenv("MEDAI_TEACHER_INFERENCE_MODE", "hierarchical_roi"),
+            "resource_policy_version": RESOURCE_POLICY_VERSION,
+            "gpu_type": os.getenv("SLURM_JOB_GPUS", ""),
+            "partition": os.getenv("SLURM_JOB_PARTITION", ""),
+            "node": os.getenv("SLURMD_NODENAME", os.getenv("HOSTNAME", "")),
+            "worker_job_id": os.getenv("SLURM_JOB_ID", ""),
+            "array_task_id": os.getenv("SLURM_ARRAY_TASK_ID", ""),
+            "worker_profile": profile,
+            "requested_memory": os.getenv("SLURM_MEM_PER_NODE", os.getenv("SLURM_MEM_PER_CPU", "")),
+            "requested_cpu": os.getenv("SLURM_CPUS_PER_TASK", ""),
+            "requested_gpu": os.getenv("SLURM_GPUS", ""),
+            "candidate_start_time": state["started_at"],
+            "candidate_end_time": utc_now(),
+            "elapsed_sec": round(candidate_end_wall - candidate_start_wall, 3),
+            "candidate_peak_rss_kb": max(rss_before_kb, rss_after_kb),
+            "telemetry_confidence": "PROCESS_TREE_RUSAGE" if max(rss_before_kb, rss_after_kb) > 0 else "WORKER_ONLY",
+            "exit_code": int(proc.returncode),
+            "slurm_state": os.getenv("SLURM_JOB_STATE", ""),
+            "oom": resource_failure == "CPU_OOM",
+            "timeout": resource_failure == "WALLTIME_EXCEEDED",
+            "node_fail": resource_failure == "NODE_FAIL",
+            "preempted": resource_failure == "PREEMPTED",
+            "resource_failure_class": resource_failure,
+            "resource_demand": candidate_state.get("resource_demand") or state.get("resource_demand"),
+            **_ct_geometry(str(row.get("ct_path") or "")),
+        }
+        try:
+            append_resource_telemetry(output_root, telemetry)
+        except Exception as exc:
+            candidate_state["resource_telemetry_warning"] = f"{type(exc).__name__}: {exc}"
+        candidate_state.update({"return_code": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "finished_at": utc_now(), "resource_policy_version": RESOURCE_POLICY_VERSION})
         publish_candidate_state(output_root, candidate_state)
         final = {
             **state,
@@ -1145,6 +1425,8 @@ def _execute_candidate_row(
             "stderr_tail": proc.stderr[-4000:],
             "finished_at": utc_now(),
             "case_output": str(case_output),
+            "resource_failure_class": resource_failure,
+            "resource_telemetry": telemetry,
         }
         atomic_write_json(task_state_path, final)
         return final
@@ -1180,6 +1462,25 @@ def run_candidate_queue_worker(
     seed_marker_check = _candidate_seed_marker_matches(output_root, task_manifest=task_manifest, rows=manifest_rows)
     cursor = _manifest_cursor_offset(output_root, worker_id=worker_id, manifest_rows=manifest_rows)
     while True:
+        capability = _worker_capability(profile, resource_class)
+        walltime_sec = int(capability.get("walltime_sec") or 0)
+        if capability.get("short_worker") and walltime_sec > 0:
+            elapsed = time.time() - started
+            guard = int(os.getenv("TASK2_SHORT_CLAIM_GUARD_SEC", "1800")) + int(os.getenv("TASK2_SHORT_CLEANUP_MARGIN_SEC", "300"))
+            if walltime_sec - elapsed < guard:
+                telemetry = build_estep_telemetry(output_root)
+                return {
+                    "status": "DRAINING",
+                    "reason": "remaining_walltime_below_claim_guard",
+                    "worker_id": worker_id,
+                    "profile": profile,
+                    "resource_class": resource_class,
+                    "completed": completed,
+                    "runtime_sec": round(elapsed, 3),
+                    "remaining_walltime_sec": round(walltime_sec - elapsed, 3),
+                    "claim_guard_sec": guard,
+                    "telemetry": telemetry,
+                }
         if seed_marker_check["status"] != "MATCH":
             seed_marker_check = _candidate_seed_marker_matches(output_root, task_manifest=task_manifest, rows=manifest_rows)
         claim = claim_next_ready_candidate_from_rows(
