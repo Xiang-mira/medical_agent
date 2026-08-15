@@ -45,6 +45,7 @@ from tools.dataset_delivery.task2_full373_round1_launcher import (  # noqa: E402
     build_estep_telemetry,
     build_full_round1_scope,
 )
+from tools.dataset_delivery.labelcritic_service_contract import service_spec_from_env, service_spec_hash  # noqa: E402
 from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
 from cli_anything.medai.core.totalseg_runner import preflight_totalseg_executable  # noqa: E402
 
@@ -288,7 +289,7 @@ def slurm_job_record(job_id: str) -> dict[str, Any]:
     query_id = parsed.get("query_id") or ""
     if not query_id:
         return {"status": "INVALID", "state": "UNKNOWN", "job_id": "", "display_id": str(job_id or ""), "source": "none"}
-    squeue = _run(["squeue", "-h", "-j", str(query_id), "-o", "%i|%T|%u|%j"])
+    squeue = _run(["squeue", "-h", "-j", str(query_id), "-o", "%i|%T|%u|%j|%k"])
     if squeue["ok"] and squeue["stdout"].strip():
         parts = squeue["stdout"].splitlines()[0].split("|")
         return {
@@ -300,9 +301,10 @@ def slurm_job_record(job_id: str) -> dict[str, Any]:
             "state": parts[1].strip() if len(parts) > 1 else "UNKNOWN",
             "user": parts[2].strip() if len(parts) > 2 else "",
             "name": parts[3].strip() if len(parts) > 3 else "",
+            "comment": parts[4].strip() if len(parts) > 4 else "",
             "source": "squeue",
         }
-    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobIDRaw,State,User,JobName", "-P"])
+    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobIDRaw,State,User,JobName,Comment", "-P"])
     if sacct["ok"] and sacct["stdout"].strip():
         preferred = parsed.get("job_id") or query_id
         for line in sacct["stdout"].splitlines():
@@ -317,6 +319,7 @@ def slurm_job_record(job_id: str) -> dict[str, Any]:
                     "state": parts[1].strip().split()[0] if len(parts) > 1 else "UNKNOWN",
                     "user": parts[2].strip() if len(parts) > 2 else "",
                     "name": parts[3].strip() if len(parts) > 3 else "",
+                    "comment": parts[4].strip() if len(parts) > 4 else "",
                     "source": "sacct",
                 }
     state = slurm_job_state(job_id)
@@ -504,13 +507,30 @@ def refresh_lifecycle_for_submitted_jobs(args: argparse.Namespace, formal_root: 
     return {"status": "REFRESHED", "jobs": refreshed, "active": active, "retryable": retryable, "fatal": fatal, "historical": historical, "current_execution_attempt_id": current_attempt}
 
 
-def validate_labelcritic_job(job_id: str, *, require_identity: bool = True) -> dict[str, Any]:
+def expected_labelcritic_service_spec_hash(state_root: Path) -> str:
+    service = _service_paths(state_root)
+    generated_script = str(service["root"] / "labelcritic_72b_service.sbatch")
+    return service_spec_hash(service_spec_from_env(generated_script=generated_script))
+
+
+def _labelcritic_spec_hash_from_comment(comment: str) -> str:
+    raw = str(comment or "").strip()
+    prefix = "medical_agent:labelcritic_72b:"
+    if raw.startswith(prefix):
+        return raw[len(prefix) :].split(":", 1)[0].strip()
+    return ""
+
+
+def validate_labelcritic_job(job_id: str, *, require_identity: bool = True, expected_spec_hash: str = "") -> dict[str, Any]:
     record = slurm_job_record(job_id)
     user = _current_user()
     active = record.get("state") in ACTIVE_STATES
     user_ok = not user or record.get("user") == user
     name_ok = not require_identity or record.get("name") == LABELCRITIC_JOB_NAME
-    ok = bool(record.get("status") == "FOUND" and active and user_ok and name_ok)
+    expected_hash = str(expected_spec_hash or os.getenv("LABELCRITIC_SERVICE_SPEC_HASH", "")).strip()
+    running_hash = _labelcritic_spec_hash_from_comment(str(record.get("comment") or ""))
+    spec_ok = not expected_hash or bool(running_hash and running_hash == expected_hash)
+    ok = bool(record.get("status") == "FOUND" and active and user_ok and name_ok and spec_ok)
     reasons = []
     if record.get("status") != "FOUND":
         reasons.append("not_found")
@@ -520,10 +540,14 @@ def validate_labelcritic_job(job_id: str, *, require_identity: bool = True) -> d
         reasons.append(f"user_mismatch:{record.get('user')}!={user}")
     if not name_ok:
         reasons.append(f"name_mismatch:{record.get('name')}!={LABELCRITIC_JOB_NAME}")
+    if not spec_ok:
+        reasons.append(f"JOB_SPEC_MISMATCH:{running_hash or 'missing'}!={expected_hash}")
     return {
         "status": "VALID" if ok else "INVALID",
         "job_id": str(job_id or ""),
         "record": record,
+        "expected_spec_hash": expected_hash,
+        "running_spec_hash": running_hash,
         "failure_reason": ",".join(reasons),
     }
 
@@ -533,8 +557,8 @@ def _job_id_sort_key(job: dict[str, Any]) -> tuple[int, str]:
     return (int(value) if value.isdigit() else sys.maxsize, value)
 
 
-def select_labelcritic_job(candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    valid = [job for job in candidates if validate_labelcritic_job(str(job.get("job_id") or ""))["status"] == "VALID"]
+def select_labelcritic_job(candidates: list[dict[str, Any]], *, expected_spec_hash: str = "") -> dict[str, Any]:
+    valid = [job for job in candidates if validate_labelcritic_job(str(job.get("job_id") or ""), expected_spec_hash=expected_spec_hash)["status"] == "VALID"]
     if not valid:
         return {"status": "NONE"}
     running = [job for job in valid if str(job.get("state") or "").upper() == "RUNNING"]
@@ -543,7 +567,7 @@ def select_labelcritic_job(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     return {"status": "SELECTED", "job_id": str(selected.get("job_id")), "candidates": valid}
 
 
-def find_labelcritic_job_by_name() -> str:
+def find_labelcritic_job_by_name(expected_spec_hash: str = "") -> str:
     command = ["squeue", "-h"]
     user = _current_user()
     if user:
@@ -562,7 +586,7 @@ def find_labelcritic_job_by_name() -> str:
                 "user": parts[2].strip() if len(parts) > 2 else "",
                 "name": parts[3].strip() if len(parts) > 3 else LABELCRITIC_JOB_NAME,
             })
-    selected = select_labelcritic_job(candidates)
+    selected = select_labelcritic_job(candidates, expected_spec_hash=expected_spec_hash)
     return str(selected.get("job_id") or "") if selected["status"] == "SELECTED" else ""
 
 
@@ -584,6 +608,31 @@ def _write_labelcritic_service_state(state_root: Path, payload: dict[str, Any]) 
     if payload.get("job_id"):
         service["job"].write_text(str(payload["job_id"]) + "\n", encoding="utf-8")
     _write_json(service["root"] / "service_state.json", payload)
+
+
+def maybe_cancel_obsolete_labelcritic_job(job_id: str, validation: dict[str, Any], *, expected_spec_hash: str) -> dict[str, Any]:
+    record = validation.get("record") or {}
+    reason = str(validation.get("failure_reason") or "")
+    if "JOB_SPEC_MISMATCH" not in reason:
+        return {"status": "SKIPPED", "reason": "not_spec_mismatch"}
+    if record.get("state") != "PENDING":
+        return {"status": "SKIPPED", "reason": f"state_not_pending:{record.get('state')}"}
+    if record.get("name") != LABELCRITIC_JOB_NAME:
+        return {"status": "SKIPPED", "reason": "name_mismatch"}
+    user = _current_user()
+    if user and record.get("user") != user:
+        return {"status": "SKIPPED", "reason": "user_mismatch"}
+    comment = str(record.get("comment") or "")
+    if not comment.startswith("medical_agent:labelcritic_72b:"):
+        return {"status": "SKIPPED", "reason": "missing_medical_agent_labelcritic_comment"}
+    result = _run(["scancel", str(job_id)])
+    return {
+        "status": "CANCELLED_OBSOLETE" if result["ok"] else "CANCEL_FAILED",
+        "job_id": str(job_id),
+        "expected_spec_hash": expected_spec_hash,
+        "validation": validation,
+        "scancel": result,
+    }
 
 
 def _case_id(row: dict[str, Any], index: int) -> str:
@@ -1173,11 +1222,17 @@ def _service_paths(state_root: Path) -> dict[str, Path]:
         "base": root / "base_url.txt",
         "port": root / "port.txt",
         "endpoint": root / "endpoint.url",
+        "ready": root / "service_ready.json",
+        "spec": root / "labelcritic_service_spec.json",
+        "spec_hash": root / "service_spec_hash.txt",
+        "preflight": root / "labelcritic_service_preflight.json",
     }
 
 
 def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
     service = _service_paths(state_root)
+    expected_spec_hash = expected_labelcritic_service_spec_hash(state_root)
+    os.environ["LABELCRITIC_SERVICE_SPEC_HASH"] = expected_spec_hash
     env_base = os.getenv("LABELCRITIC_BASE_URL", "").strip()
     if env_base:
         env_port = int(os.getenv("LABELCRITIC_PORT", "8000"))
@@ -1187,12 +1242,14 @@ def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
             service["base"].write_text(health["base_url"] + "\n", encoding="utf-8")
             service["port"].write_text(str(health["port"]) + "\n", encoding="utf-8")
             service["endpoint"].write_text(f"{health['base_url']}:{health['port']}\n", encoding="utf-8")
+            _write_json(service["ready"], {"status": "READY", "health": health, "timestamp": utc_now(), "source": "LABELCRITIC_BASE_URL"})
             return {"status": "REUSED_HEALTHY", "base_url": health["base_url"], "port": health["port"], "health": health, "source": "LABELCRITIC_BASE_URL"}
     base = service["base"].read_text(encoding="utf-8").strip() if service["base"].exists() else ""
     port = int(service["port"].read_text(encoding="utf-8").strip()) if service["port"].exists() else int(os.getenv("LABELCRITIC_PORT", "8000"))
     if base:
         health = labelcritic_health(base, port)
         if health["status"] == "READY":
+            _write_json(service["ready"], {"status": "READY", "health": health, "timestamp": utc_now(), "source": "service_files_http_check"})
             return {"status": "REUSED_HEALTHY", "base_url": health["base_url"], "port": health["port"], "health": health}
     ignored: list[dict[str, Any]] = []
     state_job_id = _job_id_from_labelcritic_state(_load_state(state_root).get("labelcritic"))
@@ -1205,27 +1262,36 @@ def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
     ):
         if not job_id:
             continue
-        validation = validate_labelcritic_job(job_id)
+        validation = validate_labelcritic_job(job_id, expected_spec_hash=expected_spec_hash)
         if validation["status"] == "VALID":
             reused = {"status": "REUSED_ACTIVE_JOB", "job_id": job_id, "source": source, "validation": validation}
             _write_labelcritic_service_state(state_root, reused)
             return reused
-        ignored.append({"source": source, "job_id": job_id, "validation": validation})
-    named = find_labelcritic_job_by_name()
+        cancellation = maybe_cancel_obsolete_labelcritic_job(job_id, validation, expected_spec_hash=expected_spec_hash)
+        ignored.append({"source": source, "job_id": job_id, "validation": validation, "controlled_cancellation": cancellation})
+    try:
+        named = find_labelcritic_job_by_name(expected_spec_hash)
+    except TypeError:
+        named = find_labelcritic_job_by_name()
     if named:
-        validation = validate_labelcritic_job(named)
+        validation = validate_labelcritic_job(named, expected_spec_hash=expected_spec_hash)
         if validation["status"] == "VALID":
             reused = {"status": "REUSED_ACTIVE_JOB", "job_id": named, "source": "slurm_name_discovery", "validation": validation, "ignored_jobs": ignored}
             _write_labelcritic_service_state(state_root, reused)
             return reused
-        ignored.append({"source": "slurm_name_discovery", "job_id": named, "validation": validation})
-    result = _run(["bash", "scripts/task2/submit_labelcritic_72b_service.sh"], env=runtime_no_git_env())
+        cancellation = maybe_cancel_obsolete_labelcritic_job(named, validation, expected_spec_hash=expected_spec_hash)
+        ignored.append({"source": "slurm_name_discovery", "job_id": named, "validation": validation, "controlled_cancellation": cancellation})
+    submit_env = runtime_no_git_env()
+    submit_env["LABELCRITIC_SERVICE_SPEC_HASH"] = expected_spec_hash
+    submit_env["STATE_ROOT"] = str(state_root)
+    submit_env["LABELCRITIC_SERVICE_ROOT"] = str(service["root"])
+    result = _run(["bash", "scripts/task2/submit_labelcritic_72b_service.sh"], env=submit_env)
     if not result["ok"]:
         log_failure(state_root, stage="labelcritic_submit", failure_reason=result["stderr"] or result["stdout"] or "labelcritic_submit_failed", details=result)
         return {"status": "SUBMIT_FAILED", "failure_reason": result["stderr"], "submit": result}
     job_id_match = re.search(r"LABELCRITIC_JOB_ID=([^\s]+)", result["stdout"])
     job_id = job_id_match.group(1) if job_id_match else (service["job"].read_text(encoding="utf-8").strip() if service["job"].exists() else "")
-    submitted = {"status": "SUBMITTED", "job_id": job_id, "submit": result, "ignored_jobs": ignored}
+    submitted = {"status": "SUBMITTED", "job_id": job_id, "submit": result, "ignored_jobs": ignored, "service_spec_hash": expected_spec_hash}
     _write_labelcritic_service_state(state_root, submitted)
     return submitted
 

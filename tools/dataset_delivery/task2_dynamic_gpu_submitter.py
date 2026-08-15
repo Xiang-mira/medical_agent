@@ -60,6 +60,13 @@ GPU_VRAM_ESTIMATE_GB = {
     "GPU": 16,
 }
 QOS_CACHE_FILENAME = "qos_capacity_cache.json"
+IMPOSSIBLE_PENDING_REASONS = {
+    "PartitionTimeLimit",
+    "DependencyNeverSatisfied",
+    "BadConstraints",
+    "InvalidAccount",
+    "InvalidQOS",
+}
 
 
 @dataclass(frozen=True)
@@ -130,6 +137,48 @@ def _gpu_type_rank(gpu_type: str) -> int:
     return 2
 
 
+def _time_to_seconds(value: Any) -> int | None:
+    raw = str(value or "").strip()
+    if not raw or raw.upper() in {"UNLIMITED", "NOT_SET", "N/A"}:
+        return None
+    days = 0
+    if "-" in raw:
+        day_text, raw = raw.split("-", 1)
+        try:
+            days = int(day_text)
+        except ValueError:
+            return None
+    parts = raw.split(":")
+    try:
+        if len(parts) == 3:
+            hours, minutes, seconds = (int(part) for part in parts)
+        elif len(parts) == 2:
+            hours, minutes, seconds = 0, int(parts[0]), int(parts[1])
+        else:
+            hours, minutes, seconds = int(parts[0]), 0, 0
+    except ValueError:
+        return None
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def _seconds_to_time(seconds: int) -> str:
+    seconds = max(60, int(seconds))
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    sec = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+
+
+def _effective_profile_time_limit(partition_row: dict[str, Any], *, requested: str, interactive_short: bool) -> str:
+    requested_sec = _time_to_seconds(requested) or 6 * 3600
+    max_sec = _time_to_seconds(partition_row.get("time_limit") or partition_row.get("time"))
+    if not interactive_short or max_sec is None:
+        return requested
+    configured_short = _time_to_seconds(os.getenv("TASK2_INTERACTIVE_T4_SHORT_TIME", "03:50:00")) or 13800
+    safety = int(os.getenv("TASK2_INTERACTIVE_T4_TIME_SAFETY_SEC", "600"))
+    return _seconds_to_time(min(requested_sec, configured_short, max(60, max_sec - safety)))
+
+
 def build_auto_gpu_profiles(snapshot: dict[str, Any], *, min_vram_gb: int = 12, include_h100_overflow: bool = True) -> list[GpuSubmitProfile]:
     profiles: list[GpuSubmitProfile] = []
     for partition, row in sorted((snapshot.get("partitions") or {}).items()):
@@ -141,7 +190,8 @@ def build_auto_gpu_profiles(snapshot: dict[str, Any], *, min_vram_gb: int = 12, 
             continue
         if "H100" in gpu_type and not include_h100_overflow:
             continue
-        name = re.sub(r"[^A-Za-z0-9_]+", "_", f"{partition}_{gpu_type.lower()}").strip("_").lower()
+        interactive_short = str(partition).lower() == "interactive" and "T4" in gpu_type
+        name = "interactive_t4_short" if interactive_short else re.sub(r"[^A-Za-z0-9_]+", "_", f"{partition}_{gpu_type.lower()}").strip("_").lower()
         gres_type = "" if gpu_type == "GPU" else f":{gpu_type}"
         mem = "96G" if vram >= 80 else ("80G" if vram >= 48 else "64G")
         profiles.append(
@@ -151,7 +201,7 @@ def build_auto_gpu_profiles(snapshot: dict[str, Any], *, min_vram_gb: int = 12, 
                 gres=f"gpu{gres_type}:1",
                 cpus_per_task=8,
                 mem=mem,
-                time_limit="06:00:00",
+                time_limit=_effective_profile_time_limit(row, requested="06:00:00", interactive_short=interactive_short),
             )
         )
     profiles.sort(key=lambda profile: _gpu_type_rank(f"{profile.name} {profile.partition} {profile.gres}"))
@@ -472,7 +522,13 @@ def _profile_desired_ceiling(profile: GpuSubmitProfile, *, planned_workers: int,
     if "A100" in upper:
         return min(ceiling, int(os.getenv("TASK2_A100_DESIRED_MAX", "4")))
     if "INTERACTIVE" in upper and "T4" in upper:
-        return min(ceiling, int(os.getenv("TASK2_INTERACTIVE_DESIRED_MAX", "1")))
+        partitions = (resource_inventory.get("snapshot") or {}).get("partitions") or {}
+        part = partitions.get(profile.partition) or {}
+        idle = int(part.get("idle_estimate") or part.get("gpus_idle_estimate") or 0)
+        physical = int(part.get("allocatable_configured_total") or part.get("gpus_configured_total") or 0)
+        available = idle if idle > 0 else physical
+        cap = int(os.getenv("TASK2_INTERACTIVE_T4_DESIRED_MAX", os.getenv("TASK2_INTERACTIVE_DESIRED_MAX", str(max(1, physical or ceiling)))))
+        return min(ceiling, max(0, available), max(1, cap))
     return ceiling
 
 
@@ -513,7 +569,7 @@ def _slurm_job_state(job_id: str) -> dict[str, Any]:
         return {"state": "UNKNOWN", "job_id": str(job_id or "")}
     try:
         proc = subprocess.run(
-            ["squeue", "-h", "-j", query_id, "-o", "%T"],
+            ["squeue", "-h", "-j", query_id, "-o", "%T|%R"],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -522,10 +578,11 @@ def _slurm_job_state(job_id: str) -> dict[str, Any]:
     except Exception as exc:
         return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "squeue_error", "error": f"{type(exc).__name__}: {exc}"}
     if proc.returncode == 0 and proc.stdout.strip():
-        return {"state": proc.stdout.splitlines()[0].strip(), "job_id": str(job_id or ""), "source": "squeue"}
+        parts = proc.stdout.splitlines()[0].split("|", 1)
+        return {"state": parts[0].strip(), "reason": parts[1].strip() if len(parts) > 1 else "", "job_id": str(job_id or ""), "source": "squeue"}
     try:
         proc = subprocess.run(
-            ["sacct", "-n", "-j", query_id, "--format=State", "-P"],
+            ["sacct", "-n", "-j", query_id, "--format=State,Reason", "-P"],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -534,29 +591,51 @@ def _slurm_job_state(job_id: str) -> dict[str, Any]:
     except Exception as exc:
         return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "sacct_error", "error": f"{type(exc).__name__}: {exc}"}
     if proc.returncode == 0 and proc.stdout.strip():
-        return {"state": proc.stdout.splitlines()[0].split("|")[0].strip(), "job_id": str(job_id or ""), "source": "sacct"}
+        parts = proc.stdout.splitlines()[0].split("|")
+        return {"state": parts[0].strip(), "reason": parts[1].strip() if len(parts) > 1 else "", "job_id": str(job_id or ""), "source": "sacct"}
     return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "unknown"}
 
 
 def _worker_pool_counts(slurm_root: Path, profiles: list[GpuSubmitProfile], *, execution_attempt_id: str = "") -> dict[str, dict[str, int]]:
     profile_names = {profile.name for profile in profiles}
-    counts = {name: {"running": 0, "pending": 0, "active": 0} for name in profile_names}
-    for row in load_submitted_jobs(slurm_root):
+    counts = {name: {"running": 0, "pending": 0, "active": 0, "invalid_pending": 0} for name in profile_names}
+    rows = [
+        row
+        for row in load_submitted_jobs(slurm_root)
+        if str(row.get("execution_schema_version") or "") == CANDIDATE_TASK_V1
+        and (not execution_attempt_id or str(row.get("execution_attempt_id") or "") == str(execution_attempt_id))
+        and str(row.get("profile") or "") in profile_names
+    ]
+    child_arrays = {str(row.get("array_job_id") or "").strip() for row in rows if str(row.get("array_task_id") or "").strip()}
+    seen_units: set[tuple[str, str, str]] = set()
+    for row in rows:
         if str(row.get("execution_schema_version") or "") != CANDIDATE_TASK_V1:
-            continue
-        if execution_attempt_id and str(row.get("execution_attempt_id") or "") != str(execution_attempt_id):
             continue
         profile_name = str(row.get("profile") or "")
         if profile_name not in counts:
             continue
         job_id = str(row.get("job_id") or "")
-        slurm_state = str(_slurm_job_state(job_id).get("state") or row.get("slurm_state") or "")
+        array_job_id = str(row.get("array_job_id") or job_id.split("_", 1)[0]).strip()
+        array_task_id = str(row.get("array_task_id") or "").strip()
+        if not array_task_id and array_job_id in child_arrays:
+            continue
+        unit_key = (profile_name, array_job_id or job_id, array_task_id or "parent")
+        if unit_key in seen_units:
+            continue
+        seen_units.add(unit_key)
+        slurm = _slurm_job_state(job_id)
+        slurm_state = str(slurm.get("state") or row.get("slurm_state") or "")
+        reason = str(slurm.get("reason") or row.get("failure_reason") or "")
+        unit_count = 1 if array_task_id else int(row.get("task_count") or 0 or 1)
+        if slurm_state == "PENDING" and reason in IMPOSSIBLE_PENDING_REASONS:
+            counts[profile_name]["invalid_pending"] += unit_count
+            continue
         if slurm_state in ACTIVE_STATES:
-            counts[profile_name]["active"] += int(row.get("task_count") or 0 or 1)
+            counts[profile_name]["active"] += unit_count
             if slurm_state == "RUNNING":
-                counts[profile_name]["running"] += int(row.get("task_count") or 0 or 1)
+                counts[profile_name]["running"] += unit_count
             else:
-                counts[profile_name]["pending"] += int(row.get("task_count") or 0 or 1)
+                counts[profile_name]["pending"] += unit_count
     return counts
 
 
@@ -1066,6 +1145,21 @@ def build_dynamic_submission_plan(
         h100_enabled=h100_enabled,
     )
     existing_workers = _worker_pool_counts(slurm_root, profiles, execution_attempt_id=safe_execution_attempt_id)
+    accounting_invariants: list[dict[str, Any]] = []
+    for profile in profiles:
+        physical = _profile_capacity_hint(profile, resource_inventory)
+        running = int((existing_workers.get(profile.name) or {}).get("running") or 0)
+        if physical > 0 and running > physical:
+            accounting_invariants.append(
+                {
+                    "status": "FAILED",
+                    "profile": profile.name,
+                    "reported_running": running,
+                    "physical_capacity": physical,
+                    "failure_reason": "reported_running_exceeds_physical_capacity",
+                }
+            )
+            desired_workers[profile.name] = max(int(desired_workers.get(profile.name) or 0), int((existing_workers.get(profile.name) or {}).get("active") or 0))
     group_slots = allocate_group_concurrency(
         requested_groups,
         task_counts,
@@ -1101,6 +1195,7 @@ def build_dynamic_submission_plan(
             "running_workers": running_workers,
             "pending_workers": pending_workers,
             "active_workers": active_workers,
+            "invalid_pending_workers": int((existing_workers.get(profile.name) or {}).get("invalid_pending") or 0),
             "new_worker_deficit": deficit,
             "last_backpressure": qos_state.get("last_backpressure") or {},
             "source": qos_state.get("source") or "",
@@ -1205,6 +1300,7 @@ def build_dynamic_submission_plan(
         "last_shard": worker_rows[-1] if worker_rows else {},
         "all_array_specs_valid": all_array_specs_valid,
         "profiles": profile_reports,
+        "accounting_invariants": accounting_invariants,
         "jobs": worker_rows,
         "legacy_active_jobs_adopted": 0,
         "compressed_job_ids_as_queryable": 0,
@@ -1537,6 +1633,7 @@ def build_dynamic_submission_plan(
             "desired_workers_by_profile": desired_workers,
             "existing_workers_by_profile": existing_workers,
             "profile_reports": profile_reports,
+            "accounting_invariants": accounting_invariants,
         },
         "qos": {
             "per_profile": qos_states,

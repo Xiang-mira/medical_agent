@@ -21,9 +21,23 @@ command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi || true
 : "${LABELCRITIC_MODEL_DIR:?LABELCRITIC_MODEL_DIR is required}"
 : "${LABELCRITIC_MODEL_ID:?LABELCRITIC_MODEL_ID is required}"
 : "${LABELCRITIC_TENSOR_PARALLEL_SIZE:?LABELCRITIC_TENSOR_PARALLEL_SIZE is required}"
+VLLM_PYTHON="${VLLM_PYTHON:-python3}"
 LABELCRITIC_PORT="${LABELCRITIC_PORT:-8000}"
+LABELCRITIC_STARTUP_TIMEOUT_SEC="${LABELCRITIC_STARTUP_TIMEOUT_SEC:-2400}"
 
-apptainer exec --nv "${VLLM_CONTAINER}" python -m vllm.entrypoints.openai.api_server \
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+  echo "FATAL: nvidia-smi not found inside LabelCritic allocation" >&2
+  exit 127
+fi
+gpu_count=$(nvidia-smi -L 2>/dev/null | grep -c '^GPU ' || true)
+if [[ "${gpu_count}" -lt 2 ]]; then
+  echo "FATAL: LabelCritic requires at least 2 visible GPUs, saw ${gpu_count}" >&2
+  exit 127
+fi
+apptainer exec --nv "${VLLM_CONTAINER}" "${VLLM_PYTHON}" --version
+apptainer exec --nv "${VLLM_CONTAINER}" "${VLLM_PYTHON}" -c 'import vllm, importlib.util; raise SystemExit(0 if importlib.util.find_spec("vllm.entrypoints.openai.api_server") is not None else 3)'
+
+apptainer exec --nv "${VLLM_CONTAINER}" "${VLLM_PYTHON}" -m vllm.entrypoints.openai.api_server \
   --model "${LABELCRITIC_MODEL_DIR}" \
   --served-model-name "${LABELCRITIC_MODEL_ID}" \
   --tensor-parallel-size "${LABELCRITIC_TENSOR_PARALLEL_SIZE}" \
@@ -31,7 +45,7 @@ apptainer exec --nv "${VLLM_CONTAINER}" python -m vllm.entrypoints.openai.api_se
   --port "${LABELCRITIC_PORT}" &
 VLLM_PID=$!
 
-for _ in $(seq 1 120); do
+for _ in $(seq 1 $((LABELCRITIC_STARTUP_TIMEOUT_SEC / 5))); do
   curl --noproxy "*" -fsS "http://127.0.0.1:${LABELCRITIC_PORT}/health" >/dev/null && break
   sleep 5
 done
