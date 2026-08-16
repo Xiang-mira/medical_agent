@@ -59,7 +59,16 @@ def _mock_slurm_units(monkeypatch: pytest.MonkeyPatch, states: dict[str, tuple[s
         if isinstance(value, list):
             return {"state": str(value[0].get("state") if value else "UNKNOWN"), "job_id": job_id, "units": value}
         state, reason, count = value or ("UNKNOWN", "", 1)
-        return {"state": state, "reason": reason, "job_id": job_id, "units": [{"job_id": job_id, "state": state, "reason": reason, "unit_count": count}]}
+        array_job_id = str(row.get("array_job_id") or job_id.split("_", 1)[0])
+        if "_" not in job_id and count > 1:
+            units = [
+                {"job_id": f"{array_job_id}_{index}", "array_job_id": array_job_id, "array_task_id": str(index), "state": state, "reason": reason, "unit_count": 1}
+                for index in range(count)
+            ]
+        else:
+            task_id = job_id.split("_", 1)[1] if "_" in job_id else str(row.get("array_task_id") or "")
+            units = [{"job_id": job_id, "array_job_id": array_job_id, "array_task_id": task_id, "state": state, "reason": reason, "unit_count": 1}]
+        return {"state": state, "reason": reason, "job_id": job_id, "units": units}
 
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_worker_units", fake_units)
 
@@ -340,8 +349,8 @@ def test_worker_pool_counts_child_array_tasks_without_double_counting_parent(tmp
         execution_attempt_id="attempt_a",
     )
 
-    assert counts["gpu_t4"]["running"] == 2
-    assert counts["gpu_t4"]["active"] == 2
+    assert counts["gpu_t4"]["running"] == 10
+    assert counts["gpu_t4"]["active"] == 10
 
 
 def test_impossible_pending_partition_time_limit_does_not_count_as_active_capacity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -520,33 +529,174 @@ def test_slurm_worker_units_parses_compressed_pending_array(monkeypatch: pytest.
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import _slurm_worker_units
 
     def fake_run(command, **kwargs):
-        if command[:2] == ["squeue", "-h"]:
+        if command[:3] == ["squeue", "-h", "-r"]:
             return subprocess.CompletedProcess(command, 0, "990100_[0-9%4]|PENDING|Resources\n", "")
         raise AssertionError(f"unexpected command: {command}")
 
-    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.slurm_reliability.subprocess.run", fake_run)
     result = _slurm_worker_units({"job_id": "990100", "array_job_id": "990100"})
 
     assert result["source"] == "squeue"
-    assert result["units"][0]["state"] == "PENDING"
-    assert result["units"][0]["unit_count"] == 10
+    assert len(result["units"]) == 10
+    assert {unit["array_task_id"] for unit in result["units"]} == {str(index) for index in range(10)}
+    assert all(unit["state"] == "PENDING" for unit in result["units"])
 
 
 def test_slurm_worker_units_uses_sacct_terminal_when_squeue_missing(monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import _slurm_worker_units
 
     def fake_run(command, **kwargs):
-        if command[:2] == ["squeue", "-h"]:
+        if command[:3] == ["squeue", "-h", "-r"]:
             return subprocess.CompletedProcess(command, 0, "", "")
-        if command[:2] == ["sacct", "-n"]:
-            return subprocess.CompletedProcess(command, 0, "990101|COMPLETED|\n", "")
+        if command[:3] == ["sacct", "-X", "-n"]:
+            return subprocess.CompletedProcess(command, 0, "990101_2|COMPLETED|\n", "")
         raise AssertionError(f"unexpected command: {command}")
 
-    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
-    result = _slurm_worker_units({"job_id": "990101"})
+    monkeypatch.setattr("tools.dataset_delivery.slurm_reliability.subprocess.run", fake_run)
+    result = _slurm_worker_units({"job_id": "990101", "array_job_id": "990101", "task_count": "10"})
 
     assert result["source"] == "sacct"
     assert result["units"][0]["state"] == "COMPLETED"
+    assert result["units"][0]["array_job_id"] == "990101"
+    assert result["units"][0]["array_task_id"] == "2"
+
+
+def test_slurm_worker_units_mixed_children_and_compressed_pending(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import _slurm_worker_units
+
+    squeue_lines = "\n".join(
+        [f"4795838_{index}|RUNNING|node{index}" for index in range(38)]
+        + ["4795838_[58-90%114]|PENDING|Resources"]
+    )
+
+    def fake_run(command, **kwargs):
+        if command[:3] == ["squeue", "-h", "-r"]:
+            return subprocess.CompletedProcess(command, 0, squeue_lines + "\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.slurm_reliability.subprocess.run", fake_run)
+    result = _slurm_worker_units({"job_id": "4795838", "array_job_id": "4795838", "task_count": "114"})
+
+    running = [unit for unit in result["units"] if unit["state"] == "RUNNING"]
+    pending = [unit for unit in result["units"] if unit["state"] == "PENDING"]
+    assert len(running) == 38
+    assert len(pending) == 33
+    assert {unit["array_task_id"] for unit in running} == {str(index) for index in range(38)}
+    assert {unit["array_task_id"] for unit in pending} == {str(index) for index in range(58, 91)}
+
+
+def test_array_accounting_reproduces_hpc_running_pending_terminal_counts(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    row = {
+        "run_id": "run_a",
+        "execution_attempt_id": "attempt_a",
+        "submission_id": "ready_batch",
+        "job_id": "4795838",
+        "array_job_id": "4795838",
+        "model_group": "full373",
+        "profile": "gpu_t4",
+        "task_count": "114",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "submission_status": "submitted",
+        "scheduler_status": "ACTIVE",
+    }
+    units = (
+        [{"job_id": f"4795838_{index}", "array_job_id": "4795838", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(38)]
+        + [{"job_id": f"4795838_{index}", "array_job_id": "4795838", "array_task_id": str(index), "state": "PENDING", "reason": "Resources", "unit_count": 1} for index in range(38, 71)]
+        + [{"job_id": f"4795838_{index}", "array_job_id": "4795838", "array_task_id": str(index), "state": "COMPLETED", "unit_count": 1} for index in range(71, 117)]
+    )
+
+    result = current_worker_accounting_from_rows(
+        [row],
+        profiles={"gpu_t4"},
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda _row: {"state": "RUNNING", "job_id": "4795838", "units": units},
+    )
+
+    counts = result["counts"]["gpu_t4"]
+    assert counts["running"] == 38
+    assert counts["pending"] == 33
+    assert counts["active"] == 71
+    assert counts["terminal"] == 46
+
+
+def test_parent_child_compressed_rows_deduplicate_to_canonical_array_tasks(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    rows = [
+        {
+            "run_id": "run_a",
+            "execution_attempt_id": "attempt_a",
+            "submission_id": "ready_batch",
+            "job_id": "4795838",
+            "array_job_id": "4795838",
+            "model_group": "full373",
+            "profile": "gpu_t4",
+            "task_count": "114",
+            "execution_schema_version": CANDIDATE_TASK_V1,
+            "submission_status": "submitted",
+            "scheduler_status": "ACTIVE",
+        },
+        {
+            "run_id": "run_a",
+            "execution_attempt_id": "attempt_a",
+            "submission_id": "ready_batch",
+            "job_id": "4795838_0",
+            "array_job_id": "4795838",
+            "array_task_id": "0",
+            "model_group": "full373",
+            "profile": "gpu_t4",
+            "task_count": "1",
+            "execution_schema_version": CANDIDATE_TASK_V1,
+            "submission_status": "submitted",
+            "scheduler_status": "ACTIVE",
+        },
+    ]
+
+    def fake_units(row):
+        if str(row.get("job_id")) == "4795838_0":
+            return {"state": "RUNNING", "units": [{"job_id": "4795838_0", "array_job_id": "4795838", "array_task_id": "0", "state": "RUNNING", "unit_count": 1}]}
+        return {
+            "state": "PENDING",
+            "units": [
+                {"job_id": "4795838_0", "array_job_id": "4795838", "array_task_id": "0", "state": "RUNNING", "unit_count": 1},
+                *[
+                    {"job_id": f"4795838_{index}", "array_job_id": "4795838", "array_task_id": str(index), "state": "PENDING", "reason": "Resources", "unit_count": 1}
+                    for index in range(1, 4)
+                ],
+            ],
+        }
+
+    result = current_worker_accounting_from_rows(rows, profiles={"gpu_t4"}, execution_attempt_id="attempt_a", job_state_fn=fake_units)
+
+    counts = result["counts"]["gpu_t4"]
+    assert counts["running"] == 1
+    assert counts["pending"] == 3
+    assert counts["active"] == 4
+
+
+def test_sacct_parser_uses_jobid_not_jobidraw_or_unsupported_array_fields(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import _slurm_worker_units
+
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append([str(item) for item in command])
+        if command[:3] == ["squeue", "-h", "-r"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:3] == ["sacct", "-X", "-n"]:
+            return subprocess.CompletedProcess(command, 0, "4795838_2|COMPLETED|\n", "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr("tools.dataset_delivery.slurm_reliability.subprocess.run", fake_run)
+    result = _slurm_worker_units({"job_id": "4795838", "array_job_id": "4795838", "task_count": "114"})
+
+    sacct_call = next(command for command in commands if command[:3] == ["sacct", "-X", "-n"])
+    assert "--format=JobID,State,Reason" in sacct_call
+    assert not any("JobIDRaw" in item or "ArrayJobID" in item or "ArrayTaskID" in item for item in sacct_call)
+    assert result["units"][0]["array_job_id"] == "4795838"
+    assert result["units"][0]["array_task_id"] == "2"
 
 
 def test_valid_pending_window_prevents_duplicate_replenishment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -318,6 +319,116 @@ def job_query_id(row: dict[str, Any]) -> str:
     return parsed["query_id"]
 
 
+def array_display_task_ids(display_id: str) -> list[str]:
+    raw = str(display_id or "").strip()
+    match = re.match(r"^\d+_\[(?P<body>.+)\]$", raw)
+    if not match:
+        parsed = normalize_slurm_job_identifier(raw)
+        return [str(parsed.get("array_task_id") or "")] if parsed.get("array_task_id") else []
+    body = match.group("body").split("%", 1)[0]
+    task_ids: list[str] = []
+    for item in body.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "-" in item:
+            start, end = item.split("-", 1)
+            try:
+                task_ids.extend(str(index) for index in range(int(start), int(end) + 1))
+            except ValueError:
+                task_ids.append(item)
+        else:
+            task_ids.append(item)
+    return task_ids
+
+
+def array_display_count(display_id: str) -> int:
+    return max(1, len(array_display_task_ids(display_id)) or 1)
+
+
+def slurm_worker_units_from_rows(lines: list[str], *, query_id: str, source: str, skip_array_parent: bool = True) -> dict[str, Any]:
+    units: list[dict[str, Any]] = []
+    ordered_lines = sorted(lines, key=lambda value: 1 if "_[" in str(value).split("|", 1)[0] else 0)
+    for line in ordered_lines:
+        if not str(line or "").strip():
+            continue
+        parts = line.split("|")
+        display_id = parts[0].strip() if len(parts) > 0 else ""
+        state = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
+        reason = parts[2].strip() if len(parts) > 2 else ""
+        if "." in display_id:
+            continue
+        parsed = normalize_slurm_job_identifier(display_id)
+        array_job_id = str(parsed.get("array_job_id") or query_id or "").strip()
+        task_ids = array_display_task_ids(display_id)
+        if task_ids:
+            for task_id in task_ids:
+                units.append(
+                    {
+                        "job_id": f"{array_job_id}_{task_id}",
+                        "array_job_id": array_job_id,
+                        "array_task_id": str(task_id),
+                        "display_id": f"{array_job_id}_{task_id}",
+                        "state": state,
+                        "reason": reason,
+                        "unit_count": 1,
+                    }
+                )
+            continue
+        if skip_array_parent and display_id == str(query_id):
+            continue
+        units.append(
+            {
+                "job_id": parsed.get("job_id") or display_id,
+                "array_job_id": parsed.get("array_job_id") or display_id,
+                "array_task_id": parsed.get("array_task_id") or "",
+                "display_id": parsed.get("display_id") or display_id,
+                "state": state,
+                "reason": reason,
+                "unit_count": 1,
+            }
+        )
+    state = str(units[0].get("state") if units else "UNKNOWN")
+    reason = str(units[0].get("reason") if units else "")
+    return {"state": state, "reason": reason, "job_id": str(query_id), "source": source, "units": units}
+
+
+def query_slurm_worker_units(row: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(row.get("job_id") or row.get("display_id") or "")
+    parsed_job = normalize_slurm_job_identifier(job_id)
+    query_id = str(row.get("array_job_id") or parsed_job.get("query_id") or job_id.split("_", 1)[0]).strip()
+    if not query_id:
+        return {"state": "UNKNOWN", "job_id": job_id, "source": "missing_job_id", "units": []}
+    is_array = bool(str(row.get("array_range") or "").strip() or str(row.get("array_spec") or "").strip() or int(str(row.get("task_count") or "0") or 0) > 1 or str(row.get("array_job_id") or "").strip())
+    try:
+        proc = subprocess.run(
+            ["squeue", "-h", "-r", "-j", query_id, "-o", "%i|%T|%R"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {"state": "UNKNOWN", "job_id": job_id, "source": "squeue_error", "error": f"{type(exc).__name__}: {exc}", "units": []}
+    if proc.returncode == 0 and proc.stdout.strip():
+        return slurm_worker_units_from_rows(proc.stdout.splitlines(), query_id=query_id, source="squeue", skip_array_parent=is_array)
+    try:
+        proc = subprocess.run(
+            ["sacct", "-X", "-n", "-j", query_id, "--format=JobID,State,Reason", "-P"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except Exception as exc:
+        return {"state": "UNKNOWN", "job_id": job_id, "source": "sacct_error", "error": f"{type(exc).__name__}: {exc}", "units": []}
+    if proc.returncode == 0 and proc.stdout.strip():
+        result = slurm_worker_units_from_rows(proc.stdout.splitlines(), query_id=query_id, source="sacct", skip_array_parent=is_array)
+        if result.get("units"):
+            return result
+    return {"state": "UNKNOWN", "job_id": job_id, "source": "unknown", "units": []}
+
+
 def is_terminal_slurm_state(state: str) -> bool:
     return str(state or "").strip().upper() in TERMINAL_STATES
 
@@ -381,11 +492,12 @@ def current_worker_accounting_from_rows(
         job_id = str(row.get("job_id") or row.get("display_id") or "")
         array_job_id = str(row.get("array_job_id") or job_id.split("_", 1)[0]).strip()
         array_task_id = str(row.get("array_task_id") or "").strip()
-        if not array_task_id and array_job_id in child_arrays:
-            continue
         slurm = job_state_fn(row) if job_state_fn else {}
         units = slurm.get("units") if isinstance(slurm, dict) and isinstance(slurm.get("units"), list) else []
-        if not units:
+        skip_parent_fallback = False
+        if not units and not array_task_id and array_job_id in child_arrays:
+            skip_parent_fallback = True
+        if not units and not skip_parent_fallback:
             units = [
                 {
                     "job_id": job_id,
@@ -405,6 +517,12 @@ def current_worker_accounting_from_rows(
             parsed = normalize_slurm_job_identifier(str(unit.get("job_id") or job_id))
             unit_array = str(unit.get("array_job_id") or parsed.get("array_job_id") or array_job_id or parsed.get("job_id") or "").strip()
             unit_task = str(unit.get("array_task_id") or parsed.get("array_task_id") or array_task_id or "").strip()
+            try:
+                row_task_count = int(str(row.get("task_count") or "0") or 0)
+            except ValueError:
+                row_task_count = 0
+            if not unit_task and not array_task_id and row_task_count > 1 and unit_array == array_job_id:
+                continue
             unit_key = (profile, unit_array or str(unit.get("job_id") or job_id), unit_task or str(unit.get("display_id") or unit.get("job_id") or job_id or "parent"))
             if unit_key in seen_units:
                 continue

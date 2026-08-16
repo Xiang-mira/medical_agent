@@ -31,9 +31,9 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     classify_sbatch_failure,
     existing_active_logical_keys,
     load_submitted_jobs,
-    normalize_slurm_job_identifier,
     parse_sbatch_job_id,
     persist_submitted_job,
+    query_slurm_worker_units,
     record_job_lifecycle,
     reconcile_submitted_worker_accounting,
     slurm_comment,
@@ -659,97 +659,8 @@ def _slurm_job_state(job_id: str) -> dict[str, Any]:
     return {"state": "UNKNOWN", "job_id": str(job_id or ""), "source": "unknown"}
 
 
-def _array_display_count(display_id: str) -> int:
-    raw = str(display_id or "").strip()
-    match = re.match(r"^\d+_\[(?P<body>.+)\]$", raw)
-    if not match:
-        return 1
-    body = match.group("body").split("%", 1)[0]
-    total = 0
-    for item in body.split(","):
-        item = item.strip()
-        if not item:
-            continue
-        if "-" in item:
-            start, end = item.split("-", 1)
-            try:
-                total += max(0, int(end) - int(start) + 1)
-            except ValueError:
-                total += 1
-        else:
-            total += 1
-    return max(1, total)
-
-
 def _slurm_worker_units(row: dict[str, Any]) -> dict[str, Any]:
-    job_id = str(row.get("job_id") or row.get("display_id") or "")
-    query_id = str(row.get("array_job_id") or "").strip() or job_id.split("_", 1)[0].strip()
-    if not query_id:
-        return {"state": "UNKNOWN", "job_id": job_id, "source": "missing_job_id", "units": []}
-    try:
-        proc = subprocess.run(
-            ["squeue", "-h", "-j", query_id, "-o", "%i|%T|%R"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-    except Exception as exc:
-        return {"state": "UNKNOWN", "job_id": job_id, "source": "squeue_error", "error": f"{type(exc).__name__}: {exc}", "units": []}
-    if proc.returncode == 0 and proc.stdout.strip():
-        units: list[dict[str, Any]] = []
-        for line in proc.stdout.splitlines():
-            parts = line.split("|", 2)
-            display_id = parts[0].strip() if len(parts) > 0 else ""
-            state = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
-            reason = parts[2].strip() if len(parts) > 2 else ""
-            parsed = normalize_slurm_job_identifier(display_id)
-            units.append(
-                {
-                    "job_id": parsed.get("job_id") or display_id,
-                    "array_job_id": parsed.get("array_job_id") or query_id,
-                    "array_task_id": parsed.get("array_task_id") or "",
-                    "display_id": parsed.get("display_id") or display_id,
-                    "state": state,
-                    "reason": reason,
-                    "unit_count": _array_display_count(display_id),
-                }
-            )
-        return {"state": units[0]["state"], "reason": units[0].get("reason", ""), "job_id": job_id, "source": "squeue", "units": units}
-    try:
-        proc = subprocess.run(
-            ["sacct", "-n", "-j", query_id, "--format=JobIDRaw,State,Reason", "-P"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-    except Exception as exc:
-        return {"state": "UNKNOWN", "job_id": job_id, "source": "sacct_error", "error": f"{type(exc).__name__}: {exc}", "units": []}
-    if proc.returncode == 0 and proc.stdout.strip():
-        units = []
-        for line in proc.stdout.splitlines():
-            parts = line.split("|")
-            display_id = parts[0].strip() if len(parts) > 0 else ""
-            state = parts[1].strip() if len(parts) > 1 else "UNKNOWN"
-            reason = parts[2].strip() if len(parts) > 2 else ""
-            if "." in display_id:
-                continue
-            parsed = normalize_slurm_job_identifier(display_id)
-            units.append(
-                {
-                    "job_id": parsed.get("job_id") or display_id,
-                    "array_job_id": parsed.get("array_job_id") or query_id,
-                    "array_task_id": parsed.get("array_task_id") or "",
-                    "display_id": parsed.get("display_id") or display_id,
-                    "state": state,
-                    "reason": reason,
-                    "unit_count": _array_display_count(display_id),
-                }
-            )
-        if units:
-            return {"state": units[0]["state"], "reason": units[0].get("reason", ""), "job_id": job_id, "source": "sacct", "units": units}
-    return {"state": "UNKNOWN", "job_id": job_id, "source": "unknown", "units": []}
+    return query_slurm_worker_units(row)
 
 
 def _worker_pool_counts(slurm_root: Path, profiles: list[GpuSubmitProfile], *, execution_attempt_id: str = "") -> dict[str, dict[str, int]]:

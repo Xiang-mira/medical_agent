@@ -32,6 +32,7 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     RETRYABLE_TERMINAL_STATES,
     classify_sbatch_failure,
     persist_submitted_job,
+    query_slurm_worker_units,
     reconcile_submitted_worker_accounting,
     record_job_lifecycle,
     slurm_comment,
@@ -248,7 +249,7 @@ def slurm_job_state(job_id: str) -> dict[str, Any]:
             "display_id": job_display,
             "source": "squeue",
         }
-    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobIDRaw,State", "-P"])
+    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobID,State", "-P"])
     if sacct["ok"] and sacct["stdout"].strip():
         preferred = parsed.get("job_id") or query_id
         chosen = None
@@ -305,7 +306,7 @@ def slurm_job_record(job_id: str) -> dict[str, Any]:
             "comment": parts[4].strip() if len(parts) > 4 else "",
             "source": "squeue",
         }
-    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobIDRaw,State,User,JobName,Comment", "-P"])
+    sacct = _run(["sacct", "-n", "-j", str(query_id), "--format=JobID,State,User,JobName,Comment", "-P"])
     if sacct["ok"] and sacct["stdout"].strip():
         preferred = parsed.get("job_id") or query_id
         for line in sacct["stdout"].splitlines():
@@ -2371,7 +2372,7 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
         reconciled = reconcile_submitted_worker_accounting(
             jobs_csv.parent,
             execution_attempt_id=str(state.get("execution_attempt_id") or ""),
-            job_state_fn=lambda row: slurm_job_state(str(row.get("job_id") or row.get("display_id") or "")),
+            job_state_fn=query_slurm_worker_units,
         )
         worker_current["by_profile"] = reconciled.get("counts") or {}
         for profile_counts in (reconciled.get("counts") or {}).values():

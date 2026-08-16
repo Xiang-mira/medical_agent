@@ -1700,6 +1700,16 @@ def test_status_reports_shared_queue_worker_and_qos_telemetry(tmp_path):
         "777777": {"state": "RUNNING", "job_id": "777777"},
     }
     orch.slurm_job_state = lambda job_id: state_map.get(str(job_id), {"state": "UNKNOWN", "job_id": str(job_id)})  # type: ignore[assignment]
+    orch.query_slurm_worker_units = lambda row: {  # type: ignore[assignment]
+        **state_map.get(str(row.get("job_id")), {"state": "UNKNOWN", "job_id": str(row.get("job_id"))}),
+        "units": [
+            {
+                "job_id": str(row.get("job_id")),
+                "state": state_map.get(str(row.get("job_id")), {"state": "UNKNOWN"})["state"],
+                "unit_count": 1,
+            }
+        ],
+    }
     payload = orch.status(args)
 
     assert payload["resources"]["task_ownership"] == "shared_queue"
@@ -1715,3 +1725,39 @@ def test_status_reports_shared_queue_worker_and_qos_telemetry(tmp_path):
     assert payload["resources"]["teacher_workers"]["a100_pending"] == 1
     assert payload["resources"]["qos"]["per_profile_known_good"]["gpu_t4"] == 4000
     assert payload["resources"]["qos"]["per_profile_known_bad"]["gpu_a100"] == 1000
+
+
+def test_status_reports_array_child_running_and_pending_counts(tmp_path):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+    (formal_root / "slurm" / "dynamic_gpu_submission_plan.json").write_text(
+        json.dumps(
+            {
+                "task_ownership": "shared_queue",
+                "profile_binding": False,
+                "worker_pool": {"profile_reports": [{"profile": "gpu_t4", "desired_workers": 114, "new_worker_deficit": 43}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "job_id,array_job_id,model_group,profile,gres,task_count,submission_status,scheduler_status,execution_schema_version\n"
+        f"4795838,4795838,full373,gpu_t4,gpu:T4:1,114,submitted,ACTIVE,{CANDIDATE_TASK_V1}\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root), execution_attempt_id="")
+    units = (
+        [{"job_id": f"4795838_{index}", "array_job_id": "4795838", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(38)]
+        + [{"job_id": f"4795838_{index}", "array_job_id": "4795838", "array_task_id": str(index), "state": "PENDING", "reason": "Resources", "unit_count": 1} for index in range(38, 71)]
+    )
+    orch.query_slurm_worker_units = lambda row: {"state": "RUNNING", "job_id": str(row.get("job_id")), "units": units}  # type: ignore[assignment]
+
+    payload = orch.status(args)
+
+    workers = payload["resources"]["teacher_workers"]
+    assert workers["t4_running"] == 38
+    assert workers["t4_pending"] == 33
+    assert workers["t4_active_real"] == 71
+    assert payload["resources"]["desired_teacher_workers_by_profile"]["gpu_t4"] == 114
+    assert payload["resources"]["replenishment_deficit_by_profile"]["gpu_t4"] == 43
