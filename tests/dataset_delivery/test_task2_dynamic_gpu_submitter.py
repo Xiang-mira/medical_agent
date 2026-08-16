@@ -621,6 +621,143 @@ def test_array_accounting_reproduces_hpc_running_pending_terminal_counts(tmp_pat
     assert counts["terminal"] == 46
 
 
+def test_array_accounting_counts_qos_gres_pending_as_valid_current_demand(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    row = {
+        "run_id": "run_a",
+        "execution_attempt_id": "attempt_a",
+        "submission_id": "ready_batch",
+        "job_id": "4796097",
+        "array_job_id": "4796097",
+        "model_group": "full373",
+        "profile": "gpu_t4",
+        "partition": "gpu",
+        "gres": "gpu:T4:1",
+        "task_count": "126",
+        "execution_schema_version": CANDIDATE_TASK_V1,
+        "submission_status": "submitted",
+        "scheduler_status": "ACTIVE",
+    }
+    units = (
+        [{"job_id": f"4796097_{index}", "array_job_id": "4796097", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(50)]
+        + [
+            {"job_id": f"4796097_{index}", "array_job_id": "4796097", "array_task_id": str(index), "state": "PENDING", "reason": "QOSMaxGRESPerUser", "node": "", "allocated_gres": "", "unit_count": 1}
+            for index in range(50, 126)
+        ]
+    )
+
+    result = current_worker_accounting_from_rows(
+        [row],
+        profiles={"gpu_t4"},
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda _row: {"state": "RUNNING", "job_id": "4796097", "units": units},
+    )
+
+    counts = result["counts"]["gpu_t4"]
+    assert counts["running"] == 50
+    assert counts["pending"] == 76
+    assert counts["valid_pending"] == 76
+    assert counts["invalid_pending"] == 0
+    assert counts["active"] == 126
+
+
+def test_existing_qos_pending_demand_prevents_false_replenishment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"full373": 1000})
+    slurm_root = tmp_path / "slurm"
+    slurm_root.mkdir(parents=True, exist_ok=True)
+    (slurm_root / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,model_group,profile,partition,gres,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"run_a,attempt_a,batch_a,4796097,4796097,full373,gpu_t4,gpu,gpu:T4:1,126,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
+        encoding="utf-8",
+    )
+    units = (
+        [{"job_id": f"4796097_{index}", "array_job_id": "4796097", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(50)]
+        + [
+            {"job_id": f"4796097_{index}", "array_job_id": "4796097", "array_task_id": str(index), "state": "PENDING", "reason": "QOSGrpGRES", "unit_count": 1}
+            for index in range(50, 126)
+        ]
+    )
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_worker_units", lambda _row: {"state": "RUNNING", "job_id": "4796097", "units": units})
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=114,
+        overrequest_workers=114,
+        profile_specs="gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00",
+        groups=["full373"],
+        dry_run=True,
+        run_id="run_a",
+        submission_id="batch_b",
+        execution_attempt_id="attempt_a",
+    )
+
+    report = plan["worker_pool"]["profile_reports"][0]
+    assert report["running_workers"] == 50
+    assert report["pending_workers"] == 76
+    assert report["active_workers"] == 126
+    assert report["new_worker_deficit"] == 0
+    assert plan["total_array_concurrency"] == 0
+
+
+def test_multi_array_running_and_pending_profile_attribution(tmp_path: Path):
+    from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
+
+    rows = []
+    unit_map = {}
+    specs = [
+        ("array_a", 4, 0),
+        ("array_b", 7, 0),
+        ("array_c", 12, 0),
+        ("array_d", 27, 15),
+        ("array_e", 0, 64),
+    ]
+    for offset, (job_id, running_count, pending_count) in enumerate(specs):
+        parent_id = str(4800000 + offset)
+        rows.append(
+            {
+                "run_id": "run_a",
+                "execution_attempt_id": "attempt_a",
+                "submission_id": "ready_batch",
+                "job_id": parent_id,
+                "array_job_id": parent_id,
+                "model_group": "full373",
+                "profile": "gpu_t4",
+                "partition": "gpu",
+                "gres": "gpu:T4:1",
+                "task_count": str(running_count + pending_count),
+                "execution_schema_version": CANDIDATE_TASK_V1,
+                "submission_status": "submitted",
+                "scheduler_status": "ACTIVE",
+                "job_name": f"task2_full373_gpu_t4_worker_shard_{offset:03d}",
+            }
+        )
+        unit_map[parent_id] = (
+            [{"job_id": f"{parent_id}_{index}", "array_job_id": parent_id, "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(running_count)]
+            + [
+                {"job_id": f"{parent_id}_{index}", "array_job_id": parent_id, "array_task_id": str(index), "state": "PENDING", "reason": "QOSMaxGRESPerUser", "node": "", "allocated_gres": "", "unit_count": 1}
+                for index in range(running_count, running_count + pending_count)
+            ]
+        )
+
+    result = current_worker_accounting_from_rows(
+        rows,
+        profiles={"gpu_t4"},
+        execution_attempt_id="attempt_a",
+        job_state_fn=lambda row: {"state": "RUNNING", "job_id": str(row.get("job_id")), "units": unit_map[str(row.get("job_id"))]},
+    )
+
+    counts = result["counts"]["gpu_t4"]
+    assert counts["running"] == 50
+    assert counts["pending"] == 79
+    assert counts["active"] == 129
+    assert counts["invalid_pending"] == 0
+
+
 def test_parent_child_compressed_rows_deduplicate_to_canonical_array_tasks(tmp_path: Path):
     from tools.dataset_delivery.slurm_reliability import current_worker_accounting_from_rows
 

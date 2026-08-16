@@ -24,8 +24,6 @@ IMPOSSIBLE_PENDING_REASONS = {
     "InvalidQOS",
     "InvalidPartition",
     "InvalidQoS",
-    "QOSGrpGRES",
-    "QOSMaxGRESPerUser",
 }
 
 LEGACY_CASE_FULL373_V1 = "legacy_case_full373_v1"

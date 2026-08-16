@@ -1761,3 +1761,43 @@ def test_status_reports_array_child_running_and_pending_counts(tmp_path):
     assert workers["t4_active_real"] == 71
     assert payload["resources"]["desired_teacher_workers_by_profile"]["gpu_t4"] == 114
     assert payload["resources"]["replenishment_deficit_by_profile"]["gpu_t4"] == 43
+
+
+def test_status_counts_qos_pending_array_children_as_active_demand(tmp_path):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+    (formal_root / "slurm" / "dynamic_gpu_submission_plan.json").write_text(
+        json.dumps(
+            {
+                "task_ownership": "shared_queue",
+                "profile_binding": False,
+                "worker_pool": {"profile_reports": [{"profile": "gpu_t4", "desired_workers": 114, "new_worker_deficit": 0}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "job_id,array_job_id,model_group,profile,partition,gres,task_count,submission_status,scheduler_status,execution_schema_version\n"
+        f"4796097,4796097,full373,gpu_t4,gpu,gpu:T4:1,126,submitted,ACTIVE,{CANDIDATE_TASK_V1}\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root), execution_attempt_id="")
+    units = (
+        [{"job_id": f"4796097_{index}", "array_job_id": "4796097", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(50)]
+        + [
+            {"job_id": f"4796097_{index}", "array_job_id": "4796097", "array_task_id": str(index), "state": "PENDING", "reason": "QOSMaxGRESPerUser", "node": "", "allocated_gres": "", "unit_count": 1}
+            for index in range(50, 126)
+        ]
+    )
+    orch.query_slurm_worker_units = lambda row: {"state": "RUNNING", "job_id": str(row.get("job_id")), "units": units}  # type: ignore[assignment]
+
+    payload = orch.status(args)
+
+    workers = payload["resources"]["teacher_workers"]
+    current = payload["resources"]["teacher_worker_current"]["by_profile"]["gpu_t4"]
+    assert workers["t4_running"] == 50
+    assert workers["t4_pending"] == 76
+    assert workers["t4_active_real"] == 126
+    assert current["valid_pending"] == 76
+    assert current["invalid_pending"] == 0
