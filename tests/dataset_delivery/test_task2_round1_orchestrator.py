@@ -1801,3 +1801,53 @@ def test_status_counts_qos_pending_array_children_as_active_demand(tmp_path):
     assert workers["t4_active_real"] == 126
     assert current["valid_pending"] == 76
     assert current["invalid_pending"] == 0
+
+
+def test_controller_sbatch_defaults_to_32g_memory(tmp_path: Path):
+    args = _args(tmp_path)
+    args.controller_mem = "32G"
+    rendered = orch.render_controller_sbatch(args, tmp_path / "controller.sbatch")
+    text = Path(rendered["path"]).read_text(encoding="utf-8")
+    assert "#SBATCH --mem=32G" in text
+
+
+def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    state_root = tmp_path / "state"
+    formal_root = state_root / "round1_orchestrated" / "full_373_multiteacher_round1"
+    orch._save_state(state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158")
+    full373.write_json(
+        formal_root / "full_round1_scope.json",
+        {"total_logical_candidate_tasks": 2, "case_count": 1, "canonical_target_count": 1, "task_rows": [{"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1"}]},
+    )
+    full373.publish_candidate_state(formal_root, {"status": "READY", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand1"}, recompute_target=False)
+    (formal_root / "slurm").mkdir(parents=True, exist_ok=True)
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text("job_id,profile,execution_attempt_id,execution_schema_version\n111,generic_gpu,,candidate_task_v1\n", encoding="utf-8")
+    monkeypatch.setattr(orch, "query_slurm_worker_units", lambda row: {"state": "RUNNING", "job_id": "111", "units": [{"job_id": "111", "state": "RUNNING", "unit_count": 1}]})
+
+    heartbeat = orch.write_controller_heartbeat(state_root, iteration=3, stage="test_loop")
+
+    assert heartbeat["iteration"] == 3
+    assert "rss_mb" in heartbeat
+    assert heartbeat["candidate_ready"] == 1
+    assert heartbeat["worker_running_by_profile"]["generic_gpu"] == 1
+    saved = json.loads((state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
+    assert saved["stage"] == "test_loop"
+
+
+def test_controller_unhandled_exception_is_recoverable_not_scientific_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    args = _args(tmp_path)
+    orch._save_state(args.state_root, run_id="round1_4995446918298643158", e_step_status="SUBMITTED")
+
+    def boom(inner_args):
+        raise RuntimeError("controller loop exploded")
+
+    monkeypatch.setattr(orch, "_controller_main", boom)
+
+    assert orch.controller(args) == 2
+    state = orch._load_state(args.state_root)
+    assert state.get("terminal_state") != "ROUND1_FAILED"
+    assert state["controller_status"] == "FAILED"
+    assert state["scheduler_status"] == "RETRY_READY"
+    crash_path = Path(state["controller_crash"]["path"])
+    assert crash_path.exists()
+    assert "controller loop exploded" in crash_path.read_text(encoding="utf-8")

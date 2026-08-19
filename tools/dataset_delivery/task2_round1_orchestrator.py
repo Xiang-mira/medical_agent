@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -43,9 +44,11 @@ from tools.dataset_delivery.task2_formal_manifest import FORMAL_CASE_COUNT, buil
 from tools.dataset_delivery.task2_full373_round1_launcher import (  # noqa: E402
     FULL373_GROUP,
     FULL373_ROOT_NAME,
+    TERMINAL_CANDIDATE_STATES,
     aggregate_full373_estep,
     build_estep_telemetry,
     build_full_round1_scope,
+    recover_stale_candidate_claims,
 )
 from tools.dataset_delivery.labelcritic_service_contract import service_spec_from_env, service_spec_hash  # noqa: E402
 from tools.dataset_delivery.task2_workspace_staging import staged_case_status  # noqa: E402
@@ -725,6 +728,8 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
         "events": root / "events.jsonl",
         "failures": root / "failures.jsonl",
         "last_failure": root / "last_failure.json",
+        "controller_heartbeat": root / "controller_heartbeat.json",
+        "controller_crashes": root / "controller_crashes",
         "controller_sbatch": root / "controller.sbatch",
         "controller_job": root / "controller_job_id.txt",
         "staging_sbatch": root / "staging_array.sbatch",
@@ -873,6 +878,28 @@ def _save_state(state_root: Path, **updates: Any) -> dict[str, Any]:
 def _tail_text(value: Any, limit: int = 4000) -> str:
     text = str(value or "")
     return text[-limit:]
+
+
+def _process_rss_mb() -> float:
+    try:
+        with Path("/proc/self/status").open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024.0, 3)
+    except Exception:
+        return 0.0
+    return 0.0
+
+
+def _available_memory_mb() -> float:
+    try:
+        with Path("/proc/meminfo").open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return round(int(line.split()[1]) / 1024.0, 3)
+    except Exception:
+        return 0.0
+    return 0.0
 
 
 def _compact_details(value: Any) -> Any:
@@ -2261,7 +2288,9 @@ def _controller_main(args: argparse.Namespace) -> int:
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=estep_submit.get("failure_reason"), e_step=estep_submit)
         return 2
     labelcritic_gate: dict[str, Any] = {"status": "WAITING"}
+    iteration = 0
     while True:
+        iteration += 1
         if labelcritic_gate.get("status") != "PASSED":
             labelcritic_gate = poll_labelcritic_runtime(state_root)
             if labelcritic_gate["status"] == "FAILED":
@@ -2271,7 +2300,14 @@ def _controller_main(args: argparse.Namespace) -> int:
             if labelcritic_gate["status"] == "PASSED":
                 _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic_gate)
         reconcile_active_teacher_jobs(args)
+        current_state = _load_state(state_root)
+        formal_root = Path(str(current_state.get("formal_root") or ""))
+        task_manifest = formal_root / "queues" / "shared_ready_candidate_manifest.csv"
+        stale_recovery: dict[str, Any] = {"status": "SKIPPED", "reason": "manifest_missing"}
+        if formal_root.exists() and task_manifest.exists():
+            stale_recovery = recover_stale_candidate_claims(formal_root, task_manifest=task_manifest, worker_state_fn=slurm_job_state)
         progress = advance_estep(args, labelcritic_gate)
+        write_controller_heartbeat(state_root, iteration=iteration, stage="e_step_loop", current={"labelcritic": labelcritic_gate, "progress": progress, "stale_recovery": stale_recovery})
         if progress["status"] == "FAILED":
             log_failure(state_root, stage="e_step_submit", failure_reason=progress.get("failure_reason", "e_step_submit_failed"), details=progress)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=progress.get("failure_reason"), e_step=progress)
@@ -2285,7 +2321,7 @@ def _controller_main(args: argparse.Namespace) -> int:
                 return 2
         estep = check_estep(args)
         wait_stage = "e_step_wait" if labelcritic_gate.get("status") == "PASSED" else "e_step_and_labelcritic_wait"
-        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate, labelcritic_selection=selection, e_step_progress=progress)
+        _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate, labelcritic_selection=selection, e_step_progress=progress, stale_running_recovery=stale_recovery)
         if estep["status"] == "PASSED":
             if labelcritic_gate.get("status") == "PASSED":
                 break
@@ -2297,7 +2333,9 @@ def _controller_main(args: argparse.Namespace) -> int:
             return 2
         time.sleep(max(10, args.poll_sec))
     while True:
+        iteration += 1
         mstep_submit = submit_mstep(args)
+        write_controller_heartbeat(state_root, iteration=iteration, stage="m_step_submit_loop", current={"m_step": mstep_submit})
         if mstep_submit["status"] == "FAILED":
             log_failure(state_root, stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason", "m_step_submit_failed"), details=mstep_submit)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason"), m_step=mstep_submit)
@@ -2308,7 +2346,9 @@ def _controller_main(args: argparse.Namespace) -> int:
             continue
         break
     while True:
+        iteration += 1
         mstep = check_mstep(args)
+        write_controller_heartbeat(state_root, iteration=iteration, stage="m_step_wait_loop", current={"m_step": mstep})
         _save_state(state_root, stage="m_step_wait", m_step=mstep, mstep_status=mstep["status"])
         if mstep["status"] == "PASSED":
             final = run_round1_final_validator(args)
@@ -2329,17 +2369,20 @@ def controller(args: argparse.Namespace) -> int:
         return _controller_main(args)
     except Exception as exc:
         state_root = args.state_root.resolve()
+        crash = record_controller_crash(state_root, exc=exc)
         failure = log_failure(
             state_root,
             stage="controller_unhandled_exception",
             failure_reason=f"{type(exc).__name__}: {exc}",
-            details={"exception_type": type(exc).__name__, "exception": str(exc)},
+            details={"exception_type": type(exc).__name__, "exception": str(exc), "controller_crash": crash},
         )
         _save_state(
             state_root,
-            terminal_state="ROUND1_FAILED",
+            controller_status="FAILED",
+            scheduler_status="RETRY_READY",
             stage="controller_unhandled_exception",
             failure_reason=failure["failure_reason"],
+            controller_crash=crash,
             last_failure=str(_state_paths(state_root)["last_failure"]),
         )
         return 2
@@ -2474,6 +2517,219 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
     }
 
 
+def write_controller_heartbeat(state_root: Path, *, iteration: int, stage: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
+    state = _load_state(state_root)
+    formal_root = Path(str(state.get("formal_root") or ""))
+    estep_telemetry = build_estep_telemetry(formal_root) if formal_root.exists() else {}
+    resources = _resource_telemetry(state_root)
+    teacher = estep_telemetry.get("teacher_candidate") or {}
+    heartbeat = {
+        "schema_version": "round1_controller_heartbeat_v1",
+        "timestamp": utc_now(),
+        "iteration": int(iteration),
+        "stage": stage,
+        "rss_mb": _process_rss_mb(),
+        "available_memory_mb": _available_memory_mb(),
+        "candidate_ready": int(teacher.get("ready_candidates") or 0),
+        "candidate_running": int(teacher.get("running") or 0),
+        "candidate_retry": int(teacher.get("retry") or 0),
+        "candidate_terminal": int(teacher.get("terminal") or 0),
+        "candidate_success": int(teacher.get("success") or 0),
+        "worker_running_by_profile": {
+            profile: int((counts or {}).get("running") or 0)
+            for profile, counts in ((resources.get("teacher_worker_current") or {}).get("by_profile") or {}).items()
+        },
+        "worker_pending_by_profile": {
+            profile: int((counts or {}).get("pending") or 0) + int((counts or {}).get("transitional") or 0)
+            for profile, counts in ((resources.get("teacher_worker_current") or {}).get("by_profile") or {}).items()
+        },
+        "scientific_run_id": state.get("run_id", ""),
+        "git_commit": _git_commit(),
+        "current": _compact_details(current or {}),
+    }
+    paths = _state_paths(state_root)
+    _write_json(paths["controller_heartbeat"], heartbeat)
+    paths["events"].parent.mkdir(parents=True, exist_ok=True)
+    with paths["events"].open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"time": heartbeat["timestamp"], "event": "controller_heartbeat", **{k: heartbeat[k] for k in ("iteration", "stage", "rss_mb", "available_memory_mb", "candidate_ready", "candidate_running", "candidate_retry", "candidate_terminal", "candidate_success")}}, ensure_ascii=False) + "\n")
+    return heartbeat
+
+
+def record_controller_crash(state_root: Path, *, exc: BaseException, iteration: int = -1, current: dict[str, Any] | None = None) -> dict[str, Any]:
+    paths = _state_paths(state_root)
+    heartbeat = _read_json(paths["controller_heartbeat"], {})
+    record = {
+        "schema_version": "round1_controller_crash_v1",
+        "timestamp": utc_now(),
+        "exception_type": type(exc).__name__,
+        "exception_message": str(exc),
+        "traceback": traceback.format_exc(),
+        "iteration": int(iteration),
+        "rss_mb": _process_rss_mb(),
+        "available_memory_mb": _available_memory_mb(),
+        "current_counters": heartbeat,
+        "current": _compact_details(current or {}),
+        "git_commit": _git_commit(),
+        "scientific_run_id": _load_state(state_root).get("run_id", ""),
+    }
+    path = paths["controller_crashes"] / f"controller_crash_{int(time.time())}.json"
+    _write_json(path, record)
+    _write_json(paths["root"] / "controller_crash.json", record)
+    return {"status": "RECORDED", "path": str(path), "record": record}
+
+
+def _candidate_state_counts(formal_root: Path) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    stale_running = 0
+    now = time.time()
+    claims_root = formal_root / "queues" / "candidate_claims"
+    for path in (formal_root / "queues" / "candidate_states").glob("*/*/*.json"):
+        state = _read_json(path, {})
+        status = str(state.get("status") or "READY")
+        counts[status] = counts.get(status, 0) + 1
+        if status in {"RUNNING", "CLAIMED"}:
+            candidate_id = str(state.get("candidate_id") or path.stem)
+            claim = _read_json(claims_root / f"{re.sub(r'[^A-Za-z0-9_.-]+', '_', candidate_id).strip('_')}.json", {})
+            lease_expiry = float(claim.get("lease_expiry") or 0.0) if isinstance(claim, dict) else 0.0
+            if not claim or (lease_expiry and lease_expiry < now):
+                stale_running += 1
+    terminal = sum(counts.get(state, 0) for state in TERMINAL_CANDIDATE_STATES)
+    return {
+        "counts": counts,
+        "candidate_universe": sum(counts.values()),
+        "SUCCESS": counts.get("SUCCESS", 0),
+        "TERMINAL": terminal,
+        "READY": counts.get("READY", 0),
+        "RETRY": counts.get("RETRY_PENDING", 0) + counts.get("BACKPRESSURED", 0),
+        "RUNNING": counts.get("RUNNING", 0) + counts.get("CLAIMED", 0),
+        "stale_RUNNING": stale_running,
+    }
+
+
+def recovery_audit(args: argparse.Namespace) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    formal_root = Path(str(args.formal_root)).resolve()
+    state = _load_state(state_root)
+    seed = _read_json(formal_root / "queues" / "candidate_seed_complete.json", {})
+    scope = _read_json(formal_root / "full_round1_submission_scope.json", {}) or _read_json(formal_root / "full_round1_scope.json", {})
+    counts = _candidate_state_counts(formal_root) if formal_root.exists() else {"candidate_universe": 0}
+    run_id = str(state.get("run_id") or seed.get("scientific_run_id") or scope.get("run_id") or "")
+    expected = str(args.scientific_run_id)
+    jobs = _resource_telemetry(state_root) if formal_root.exists() else {}
+    checks = [
+        {"name": "formal_root_exists", "ok": formal_root.exists(), "detail": str(formal_root)},
+        {"name": "scientific_run_id", "ok": run_id == expected, "detail": run_id},
+        {"name": "candidate_universe_nonzero", "ok": int(counts.get("candidate_universe") or 0) > 0, "detail": counts.get("candidate_universe")},
+        {"name": "seed_marker_no_rebuild_requested", "ok": bool(seed), "detail": str(formal_root / "queues" / "candidate_seed_complete.json")},
+    ]
+    report = {
+        "schema_version": "round1_recovery_audit_v1",
+        "status": "PASS" if all(check["ok"] for check in checks) else "FAIL",
+        "timestamp": utc_now(),
+        "git_commit": _git_commit(),
+        "state_root": str(state_root),
+        "formal_root": str(formal_root),
+        "scientific_run_id": run_id,
+        "expected_scientific_run_id": expected,
+        "candidate_counts": counts,
+        "slurm_jobs": jobs,
+        "checks": checks,
+        "read_only": True,
+    }
+    _write_json(_state_paths(state_root)["root"] / "round1_recovery_audit.json", report)
+    return report
+
+
+def minimal_recovery(args: argparse.Namespace) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    formal_root = Path(str(args.formal_root)).resolve()
+    task_manifest = formal_root / "queues" / "shared_ready_candidate_manifest.csv"
+    before = _candidate_state_counts(formal_root)
+    recovery = recover_stale_candidate_claims(formal_root, task_manifest=task_manifest if task_manifest.exists() else None, worker_state_fn=slurm_job_state)
+    after = _candidate_state_counts(formal_root)
+    result = {
+        "schema_version": "round1_minimal_recovery_gate_v1",
+        "status": "PASS",
+        "timestamp": utc_now(),
+        "state_root": str(state_root),
+        "formal_root": str(formal_root),
+        "scientific_run_id": str(args.scientific_run_id),
+        "before": before,
+        "stale_recovery": recovery,
+        "after_recovery": after,
+        "submitted_worker_count": 0,
+        "worker_job_id": "",
+        "child_logs_required": True,
+        "terminal_count_not_decreased": int(after.get("TERMINAL") or 0) >= int(before.get("TERMINAL") or 0),
+        "success_count_not_decreased": int(after.get("SUCCESS") or 0) >= int(before.get("SUCCESS") or 0),
+    }
+    if not task_manifest.exists():
+        result.update({"status": "FAIL", "failure_reason": "shared_ready_candidate_manifest_missing"})
+    elif result["terminal_count_not_decreased"] and result["success_count_not_decreased"]:
+        dynamic_cmd = [
+            str(args.python),
+            "tools/dataset_delivery/task2_dynamic_gpu_submitter.py",
+            "--summary", str(formal_root / "formal_task2_submission_manifest.json"),
+            "--output-root", str(formal_root),
+            "--state-root", str(state_root),
+            "--target-workers", "2",
+            "--overrequest-workers", "2",
+            "--profile-specs", args.gpu_profile_specs,
+            "--groups", FULL373_GROUP,
+            "--submission-id", "minimal_recovery_gate",
+            "--execution-attempt-id", f"{args.scientific_run_id}_minimal_recovery_{int(time.time())}",
+            "--append-submitted-jobs",
+            "--run-id", str(args.scientific_run_id),
+            "--git-commit", _git_commit(),
+        ]
+        if os.getenv("DYNAMIC_SBATCH_TEST_ONLY", "1") != "1":
+            dynamic_cmd.append("--skip-sbatch-test-only")
+        submit = _run(dynamic_cmd, env=runtime_no_git_env(), timeout=_dynamic_submit_timeout_sec())
+        result["submit"] = submit
+        result["submitted_worker_count"] = 2 if submit.get("ok") else 0
+        if not submit.get("ok"):
+            result.update({"status": "FAIL", "failure_reason": submit.get("stderr") or "minimal_worker_submit_failed"})
+    else:
+        result.update({"status": "FAIL", "failure_reason": "terminal_or_success_count_decreased"})
+    _write_json(_state_paths(state_root)["root"] / "round1_minimal_recovery_gate.json", result)
+    print(f"MINIMAL_RECOVERY_GATE={result['status']}")
+    return result
+
+
+def _latest_acceptance_report(root: Path) -> dict[str, Any]:
+    reports = sorted(root.glob("*/acceptance_report.json"))
+    return _read_json(reports[-1], {}) if reports else {}
+
+
+def resume_formal(args: argparse.Namespace) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    paths = _state_paths(state_root)
+    state = _load_state(state_root)
+    existing = str(state.get("controller_job_id") or "").strip()
+    if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
+        return {"status": "FAIL", "failure_reason": "active_controller_exists", "controller_job_id": existing}
+    audit = recovery_audit(args)
+    acceptance = _latest_acceptance_report(Path(str(args.acceptance_root)).expanduser())
+    minimal = _read_json(paths["root"] / "round1_minimal_recovery_gate.json", {})
+    checks = [
+        {"name": "recovery_audit", "ok": audit.get("status") == "PASS"},
+        {"name": "labelcritic_acceptance", "ok": acceptance.get("final_status") == "PASS"},
+        {"name": "minimal_recovery", "ok": minimal.get("status") == "PASS"},
+    ]
+    if not all(check["ok"] for check in checks):
+        return {"status": "FAIL", "failure_reason": "resume_gates_not_passed", "checks": checks, "acceptance": acceptance, "minimal": minimal, "audit": audit}
+    os.environ["CONTROLLER_MEM"] = "32G"
+    os.environ["ROUND1_RUN_ID"] = str(args.scientific_run_id)
+    submit_args = argparse.Namespace(**vars(args))
+    submit_args.controller_mem = "32G"
+    submit_args.retry_failed = True
+    submit_args.new_attempt = False
+    result = submit_controller(submit_args)
+    if result.get("status") == "CONTROLLER_SUBMITTED":
+        result = {"ROUND1_RESUME_SUBMITTED": "PASS", **result, "scientific_run_id": str(args.scientific_run_id), "formal_root": str(args.formal_root)}
+    return result
+
+
 def status(args: argparse.Namespace) -> dict[str, Any]:
     state = _load_state(args.state_root.resolve())
     paths = _state_paths(args.state_root.resolve())
@@ -2529,28 +2785,53 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--expected-git-commit", default=os.getenv("EXPECTED_GIT_COMMIT", _git_commit()))
 
 
+def add_recovery_common(parser: argparse.ArgumentParser) -> None:
+    add_common(parser)
+    parser.add_argument(
+        "--formal-root",
+        default=os.getenv(
+            "FORMAL_ROOT",
+            "/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/runtime_state/round1_orchestrated/full_373_multiteacher_round1",
+        ),
+        type=Path,
+    )
+    parser.add_argument("--scientific-run-id", default=os.getenv("ROUND1_RUN_ID", "round1_4995446918298643158"))
+    parser.add_argument("--acceptance-root", default=os.getenv("LABELCRITIC_ACCEPTANCE_ROOT", "/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/runtime_state/labelcritic_72b_acceptance"), type=Path)
+
+
+def add_controller_submit_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--controller-partition", default=os.getenv("CONTROLLER_PARTITION", "cpu"))
+    parser.add_argument("--controller-cpus", default=int(os.getenv("CONTROLLER_CPUS", "2")), type=int)
+    parser.add_argument("--controller-mem", default=os.getenv("CONTROLLER_MEM", "32G"))
+    parser.add_argument("--controller-time", default=os.getenv("CONTROLLER_TIME", "48:00:00"))
+    parser.add_argument("--labelcritic-partition", default=os.getenv("LABELCRITIC_PARTITION", "gpuh100"))
+    parser.add_argument("--labelcritic-gres", default=os.getenv("LABELCRITIC_GRES", "gpu:H100:2"))
+    parser.add_argument("--labelcritic-tensor-parallel-size", default=int(os.getenv("LABELCRITIC_TENSOR_PARALLEL_SIZE", "2")), type=int)
+    parser.add_argument("--labelcritic-port", default=int(os.getenv("LABELCRITIC_PORT", "8000")), type=int)
+    parser.add_argument("--skip-sbatch-test-only", action="store_true")
+    parser.add_argument("--run-static-tests", default=os.getenv("RUN_STATIC_PREFLIGHT_TESTS", "1").lower() not in {"0", "false", "no"}, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--static-tests-timeout-sec", default=int(os.getenv("STATIC_PREFLIGHT_TESTS_TIMEOUT_SEC", "900")), type=int)
+    parser.add_argument("--retry-failed", default=os.getenv("RETRY_FAILED", "1").lower() not in {"0", "false", "no"}, action=argparse.BooleanOptionalAction)
+    parser.add_argument("--new-attempt", default=os.getenv("NEW_ATTEMPT", "0").lower() in {"1", "true", "yes"}, action=argparse.BooleanOptionalAction)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Unattended Task2 103-case Round1 orchestrator.")
     sub = ap.add_subparsers(dest="cmd", required=True)
     submit_p = sub.add_parser("submit-controller")
     add_common(submit_p)
-    submit_p.add_argument("--controller-partition", default=os.getenv("CONTROLLER_PARTITION", "cpu"))
-    submit_p.add_argument("--controller-cpus", default=int(os.getenv("CONTROLLER_CPUS", "2")), type=int)
-    submit_p.add_argument("--controller-mem", default=os.getenv("CONTROLLER_MEM", "8G"))
-    submit_p.add_argument("--controller-time", default=os.getenv("CONTROLLER_TIME", "48:00:00"))
-    submit_p.add_argument("--labelcritic-partition", default=os.getenv("LABELCRITIC_PARTITION", "gpuh100"))
-    submit_p.add_argument("--labelcritic-gres", default=os.getenv("LABELCRITIC_GRES", "gpu:H100:2"))
-    submit_p.add_argument("--labelcritic-tensor-parallel-size", default=int(os.getenv("LABELCRITIC_TENSOR_PARALLEL_SIZE", "2")), type=int)
-    submit_p.add_argument("--labelcritic-port", default=int(os.getenv("LABELCRITIC_PORT", "8000")), type=int)
-    submit_p.add_argument("--skip-sbatch-test-only", action="store_true")
-    submit_p.add_argument("--run-static-tests", default=os.getenv("RUN_STATIC_PREFLIGHT_TESTS", "1").lower() not in {"0", "false", "no"}, action=argparse.BooleanOptionalAction)
-    submit_p.add_argument("--static-tests-timeout-sec", default=int(os.getenv("STATIC_PREFLIGHT_TESTS_TIMEOUT_SEC", "900")), type=int)
-    submit_p.add_argument("--retry-failed", default=os.getenv("RETRY_FAILED", "1").lower() not in {"0", "false", "no"}, action=argparse.BooleanOptionalAction)
-    submit_p.add_argument("--new-attempt", default=os.getenv("NEW_ATTEMPT", "0").lower() in {"1", "true", "yes"}, action=argparse.BooleanOptionalAction)
+    add_controller_submit_options(submit_p)
     controller_p = sub.add_parser("controller")
     add_common(controller_p)
     status_p = sub.add_parser("status")
     status_p.add_argument("--state-root", default=os.getenv("STATE_ROOT", "/projects/bodymaps/users/xhan74/medical_agent/outputs/dataset_delivery_373/runtime_state"), type=Path)
+    audit_p = sub.add_parser("recovery-audit")
+    add_recovery_common(audit_p)
+    minimal_p = sub.add_parser("minimal-recovery")
+    add_recovery_common(minimal_p)
+    resume_p = sub.add_parser("resume-formal")
+    add_recovery_common(resume_p)
+    add_controller_submit_options(resume_p)
     args = ap.parse_args()
     if args.cmd == "submit-controller":
         print(json.dumps(submit_controller(args), indent=2, ensure_ascii=False))
@@ -2560,6 +2841,25 @@ def main() -> int:
     if args.cmd == "status":
         print(json.dumps(status(args), indent=2, ensure_ascii=False))
         return 0
+    if args.cmd == "recovery-audit":
+        report = recovery_audit(args)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        print(f"ROUND1_RECOVERY_AUDIT={report['status']}")
+        return 0 if report["status"] == "PASS" else 2
+    if args.cmd == "minimal-recovery":
+        report = minimal_recovery(args)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0 if report["status"] == "PASS" else 2
+    if args.cmd == "resume-formal":
+        report = resume_formal(args)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        if report.get("ROUND1_RESUME_SUBMITTED") == "PASS":
+            print("ROUND1_RESUME_SUBMITTED=PASS")
+            print(f"controller_job_id={report.get('controller_job_id', '')}")
+            print(f"scientific_run_id={report.get('scientific_run_id', '')}")
+            print(f"formal_root={report.get('formal_root', '')}")
+            return 0
+        return 2
     return 2
 
 

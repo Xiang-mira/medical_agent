@@ -13,8 +13,9 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS = REPO_ROOT / "agent-harness"
@@ -298,6 +299,8 @@ def _queue_paths(output_root: Path) -> dict[str, Path]:
         "case_target_states": root / "case_target_states",
         "case_target_claims": root / "case_target_claims",
         "selection_results": root / "selection_results",
+        "worker_active": root / "worker_active",
+        "worker_crashes": root / "worker_crashes",
         "events": root / "events.jsonl",
         "telemetry": root / "telemetry.json",
         "candidate_seed_complete": root / "candidate_seed_complete.json",
@@ -325,6 +328,72 @@ def _append_event(output_root: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"time": utc_now(), **payload}, ensure_ascii=False) + "\n")
+
+
+def _tail_file(path: Path, limit: int = 4000) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - limit), os.SEEK_SET)
+            return handle.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _worker_runtime_context(worker_id: str) -> dict[str, Any]:
+    return {
+        "worker_id": worker_id,
+        "node": os.getenv("SLURMD_NODENAME", os.getenv("HOSTNAME", "")),
+        "slurm_job_id": os.getenv("SLURM_JOB_ID", ""),
+        "slurm_array_job_id": os.getenv("SLURM_ARRAY_JOB_ID", ""),
+        "slurm_array_task_id": os.getenv("SLURM_ARRAY_TASK_ID", ""),
+        "slurm_job_partition": os.getenv("SLURM_JOB_PARTITION", ""),
+        "slurm_job_gpus": os.getenv("SLURM_JOB_GPUS", ""),
+        "slurm_mem_per_node": os.getenv("SLURM_MEM_PER_NODE", ""),
+        "slurm_cpus_per_task": os.getenv("SLURM_CPUS_PER_TASK", ""),
+    }
+
+
+def _worker_active_path(output_root: Path, worker_id: str) -> Path:
+    return _queue_paths(output_root)["worker_active"] / f"{re_safe(worker_id)}.json"
+
+
+def _set_worker_active(output_root: Path, *, worker_id: str, payload: dict[str, Any]) -> None:
+    atomic_write_json(_worker_active_path(output_root, worker_id), {"updated_at": utc_now(), **payload})
+
+
+def _clear_worker_active(output_root: Path, worker_id: str) -> None:
+    try:
+        _worker_active_path(output_root, worker_id).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def record_worker_crash(
+    output_root: Path,
+    *,
+    worker_id: str,
+    exc: BaseException,
+    active_candidate: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    timestamp = utc_now()
+    record = {
+        "schema_version": "task2_worker_crash_v1",
+        "timestamp": timestamp,
+        "scientific_run_id": _scientific_run_id(output_root),
+        "exception_type": type(exc).__name__,
+        "exception_message": str(exc),
+        "traceback": traceback.format_exc(),
+        "active_candidate": active_candidate or _read_json(_worker_active_path(output_root, worker_id), {}),
+        **_worker_runtime_context(worker_id),
+        **(extra or {}),
+    }
+    path = _queue_paths(output_root)["worker_crashes"] / f"{re_safe(worker_id)}_{int(time.time())}.json"
+    atomic_write_json(path, record)
+    _append_event(output_root, {"event": "worker_crash", "worker_id": worker_id, "crash_path": str(path), "exception_type": type(exc).__name__})
+    return {"status": "RECORDED", "path": str(path), "record": record}
 
 
 def _claim_path(output_root: Path, *, claim_kind: str, claim_key: str) -> Path:
@@ -991,9 +1060,28 @@ def recover_candidate_seed_marker(output_root: Path, *, task_manifest: Path | No
     return {"status": "READY", **marker}
 
 
-def recover_stale_candidate_claims(output_root: Path, *, task_manifest: Path | None = None, lease_sec: int = 7200) -> dict[str, Any]:
+def _owner_job_id_from_state(state: dict[str, Any], claim_doc: dict[str, Any]) -> str:
+    for source in (state, claim_doc):
+        for key in ("worker_job_id", "slurm_job_id", "job_id"):
+            value = str(source.get(key) or "").strip()
+            if value:
+                return value
+        worker_id = str(source.get("worker_id") or "").strip()
+        if re.match(r"^\d+(_\d+)?$", worker_id):
+            return worker_id
+    return ""
+
+
+def recover_stale_candidate_claims(
+    output_root: Path,
+    *,
+    task_manifest: Path | None = None,
+    lease_sec: int = 7200,
+    worker_state_fn: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     rows = _candidate_queue_rows(output_root, task_manifest=task_manifest)
     recovered = []
+    retained_terminal = 0
     now = time.time()
     for row in rows:
         case_id = str(row.get("case_id") or "").strip()
@@ -1003,22 +1091,54 @@ def recover_stale_candidate_claims(output_root: Path, *, task_manifest: Path | N
             continue
         state = load_candidate_state(output_root, case_id=case_id, target=target, teacher=teacher)
         status = str(state.get("status") or "")
+        if status in TERMINAL_CANDIDATE_STATES:
+            retained_terminal += 1
+            continue
         if status not in {"CLAIMED", "RUNNING"}:
             continue
         candidate_id = _candidate_id_from_row(row)
         claim_path = _claim_path(output_root, claim_kind="candidate", claim_key=candidate_id)
         claim_doc = _read_json(claim_path, {}) if claim_path.exists() else {}
-        if claim_path.exists() and not _claim_expired(claim_doc, now=now, lease_sec=int(claim_doc.get("lease_sec") or lease_sec)):
+        recovery_reason = ""
+        worker_state: dict[str, Any] = {}
+        if not claim_path.exists():
+            recovery_reason = "claim_missing_requeued"
+        elif _claim_expired(claim_doc, now=now, lease_sec=int(claim_doc.get("lease_sec") or lease_sec)):
+            recovery_reason = "lease_expired_requeued"
+        elif worker_state_fn is not None:
+            owner_job_id = _owner_job_id_from_state(state, claim_doc)
+            if owner_job_id:
+                try:
+                    worker_state = worker_state_fn(owner_job_id) or {}
+                except Exception as exc:
+                    worker_state = {"state": "UNKNOWN", "failure_reason": f"{type(exc).__name__}: {exc}"}
+                slurm_state = str(worker_state.get("state") or "").upper()
+                if slurm_state in {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE", "COMPLETED"}:
+                    recovery_reason = f"worker_slurm_terminal:{slurm_state}"
+        if not recovery_reason:
             continue
         updated = {
             **state,
             "status": "RETRY_PENDING",
-            "failure_reason": str(state.get("failure_reason") or ("claim_missing_requeued" if not claim_path.exists() else "lease_expired_requeued")),
+            "failure_reason": str(state.get("failure_reason") or recovery_reason),
+            "recovery_reason": recovery_reason,
+            "previous_status": status,
+            "previous_worker_id": str(state.get("worker_id") or claim_doc.get("worker_id") or ""),
+            "previous_execution_id": str(state.get("execution_id") or claim_doc.get("execution_id") or claim_doc.get("claim_id") or ""),
+            "previous_claim": claim_doc,
+            "worker_slurm_state": worker_state,
+            "recovered_at": utc_now(),
             "updated_at": utc_now(),
         }
         publish_candidate_state(output_root, updated)
-        recovered.append({"case_id": case_id, "target": target, "teacher": teacher, "candidate_id": candidate_id, "previous_status": status})
-    return {"status": "READY", "recovered_count": len(recovered), "recovered": recovered[:100], "logical_task_count": len(rows)}
+        recovered.append({"case_id": case_id, "target": target, "teacher": teacher, "candidate_id": candidate_id, "previous_status": status, "recovery_reason": recovery_reason})
+    return {
+        "status": "READY",
+        "recovered_count": len(recovered),
+        "recovered": recovered[:100],
+        "logical_task_count": len(rows),
+        "retained_terminal_count": retained_terminal,
+    }
 
 
 FORMAL_TARGET_CONTRACT_FAILURE = "Requested organs include non-target organs for the formal 373-organ mainline"
@@ -1293,6 +1413,9 @@ def _execute_candidate_row(
             },
         )
         case_output = output_root / "candidate_runs" / case_id / target / teacher
+        case_output.mkdir(parents=True, exist_ok=True)
+        child_stdout_path = case_output / "worker_child.stdout.log"
+        child_stderr_path = case_output / "worker_child.stderr.log"
         command = [
             str(row.get("python") or sys.executable),
             "run_medai_cli.py",
@@ -1338,22 +1461,75 @@ def _execute_candidate_row(
             "resource_demand": _default_resource_demand({**row, **existing}),
             "claim": claim.get("claim") or {},
             "command": command,
+            "execution_id": str((claim.get("claim") or {}).get("execution_id") or (claim.get("claim") or {}).get("claim_id") or ""),
+            "child_stdout_path": str(child_stdout_path),
+            "child_stderr_path": str(child_stderr_path),
             "started_at": utc_now(),
+            "last_heartbeat": utc_now(),
+            **_worker_runtime_context(worker_id or f"pid_{os.getpid()}"),
         }
+        _set_worker_active(output_root, worker_id=state["worker_id"], payload=state)
         publish_candidate_state(output_root, state)
         atomic_write_json(task_state_path, state)
         candidate_start_wall = time.time()
         rss_before_kb = _rss_kb()
-        proc = subprocess.run(command, cwd=REPO_ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        try:
+            with child_stdout_path.open("a", encoding="utf-8") as stdout_handle, child_stderr_path.open("a", encoding="utf-8") as stderr_handle:
+                proc = subprocess.run(command, cwd=REPO_ROOT, env=env, text=True, stdout=stdout_handle, stderr=stderr_handle, check=False)
+        except (subprocess.TimeoutExpired, OSError, BrokenPipeError, MemoryError, Exception) as exc:
+            if isinstance(exc, KeyboardInterrupt):
+                raise
+            candidate_end_wall = time.time()
+            failure = {
+                **state,
+                "status": "RETRY_PENDING",
+                "failure_reason": f"parent_exception_after_running:{type(exc).__name__}",
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+                "traceback": traceback.format_exc(),
+                "return_code": None,
+                "stdout_tail": _tail_file(child_stdout_path),
+                "stderr_tail": _tail_file(child_stderr_path),
+                "finished_at": utc_now(),
+                "elapsed_sec": round(candidate_end_wall - candidate_start_wall, 3),
+                "last_heartbeat": utc_now(),
+            }
+            publish_candidate_state(output_root, failure)
+            atomic_write_json(task_state_path, failure)
+            try:
+                append_resource_telemetry(
+                    output_root,
+                    {
+                        "schema_version": "candidate_resource_telemetry_v1",
+                        "scientific_run_id": _scientific_run_id(output_root),
+                        "candidate_id": candidate_id,
+                        "case_id": case_id,
+                        "canonical_target": target,
+                        "teacher_id": teacher,
+                        "worker_id": state["worker_id"],
+                        "exception_type": type(exc).__name__,
+                        "failure_reason": failure["failure_reason"],
+                        "elapsed_sec": failure["elapsed_sec"],
+                        "child_stdout_path": str(child_stdout_path),
+                        "child_stderr_path": str(child_stderr_path),
+                        **_worker_runtime_context(state["worker_id"]),
+                    },
+                )
+            except Exception as telemetry_exc:
+                failure["resource_telemetry_warning"] = f"{type(telemetry_exc).__name__}: {telemetry_exc}"
+                atomic_write_json(task_state_path, failure)
+            return failure
         candidate_end_wall = time.time()
         rss_after_kb = _rss_kb()
         candidate_state = _candidate_from_single_teacher_run(case_output, case_id=case_id, target=target, teacher=teacher)
         candidate_state["ct_path"] = str(row.get("ct_path") or "")
         profile = str(state.get("profile") or "")
+        stdout_tail = _tail_file(child_stdout_path)
+        stderr_tail = _tail_file(child_stderr_path)
         resource_failure = classify_resource_failure(
             return_code=int(proc.returncode),
-            stdout=proc.stdout[-4000:],
-            stderr=proc.stderr[-4000:],
+            stdout=stdout_tail,
+            stderr=stderr_tail,
             profile=profile,
         )
         if proc.returncode != 0 and resource_failure and candidate_state["status"] not in {"SUCCESS", "ABSENT", "OUT_OF_FOV"}:
@@ -1372,7 +1548,7 @@ def _execute_candidate_row(
             )
         elif proc.returncode != 0 and candidate_state["status"] not in {"SUCCESS", "ABSENT", "OUT_OF_FOV"}:
             candidate_state["status"] = "FAILED_FINAL"
-            candidate_state["failure_reason"] = proc.stderr[-1000:] or proc.stdout[-1000:] or "candidate_worker_failed"
+            candidate_state["failure_reason"] = stderr_tail[-1000:] or stdout_tail[-1000:] or "candidate_worker_failed"
         telemetry = {
             "schema_version": "candidate_resource_telemetry_v1",
             "scientific_run_id": _scientific_run_id(output_root),
@@ -1401,6 +1577,8 @@ def _execute_candidate_row(
             "candidate_peak_rss_kb": max(rss_before_kb, rss_after_kb),
             "telemetry_confidence": "PROCESS_TREE_RUSAGE" if max(rss_before_kb, rss_after_kb) > 0 else "WORKER_ONLY",
             "exit_code": int(proc.returncode),
+            "child_stdout_path": str(child_stdout_path),
+            "child_stderr_path": str(child_stderr_path),
             "slurm_state": os.getenv("SLURM_JOB_STATE", ""),
             "oom": resource_failure == "CPU_OOM",
             "timeout": resource_failure == "WALLTIME_EXCEEDED",
@@ -1414,15 +1592,25 @@ def _execute_candidate_row(
             append_resource_telemetry(output_root, telemetry)
         except Exception as exc:
             candidate_state["resource_telemetry_warning"] = f"{type(exc).__name__}: {exc}"
-        candidate_state.update({"return_code": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "finished_at": utc_now(), "resource_policy_version": RESOURCE_POLICY_VERSION})
+        candidate_state.update({
+            "return_code": int(proc.returncode),
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "child_stdout_path": str(child_stdout_path),
+            "child_stderr_path": str(child_stderr_path),
+            "finished_at": utc_now(),
+            "resource_policy_version": RESOURCE_POLICY_VERSION,
+        })
         publish_candidate_state(output_root, candidate_state)
         final = {
             **state,
             "status": "COMPLETED" if proc.returncode == 0 else "FAILED",
             "candidate_status": candidate_state["status"],
             "return_code": int(proc.returncode),
-            "stdout_tail": proc.stdout[-4000:],
-            "stderr_tail": proc.stderr[-4000:],
+            "stdout_tail": stdout_tail,
+            "stderr_tail": stderr_tail,
+            "child_stdout_path": str(child_stdout_path),
+            "child_stderr_path": str(child_stderr_path),
             "finished_at": utc_now(),
             "case_output": str(case_output),
             "resource_failure_class": resource_failure,
@@ -1431,6 +1619,7 @@ def _execute_candidate_row(
         atomic_write_json(task_state_path, final)
         return final
     finally:
+        _clear_worker_active(output_root, worker_id or f"pid_{os.getpid()}")
         release_claim(output_root, claim_kind="candidate", claim_key=candidate_id)
 
 
@@ -2124,23 +2313,36 @@ def main() -> int:
     if args.execute_task_index is not None:
         if not args.task_manifest:
             raise SystemExit("--task-manifest is required with --execute-task-index")
-        print(json.dumps(execute_task_index(args.execute_task_index, args.task_manifest.resolve(), output_root, worker_id=args.worker_id, state_root=args.state_root), indent=2, default=str))
+        try:
+            result = execute_task_index(args.execute_task_index, args.task_manifest.resolve(), output_root, worker_id=args.worker_id, state_root=args.state_root)
+        except Exception as exc:
+            crash = record_worker_crash(output_root, worker_id=args.worker_id or f"task_{os.getpid()}", exc=exc, extra={"mode": "execute_task_index", "task_index": args.execute_task_index})
+            print(json.dumps(crash, indent=2, default=str))
+            return 2
+        print(json.dumps(result, indent=2, default=str))
         return 0
     if args.queue_worker:
         if not args.task_manifest:
             raise SystemExit("--task-manifest is required with --queue-worker")
-        print(json.dumps(run_candidate_queue_worker(
-            output_root,
-            task_manifest=args.task_manifest.resolve(),
-            worker_id=args.worker_id or f"queue_{os.getpid()}",
-            profile=args.worker_profile or "generic_gpu",
-            resource_class=args.worker_resource_class,
-            state_root=args.state_root,
-            poll_sec=args.queue_poll_sec,
-            max_idle_sec=args.queue_max_idle_sec,
-            max_tasks=args.queue_max_tasks,
-            lease_sec=args.claim_lease_sec,
-        ), indent=2, default=str))
+        worker_id = args.worker_id or f"queue_{os.getpid()}"
+        try:
+            result = run_candidate_queue_worker(
+                output_root,
+                task_manifest=args.task_manifest.resolve(),
+                worker_id=worker_id,
+                profile=args.worker_profile or "generic_gpu",
+                resource_class=args.worker_resource_class,
+                state_root=args.state_root,
+                poll_sec=args.queue_poll_sec,
+                max_idle_sec=args.queue_max_idle_sec,
+                max_tasks=args.queue_max_tasks,
+                lease_sec=args.claim_lease_sec,
+            )
+        except Exception as exc:
+            crash = record_worker_crash(output_root, worker_id=worker_id, exc=exc, extra={"mode": "queue_worker", "profile": args.worker_profile or "generic_gpu", "resource_class": args.worker_resource_class})
+            print(json.dumps(crash, indent=2, default=str))
+            return 2
+        print(json.dumps(result, indent=2, default=str))
         return 0
     if args.selection_worker:
         print(json.dumps(run_labelcritic_selection_worker(

@@ -24,6 +24,7 @@ command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi || true
 VLLM_PYTHON="${VLLM_PYTHON:-python3}"
 LABELCRITIC_PORT="${LABELCRITIC_PORT:-8000}"
 LABELCRITIC_STARTUP_TIMEOUT_SEC="${LABELCRITIC_STARTUP_TIMEOUT_SEC:-2400}"
+LABELCRITIC_PROJECT_BIND="${LABELCRITIC_PROJECT_BIND:-/projects/bodymaps/users/xhan74/medical_agent:/projects/bodymaps/users/xhan74/medical_agent}"
 
 if ! command -v nvidia-smi >/dev/null 2>&1; then
   echo "FATAL: nvidia-smi not found inside LabelCritic allocation" >&2
@@ -34,10 +35,12 @@ if [[ "${gpu_count}" -lt 2 ]]; then
   echo "FATAL: LabelCritic requires at least 2 visible GPUs, saw ${gpu_count}" >&2
   exit 127
 fi
-apptainer exec --nv "${VLLM_CONTAINER}" "${VLLM_PYTHON}" --version
-apptainer exec --nv "${VLLM_CONTAINER}" "${VLLM_PYTHON}" -c 'import vllm, importlib.util; raise SystemExit(0 if importlib.util.find_spec("vllm.entrypoints.openai.api_server") is not None else 3)'
+apptainer exec --nv --bind "${LABELCRITIC_PROJECT_BIND}" "${VLLM_CONTAINER}" "${VLLM_PYTHON}" --version
+apptainer exec --nv --bind "${LABELCRITIC_PROJECT_BIND}" "${VLLM_CONTAINER}" "${VLLM_PYTHON}" -c 'import vllm, importlib.util; raise SystemExit(0 if importlib.util.find_spec("vllm.entrypoints.openai.api_server") is not None else 3)'
+python3 tools/dataset_delivery/labelcritic_service_contract.py model-files --container "${VLLM_CONTAINER}" --model-path "${LABELCRITIC_MODEL_DIR}" --python "${VLLM_PYTHON}" --output-json "${LABELCRITIC_SERVICE_ROOT:-.}/model_files_preflight.json"
+python3 tools/dataset_delivery/labelcritic_service_contract.py gpu-topology --container "${VLLM_CONTAINER}" --python "${VLLM_PYTHON}" --expected-count 2 --expected-type H100 --tp "${LABELCRITIC_TENSOR_PARALLEL_SIZE}" --output-json "${LABELCRITIC_SERVICE_ROOT:-.}/gpu_topology_preflight.json"
 
-apptainer exec --nv "${VLLM_CONTAINER}" "${VLLM_PYTHON}" -m vllm.entrypoints.openai.api_server \
+apptainer exec --nv --bind "${LABELCRITIC_PROJECT_BIND}" "${VLLM_CONTAINER}" "${VLLM_PYTHON}" -m vllm.entrypoints.openai.api_server \
   --model "${LABELCRITIC_MODEL_DIR}" \
   --served-model-name "${LABELCRITIC_MODEL_ID}" \
   --tensor-parallel-size "${LABELCRITIC_TENSOR_PARALLEL_SIZE}" \

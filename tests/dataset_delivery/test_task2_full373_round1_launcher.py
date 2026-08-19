@@ -1178,3 +1178,115 @@ def test_short_timeout_revokes_short_qualification_and_retries_normal(tmp_path: 
     assert updated["resource_demand"]["runtime_tier"] == "STANDARD"
     assert updated["resource_demand"]["short_eligible"] is False
     assert qualifications["ek_short"]["status"] == "REVOKED"
+
+
+def test_child_success_writes_durable_stdout_stderr_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    row = {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_logs", "ct_path": str(tmp_path / "ct.nii.gz"), "annotation_folder": str(tmp_path / "ann"), "profile": "gpu_t4"}
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+
+    def fake_run(command, **kwargs):
+        kwargs["stdout"].write("child stdout durable\n")
+        kwargs["stderr"].write("child stderr durable\n")
+        case_output = tmp_path / "candidate_runs" / "CASE001" / "organ_a" / "teacher1"
+        mask = case_output / "annotation_versions" / "CASE001" / "updated" / "organ_a.nii.gz"
+        _save_mask(mask)
+        full373.write_json(
+            case_output / "annotation_versions" / "CASE001" / "selection_metadata.json",
+            {"selected_organs": [{"organ": "organ_a", "final_mask": str(mask)}], "selection_rows": [{"organ": "organ_a", "candidate_predictions": [{"model": "teacher1", "prediction": str(mask), "candidate_exists": True, "candidate_qc_status": "pass"}]}]},
+        )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(full373.subprocess, "run", fake_run)
+    result = full373._execute_candidate_row(row, tmp_path, worker_id="worker_logs", already_claimed=True)
+
+    assert result["status"] == "COMPLETED"
+    assert Path(result["child_stdout_path"]).read_text(encoding="utf-8") == "child stdout durable\n"
+    assert Path(result["child_stderr_path"]).read_text(encoding="utf-8") == "child stderr durable\n"
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+    assert state["child_stdout_path"] == result["child_stdout_path"]
+    assert "child stdout durable" in state["stdout_tail"]
+
+
+def test_child_nonzero_uses_durable_log_tail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    row = {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_nonzero", "ct_path": str(tmp_path / "ct.nii.gz"), "annotation_folder": str(tmp_path / "ann"), "profile": "gpu_t4"}
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+
+    def fake_run(command, **kwargs):
+        kwargs["stderr"].write("teacher child failed clearly\n")
+        return subprocess.CompletedProcess(command, 7)
+
+    monkeypatch.setattr(full373.subprocess, "run", fake_run)
+    result = full373._execute_candidate_row(row, tmp_path, worker_id="worker_nonzero", already_claimed=True)
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+
+    assert result["status"] == "FAILED"
+    assert result["candidate_status"] == "FAILED_FINAL"
+    assert "teacher child failed clearly" in state["failure_reason"]
+    assert Path(result["child_stderr_path"]).is_file()
+
+
+def test_spawn_exception_after_running_publishes_retry_pending_with_traceback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    row = {"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_spawn", "ct_path": str(tmp_path / "ct.nii.gz"), "annotation_folder": str(tmp_path / "ann"), "profile": "gpu_t4"}
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+
+    def fake_run(command, **kwargs):
+        raise OSError("spawn exploded")
+
+    monkeypatch.setattr(full373.subprocess, "run", fake_run)
+    result = full373._execute_candidate_row(row, tmp_path, worker_id="worker_spawn", already_claimed=True)
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+
+    assert result["status"] == "RETRY_PENDING"
+    assert state["status"] == "RETRY_PENDING"
+    assert state["exception_type"] == "OSError"
+    assert "spawn exploded" in state["traceback"]
+
+
+def test_worker_crash_record_contains_active_candidate(tmp_path: Path):
+    full373._set_worker_active(tmp_path, worker_id="111111_40", payload={"candidate_id": "cand_active", "case_id": "BDMAP_00002018"})
+    try:
+        raise RuntimeError("top level worker crash")
+    except RuntimeError as exc:
+        crash = full373.record_worker_crash(tmp_path, worker_id="111111_40", exc=exc)
+
+    record = json.loads(Path(crash["path"]).read_text(encoding="utf-8"))
+    assert record["exception_type"] == "RuntimeError"
+    assert record["active_candidate"]["candidate_id"] == "cand_active"
+    assert "top level worker crash" in record["traceback"]
+
+
+def test_slurm_terminal_running_candidate_recovers_to_retry_pending(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [{"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_stale", "ct_path": "/ct", "annotation_folder": "/ann"}],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    full373.claim_work(tmp_path, claim_kind="candidate", claim_key="cand_stale", worker_id="111111_40", lease_sec=7200)
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+    full373.publish_candidate_state(tmp_path, {**state, "status": "RUNNING", "worker_id": "111111_40", "execution_id": "exec_old"}, recompute_target=False)
+
+    recovery = full373.recover_stale_candidate_claims(tmp_path, task_manifest=manifest, worker_state_fn=lambda job_id: {"state": "FAILED", "job_id": job_id})
+    updated = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+
+    assert recovery["recovered_count"] == 1
+    assert updated["status"] == "RETRY_PENDING"
+    assert updated["previous_worker_id"] == "111111_40"
+    assert updated["recovery_reason"] == "worker_slurm_terminal:FAILED"
+
+
+def test_terminal_candidate_never_reclaimed_after_recovery(tmp_path: Path):
+    manifest = _write_candidate_manifest(
+        tmp_path / "shared.csv",
+        [{"task_index": "0", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand_terminal", "ct_path": "/ct", "annotation_folder": "/ann"}],
+    )
+    _write_scope(tmp_path, cases=["CASE001"], routes={"organ_a": ["teacher1"]})
+    full373.seed_candidate_states(tmp_path, task_manifest=manifest)
+    state = full373.load_candidate_state(tmp_path, case_id="CASE001", target="organ_a", teacher="teacher1")
+    full373.publish_candidate_state(tmp_path, {**state, "status": "SUCCESS", "candidate_exists": True}, recompute_target=False)
+
+    recovery = full373.recover_stale_candidate_claims(tmp_path, task_manifest=manifest, worker_state_fn=lambda job_id: {"state": "FAILED"})
+    claim = full373.claim_next_ready_candidate(tmp_path, task_manifest=manifest, worker_id="new_worker", profile="gpu_t4")
+
+    assert recovery["recovered_count"] == 0
+    assert claim["status"] == "NO_READY_CANDIDATES"

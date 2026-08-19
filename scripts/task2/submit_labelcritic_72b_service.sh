@@ -24,6 +24,7 @@ VLLM_CONTAINER=${VLLM_CONTAINER:-/home/xhan74/containers/vllm-openai-v0.19.1.sif
 VLLM_PYTHON=${VLLM_PYTHON:-python3}
 VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-0.88}
 VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-8192}
+LABELCRITIC_PROJECT_BIND=${LABELCRITIC_PROJECT_BIND:-/projects/bodymaps/users/xhan74/medical_agent:/projects/bodymaps/users/xhan74/medical_agent}
 LABELCRITIC_STARTUP_TIMEOUT_SEC=${LABELCRITIC_STARTUP_TIMEOUT_SEC:-2400}
 WAIT_READY=${WAIT_READY:-0}
 WAIT_READY_SEC=${WAIT_READY_SEC:-900}
@@ -66,9 +67,44 @@ $QOS_LINE
 #SBATCH --error=$LABELCRITIC_SERVICE_ROOT/logs/labelcritic_72b_%j.err
 
 set -euo pipefail
+export HOST_PYTHON="$HOST_PYTHON"
 export VLLM_PYTHON="$VLLM_PYTHON"
+export LABELCRITIC_PROJECT_BIND="$LABELCRITIC_PROJECT_BIND"
 cd "$CODE_ROOT"
 host=\$(hostname -f 2>/dev/null || hostname)
+service_state_file="$LABELCRITIC_SERVICE_ROOT/service_state.json"
+mark_failed() {
+  rc=\$?
+  if [ "\$rc" -ne 0 ]; then
+    "\$HOST_PYTHON" - <<FAILED_JSON
+import json, os, pathlib, time
+job = os.environ.get("SLURM_JOB_ID", "")
+root = pathlib.Path("$LABELCRITIC_SERVICE_ROOT")
+out = root / "logs" / f"labelcritic_72b_{job}.out"
+err = root / "logs" / f"labelcritic_72b_{job}.err"
+def tail(path):
+    try:
+        data = path.read_bytes()[-4000:]
+        return data.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+payload = {
+  "status": "FAILED",
+  "failure_reason": "labelcritic_service_exit_\$rc",
+  "job_id": job,
+  "node": os.environ.get("SLURMD_NODENAME", os.environ.get("HOSTNAME", "")),
+  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+  "model": "$LABELCRITIC_MODEL_ID",
+  "git_commit": os.environ.get("EXPECTED_GIT_COMMIT", ""),
+  "stdout_tail": tail(out),
+  "stderr_tail": tail(err),
+}
+pathlib.Path("$LABELCRITIC_SERVICE_ROOT/service_state.json").write_text(json.dumps(payload, indent=2) + "\\n", encoding="utf-8")
+FAILED_JSON
+  fi
+  exit "\$rc"
+}
+trap mark_failed EXIT
 printf "%s\n" "\$host" > "$ENDPOINT_HOST_FILE"
 printf "http://%s:%s\n" "\$host" "$LABELCRITIC_PORT" > "$ENDPOINT_URL_FILE"
 printf "http://%s\n" "\$host" > "$ENDPOINT_BASE_URL_FILE"
@@ -91,15 +127,24 @@ else
   fi
 fi
 if [ "\$runtime_status" = "PASSED" ]; then
-  if ! apptainer exec --nv "$VLLM_CONTAINER" "\$VLLM_PYTHON" --version >/tmp/labelcritic_python_version_\${SLURM_JOB_ID:-local}.txt 2>/tmp/labelcritic_python_version_\${SLURM_JOB_ID:-local}.err; then
+  if ! apptainer exec --nv --bind "$LABELCRITIC_PROJECT_BIND" "$VLLM_CONTAINER" "\$VLLM_PYTHON" --version >/tmp/labelcritic_python_version_\${SLURM_JOB_ID:-local}.txt 2>/tmp/labelcritic_python_version_\${SLURM_JOB_ID:-local}.err; then
     runtime_status=FAILED
     runtime_reason=configured_vllm_python_missing
-  elif ! apptainer exec --nv "$VLLM_CONTAINER" "\$VLLM_PYTHON" -c 'import vllm, importlib.util; raise SystemExit(0 if importlib.util.find_spec("vllm.entrypoints.openai.api_server") is not None else 3)' >/tmp/labelcritic_vllm_import_\${SLURM_JOB_ID:-local}.txt 2>/tmp/labelcritic_vllm_import_\${SLURM_JOB_ID:-local}.err; then
+  elif ! apptainer exec --nv --bind "$LABELCRITIC_PROJECT_BIND" "$VLLM_CONTAINER" "\$VLLM_PYTHON" -c 'import vllm, importlib.util; raise SystemExit(0 if importlib.util.find_spec("vllm.entrypoints.openai.api_server") is not None else 3)' >/tmp/labelcritic_vllm_import_\${SLURM_JOB_ID:-local}.txt 2>/tmp/labelcritic_vllm_import_\${SLURM_JOB_ID:-local}.err; then
     runtime_status=FAILED
     runtime_reason=vllm_or_api_server_import_failed
   fi
 fi
-python3 - <<RUNTIME_JSON
+if [ "\$runtime_status" = "PASSED" ]; then
+  if ! "\$HOST_PYTHON" tools/dataset_delivery/labelcritic_service_contract.py model-files --container "$VLLM_CONTAINER" --model-path "$LABELCRITIC_MODEL_DIR" --python "\$VLLM_PYTHON" --output-json "$LABELCRITIC_SERVICE_ROOT/model_files_preflight.json"; then
+    runtime_status=FAILED
+    runtime_reason=model_files_preflight_failed
+  elif ! "\$HOST_PYTHON" tools/dataset_delivery/labelcritic_service_contract.py gpu-topology --container "$VLLM_CONTAINER" --python "\$VLLM_PYTHON" --expected-count 2 --expected-type H100 --tp "$LABELCRITIC_TENSOR_PARALLEL_SIZE" --output-json "$LABELCRITIC_SERVICE_ROOT/gpu_topology_preflight.json"; then
+    runtime_status=FAILED
+    runtime_reason=gpu_topology_preflight_failed
+  fi
+fi
+"\$HOST_PYTHON" - <<RUNTIME_JSON
 import json, os
 payload = {
   "status": "\$runtime_status",
@@ -118,7 +163,7 @@ if [ "\$runtime_status" != "PASSED" ]; then
   exit 127
 fi
 
-apptainer exec --nv "$VLLM_CONTAINER" "\$VLLM_PYTHON" -m vllm.entrypoints.openai.api_server \\
+apptainer exec --nv --bind "$LABELCRITIC_PROJECT_BIND" "$VLLM_CONTAINER" "\$VLLM_PYTHON" -m vllm.entrypoints.openai.api_server \\
   --model "$LABELCRITIC_MODEL_DIR" \\
   --served-model-name "$LABELCRITIC_MODEL_ID" \\
   --tensor-parallel-size "$LABELCRITIC_TENSOR_PARALLEL_SIZE" \\
@@ -138,7 +183,7 @@ while [ "\$SECONDS" -lt "\$deadline" ]; do
   fi
   if curl --noproxy "*" -fsS "http://127.0.0.1:$LABELCRITIC_PORT/v1/models" | grep -F "$LABELCRITIC_MODEL_ID" >/dev/null 2>&1; then
     ready=1
-    python3 - <<READY_JSON
+    "\$HOST_PYTHON" - <<READY_JSON
 import json, os
 payload = {
   "status": "READY",
