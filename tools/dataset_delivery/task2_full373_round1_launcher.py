@@ -35,6 +35,7 @@ from tools.dataset_delivery.slurm_reliability import CANDIDATE_TASK_V1  # noqa: 
 
 FULL373_GROUP = "full373"
 FULL373_ROOT_NAME = "full_373_multiteacher_round1"
+FORMAL_TOTALSEGMENTATOR_EXECUTABLE = "/home/xhan74/envs/totalsegmentator_py310/bin/TotalSegmentator"
 RESOURCE_POLICY_VERSION = "teacher_resource_policy_v2_shadow"
 STANDARD_HOST_MEMORY_TIER = "STANDARD64"
 LOWMEM_HOST_MEMORY_TIER = "LOWMEM"
@@ -669,6 +670,17 @@ def _candidate_queue_manifest(output_root: Path) -> Path:
     return _queue_paths(output_root)["root"] / "shared_ready_candidate_manifest.csv"
 
 
+def resolve_totalsegmentator_executable_arg(value: str | Path | None = None) -> str:
+    configured = str(value or "").strip()
+    if configured:
+        return configured
+    for key in ("TOTAL_SEGMENTATOR_EXECUTABLE", "TOTALSEGMENTATOR_EXECUTABLE", "MEDAI_TOTALSEG_EXECUTABLE"):
+        configured = str(os.getenv(key) or "").strip()
+        if configured:
+            return configured
+    return FORMAL_TOTALSEGMENTATOR_EXECUTABLE
+
+
 def _candidate_queue_rows(output_root: Path, *, task_manifest: Path | None = None) -> list[dict[str, Any]]:
     manifest = task_manifest or _candidate_queue_manifest(output_root)
     if manifest.exists():
@@ -817,7 +829,7 @@ def build_submission_manifest(
                 "checkpoint_root": str(checkpoint_root),
                 "nnunet_predict_executable": str(nnunet_predict_executable),
                 "unest_python_executable": str(unest_python_executable),
-                "totalsegmentator_executable": str(totalsegmentator_executable or os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE", "")),
+                "totalsegmentator_executable": resolve_totalsegmentator_executable_arg(totalsegmentator_executable),
                 "python": str(python),
             }
         )
@@ -2289,7 +2301,7 @@ def main() -> int:
     parser.add_argument("--checkpoint-root", default=REPO_ROOT / "checkpoints", type=Path)
     parser.add_argument("--nnunet-predict-executable", default=Path("nnUNetv2_predict"), type=Path)
     parser.add_argument("--unest-python-executable", default=Path(sys.executable), type=Path)
-    parser.add_argument("--totalsegmentator-executable", default=os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE", ""))
+    parser.add_argument("--totalsegmentator-executable", default=resolve_totalsegmentator_executable_arg())
     parser.add_argument("--cache-root", action="append", default=[], type=Path)
     parser.add_argument("--execute-task-index", type=int)
     parser.add_argument("--task-manifest", type=Path)

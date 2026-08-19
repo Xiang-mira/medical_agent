@@ -15,13 +15,19 @@ BASE_MANIFEST=${BASE_MANIFEST:-/projects/bodymaps/users/xhan74/medical_agent/out
 CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints}
 NNUNETV2_PREDICT_EXECUTABLE=${NNUNETV2_PREDICT_EXECUTABLE:-/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict}
 UNEST_PYTHON_EXECUTABLE=${UNEST_PYTHON_EXECUTABLE:-/home/xhan74/envs/medical_agent_train_py311/bin/python}
+TOTAL_SEGMENTATOR_EXECUTABLE=${TOTAL_SEGMENTATOR_EXECUTABLE:-/home/xhan74/envs/totalsegmentator_py310/bin/TotalSegmentator}
 ROUND1_RUN_ID=${ROUND1_RUN_ID:-round1_4995446918298643158}
 CONTROLLER_MEM=${CONTROLLER_MEM:-32G}
-export ROUND1_RUN_ID CONTROLLER_MEM
+export ROUND1_RUN_ID CONTROLLER_MEM TOTAL_SEGMENTATOR_EXECUTABLE
 
 cd "$CODE_ROOT"
 EXPECTED_GIT_COMMIT=${EXPECTED_GIT_COMMIT:-$(git rev-parse HEAD)}
 export EXPECTED_GIT_COMMIT
+
+if [ ! -x "$TOTAL_SEGMENTATOR_EXECUTABLE" ]; then
+  echo "TOTALSEG_EXECUTABLE_NOT_FOUND: TOTAL_SEGMENTATOR_EXECUTABLE=$TOTAL_SEGMENTATOR_EXECUTABLE" >&2
+  exit 2
+fi
 
 exec "$PYTHON" tools/dataset_delivery/task2_round1_orchestrator.py resume-formal \
   --state-root "$STATE_ROOT" \
@@ -34,5 +40,6 @@ exec "$PYTHON" tools/dataset_delivery/task2_round1_orchestrator.py resume-formal
   --checkpoint-root "$CHECKPOINT_ROOT" \
   --nnunet-predict-executable "$NNUNETV2_PREDICT_EXECUTABLE" \
   --unest-python-executable "$UNEST_PYTHON_EXECUTABLE" \
+  --totalsegmentator-executable "$TOTAL_SEGMENTATOR_EXECUTABLE" \
   --expected-git-commit "$EXPECTED_GIT_COMMIT" \
   "$@"

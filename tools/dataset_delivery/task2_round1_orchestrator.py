@@ -62,6 +62,7 @@ SUCCESS_STATES = {"COMPLETED"}
 BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY", "READY_WORKER_QUEUE", "RETRY_READY"}
 TEACHER_JOB_GROUPS = {"cads", "atm", "airrc", "unest", "full373"}
 LABELCRITIC_JOB_NAME = "labelcritic_72b_service"
+FORMAL_TOTALSEGMENTATOR_EXECUTABLE = "/home/xhan74/envs/totalsegmentator_py310/bin/TotalSegmentator"
 STATIC_TEST_ENV_DROP = {
     "LABELCRITIC_JOB_ID",
     "RETRY_FAILED",
@@ -152,6 +153,17 @@ def runtime_no_git_env() -> dict[str, str]:
     env["SKIP_GIT_SYNC"] = "1"
     env["GIT_TERMINAL_PROMPT"] = "0"
     return env
+
+
+def resolve_totalsegmentator_executable_arg(value: Any = "") -> str:
+    configured = str(value or "").strip()
+    if configured:
+        return configured
+    for key in ("TOTAL_SEGMENTATOR_EXECUTABLE", "TOTALSEGMENTATOR_EXECUTABLE", "MEDAI_TOTALSEG_EXECUTABLE"):
+        configured = str(os.getenv(key) or "").strip()
+        if configured:
+            return configured
+    return FORMAL_TOTALSEGMENTATOR_EXECUTABLE
 
 
 def normalize_labelcritic_endpoint(base_url: str, port: int) -> tuple[str, int]:
@@ -1069,18 +1081,16 @@ def run_static_preflight(args: argparse.Namespace) -> dict[str, Any]:
         routes = full_scope.get("routes") or {}
         requires_totalseg = any("totalsegmentator" in [str(teacher) for teacher in teachers] for teachers in routes.values())
         if requires_totalseg:
-            configured = str(getattr(args, "totalsegmentator_executable", "") or "").strip()
+            configured = resolve_totalsegmentator_executable_arg(getattr(args, "totalsegmentator_executable", ""))
             previous = os.environ.get("TOTAL_SEGMENTATOR_EXECUTABLE")
-            if configured:
-                os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = configured
+            os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = configured
             try:
                 totalseg = preflight_totalseg_executable()
             finally:
-                if configured:
-                    if previous is None:
-                        os.environ.pop("TOTAL_SEGMENTATOR_EXECUTABLE", None)
-                    else:
-                        os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = previous
+                if previous is None:
+                    os.environ.pop("TOTAL_SEGMENTATOR_EXECUTABLE", None)
+                else:
+                    os.environ["TOTAL_SEGMENTATOR_EXECUTABLE"] = previous
             add("totalsegmentator_executable", totalseg.get("status") == "ok", totalseg)
     except Exception as exc:
         add("full_373_multiteacher_scope", False, f"{type(exc).__name__}: {exc}")
@@ -1178,6 +1188,7 @@ def render_labelcritic_preview_sbatch(args: argparse.Namespace, path: Path) -> d
 
 def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, Any]:
     run_id = _run_id(args.state_root.resolve())
+    totalsegmentator_executable = resolve_totalsegmentator_executable_arg(getattr(args, "totalsegmentator_executable", ""))
     command = [
         str(args.python),
         "tools/dataset_delivery/task2_round1_orchestrator.py",
@@ -1198,6 +1209,8 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "--poll-sec", str(args.poll_sec),
         "--expected-git-commit", str(args.expected_git_commit),
     ]
+    if totalsegmentator_executable:
+        command.extend(["--totalsegmentator-executable", totalsegmentator_executable])
     env_exports = {
         "CODE_ROOT": str(REPO_ROOT),
         "STATE_ROOT": str(args.state_root),
@@ -1209,6 +1222,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "LABELCRITIC_PORT": str(args.labelcritic_port),
         "LABELCRITIC_MODEL_ID": LABELCRITIC_MODEL_ID,
         "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
+        "TOTAL_SEGMENTATOR_EXECUTABLE": totalsegmentator_executable,
         "RUNTIME_NO_GIT": "1",
         "SKIP_GIT_SYNC": "1",
         "GIT_TERMINAL_PROMPT": "0",
@@ -1641,8 +1655,9 @@ def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, 
         "--state-root", str(state_root),
         "--cache-root", str(paths["root"] / "formal_task2_round1"),
     ]
-    if str(getattr(args, "totalsegmentator_executable", "") or "").strip():
-        plan_cmd.extend(["--totalsegmentator-executable", str(args.totalsegmentator_executable)])
+    totalsegmentator_executable = resolve_totalsegmentator_executable_arg(getattr(args, "totalsegmentator_executable", ""))
+    if totalsegmentator_executable:
+        plan_cmd.extend(["--totalsegmentator-executable", totalsegmentator_executable])
     plan_result = _run(plan_cmd, env=env, timeout=600)
     if not plan_result["ok"]:
         log_failure(state_root, stage="teacher_batch_plan", failure_reason=plan_result["stderr"] or "teacher_batch_plan_failed", details=plan_result)
@@ -2816,7 +2831,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--checkpoint-root", default=os.getenv("CHECKPOINT_ROOT", "/projects/bodymaps/users/xhan74/medical_agent/models/checkpoints"), type=Path)
     parser.add_argument("--nnunet-predict-executable", default=os.getenv("NNUNETV2_PREDICT_EXECUTABLE", "/home/xhan74/nnunet_torch22_wrapper/bin/nnUNetv2_predict"), type=Path)
     parser.add_argument("--unest-python-executable", default=os.getenv("UNEST_PYTHON_EXECUTABLE", "/home/xhan74/envs/medical_agent_train_py311/bin/python"), type=Path)
-    parser.add_argument("--totalsegmentator-executable", default=os.getenv("TOTAL_SEGMENTATOR_EXECUTABLE", ""))
+    parser.add_argument("--totalsegmentator-executable", default=resolve_totalsegmentator_executable_arg())
     parser.add_argument("--registry", default=REPO_ROOT / "configs" / "model_registry.yaml", type=Path)
     parser.add_argument("--target-config", default=REPO_ROOT / "configs" / "student_3d_prompt_target_organs.json", type=Path)
     parser.add_argument("--gpu-target-workers", default=int(os.getenv("GPU_TARGET_WORKERS", "0")), type=int)

@@ -73,6 +73,20 @@ def _mock_slurm_units(monkeypatch: pytest.MonkeyPatch, states: dict[str, tuple[s
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_worker_units", fake_units)
 
 
+def _mock_live_labelcritic_job(monkeypatch: pytest.MonkeyPatch, *, job_id: str, state: str, name: str = "labelcritic_72b_service") -> None:
+    def fake_state(observed_job_id):
+        if str(observed_job_id) != str(job_id):
+            return {"state": "UNKNOWN", "job_id": str(observed_job_id), "source": "unknown"}
+        return {
+            "state": state,
+            "job_id": str(observed_job_id),
+            "name": name,
+            "source": "squeue",
+        }
+
+    monkeypatch.setattr("tools.dataset_delivery.task2_h100_policy.default_slurm_job_state", fake_state)
+
+
 def test_dynamic_submitter_overrequests_target_30_to_40_and_uses_generic_gpu(tmp_path: Path):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
 
@@ -992,6 +1006,7 @@ def test_dynamic_submitter_can_defer_teacher_h100_when_labelcritic_reserved(tmp_
         }
     }
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    _mock_live_labelcritic_job(monkeypatch, job_id="777777", state="PENDING")
     summary = _summary(tmp_path, {"full373": 8})
 
     plan = build_dynamic_submission_plan(
@@ -1031,6 +1046,7 @@ def test_dynamic_submitter_blocks_teacher_h100_for_labelcritic_runtime_states(tm
         }
     }
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    _mock_live_labelcritic_job(monkeypatch, job_id="777777", state=state)
     summary = _summary(tmp_path, {"full373": 8})
 
     plan = build_dynamic_submission_plan(
@@ -1408,6 +1424,7 @@ def test_dynamic_submitter_preserves_full_61697_t4_reachability_when_h100_reserv
         }
     }
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.discover_resource_snapshot", lambda **kwargs: snapshot)
+    _mock_live_labelcritic_job(monkeypatch, job_id="777777", state="PENDING")
     monkeypatch.setenv("TASK2_GPU_WORKER_SAFETY_CAP", "5000")
     summary = _summary(tmp_path, {"full373": 61697})
 

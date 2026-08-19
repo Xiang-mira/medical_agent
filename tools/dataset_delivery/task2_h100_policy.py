@@ -180,7 +180,29 @@ def default_slurm_job_state(job_id: str) -> dict[str, Any]:
             "name": parts[3].strip() if len(parts) > 3 else "",
             "source": "squeue",
         }
-    return {"state": "UNKNOWN", "job_id": str(job_id or query_id), "source": "unknown", "squeue": result}
+    sacct = _run(["sacct", "-X", "-n", "-j", query_id, "--format=JobID,State,JobName", "-P"])
+    if sacct["ok"] and sacct["stdout"].strip():
+        preferred = str(job_id or query_id)
+        chosen: list[str] | None = None
+        fallback: list[str] | None = None
+        for line in sacct["stdout"].splitlines():
+            parts = line.split("|")
+            row_id = parts[0].strip() if parts else ""
+            if not row_id:
+                continue
+            fallback = fallback or parts
+            if row_id == preferred or row_id == query_id:
+                chosen = parts
+                break
+        parts = chosen or fallback or []
+        return {
+            "state": parts[1].strip().upper() if len(parts) > 1 else "UNKNOWN",
+            "job_id": str(job_id or query_id),
+            "display_id": parts[0].strip() if parts else query_id,
+            "name": parts[2].strip() if len(parts) > 2 else "",
+            "source": "sacct",
+        }
+    return {"state": "UNKNOWN", "job_id": str(job_id or query_id), "source": "unknown", "squeue": result, "sacct": sacct}
 
 
 def default_find_labelcritic_job_by_name() -> dict[str, Any]:
@@ -367,7 +389,7 @@ def resolve_teacher_h100_policy(
     elif not bool(required):
         reserved = False
         reason = "labelcritic_not_required"
-    elif job_state in LABELCRITIC_H100_RESERVING_STATES:
+    elif job_state in LABELCRITIC_H100_RESERVING_STATES and job_identity_ok:
         reserved = True
         reason = f"labelcritic_job_state:{job_state}"
     elif bool(required):
