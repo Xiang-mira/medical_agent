@@ -94,7 +94,12 @@ def _read_json(path: Path, default: Any = None) -> Any:
 
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
 
 
 def _coerce_process_text(value: Any) -> str:
@@ -105,7 +110,44 @@ def _coerce_process_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _slurm_mutations_disabled(env: dict[str, str] | None = None) -> bool:
+    source = env if env is not None else os.environ
+    return str(source.get("TASK2_DISABLE_SLURM_MUTATIONS") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_slurm_mutation_command(command: list[str]) -> bool:
+    if not command:
+        return False
+    exe = Path(str(command[0])).name
+    if exe == "sbatch":
+        return "--test-only" not in {str(part) for part in command[1:]}
+    if exe == "scancel":
+        return True
+    if exe == "scontrol":
+        readonly = {"show", "listpids", "pidinfo"}
+        action = str(command[1]).lower() if len(command) > 1 else ""
+        return action not in readonly
+    if exe == "bash" and len(command) > 1:
+        script = Path(str(command[1])).name
+        return script in {
+            "submit_labelcritic_72b_service.sh",
+            "submit_task2_formal_103cases.sh",
+            "submit_task2_round1_orchestrated.sh",
+            "resume_round1_formal.sh",
+        }
+    return False
+
+
 def _run(command: list[str], *, cwd: Path = REPO_ROOT, env: dict[str, str] | None = None, timeout: int | None = None) -> dict[str, Any]:
+    if _slurm_mutations_disabled(env) and _is_slurm_mutation_command(command):
+        return {
+            "command": command,
+            "return_code": 125,
+            "stdout": "",
+            "stderr": "SLURM_MUTATION_DISABLED: refusing real scheduler mutation while TASK2_DISABLE_SLURM_MUTATIONS=1",
+            "ok": False,
+            "scheduler_mutation_disabled": True,
+        }
     try:
         proc = subprocess.run(
             command,
@@ -142,6 +184,7 @@ def sanitized_static_test_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in STATIC_TEST_ENV_DROP:
         env.pop(key, None)
+    env["TASK2_DISABLE_SLURM_MUTATIONS"] = "1"
     return env
 
 
@@ -2304,7 +2347,7 @@ def _controller_main(args: argparse.Namespace) -> int:
     if current.get("terminal_state") == "ROUND1_FAILED":
         return 2
     run_id = _run_id(state_root)
-    execution_attempt_id = _execution_attempt_id(state_root, new=True)
+    execution_attempt_id = _execution_attempt_id(state_root)
     _save_state(
         state_root,
         status="CONTROLLER_RUNNING",
@@ -2316,18 +2359,22 @@ def _controller_main(args: argparse.Namespace) -> int:
         worker_generation=execution_attempt_id,
         started_at=utc_now(),
     )
+    write_controller_heartbeat(state_root, iteration=0, stage="start", current={"status": "CONTROLLER_RUNNING"})
     commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
     _save_state(state_root, stage="git_commit_pin", expected_git_commit=commit_pin)
     if commit_pin["status"] != "PASSED":
+        write_controller_heartbeat(state_root, iteration=0, stage="git_commit_pin_failed", current={"expected_git_commit": commit_pin})
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="git_commit_pin", failure_reason=commit_pin["failure_reason"], expected_git_commit=commit_pin)
         return 2
     labelcritic = ensure_labelcritic_service(state_root)
     if labelcritic["status"] == "SUBMIT_FAILED":
         log_failure(state_root, stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason", "labelcritic_submit_failed"), details=labelcritic)
+        write_controller_heartbeat(state_root, iteration=0, stage="labelcritic_submit_failed", current={"labelcritic": labelcritic})
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
         return 2
     _save_state(state_root, stage="labelcritic_submitted_or_reused", labelcritic=labelcritic)
     reconcile_active_teacher_jobs(args)
+    write_controller_heartbeat(state_root, iteration=0, stage="labelcritic_submitted_or_reused", current={"labelcritic": labelcritic})
     estep_submit = submit_estep(args, labelcritic)
     if estep_submit["status"] == "FAILED":
         log_failure(state_root, stage="e_step_submit", failure_reason=estep_submit.get("failure_reason", "e_step_submit_failed"), details=estep_submit)
@@ -2436,7 +2483,8 @@ def controller(args: argparse.Namespace) -> int:
 
 def _resource_telemetry(state_root: Path) -> dict[str, Any]:
     state = _load_state(state_root)
-    formal_root = Path(str(state.get("formal_root") or ""))
+    formal_root_value = str(state.get("formal_root") or "").strip()
+    formal_root = Path(formal_root_value) if formal_root_value else Path("__missing_formal_root__")
     jobs_csv = formal_root / "slurm" / "submitted_jobs.csv"
     worker_counts = {
         "t4_running": 0,
@@ -2565,13 +2613,27 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
 
 def write_controller_heartbeat(state_root: Path, *, iteration: int, stage: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
     state = _load_state(state_root)
-    formal_root = Path(str(state.get("formal_root") or ""))
+    formal_root_value = str(state.get("formal_root") or "").strip()
+    formal_root = Path(formal_root_value) if formal_root_value else Path("__missing_formal_root__")
     estep_telemetry = build_estep_telemetry(formal_root) if formal_root.exists() else {}
     resources = _resource_telemetry(state_root)
     teacher = estep_telemetry.get("teacher_candidate") or {}
+    worker_profiles = (resources.get("teacher_worker_current") or {}).get("by_profile") or {}
+    teacher_workers_by_profile = {
+        profile: {
+            "running": int((counts or {}).get("running") or 0),
+            "pending": int((counts or {}).get("pending") or 0),
+            "transitional": int((counts or {}).get("transitional") or 0),
+            "active": int((counts or {}).get("active") or 0),
+            "valid_pending": int((counts or {}).get("valid_pending") or 0),
+            "invalid_pending": int((counts or {}).get("invalid_pending") or 0),
+        }
+        for profile, counts in worker_profiles.items()
+    }
     heartbeat = {
         "schema_version": "round1_controller_heartbeat_v1",
         "timestamp": utc_now(),
+        "controller_job_id": str(state.get("controller_job_id") or os.getenv("SLURM_JOB_ID") or ""),
         "iteration": int(iteration),
         "stage": stage,
         "rss_mb": _process_rss_mb(),
@@ -2583,21 +2645,19 @@ def write_controller_heartbeat(state_root: Path, *, iteration: int, stage: str, 
         "candidate_success": int(teacher.get("success") or 0),
         "worker_running_by_profile": {
             profile: int((counts or {}).get("running") or 0)
-            for profile, counts in ((resources.get("teacher_worker_current") or {}).get("by_profile") or {}).items()
+            for profile, counts in worker_profiles.items()
         },
         "worker_pending_by_profile": {
             profile: int((counts or {}).get("pending") or 0) + int((counts or {}).get("transitional") or 0)
-            for profile, counts in ((resources.get("teacher_worker_current") or {}).get("by_profile") or {}).items()
+            for profile, counts in worker_profiles.items()
         },
+        "teacher_workers_by_profile": teacher_workers_by_profile,
         "scientific_run_id": state.get("run_id", ""),
         "git_commit": _git_commit(),
         "current": _compact_details(current or {}),
     }
     paths = _state_paths(state_root)
     _write_json(paths["controller_heartbeat"], heartbeat)
-    paths["events"].parent.mkdir(parents=True, exist_ok=True)
-    with paths["events"].open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"time": heartbeat["timestamp"], "event": "controller_heartbeat", **{k: heartbeat[k] for k in ("iteration", "stage", "rss_mb", "available_memory_mb", "candidate_ready", "candidate_running", "candidate_retry", "candidate_terminal", "candidate_success")}}, ensure_ascii=False) + "\n")
     return heartbeat
 
 

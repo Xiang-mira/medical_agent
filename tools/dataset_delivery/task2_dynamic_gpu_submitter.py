@@ -64,6 +64,28 @@ GPU_VRAM_ESTIMATE_GB = {
 }
 QOS_CACHE_FILENAME = "qos_capacity_cache.json"
 
+
+def _slurm_mutations_disabled() -> bool:
+    return str(os.getenv("TASK2_DISABLE_SLURM_MUTATIONS") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _run_sbatch_submit(command: list[str]) -> subprocess.CompletedProcess[str]:
+    if _slurm_mutations_disabled():
+        return subprocess.CompletedProcess(
+            command,
+            125,
+            "",
+            "SLURM_MUTATION_DISABLED: refusing real scheduler mutation while TASK2_DISABLE_SLURM_MUTATIONS=1",
+        )
+    return subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
 @dataclass(frozen=True)
 class GpuSubmitProfile:
     name: str
@@ -1486,19 +1508,14 @@ def build_dynamic_submission_plan(
         task_count = int(row["task_count"])
         comment = str(row["comment"])
         array_spec = str(row["array_spec"])
-        proc = subprocess.run(
-            [
-                "sbatch",
-                "--parsable",
-                "--comment", comment,
-                f"--array={array_spec}",
-                str(row["sbatch_file"]),
-            ],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
+        command = [
+            "sbatch",
+            "--parsable",
+            "--comment", comment,
+            f"--array={array_spec}",
+            str(row["sbatch_file"]),
+        ]
+        proc = _run_sbatch_submit(command)
         parsed_job = parse_sbatch_job_id(proc.stdout)
         row["job_id"] = parsed_job["job_id"]
         row["array_job_id"] = parsed_job["array_job_id"]
@@ -1511,13 +1528,7 @@ def build_dynamic_submission_plan(
         attempt = {
             **row,
             "return_code": int(proc.returncode),
-            "command": [
-                "sbatch",
-                "--parsable",
-                "--comment", comment,
-                f"--array={array_spec}",
-                str(row["sbatch_file"]),
-            ],
+            "command": command,
         }
         append_submission_attempt(slurm_root, attempt)
         if proc.returncode != 0:

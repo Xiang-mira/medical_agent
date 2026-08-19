@@ -883,6 +883,42 @@ def test_valid_pending_window_prevents_duplicate_replenishment(tmp_path: Path, m
     assert plan["total_array_concurrency"] == 0
 
 
+def test_restarted_controller_counts_existing_t4_and_a100_arrays_without_duplicate_demand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import build_dynamic_submission_plan
+
+    summary = _summary(tmp_path, {"full373": 64})
+    slurm_root = tmp_path / "slurm"
+    slurm_root.mkdir(parents=True, exist_ok=True)
+    (slurm_root / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,array_task_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"round1_live,attempt_live,ready_batch_001,4963693,4963693,,full373,gpu_t4,1,{CANDIDATE_TASK_V1},submitted,ACTIVE,PENDING\n"
+        f"round1_live,attempt_live,ready_batch_001,4963694,4963694,,full373,gpu_a100,1,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
+        encoding="utf-8",
+    )
+    _mock_slurm_units(monkeypatch, {"4963693": ("PENDING", "Resources", 1), "4963694": ("RUNNING", "", 1)})
+
+    plan = build_dynamic_submission_plan(
+        summary_path=summary,
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        target_workers=2,
+        overrequest_workers=2,
+        profile_specs="gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00,gpu_a100|gpua100|gpu:A100:1|8|80G|06:00:00",
+        groups=["full373"],
+        dry_run=True,
+        run_id="round1_live",
+        submission_id="ready_batch_002",
+        execution_attempt_id="attempt_live",
+    )
+
+    reports = {row["profile"]: row for row in plan["worker_pool"]["profile_reports"]}
+    assert reports["gpu_t4"]["active_workers"] == 1
+    assert reports["gpu_a100"]["active_workers"] == 1
+    assert reports["gpu_t4"]["new_worker_deficit"] == 0
+    assert reports["gpu_a100"]["new_worker_deficit"] == 0
+    assert plan["total_array_concurrency"] == 0
+
+
 def test_completed_workers_release_capacity_on_next_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import GpuSubmitProfile, _worker_pool_counts
 
@@ -1338,6 +1374,41 @@ def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_s
     assert "worker_shard_000" in submitted[0]
     rows = _rows(tmp_path / "slurm" / "submitted_jobs.csv")
     assert {row["model_group"] for row in rows} == {"full373"}
+
+
+def test_dynamic_submitter_slurm_mutation_guard_blocks_real_sbatch(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery import task2_dynamic_gpu_submitter as submitter
+
+    monkeypatch.setenv("TASK2_DISABLE_SLURM_MUTATIONS", "1")
+
+    def fail_subprocess(*args, **kwargs):
+        raise AssertionError("guarded sbatch submit must not reach subprocess.run")
+
+    monkeypatch.setattr(submitter.subprocess, "run", fail_subprocess)
+
+    proc = submitter._run_sbatch_submit(["sbatch", "--parsable", "worker.sbatch"])
+
+    assert proc.returncode == 125
+    assert "SLURM_MUTATION_DISABLED" in proc.stderr
+
+
+def test_dynamic_submitter_sbatch_submit_runs_outside_mutation_guard(monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery import task2_dynamic_gpu_submitter as submitter
+
+    monkeypatch.delenv("TASK2_DISABLE_SLURM_MUTATIONS", raising=False)
+    calls: list[list[str]] = []
+
+    def fake_subprocess(command, **kwargs):
+        calls.append([str(item) for item in command])
+        return subprocess.CompletedProcess(command, 0, "91006\n", "")
+
+    monkeypatch.setattr(submitter.subprocess, "run", fake_subprocess)
+
+    proc = submitter._run_sbatch_submit(["sbatch", "--parsable", "worker.sbatch"])
+
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == "91006"
+    assert calls == [["sbatch", "--parsable", "worker.sbatch"]]
 
 
 def test_dynamic_submitter_qos_slot_later_frees_and_remaining_workers_submit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

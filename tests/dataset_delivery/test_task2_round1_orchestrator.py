@@ -26,6 +26,7 @@ def _clean_runtime_env(monkeypatch):
         "TOTAL_SEGMENTATOR_EXECUTABLE",
         "TOTALSEGMENTATOR_EXECUTABLE",
         "MEDAI_TOTALSEG_EXECUTABLE",
+        "TASK2_DISABLE_SLURM_MUTATIONS",
         "GITHUB_TOKEN",
     }:
         monkeypatch.delenv(key, raising=False)
@@ -599,12 +600,13 @@ def test_estep_passed_releases_mstep(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic: calls.append("submit_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: calls.append("advance_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or {"status": "PASSED"})
+    monkeypatch.setattr(orch, "submit_labelcritic_selection_workers", lambda args, labelcritic: calls.append("submit_selection") or {"status": "SUBMITTED", "job_id": "88"})
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
     monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
 
     assert orch.controller(args) == 0
-    assert calls == ["submit_estep", "poll_labelcritic", "advance_estep", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
+    assert calls == ["submit_estep", "poll_labelcritic", "advance_estep", "submit_selection", "check_estep", "submit_mstep", "check_mstep", "final_validator"]
     assert orch._load_state(args.state_root)["terminal_state"] == "ROUND1_PASSED"
 
 
@@ -652,6 +654,7 @@ def test_estep_passed_waits_for_labelcritic_gate_before_mstep(tmp_path, monkeypa
     monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic: calls.append("submit_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: calls.append("advance_estep") or {"status": "SUBMITTED"})
     monkeypatch.setattr(orch, "check_estep", lambda args: calls.append("check_estep") or {"status": "PASSED"})
+    monkeypatch.setattr(orch, "submit_labelcritic_selection_workers", lambda args, labelcritic: calls.append("submit_selection") or {"status": "SUBMITTED", "job_id": "88"})
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
     monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
@@ -666,6 +669,7 @@ def test_estep_passed_waits_for_labelcritic_gate_before_mstep(tmp_path, monkeypa
         "sleep",
         "poll_labelcritic",
         "advance_estep",
+        "submit_selection",
         "check_estep",
         "submit_mstep",
         "check_mstep",
@@ -950,6 +954,86 @@ def test_static_preflight_pytest_uses_sanitized_environment(tmp_path, monkeypatc
     assert report["status"] == "PASSED"
     assert captured_env
     assert not any(key in captured_env for key in orch.STATIC_TEST_ENV_DROP)
+    assert captured_env["TASK2_DISABLE_SLURM_MUTATIONS"] == "1"
+
+
+def test_static_preflight_slurm_mutation_guard_refuses_real_sbatch(monkeypatch):
+    monkeypatch.setenv("TASK2_DISABLE_SLURM_MUTATIONS", "1")
+
+    def fail_subprocess(*args, **kwargs):
+        raise AssertionError("guarded scheduler mutation must not reach subprocess.run")
+
+    monkeypatch.setattr(orch.subprocess, "run", fail_subprocess)
+
+    result = orch._run(["sbatch", "--parsable", "worker.sbatch"])
+
+    assert result["return_code"] == 125
+    assert result["scheduler_mutation_disabled"] is True
+    assert "SLURM_MUTATION_DISABLED" in result["stderr"]
+
+
+def test_slurm_mutation_guard_allows_readonly_and_test_only_commands(monkeypatch):
+    monkeypatch.setenv("TASK2_DISABLE_SLURM_MUTATIONS", "1")
+    calls: list[list[str]] = []
+
+    def fake_subprocess(command, **kwargs):
+        calls.append([str(item) for item in command])
+        return subprocess.CompletedProcess(command, 0, "ok\n", "")
+
+    monkeypatch.setattr(orch.subprocess, "run", fake_subprocess)
+
+    assert orch._run(["sbatch", "--test-only", "worker.sbatch"])["ok"] is True
+    assert orch._run(["scontrol", "show", "config"])["ok"] is True
+    assert calls == [["sbatch", "--test-only", "worker.sbatch"], ["scontrol", "show", "config"]]
+
+
+def test_production_sbatch_submit_still_runs_without_test_guard(monkeypatch):
+    monkeypatch.delenv("TASK2_DISABLE_SLURM_MUTATIONS", raising=False)
+    calls: list[list[str]] = []
+
+    def fake_subprocess(command, **kwargs):
+        calls.append([str(item) for item in command])
+        return subprocess.CompletedProcess(command, 0, "123456\n", "")
+
+    monkeypatch.setattr(orch.subprocess, "run", fake_subprocess)
+
+    result = orch._run(["sbatch", "--parsable", "worker.sbatch"])
+
+    assert result["ok"] is True
+    assert result["stdout"] == "123456"
+    assert calls == [["sbatch", "--parsable", "worker.sbatch"]]
+
+
+def test_labelcritic_selection_submitter_cannot_call_real_sbatch_under_static_guard(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    formal_root.mkdir(parents=True)
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_guard")
+    monkeypatch.setenv("TASK2_DISABLE_SLURM_MUTATIONS", "1")
+    monkeypatch.setattr(
+        orch,
+        "build_estep_telemetry",
+        lambda root: {"labelcritic": {"queue_depth": 1}, "case_target": {"terminal": 0, "total": 1}},
+    )
+    calls: list[list[str]] = []
+
+    def fake_subprocess(command, **kwargs):
+        calls.append([str(item) for item in command])
+        if command[:2] == ["bash", "-n"] or command[:2] == ["sbatch", "--test-only"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(command, 0, "abc123\n", "")
+        raise AssertionError("real selection sbatch submit must be blocked before subprocess.run")
+
+    monkeypatch.setattr(orch.subprocess, "run", fake_subprocess)
+
+    result = orch.submit_labelcritic_selection_workers(args, {"status": "PASSED", "base_url": "http://node", "port": 8000})
+
+    assert result["status"] == "FAILED"
+    assert "SLURM_MUTATION_DISABLED" in result["failure_reason"]
+    assert calls[0][:2] == ["bash", "-n"]
+    assert calls[1][:2] == ["sbatch", "--test-only"]
+    assert not any("--parsable" in command for command in calls)
 
 
 def test_static_preflight_requires_totalsegmentator_executable_when_routed(tmp_path, monkeypatch):
@@ -1379,6 +1463,43 @@ def test_case_input_ready_submits_teacher_while_other_case_staging_running(tmp_p
     assert result["case_ids"] == ["CASE001"]
     assert captured_ready == [["CASE001"]]
     assert orch._load_state(args.state_root)["teacher_submitted_case_ids"] == ["CASE001"]
+
+
+def test_restarted_teacher_submit_uses_existing_execution_attempt_for_live_adoption(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    args.gpu_profile_specs = "gpu_t4|gpu|gpu:T4:1|8|64G|06:00:00,gpu_a100|gpua100|gpu:A100:1|8|80G|06:00:00"
+    formal_root = tmp_path / "formal"
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_live", execution_attempt_id="attempt_live", worker_generation="attempt_live")
+    source_manifest = _write_source_manifest(tmp_path / "source.csv", ["CASE001"])
+    _stage_ready_case(args.workspace_root, "CASE001")
+    commands: list[list[str]] = []
+    _fake_teacher_submitter(monkeypatch, submitted_commands=commands)
+    monkeypatch.setattr(orch, "reconcile_active_teacher_jobs", lambda *args, **kwargs: {"status": "RECONCILED", "adopted_count": 2})
+
+    result = orch.submit_ready_teacher_batch(args, source_manifest, {"status": "WAITING", "job_id": "4963105"})
+
+    dynamic_command = next(command for command in commands if any(str(part).endswith("task2_dynamic_gpu_submitter.py") for part in command))
+    assert result["status"] == "SUBMITTED"
+    assert dynamic_command[dynamic_command.index("--execution-attempt-id") + 1] == "attempt_live"
+    assert result["execution_attempt_id"] == "attempt_live"
+
+
+def test_controller_restart_preserves_existing_execution_attempt_id(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    orch._save_state(args.state_root, run_id="round1_live", execution_attempt_id="attempt_live", worker_generation="attempt_live")
+    monkeypatch.setattr(orch, "_git_commit", lambda: "actual")
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "UNKNOWN", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "find_labelcritic_job_by_name", lambda *args, **kwargs: "")
+    args.expected_git_commit = "expected"
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: pytest.fail("commit mismatch stops before service submit"))
+
+    assert orch.controller(args) == 2
+    state = orch._load_state(args.state_root)
+    heartbeat = json.loads((args.state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
+    assert state["execution_attempt_id"] == "attempt_live"
+    assert state["worker_generation"] == "attempt_live"
+    assert heartbeat["iteration"] == 0
+    assert heartbeat["stage"] == "git_commit_pin_failed"
 
 
 def test_seventy_of_103_staged_allows_gpu_teacher_workers(tmp_path, monkeypatch):
@@ -2001,10 +2122,24 @@ def test_controller_sbatch_defaults_to_32g_memory(tmp_path: Path):
     assert "#SBATCH --mem=32G" in text
 
 
+def test_controller_sbatch_preserves_zero_worker_auto_scheduling_semantics(tmp_path: Path):
+    args = _args(tmp_path)
+    args.gpu_target_workers = 0
+    args.gpu_overrequest_workers = 0
+    args.gpu_profile_specs = "auto"
+
+    rendered = orch.render_controller_sbatch(args, tmp_path / "controller.sbatch")
+
+    command = rendered["command"]
+    assert command[command.index("--gpu-target-workers") + 1] == "0"
+    assert command[command.index("--gpu-overrequest-workers") + 1] == "0"
+    assert command[command.index("--gpu-profile-specs") + 1] == "auto"
+
+
 def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     state_root = tmp_path / "state"
     formal_root = state_root / "round1_orchestrated" / "full_373_multiteacher_round1"
-    orch._save_state(state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158")
+    orch._save_state(state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158", controller_job_id="controller_123")
     full373.write_json(
         formal_root / "full_round1_scope.json",
         {"total_logical_candidate_tasks": 2, "case_count": 1, "canonical_target_count": 1, "task_rows": [{"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1"}]},
@@ -2014,14 +2149,28 @@ def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path:
     (formal_root / "slurm" / "submitted_jobs.csv").write_text("job_id,profile,execution_attempt_id,execution_schema_version\n111,generic_gpu,,candidate_task_v1\n", encoding="utf-8")
     monkeypatch.setattr(orch, "query_slurm_worker_units", lambda row: {"state": "RUNNING", "job_id": "111", "units": [{"job_id": "111", "state": "RUNNING", "unit_count": 1}]})
 
+    events_path = state_root / "round1_orchestrated" / "events.jsonl"
+    event_lines_before = events_path.read_text(encoding="utf-8").splitlines()
+
     heartbeat = orch.write_controller_heartbeat(state_root, iteration=3, stage="test_loop")
 
     assert heartbeat["iteration"] == 3
+    assert heartbeat["controller_job_id"] == "controller_123"
     assert "rss_mb" in heartbeat
+    assert "available_memory_mb" in heartbeat
     assert heartbeat["candidate_ready"] == 1
     assert heartbeat["worker_running_by_profile"]["generic_gpu"] == 1
+    assert heartbeat["teacher_workers_by_profile"]["generic_gpu"]["active"] == 1
     saved = json.loads((state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
     assert saved["stage"] == "test_loop"
+    second = orch.write_controller_heartbeat(state_root, iteration=4, stage="second_loop")
+    saved_second = json.loads((state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
+    assert second["iteration"] == 4
+    assert saved_second["iteration"] == 4
+    assert saved_second["stage"] == "second_loop"
+    assert "test_loop" not in (state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8")
+    assert events_path.read_text(encoding="utf-8").splitlines() == event_lines_before
+    assert not list((state_root / "round1_orchestrated").glob(".controller_heartbeat.json.*.tmp"))
 
 
 def test_controller_unhandled_exception_is_recoverable_not_scientific_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
