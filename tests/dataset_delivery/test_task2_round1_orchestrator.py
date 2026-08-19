@@ -2136,6 +2136,70 @@ def test_controller_sbatch_preserves_zero_worker_auto_scheduling_semantics(tmp_p
     assert command[command.index("--gpu-profile-specs") + 1] == "auto"
 
 
+def test_controller_sbatch_runs_python_unbuffered(tmp_path: Path):
+    args = _args(tmp_path)
+
+    rendered = orch.render_controller_sbatch(args, tmp_path / "controller.sbatch")
+
+    command = rendered["command"]
+    text = Path(rendered["path"]).read_text(encoding="utf-8")
+    assert command[1] == "-u"
+    assert rendered["env"]["PYTHONUNBUFFERED"] == "1"
+    assert "export PYTHONUNBUFFERED=1" in text
+
+
+def test_controller_fast_teacher_replenishment_uses_compact_state_before_full_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    (formal_root / "slurm").mkdir(parents=True)
+    (formal_root / "queues").mkdir(parents=True)
+    (formal_root / "formal_task2_submission_manifest.json").write_text('{"status":"READY","task_count":61697}\n', encoding="utf-8")
+    (formal_root / "slurm" / "dynamic_gpu_submission_plan.json").write_text('{"logical_task_count":61697}\n', encoding="utf-8")
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "job_id,array_job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158", execution_attempt_id="attempt_live")
+    calls: list[dict[str, object]] = []
+
+    def fake_fast(**kwargs):
+        calls.append(kwargs)
+        return {
+            "status": "SUBMITTED",
+            "scheduler_status": "ACTIVE",
+            "candidate_summary": {"ready": 52149, "running": 0, "retry": 52, "terminal": 9496, "success": 7218, "total": 61697},
+            "desired_workers_by_profile": {"gpu_t4": 114},
+            "existing_workers_by_profile": {"gpu_t4": {"running": 0, "pending": 0, "active": 0}},
+            "deficit_by_profile": {"gpu_t4": 114},
+        }
+
+    stages: list[str] = []
+    real_heartbeat = orch.write_controller_heartbeat
+
+    def capture_heartbeat(state_root, *, iteration, stage, current=None):
+        stages.append(stage)
+        return real_heartbeat(state_root, iteration=iteration, stage=stage, current=current)
+
+    monkeypatch.setattr(orch, "build_estep_telemetry", lambda *args, **kwargs: pytest.fail("fast path must not perform full candidate telemetry scan"))
+    monkeypatch.setattr(orch, "write_controller_heartbeat", capture_heartbeat)
+    monkeypatch.setattr(orch, "reconcile_active_teacher_jobs", lambda *args, **kwargs: {"status": "RECONCILED", "adopted_count": 0})
+    monkeypatch.setattr(orch, "_git_commit", lambda: "abc123")
+    monkeypatch.setattr(orch, "resolve_teacher_h100_policy", lambda **kwargs: {"labelcritic_required": True, "labelcritic_job_id": "4963105", "labelcritic_job_state": "PENDING", "labelcritic_h100_reserved": True, "effective_teacher_h100_enabled": False})
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.fast_replenish_existing_worker_pool", fake_fast)
+
+    result = orch.fast_teacher_replenishment(args, iteration=1, labelcritic={"status": "WAITING", "job_id": "4963105"})
+
+    heartbeat = json.loads((args.state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
+    assert result["status"] == "SUBMITTED"
+    assert calls
+    assert calls[0]["expected_candidate_count"] == 61697
+    assert calls[0]["expected_scientific_run_id"] == "round1_4995446918298643158"
+    assert heartbeat["stage"] == "teacher_replenishment"
+    assert stages == ["minimal_safety_gate", "live_worker_reconcile", "teacher_replenishment"]
+    assert heartbeat["candidate_summary"]["ready"] == 52149
+    assert heartbeat["last_submission_result"]["status"] == "SUBMITTED"
+
+
 def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     state_root = tmp_path / "state"
     formal_root = state_root / "round1_orchestrated" / "full_373_multiteacher_round1"

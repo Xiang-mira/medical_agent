@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,13 @@ GPU_VRAM_ESTIMATE_GB = {
 QOS_CACHE_FILENAME = "qos_capacity_cache.json"
 
 
+def _read_json(path: Path, default: Any = None) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {} if default is None else default
+
+
 def _slurm_mutations_disabled() -> bool:
     return str(os.getenv("TASK2_DISABLE_SLURM_MUTATIONS") or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -107,6 +115,20 @@ class GpuSubmitProfile:
         if any(token in upper for token in ("L40", "A40", "A6000", "A30", "A10")):
             return "GPU_MEDIUM"
         return "GPU_INFERENCE_COMPATIBLE"
+
+
+def _profile_from_plan(value: dict[str, Any]) -> GpuSubmitProfile | None:
+    try:
+        return GpuSubmitProfile(
+            name=str(value["name"]),
+            partition=str(value["partition"]),
+            gres=str(value["gres"]),
+            cpus_per_task=int(value["cpus_per_task"]),
+            mem=str(value["mem"]),
+            time_limit=str(value["time_limit"]),
+        )
+    except Exception:
+        return None
 
 
 def parse_profile_specs(value: str) -> list[GpuSubmitProfile]:
@@ -1205,7 +1227,7 @@ def build_dynamic_submission_plan(
         qos_states=qos_states,
         h100_enabled=h100_enabled,
     )
-    existing_workers = _worker_pool_counts(slurm_root, profiles, execution_attempt_id=safe_execution_attempt_id)
+    existing_workers = _worker_pool_counts(slurm_root, profiles, execution_attempt_id="")
     accounting_invariants: list[dict[str, Any]] = []
     for profile in profiles:
         physical = _profile_capacity_hint(profile, resource_inventory)
@@ -1408,7 +1430,7 @@ def build_dynamic_submission_plan(
     reused: list[dict[str, Any]] = []
     active_logical_keys = existing_active_logical_keys(
         slurm_root,
-        execution_attempt_id=safe_execution_attempt_id,
+        execution_attempt_id="",
         job_state_fn=_slurm_worker_units,
     )
 
@@ -1743,6 +1765,330 @@ def build_dynamic_submission_plan(
         tmp_last.write_text(str(output_root) + "\n", encoding="utf-8")
         tmp_last.replace(state_root / ".last_task2_formal")
     return plan
+
+
+def _compact_candidate_summary(output_root: Path) -> dict[str, Any]:
+    telemetry = _read_json(output_root / "queues" / "telemetry.json", {})
+    marker = _read_json(output_root / "queues" / "candidate_seed_complete.json", {})
+    teacher = telemetry.get("teacher_candidate") if isinstance(telemetry, dict) else {}
+    teacher = teacher if isinstance(teacher, dict) else {}
+    return {
+        "status": "READY" if teacher else "MISSING",
+        "ready": int(teacher.get("ready_candidates") or 0),
+        "running": int(teacher.get("running") or 0),
+        "retry": int(teacher.get("retry") or 0),
+        "terminal": int(teacher.get("terminal") or 0),
+        "success": int(teacher.get("success") or 0),
+        "total": int(teacher.get("total") or marker.get("logical_task_count") or 0),
+        "source": str(output_root / "queues" / "telemetry.json") if teacher else "",
+        "seed_marker": marker,
+    }
+
+
+def _validate_existing_seed_marker(output_root: Path, *, expected_scientific_run_id: str = "", expected_count: int | None = None) -> dict[str, Any]:
+    marker_path = output_root / "queues" / "candidate_seed_complete.json"
+    marker = _read_json(marker_path, {})
+    if not marker:
+        return {"status": "MISSING", "path": str(marker_path)}
+    failures = []
+    if marker.get("schema_version") != "candidate_seed_complete_v1":
+        failures.append("schema_version")
+    if marker.get("execution_schema_version") != CANDIDATE_TASK_V1:
+        failures.append("execution_schema_version")
+    if expected_scientific_run_id and marker.get("scientific_run_id") != expected_scientific_run_id:
+        failures.append("scientific_run_id")
+    if expected_count is not None and int(marker.get("logical_task_count") or 0) != int(expected_count):
+        failures.append("logical_task_count")
+    if not marker.get("manifest_sha256"):
+        failures.append("manifest_sha256_missing")
+    manifest_path = Path(str(marker.get("manifest_path") or output_root / "queues" / "shared_ready_candidate_manifest.csv"))
+    if not manifest_path.exists():
+        failures.append("manifest_missing")
+    else:
+        stat = manifest_path.stat()
+        if marker.get("manifest_size") is not None and int(marker.get("manifest_size") or 0) != int(stat.st_size):
+            failures.append("manifest_size")
+        if marker.get("manifest_mtime_ns") is not None and int(marker.get("manifest_mtime_ns") or 0) != int(stat.st_mtime_ns):
+            failures.append("manifest_mtime_ns")
+    return {
+        "status": "READY" if not failures else "MISMATCH",
+        "path": str(marker_path),
+        "failures": failures,
+        "marker": marker,
+        "manifest_path": str(manifest_path),
+    }
+
+
+def _profiles_from_existing_plan(plan: dict[str, Any]) -> list[GpuSubmitProfile]:
+    profiles = []
+    for row in plan.get("profile_specs") or []:
+        if isinstance(row, dict):
+            profile = _profile_from_plan(row)
+            if profile is not None:
+                profiles.append(profile)
+    return profiles
+
+
+def _desired_workers_from_existing_plan(plan: dict[str, Any]) -> dict[str, int]:
+    desired = {
+        str(name): int(value or 0)
+        for name, value in (((plan.get("worker_pool") or {}).get("desired_workers_by_profile") or {}) if isinstance(plan.get("worker_pool"), dict) else {}).items()
+    }
+    for row in ((plan.get("worker_pool") or {}).get("profile_reports") or []) if isinstance(plan.get("worker_pool"), dict) else []:
+        if isinstance(row, dict) and row.get("profile"):
+            desired.setdefault(str(row["profile"]), int(row.get("desired_workers") or 0))
+    return desired
+
+
+def fast_replenish_existing_worker_pool(
+    *,
+    output_root: Path,
+    state_root: Path,
+    submission_id: str,
+    execution_attempt_id: str,
+    run_id: str,
+    git_commit: str = "",
+    expected_scientific_run_id: str = "",
+    expected_candidate_count: int | None = None,
+    run_sbatch_test_only: bool = False,
+    labelcritic_required: Any | None = None,
+    labelcritic_job_id: str | None = None,
+    labelcritic_job_state: str | None = None,
+    labelcritic_h100_reserved: Any | None = None,
+) -> dict[str, Any]:
+    output_root = output_root.resolve()
+    state_root = state_root.resolve()
+    slurm_root = output_root / "slurm"
+    plan_path = slurm_root / "dynamic_gpu_submission_plan.json"
+    existing_plan = _read_json(plan_path, {})
+    if not existing_plan:
+        return {"status": "SKIPPED", "reason": "dynamic_plan_missing", "plan_path": str(plan_path)}
+    seed = _validate_existing_seed_marker(
+        output_root,
+        expected_scientific_run_id=expected_scientific_run_id,
+        expected_count=expected_candidate_count,
+    )
+    if seed["status"] != "READY":
+        return {"status": "SKIPPED", "reason": "candidate_seed_marker_not_ready", "seed": seed}
+    candidate_summary = _compact_candidate_summary(output_root)
+    if int(candidate_summary.get("ready") or 0) <= 0:
+        return {"status": "NO_READY_CANDIDATES", "candidate_summary": candidate_summary, "seed": seed}
+    profiles = _profiles_from_existing_plan(existing_plan)
+    desired = _desired_workers_from_existing_plan(existing_plan)
+    if not profiles or not desired:
+        return {"status": "SKIPPED", "reason": "worker_plan_missing", "candidate_summary": candidate_summary, "seed": seed}
+    h100_policy = resolve_teacher_h100_policy(
+        state_root=state_root,
+        labelcritic_required=labelcritic_required,
+        labelcritic_job_id=labelcritic_job_id,
+        labelcritic_job_state=labelcritic_job_state,
+        labelcritic_h100_reserved=labelcritic_h100_reserved,
+    )
+    if not h100_policy.get("effective_teacher_h100_enabled"):
+        for profile in profiles:
+            if "H100" in f"{profile.name} {profile.partition} {profile.gres}".upper():
+                desired[profile.name] = 0
+    profile_names = {profile.name for profile in profiles}
+    accounting = reconcile_submitted_worker_accounting(
+        slurm_root,
+        profiles=profile_names,
+        execution_attempt_id="",
+        job_state_fn=_slurm_worker_units,
+    )
+    existing_workers = accounting.get("counts") or {}
+    profile_reports_by_name = {
+        str(row.get("profile")): row
+        for row in ((existing_plan.get("worker_pool") or {}).get("profile_reports") or [])
+        if isinstance(row, dict) and row.get("profile")
+    }
+    deficits = {}
+    for profile in profiles:
+        active = int((existing_workers.get(profile.name) or {}).get("active") or 0)
+        deficits[profile.name] = max(0, int(desired.get(profile.name) or 0) - active)
+    if not any(deficits.values()):
+        return {
+            "status": "NO_DEFICIT",
+            "candidate_summary": candidate_summary,
+            "seed": seed,
+            "desired_workers_by_profile": desired,
+            "existing_workers_by_profile": existing_workers,
+            "deficit_by_profile": deficits,
+            "teacher_h100_policy": h100_policy,
+        }
+    task_manifest = output_root / "queues" / "shared_ready_candidate_manifest.csv"
+    if not task_manifest.exists():
+        return {"status": "SKIPPED", "reason": "shared_ready_candidate_manifest_missing", "task_manifest": str(task_manifest)}
+    safe_submission_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(submission_id or "fast_replenish").strip()).strip("_")
+    safe_run_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(run_id or os.getenv("ROUND1_RUN_ID") or "round1").strip()).strip("_")
+    safe_execution_attempt_id = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(execution_attempt_id or os.getenv("TASK2_EXECUTION_ATTEMPT_ID") or safe_submission_id).strip()).strip("_")
+    dynamic_root = slurm_root / "dynamic" / safe_submission_id
+    dynamic_root.mkdir(parents=True, exist_ok=True)
+    max_array_size = int(existing_plan.get("max_array_size") or DEFAULT_SLURM_MAX_ARRAY_SIZE_FALLBACK)
+    submitted = []
+    backpressured = []
+    failed = []
+    planned_rows = []
+    for profile in profiles:
+        deficit = int(deficits.get(profile.name) or 0)
+        if deficit <= 0:
+            continue
+        report = profile_reports_by_name.get(profile.name) or {}
+        effective_limit = int(report.get("effective_shard_size") or max_array_size or deficit)
+        effective_limit = max(1, min(effective_limit, max_array_size, deficit))
+        remaining = deficit
+        shard_index = 0
+        while remaining > 0:
+            worker_count = min(remaining, effective_limit)
+            shard_id = f"fast_replenish_{int(time.time())}_{os.getpid()}_{profile.name}_{shard_index:03d}"
+            sbatch_for_shard = dynamic_root / f"full373_{profile.name}_{shard_id}_queue_worker.sbatch"
+            _render_queue_worker_sbatch(
+                sbatch_for_shard,
+                profile=profile,
+                task_manifest=task_manifest,
+                output_root=output_root,
+                state_root=state_root,
+                run_id=safe_run_id,
+                submission_id=safe_submission_id,
+                worker_shard_id=shard_id,
+                python_executable=sys.executable,
+            )
+            local_end = worker_count - 1
+            row = {
+                "run_id": safe_run_id,
+                "execution_attempt_id": safe_execution_attempt_id,
+                "worker_generation": safe_execution_attempt_id,
+                "submission_id": safe_submission_id,
+                "logical_task_id": f"{safe_run_id}:{safe_submission_id}:{CANDIDATE_TASK_V1}:full373:{profile.name}:{shard_id}",
+                "execution_schema_version": CANDIDATE_TASK_V1,
+                "manifest_schema_version": DEFAULT_MANIFEST_SCHEMA_VERSION,
+                "logical_task_namespace": DEFAULT_LOGICAL_TASK_NAMESPACE,
+                "model_group": "full373",
+                "group": "full373",
+                "profile": profile.name,
+                "shard_id": shard_id,
+                "shard_index": str(shard_index),
+                "partition": profile.partition,
+                "gres": profile.gres,
+                "cpus_per_task": profile.cpus_per_task,
+                "mem": profile.mem,
+                "time_limit": profile.time_limit,
+                "task_count": worker_count,
+                "array_concurrency": worker_count,
+                "task_manifest": str(task_manifest),
+                "sbatch_file": str(sbatch_for_shard),
+                "job_id": "",
+                "array_job_id": "",
+                "array_task_id": "",
+                "display_id": "",
+                "submission_status": "pending",
+                "preflight_status": "",
+                "preflight_stderr": "",
+                "stderr": "",
+                "stdout": "",
+                "array_range": f"0-{local_end}",
+                "array_spec": f"0-{local_end}%{worker_count}",
+                "local_start": 0,
+                "local_end": local_end,
+                "comment": slurm_comment(
+                    run_id=safe_run_id,
+                    submission_id=safe_submission_id,
+                    group="full373",
+                    profile=profile.name,
+                    execution_schema_version=CANDIDATE_TASK_V1,
+                    shard_id=shard_id,
+                ),
+                "formal_root": str(output_root),
+                "state_root": str(state_root),
+                "git_commit": git_commit,
+                "scheduler_status": "PLANNED",
+                "worker_mode": "shared_ready_queue_consumer",
+                "resource_class": profile.resource_class,
+            }
+            planned_rows.append(dict(row))
+            preflight = _preflight_worker_array(row, run_sbatch_test_only=run_sbatch_test_only)
+            row["preflight_status"] = preflight["status"]
+            row["preflight_stderr"] = preflight.get("sbatch_test_only_stderr") or preflight.get("bash_n_stderr") or ""
+            if preflight["status"] != "READY":
+                row["submission_status"] = "failed"
+                row["scheduler_status"] = "BACKPRESSURED" if preflight["status"] == "BACKPRESSURED" else "FATAL"
+                row["failure_reason"] = preflight.get("failure_reason") or row["preflight_stderr"]
+                (backpressured if preflight["status"] == "BACKPRESSURED" else failed).append(dict(row))
+                remaining -= worker_count
+                shard_index += 1
+                continue
+            command = ["sbatch", "--parsable", "--comment", row["comment"], f"--array={row['array_spec']}", str(sbatch_for_shard)]
+            proc = _run_sbatch_submit(command)
+            parsed_job = parse_sbatch_job_id(proc.stdout)
+            row["job_id"] = parsed_job["job_id"]
+            row["array_job_id"] = parsed_job["array_job_id"]
+            row["array_task_id"] = parsed_job["array_task_id"]
+            row["display_id"] = parsed_job["display_id"]
+            row["stderr"] = proc.stderr.strip()
+            row["stdout"] = proc.stdout.strip()
+            row["submitted_at"] = utc_now()
+            append_submission_attempt(slurm_root, {**row, "return_code": int(proc.returncode), "command": command})
+            if proc.returncode != 0:
+                classification = classify_sbatch_failure(proc.stderr or proc.stdout)
+                row["submission_status"] = "failed"
+                row["scheduler_status"] = "BACKPRESSURED" if classification["class"] == "TRANSIENT_RESOURCE_BACKPRESSURE" else "FATAL"
+                row["failure_reason"] = classification["reason"]
+                (backpressured if row["scheduler_status"] == "BACKPRESSURED" else failed).append(dict(row))
+                remaining -= worker_count
+                shard_index += 1
+                continue
+            row["status"] = "SUBMITTED"
+            row["submission_status"] = "submitted"
+            row["scheduler_status"] = "ACTIVE"
+            row["slurm_state"] = "PENDING"
+            persist_submitted_job(slurm_root, row)
+            record_job_lifecycle(
+                state_root,
+                {
+                    "status": "SUBMITTED",
+                    "scheduler_state": "ACTIVE",
+                    "job_id": row["job_id"],
+                    "logical_task_id": row["logical_task_id"],
+                    "submission_id": safe_submission_id,
+                    "execution_attempt_id": safe_execution_attempt_id,
+                    "execution_schema_version": CANDIDATE_TASK_V1,
+                    "group": row["model_group"],
+                    "profile": row["profile"],
+                    "shard_id": row["shard_id"],
+                    "partition": row["partition"],
+                    "gres": row["gres"],
+                    "task_manifest": row["task_manifest"],
+                    "formal_root": str(output_root),
+                    "git_commit": git_commit,
+                    "worker_mode": "shared_ready_queue_consumer",
+                    "attempt": "fast_teacher_replenishment",
+                },
+            )
+            submitted.append(dict(row))
+            remaining -= worker_count
+            shard_index += 1
+    status = "SUBMITTED" if submitted else ("WAITING_FOR_SUBMISSION_CAPACITY" if backpressured else "FAILED" if failed else "NO_DEFICIT")
+    result = {
+        "status": status,
+        "scheduler_status": "ACTIVE" if submitted else ("BACKPRESSURED" if backpressured else "FATAL" if failed else "IDLE"),
+        "scheduler_mode": "fast_teacher_replenishment",
+        "created_at": utc_now(),
+        "submission_id": safe_submission_id,
+        "execution_attempt_id": safe_execution_attempt_id,
+        "run_id": safe_run_id,
+        "candidate_summary": candidate_summary,
+        "seed": seed,
+        "desired_workers_by_profile": desired,
+        "existing_workers_by_profile": existing_workers,
+        "deficit_by_profile": deficits,
+        "teacher_h100_policy": h100_policy,
+        "planned_jobs": planned_rows,
+        "submitted_jobs": submitted,
+        "backpressured_jobs": backpressured,
+        "failed_jobs": failed,
+        "submitted_job_count": len(submitted),
+    }
+    write_json(slurm_root / f"fast_teacher_replenishment_{safe_submission_id}.json", result)
+    return result
 
 
 def main() -> int:

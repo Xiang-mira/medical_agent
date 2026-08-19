@@ -1234,6 +1234,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
     totalsegmentator_executable = resolve_totalsegmentator_executable_arg(getattr(args, "totalsegmentator_executable", ""))
     command = [
         str(args.python),
+        "-u",
         "tools/dataset_delivery/task2_round1_orchestrator.py",
         "controller",
         "--state-root", str(args.state_root),
@@ -1266,6 +1267,7 @@ def render_controller_sbatch(args: argparse.Namespace, path: Path) -> dict[str, 
         "LABELCRITIC_MODEL_ID": LABELCRITIC_MODEL_ID,
         "EXPECTED_GIT_COMMIT": str(args.expected_git_commit),
         "TOTAL_SEGMENTATOR_EXECUTABLE": totalsegmentator_executable,
+        "PYTHONUNBUFFERED": "1",
         "RUNTIME_NO_GIT": "1",
         "SKIP_GIT_SYNC": "1",
         "GIT_TERMINAL_PROMPT": "0",
@@ -1616,6 +1618,105 @@ def _dynamic_submit_timeout_sec() -> int:
 
 def _dynamic_submit_timed_out(result: dict[str, Any]) -> bool:
     return bool(result.get("timed_out")) or int(result.get("return_code") or 0) == 124
+
+
+def _controller_log(*, iteration: int, stage: str, **fields: Any) -> None:
+    parts = [f"iteration={int(iteration)}", f"stage={stage}"]
+    for key, value in fields.items():
+        if isinstance(value, dict):
+            continue
+        parts.append(f"{key}={value}")
+    print(" ".join(parts), flush=True)
+
+
+def _current_labelcritic_job_id(state: dict[str, Any], labelcritic: dict[str, Any] | None = None) -> str:
+    for payload in (labelcritic, state.get("labelcritic")):
+        if isinstance(payload, dict):
+            job_id = _job_id_from_labelcritic_state(payload)
+            if job_id:
+                return job_id
+    return ""
+
+
+def fast_teacher_replenishment(args: argparse.Namespace, *, iteration: int, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
+    state_root = args.state_root.resolve()
+    state = _load_state(state_root)
+    formal_root_value = str(state.get("formal_root") or (_state_paths(state_root)["root"] / FULL373_ROOT_NAME)).strip()
+    formal_root = Path(formal_root_value).resolve()
+    if not formal_root.exists():
+        return {"status": "SKIPPED", "reason": "formal_root_missing", "formal_root": str(formal_root)}
+    start = time.time()
+    write_controller_heartbeat(state_root, iteration=iteration, stage="minimal_safety_gate", current={"stage_started_at": utc_now(), "formal_root": str(formal_root), "skip_candidate_scan": True})
+    if state.get("terminal_state") in {"ROUND1_PASSED", "ROUND1_FAILED"}:
+        return {"status": "SKIPPED", "reason": "terminal_state", "terminal_state": state.get("terminal_state")}
+    summary = _read_json(formal_root / "formal_task2_submission_manifest.json", {})
+    dynamic_plan = _read_json(formal_root / "slurm" / "dynamic_gpu_submission_plan.json", {})
+    expected_count = int(dynamic_plan.get("logical_task_count") or dynamic_plan.get("total_task_count") or summary.get("task_count") or 0) or None
+    write_controller_heartbeat(state_root, iteration=iteration, stage="live_worker_reconcile", current={"stage_started_at": utc_now(), "formal_root": str(formal_root), "skip_candidate_scan": True})
+    reconcile = reconcile_active_teacher_jobs(args, formal_root)
+    state = _load_state(state_root)
+    label_job_id = _current_labelcritic_job_id(state, labelcritic)
+    h100_policy = resolve_teacher_h100_policy(
+        state_root=state_root,
+        labelcritic=labelcritic if isinstance(labelcritic, dict) else state.get("labelcritic") if isinstance(state.get("labelcritic"), dict) else None,
+        labelcritic_job_id=label_job_id,
+        slurm_job_state_fn=slurm_job_state,
+        find_labelcritic_job_fn=find_labelcritic_job_by_name,
+        source="fast_teacher_replenishment",
+    )
+    from tools.dataset_delivery.task2_dynamic_gpu_submitter import fast_replenish_existing_worker_pool
+
+    submission_id = f"fast_replenish_{iteration:04d}"
+    result = fast_replenish_existing_worker_pool(
+        output_root=formal_root,
+        state_root=state_root,
+        submission_id=submission_id,
+        execution_attempt_id=_execution_attempt_id(state_root),
+        run_id=str(state.get("run_id") or _run_id(state_root)),
+        git_commit=_git_commit(),
+        expected_scientific_run_id=str(state.get("run_id") or ""),
+        expected_candidate_count=expected_count,
+        run_sbatch_test_only=not bool(getattr(args, "skip_sbatch_test_only", False)),
+        labelcritic_required=h100_policy.get("labelcritic_required"),
+        labelcritic_job_id=str(h100_policy.get("labelcritic_job_id") or ""),
+        labelcritic_job_state=str(h100_policy.get("labelcritic_job_state") or ""),
+        labelcritic_h100_reserved=h100_policy.get("labelcritic_h100_reserved"),
+    )
+    elapsed = round(time.time() - start, 3)
+    _save_state(
+        state_root,
+        last_teacher_replenishment=result,
+        last_completed_stage="teacher_replenishment",
+        scheduler_status=result.get("scheduler_status") or state.get("scheduler_status") or "",
+    )
+    write_controller_heartbeat(
+        state_root,
+        iteration=iteration,
+        stage="teacher_replenishment",
+        current={
+            "stage_started_at": utc_now(),
+            "stage_elapsed_sec": elapsed,
+            "skip_candidate_scan": True,
+            "reconcile": reconcile,
+            "last_submission_result": result,
+            "candidate_summary": result.get("candidate_summary") or {},
+        },
+    )
+    deficits = result.get("deficit_by_profile") or {}
+    existing = result.get("existing_workers_by_profile") or {}
+    for profile, deficit in deficits.items():
+        counts = existing.get(profile) or {}
+        _controller_log(
+            iteration=iteration,
+            stage="teacher_replenishment",
+            profile=profile,
+            desired=(result.get("desired_workers_by_profile") or {}).get(profile, 0),
+            running=counts.get("running", 0),
+            pending=counts.get("pending", 0),
+            deficit=deficit,
+            result=result.get("status", ""),
+        )
+    return result
 
 
 def submit_ready_teacher_batch(args: argparse.Namespace, source_manifest: Path, labelcritic: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2359,17 +2460,19 @@ def _controller_main(args: argparse.Namespace) -> int:
         worker_generation=execution_attempt_id,
         started_at=utc_now(),
     )
-    write_controller_heartbeat(state_root, iteration=0, stage="start", current={"status": "CONTROLLER_RUNNING"})
+    write_controller_heartbeat(state_root, iteration=0, stage="start", current={"status": "CONTROLLER_RUNNING", "skip_candidate_scan": True})
     commit_pin = verify_expected_git_commit(state_root, str(getattr(args, "expected_git_commit", "") or ""))
     _save_state(state_root, stage="git_commit_pin", expected_git_commit=commit_pin)
     if commit_pin["status"] != "PASSED":
-        write_controller_heartbeat(state_root, iteration=0, stage="git_commit_pin_failed", current={"expected_git_commit": commit_pin})
+        write_controller_heartbeat(state_root, iteration=0, stage="git_commit_pin_failed", current={"expected_git_commit": commit_pin, "skip_candidate_scan": True})
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="git_commit_pin", failure_reason=commit_pin["failure_reason"], expected_git_commit=commit_pin)
         return 2
+    fast_startup = fast_teacher_replenishment(args, iteration=0)
+    _controller_log(iteration=0, stage="startup_fast_teacher_replenishment", result=fast_startup.get("status", ""))
     labelcritic = ensure_labelcritic_service(state_root)
     if labelcritic["status"] == "SUBMIT_FAILED":
         log_failure(state_root, stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason", "labelcritic_submit_failed"), details=labelcritic)
-        write_controller_heartbeat(state_root, iteration=0, stage="labelcritic_submit_failed", current={"labelcritic": labelcritic})
+        write_controller_heartbeat(state_root, iteration=0, stage="labelcritic_submit_failed", current={"labelcritic": labelcritic, "skip_candidate_scan": True})
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
         return 2
     _save_state(state_root, stage="labelcritic_submitted_or_reused", labelcritic=labelcritic)
@@ -2384,6 +2487,8 @@ def _controller_main(args: argparse.Namespace) -> int:
     iteration = 0
     while True:
         iteration += 1
+        fast_loop = fast_teacher_replenishment(args, iteration=iteration, labelcritic=labelcritic_gate)
+        _controller_log(iteration=iteration, stage="loop_fast_teacher_replenishment", result=fast_loop.get("status", ""))
         if labelcritic_gate.get("status") != "PASSED":
             labelcritic_gate = poll_labelcritic_runtime(state_root)
             if labelcritic_gate["status"] == "FAILED":
@@ -2508,7 +2613,7 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
     if jobs_csv.exists():
         reconciled = reconcile_submitted_worker_accounting(
             jobs_csv.parent,
-            execution_attempt_id=str(state.get("execution_attempt_id") or ""),
+            execution_attempt_id="",
             job_state_fn=query_slurm_worker_units,
         )
         worker_current["by_profile"] = reconciled.get("counts") or {}
@@ -2613,9 +2718,11 @@ def _resource_telemetry(state_root: Path) -> dict[str, Any]:
 
 def write_controller_heartbeat(state_root: Path, *, iteration: int, stage: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
     state = _load_state(state_root)
+    current = current or {}
     formal_root_value = str(state.get("formal_root") or "").strip()
     formal_root = Path(formal_root_value) if formal_root_value else Path("__missing_formal_root__")
-    estep_telemetry = build_estep_telemetry(formal_root) if formal_root.exists() else {}
+    use_compact_candidate_summary = bool(current.get("skip_candidate_scan")) or isinstance(current.get("candidate_summary"), dict)
+    estep_telemetry = {} if use_compact_candidate_summary else (build_estep_telemetry(formal_root) if formal_root.exists() else {})
     resources = _resource_telemetry(state_root)
     teacher = estep_telemetry.get("teacher_candidate") or {}
     worker_profiles = (resources.get("teacher_worker_current") or {}).get("by_profile") or {}
@@ -2630,19 +2737,36 @@ def write_controller_heartbeat(state_root: Path, *, iteration: int, stage: str, 
         }
         for profile, counts in worker_profiles.items()
     }
+    candidate_summary = current.get("candidate_summary") if isinstance(current.get("candidate_summary"), dict) else {
+        "ready": int(teacher.get("ready_candidates") or 0),
+        "running": int(teacher.get("running") or 0),
+        "retry": int(teacher.get("retry") or 0),
+        "terminal": int(teacher.get("terminal") or 0),
+        "success": int(teacher.get("success") or 0),
+        "total": int(teacher.get("total") or 0),
+    }
+    candidate_ready = int(candidate_summary.get("ready") or teacher.get("ready_candidates") or 0)
+    candidate_running = int(candidate_summary.get("running") or teacher.get("running") or 0)
+    candidate_retry = int(candidate_summary.get("retry") or teacher.get("retry") or 0)
+    candidate_terminal = int(candidate_summary.get("terminal") or teacher.get("terminal") or 0)
+    candidate_success = int(candidate_summary.get("success") or teacher.get("success") or 0)
     heartbeat = {
         "schema_version": "round1_controller_heartbeat_v1",
         "timestamp": utc_now(),
         "controller_job_id": str(state.get("controller_job_id") or os.getenv("SLURM_JOB_ID") or ""),
         "iteration": int(iteration),
         "stage": stage,
+        "stage_started_at": str(current.get("stage_started_at") or state.get("stage_started_at") or utc_now()),
+        "stage_elapsed_sec": float(current.get("stage_elapsed_sec") or 0.0),
+        "last_completed_stage": str(current.get("last_completed_stage") or state.get("last_completed_stage") or ""),
         "rss_mb": _process_rss_mb(),
         "available_memory_mb": _available_memory_mb(),
-        "candidate_ready": int(teacher.get("ready_candidates") or 0),
-        "candidate_running": int(teacher.get("running") or 0),
-        "candidate_retry": int(teacher.get("retry") or 0),
-        "candidate_terminal": int(teacher.get("terminal") or 0),
-        "candidate_success": int(teacher.get("success") or 0),
+        "candidate_ready": candidate_ready,
+        "candidate_running": candidate_running,
+        "candidate_retry": candidate_retry,
+        "candidate_terminal": candidate_terminal,
+        "candidate_success": candidate_success,
+        "candidate_summary": candidate_summary,
         "worker_running_by_profile": {
             profile: int((counts or {}).get("running") or 0)
             for profile, counts in worker_profiles.items()
@@ -2652,9 +2776,13 @@ def write_controller_heartbeat(state_root: Path, *, iteration: int, stage: str, 
             for profile, counts in worker_profiles.items()
         },
         "teacher_workers_by_profile": teacher_workers_by_profile,
+        "live_workers_by_profile": teacher_workers_by_profile,
+        "desired_workers_by_profile": resources.get("desired_teacher_workers_by_profile") or {},
+        "deficit_by_profile": resources.get("replenishment_deficit_by_profile") or {},
+        "last_submission_result": current.get("last_submission_result") or state.get("last_teacher_replenishment") or {},
         "scientific_run_id": state.get("run_id", ""),
         "git_commit": _git_commit(),
-        "current": _compact_details(current or {}),
+        "current": _compact_details(current),
     }
     paths = _state_paths(state_root)
     _write_json(paths["controller_heartbeat"], heartbeat)
