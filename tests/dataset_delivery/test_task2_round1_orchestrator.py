@@ -59,6 +59,9 @@ def _args(tmp_path: Path) -> SimpleNamespace:
         retry_failed=True,
         new_attempt=False,
         expected_git_commit="",
+        formal_root=tmp_path / "state" / "round1_orchestrated" / orch.FULL373_ROOT_NAME,
+        scientific_run_id="round1_4995446918298643158",
+        acceptance_root=tmp_path / "acceptance",
     )
 
 
@@ -251,6 +254,70 @@ def test_active_slurm_discovered_labelcritic_reused(tmp_path, monkeypatch):
     assert result["source"] == "slurm_name_discovery"
 
 
+def test_acceptance_job_is_not_reused_as_formal_labelcritic_service(tmp_path, monkeypatch):
+    monkeypatch.delenv("LABELCRITIC_JOB_ID", raising=False)
+    service = orch._service_paths(tmp_path)
+    service["root"].mkdir(parents=True)
+    service["job"].write_text("111111\n", encoding="utf-8")
+
+    def fake_record(job_id):
+        if str(job_id) == "111111":
+            return _labelcritic_record(str(job_id), state="PENDING", name="labelcritic_72b_acceptance")
+        return _labelcritic_record(str(job_id), state="PENDING")
+
+    submits: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        submits.append(command)
+        assert command == ["bash", "scripts/task2/submit_labelcritic_72b_service.sh"]
+        return {"ok": True, "stdout": "LABELCRITIC_JOB_ID=222222\n", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "slurm_job_record", fake_record)
+    monkeypatch.setattr(orch, "find_labelcritic_job_by_name", lambda *args: "")
+    monkeypatch.setattr(orch, "_run", fake_run)
+
+    result = orch.ensure_labelcritic_service(tmp_path)
+
+    assert result["status"] == "SUBMITTED"
+    assert result["job_id"] == "222222"
+    assert "name_mismatch" in result["ignored_jobs"][0]["validation"]["failure_reason"]
+    assert len(submits) == 1
+
+
+def test_stale_historical_labelcritic_metadata_does_not_prevent_new_formal_service(tmp_path, monkeypatch):
+    monkeypatch.delenv("LABELCRITIC_JOB_ID", raising=False)
+    service = orch._service_paths(tmp_path)
+    service["root"].mkdir(parents=True)
+    service["job"].write_text("111111\n", encoding="utf-8")
+    service_state = {"status": "REUSED_ACTIVE_JOB", "job_id": "111111", "validation": {"record": {"state": "PENDING"}}}
+    (service["root"] / "service_state.json").write_text(json.dumps(service_state), encoding="utf-8")
+    orch._save_state(tmp_path, labelcritic={"job_id": "111111", "status": "REUSED_ACTIVE_JOB"})
+
+    monkeypatch.setattr(
+        orch,
+        "slurm_job_record",
+        lambda job_id: {"status": "NOT_FOUND", "state": "UNKNOWN", "job_id": str(job_id), "user": "", "name": ""},
+    )
+    monkeypatch.setattr(orch, "find_labelcritic_job_by_name", lambda *args: "")
+    submits: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        submits.append(command)
+        assert command == ["bash", "scripts/task2/submit_labelcritic_72b_service.sh"]
+        return {"ok": True, "stdout": "LABELCRITIC_JOB_ID=222222\n", "stderr": "", "return_code": 0}
+
+    monkeypatch.setattr(orch, "_run", fake_run)
+
+    result = orch.ensure_labelcritic_service(tmp_path)
+
+    assert result["status"] == "SUBMITTED"
+    assert result["job_id"] == "222222"
+    assert len(submits) == 1
+    stale = json.loads((service["root"] / "stale_service_job_last.json").read_text(encoding="utf-8"))
+    assert stale["active_formal_service"] is False
+    assert stale["job_id"] == "111111"
+
+
 def test_labelcritic_spec_hash_mismatch_is_not_reused_and_pending_job_is_controlled_cancelled(tmp_path, monkeypatch):
     monkeypatch.delenv("LABELCRITIC_JOB_ID", raising=False)
     service = orch._service_paths(tmp_path)
@@ -373,11 +440,14 @@ def test_pending_labelcritic_submits_estep_before_runtime_ready(tmp_path, monkey
     monkeypatch.setattr(orch, "submit_mstep", lambda args: calls.append("submit_mstep") or {"status": "SUBMITTED", "job_id": "99"})
     monkeypatch.setattr(orch, "check_mstep", lambda args: calls.append("check_mstep") or {"status": "PASSED"})
     monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: calls.append("final_validator") or {"status": "PASSED", "terminal_state": "ROUND1_PASSED"})
+    monkeypatch.setattr(orch, "submit_labelcritic_selection_workers", lambda args, labelcritic: calls.append(f"selection:{labelcritic['status']}") or {"status": "SUBMITTED", "job_id": "555"})
     monkeypatch.setattr(orch.time, "sleep", lambda sec: calls.append("sleep"))
 
     assert orch.controller(args) == 0
     assert calls.index("submit_estep") < calls.index("poll_labelcritic")
     assert calls.index("submit_mstep") > calls.index("check_estep")
+    assert "selection:WAITING" not in calls
+    assert "selection:PASSED" in calls
 
 
 def test_service_runtime_validation_failure_blocks_mstep_not_estep(tmp_path, monkeypatch):
@@ -450,6 +520,72 @@ def test_status_reports_round1_streaming_telemetry(tmp_path, monkeypatch):
     assert status["case_target"]["total"] == 6
     assert status["labelcritic_queue"]["queue_depth"] == 1
     assert status["resources"]["labelcritic_h100_state"] == "RUNNING"
+
+
+def _write_minimal_gate(args, status: str = "PASS") -> None:
+    paths = orch._state_paths(args.state_root)
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    (paths["root"] / "round1_minimal_recovery_gate.json").write_text(json.dumps({"status": status}), encoding="utf-8")
+
+
+def test_acceptance_pending_does_not_block_formal_resume(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    _write_minimal_gate(args, "PASS")
+    calls: list[str] = []
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "COMPLETED", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "recovery_audit", lambda call_args: {"status": "PASS", "scientific_run_id": call_args.scientific_run_id, "candidate_counts": {"candidate_universe": 61697}})
+    monkeypatch.setattr(orch, "_latest_acceptance_report", lambda root: {"final_status": "PENDING", "job_id": "111111"})
+    monkeypatch.setattr(orch, "submit_controller", lambda call_args: calls.append("submit_controller") or {"status": "CONTROLLER_SUBMITTED", "controller_job_id": "222222", "state_root": str(call_args.state_root)})
+
+    result = orch.resume_formal(args)
+
+    assert result["ROUND1_RESUME_SUBMITTED"] == "PASS"
+    assert result["controller_job_id"] == "222222"
+    assert result["labelcritic_acceptance"]["status"] == "NON_BLOCKING"
+    assert calls == ["submit_controller"]
+
+
+def test_recovery_audit_failure_blocks_formal_resume(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    _write_minimal_gate(args, "PASS")
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "COMPLETED", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "recovery_audit", lambda call_args: {"status": "FAIL", "checks": [{"name": "scientific_run_id", "ok": False}]})
+    monkeypatch.setattr(orch, "_latest_acceptance_report", lambda root: {"final_status": "PASS"})
+    monkeypatch.setattr(orch, "submit_controller", lambda call_args: pytest.fail("recovery audit failure must block resume"))
+
+    result = orch.resume_formal(args)
+
+    assert result["status"] == "FAIL"
+    assert result["failure_reason"] == "resume_gates_not_passed"
+    assert next(check for check in result["checks"] if check["name"] == "recovery_audit")["ok"] is False
+
+
+def test_minimal_recovery_failure_blocks_formal_resume(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    _write_minimal_gate(args, "FAIL")
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "COMPLETED", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "recovery_audit", lambda call_args: {"status": "PASS"})
+    monkeypatch.setattr(orch, "_latest_acceptance_report", lambda root: {"final_status": "PENDING"})
+    monkeypatch.setattr(orch, "submit_controller", lambda call_args: pytest.fail("minimal recovery failure must block resume"))
+
+    result = orch.resume_formal(args)
+
+    assert result["status"] == "FAIL"
+    assert result["failure_reason"] == "resume_gates_not_passed"
+    assert next(check for check in result["checks"] if check["name"] == "minimal_recovery")["ok"] is False
+
+
+def test_duplicate_active_controller_blocks_duplicate_formal_resume(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    orch._save_state(args.state_root, controller_job_id="111111")
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "RUNNING", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "recovery_audit", lambda call_args: pytest.fail("duplicate controller check should happen first"))
+
+    result = orch.resume_formal(args)
+
+    assert result["status"] == "FAIL"
+    assert result["failure_reason"] == "active_controller_exists"
+    assert result["controller_job_id"] == "111111"
 
 
 def test_estep_passed_releases_mstep(tmp_path, monkeypatch):

@@ -281,6 +281,7 @@ def resolve_teacher_h100_policy(
     sources: list[str] = [source] if source else []
     job_found = False
     discovery_details: dict[str, Any] = {}
+    job_identity_ok = True
 
     if job_id or job_state or explicit_reserved is not None:
         sources.append("explicit_policy")
@@ -303,14 +304,23 @@ def resolve_teacher_h100_policy(
             sources.append(payload_source)
 
     slurm_fn = slurm_job_state_fn or default_slurm_job_state
-    if job_id and (not job_state or job_state == "UNKNOWN"):
+    if job_id:
         state_doc = slurm_fn(job_id)
         discovery_details["job_state_lookup"] = state_doc
         discovered = str(state_doc.get("state") or "").strip().upper()
-        if discovered:
+        discovered_name = str(state_doc.get("name") or state_doc.get("job_name") or "").strip()
+        if discovered_name and discovered_name != LABELCRITIC_JOB_NAME:
+            job_identity_ok = False
+            discovery_details["job_identity_mismatch"] = {
+                "expected_name": LABELCRITIC_JOB_NAME,
+                "actual_name": discovered_name,
+            }
+        if discovered and discovered != "UNKNOWN":
             job_state = discovered
             sources.append(str(state_doc.get("source") or "slurm_job_state"))
-    if job_id and job_state and job_state != "UNKNOWN":
+        elif str(state_doc.get("source") or "") in {"unknown", "none", ""}:
+            job_state = "UNKNOWN"
+    if job_id and job_state and job_state != "UNKNOWN" and job_identity_ok and job_state in LABELCRITIC_H100_RESERVING_STATES:
         job_found = True
 
     if not job_id and not job_state:
@@ -320,19 +330,35 @@ def resolve_teacher_h100_policy(
             found = {"status": "SELECTED", "job_id": found} if found else {"status": "NONE"}
         discovery_details["name_discovery"] = found
         if isinstance(found, dict) and str(found.get("status") or "") == "SELECTED":
-            job_id = str(found.get("job_id") or "").strip()
-            job_state = str(found.get("state") or "").strip().upper()
-            job_found = bool(job_id or job_state)
-            sources.append(str(found.get("source") or "slurm_name_discovery"))
+            found_name = str(found.get("name") or found.get("job_name") or LABELCRITIC_JOB_NAME).strip()
+            if found_name == LABELCRITIC_JOB_NAME:
+                job_id = str(found.get("job_id") or "").strip()
+                job_state = str(found.get("state") or "").strip().upper()
+                job_found = bool(job_id and job_state in LABELCRITIC_H100_RESERVING_STATES)
+                sources.append(str(found.get("source") or "slurm_name_discovery"))
+            else:
+                discovery_details["ignored_name_discovery"] = {
+                    "reason": "name_mismatch",
+                    "expected_name": LABELCRITIC_JOB_NAME,
+                    "actual_name": found_name,
+                    "job_id": str(found.get("job_id") or ""),
+                }
 
     if job_id and (not job_state or job_state == "UNKNOWN"):
         state_doc = slurm_fn(job_id)
         discovery_details["post_discovery_job_state_lookup"] = state_doc
         discovered = str(state_doc.get("state") or "").strip().upper()
-        if discovered:
+        discovered_name = str(state_doc.get("name") or state_doc.get("job_name") or "").strip()
+        if discovered_name and discovered_name != LABELCRITIC_JOB_NAME:
+            job_identity_ok = False
+            discovery_details["job_identity_mismatch"] = {
+                "expected_name": LABELCRITIC_JOB_NAME,
+                "actual_name": discovered_name,
+            }
+        if discovered and discovered != "UNKNOWN":
             job_state = discovered
             sources.append(str(state_doc.get("source") or "slurm_job_state"))
-    if job_id and job_state and job_state != "UNKNOWN":
+    if job_id and job_state and job_state != "UNKNOWN" and job_identity_ok and job_state in LABELCRITIC_H100_RESERVING_STATES:
         job_found = True
 
     if explicit_reserved is not None:
@@ -346,8 +372,10 @@ def resolve_teacher_h100_policy(
         reason = f"labelcritic_job_state:{job_state}"
     elif bool(required):
         reserved = True
-        if job_state in LABELCRITIC_TERMINAL_STATES:
-            reason = f"labelcritic_required_job_terminal:{job_state}"
+        if job_id and not job_identity_ok:
+            reason = "labelcritic_required_without_active_job:name_mismatch"
+        elif job_state in LABELCRITIC_TERMINAL_STATES:
+            reason = "labelcritic_required_without_active_job"
         else:
             reason = "labelcritic_required_without_active_job"
 

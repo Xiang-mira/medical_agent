@@ -31,6 +31,7 @@ def test_labelcritic_active_states_reserve_h100_when_teacher_overflow_allowed(tm
         labelcritic_required=True,
         labelcritic_job_id="111111",
         labelcritic_job_state=state,
+        slurm_job_state_fn=lambda job_id: {"state": state, "job_id": str(job_id), "name": "labelcritic_72b_service"},
     )
 
     assert policy["allow_h100_teacher_overflow"] is True
@@ -73,6 +74,7 @@ def test_labelcritic_not_required_overrides_discovered_pending_job(tmp_path: Pat
         allow_h100_teacher_overflow=True,
         labelcritic_required=False,
         find_labelcritic_job_fn=lambda: {"status": "SELECTED", "job_id": "987654", "state": "PENDING", "source": "test_discovery"},
+        slurm_job_state_fn=lambda job_id: {"state": "PENDING", "job_id": str(job_id), "name": "labelcritic_72b_service"},
     )
 
     assert policy["labelcritic_job_found"] is True
@@ -110,6 +112,7 @@ def test_controller_restart_restores_reservation_from_service_state(tmp_path: Pa
         state_root=state_root,
         allow_h100_teacher_overflow=True,
         labelcritic_required=True,
+        slurm_job_state_fn=lambda job_id: {"state": "PENDING", "job_id": str(job_id), "name": "labelcritic_72b_service"},
     )
 
     assert policy["labelcritic_job_id"] == "222222"
@@ -124,9 +127,46 @@ def test_labelcritic_discovery_does_not_hardcode_runtime_job_id(tmp_path: Path):
         allow_h100_teacher_overflow=True,
         labelcritic_required=True,
         find_labelcritic_job_fn=lambda: {"status": "SELECTED", "job_id": "987654", "state": "RUNNING", "source": "test_discovery"},
+        slurm_job_state_fn=lambda job_id: {"state": "RUNNING", "job_id": str(job_id), "name": "labelcritic_72b_service"},
     )
 
     assert policy["labelcritic_job_id"] == "987654"
     assert policy["labelcritic_job_id"] != "111111"
     assert policy["labelcritic_job_state"] == "RUNNING"
     assert policy["labelcritic_h100_reserved"] is True
+
+
+def test_stale_persisted_labelcritic_pending_is_reconciled_with_slurm_terminal(tmp_path: Path):
+    state_root = tmp_path / "state"
+    service_root = state_root / "labelcritic_72b_service"
+    service_root.mkdir(parents=True)
+    (service_root / "service_state.json").write_text(
+        json.dumps({"status": "REUSED_ACTIVE_JOB", "job_id": "111111", "validation": {"record": {"state": "PENDING"}}}),
+        encoding="utf-8",
+    )
+
+    policy = resolve_teacher_h100_policy(
+        state_root=state_root,
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=True,
+        slurm_job_state_fn=lambda job_id: {"state": "FAILED", "job_id": str(job_id), "name": "labelcritic_72b_service", "source": "sacct"},
+    )
+
+    assert policy["labelcritic_job_id"] == "111111"
+    assert policy["labelcritic_job_found"] is False
+    assert policy["labelcritic_job_state"] == "FAILED"
+    assert policy["reservation_reason"] == "labelcritic_required_without_active_job"
+
+
+def test_acceptance_job_is_not_counted_as_formal_labelcritic_reservation(tmp_path: Path):
+    policy = resolve_teacher_h100_policy(
+        state_root=tmp_path / "state",
+        allow_h100_teacher_overflow=True,
+        labelcritic_required=True,
+        find_labelcritic_job_fn=lambda: {"status": "SELECTED", "job_id": "222222", "state": "PENDING", "name": "labelcritic_72b_acceptance", "source": "test_discovery"},
+        slurm_job_state_fn=lambda job_id: {"state": "PENDING", "job_id": str(job_id), "name": "labelcritic_72b_acceptance"},
+    )
+
+    assert policy["labelcritic_job_found"] is False
+    assert policy["labelcritic_job_id"] == ""
+    assert policy["reservation_reason"] == "labelcritic_required_without_active_job"

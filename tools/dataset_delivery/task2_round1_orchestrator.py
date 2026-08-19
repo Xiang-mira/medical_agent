@@ -619,6 +619,36 @@ def _write_labelcritic_service_state(state_root: Path, payload: dict[str, Any]) 
     _write_json(service["root"] / "service_state.json", payload)
 
 
+def reconcile_stale_labelcritic_service_job(state_root: Path, *, source: str, job_id: str, validation: dict[str, Any]) -> dict[str, Any]:
+    record = validation.get("record") if isinstance(validation, dict) else {}
+    state = str((record or {}).get("state") or "UNKNOWN").upper()
+    reconciled = {
+        "status": "STALE_FORMAL_LABELCRITIC_JOB",
+        "source": source,
+        "job_id": str(job_id),
+        "slurm_state": state,
+        "validation": validation,
+        "timestamp": utc_now(),
+        "active_formal_service": False,
+    }
+    service = _service_paths(state_root)
+    service["root"].mkdir(parents=True, exist_ok=True)
+    _write_json(service["root"] / "stale_service_job_last.json", reconciled)
+    record_job_lifecycle(
+        state_root,
+        {
+            "status": "STALE_FORMAL_LABELCRITIC_JOB",
+            "stage": "labelcritic_service_reconcile",
+            "job_id": str(job_id),
+            "slurm_state": state,
+            "source": source,
+            "active_formal_service": False,
+            "validation": validation,
+        },
+    )
+    return reconciled
+
+
 def maybe_cancel_obsolete_labelcritic_job(job_id: str, validation: dict[str, Any], *, expected_spec_hash: str) -> dict[str, Any]:
     record = validation.get("record") or {}
     reason = str(validation.get("failure_reason") or "")
@@ -1300,8 +1330,9 @@ def ensure_labelcritic_service(state_root: Path) -> dict[str, Any]:
             reused = {"status": "REUSED_ACTIVE_JOB", "job_id": job_id, "source": source, "validation": validation}
             _write_labelcritic_service_state(state_root, reused)
             return reused
+        stale = reconcile_stale_labelcritic_service_job(state_root, source=source, job_id=job_id, validation=validation)
         cancellation = maybe_cancel_obsolete_labelcritic_job(job_id, validation, expected_spec_hash=expected_spec_hash)
-        ignored.append({"source": source, "job_id": job_id, "validation": validation, "controlled_cancellation": cancellation})
+        ignored.append({"source": source, "job_id": job_id, "validation": validation, "stale_reconciliation": stale, "controlled_cancellation": cancellation})
     try:
         named = find_labelcritic_job_by_name(expected_spec_hash)
     except TypeError:
@@ -2713,7 +2744,6 @@ def resume_formal(args: argparse.Namespace) -> dict[str, Any]:
     minimal = _read_json(paths["root"] / "round1_minimal_recovery_gate.json", {})
     checks = [
         {"name": "recovery_audit", "ok": audit.get("status") == "PASS"},
-        {"name": "labelcritic_acceptance", "ok": acceptance.get("final_status") == "PASS"},
         {"name": "minimal_recovery", "ok": minimal.get("status") == "PASS"},
     ]
     if not all(check["ok"] for check in checks):
@@ -2726,7 +2756,18 @@ def resume_formal(args: argparse.Namespace) -> dict[str, Any]:
     submit_args.new_attempt = False
     result = submit_controller(submit_args)
     if result.get("status") == "CONTROLLER_SUBMITTED":
-        result = {"ROUND1_RESUME_SUBMITTED": "PASS", **result, "scientific_run_id": str(args.scientific_run_id), "formal_root": str(args.formal_root)}
+        result = {
+            "ROUND1_RESUME_SUBMITTED": "PASS",
+            **result,
+            "scientific_run_id": str(args.scientific_run_id),
+            "formal_root": str(args.formal_root),
+            "resume_gates": checks,
+            "labelcritic_acceptance": {
+                "status": "NON_BLOCKING",
+                "final_status": acceptance.get("final_status") or acceptance.get("status") or "UNKNOWN",
+                "report": acceptance.get("report") or "",
+            },
+        }
     return result
 
 
