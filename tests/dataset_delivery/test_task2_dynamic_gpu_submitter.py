@@ -189,7 +189,11 @@ def test_dynamic_submitter_preflight_failure_submits_no_partial_jobs(tmp_path: P
             return subprocess.CompletedProcess(command, 0, "999", "")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
     with pytest.raises(RuntimeError, match="no jobs were submitted"):
         build_dynamic_submission_plan(
             summary_path=summary,
@@ -1224,7 +1228,11 @@ def test_dynamic_submitter_partial_sbatch_success_persists_before_qos_backpressu
             return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: Job violates accounting/QOS policy")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
     monkeypatch.setenv("TASK2_GPU_T4_MAX_ARRAY_TASKS", "1")
 
     plan = build_dynamic_submission_plan(
@@ -1262,7 +1270,11 @@ def test_dynamic_submitter_all_profiles_backpressured_waits_without_failure(tmp_
             return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: QOSMaxSubmitJobPerUserLimit")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
 
     plan = build_dynamic_submission_plan(
         summary_path=summary,
@@ -1300,7 +1312,11 @@ def test_dynamic_submitter_continues_other_profile_after_one_backpressured(tmp_p
             return subprocess.CompletedProcess(command, 0, "91002\n", "")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
     monkeypatch.setenv("TASK2_GPU_T4_MAX_ARRAY_TASKS", "1")
 
     plan = build_dynamic_submission_plan(
@@ -1354,7 +1370,11 @@ def test_dynamic_submitter_restart_reuses_active_logical_job_without_duplicate_s
             return subprocess.CompletedProcess(command, 0, "91004\n", "")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
     _mock_slurm_units(monkeypatch, {"91003": ("RUNNING", "", 1)})
     plan = build_dynamic_submission_plan(
         summary_path=summary,
@@ -1427,7 +1447,11 @@ def test_dynamic_submitter_qos_slot_later_frees_and_remaining_workers_submit(tmp
             return subprocess.CompletedProcess(command, 0, "91005\n", "")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
     first = build_dynamic_submission_plan(
         summary_path=summary,
         output_root=tmp_path,
@@ -1559,7 +1583,11 @@ def test_dynamic_submitter_test_only_uses_real_array_argument(tmp_path: Path, mo
             return subprocess.CompletedProcess(command, 1, "", "Batch job submission failed: QOSMaxSubmitJobPerUserLimit")
         raise AssertionError(f"unexpected command: {command}")
 
+    def fake_submit(command):
+        return fake_run(command)
+
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", fake_submit)
     monkeypatch.setenv("TASK2_GPU_WORKER_SAFETY_CAP", "5000")
     build_dynamic_submission_plan(
         summary_path=summary,
