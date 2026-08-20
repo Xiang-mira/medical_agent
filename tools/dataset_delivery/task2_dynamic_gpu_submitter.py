@@ -36,6 +36,7 @@ from tools.dataset_delivery.slurm_reliability import (  # noqa: E402
     persist_submitted_job,
     query_slurm_worker_units,
     record_job_lifecycle,
+    current_worker_accounting_from_rows,
     reconcile_submitted_worker_accounting,
     slurm_comment,
 )
@@ -1772,15 +1773,35 @@ def _compact_candidate_summary(output_root: Path) -> dict[str, Any]:
     marker = _read_json(output_root / "queues" / "candidate_seed_complete.json", {})
     teacher = telemetry.get("teacher_candidate") if isinstance(telemetry, dict) else {}
     teacher = teacher if isinstance(teacher, dict) else {}
+    updated_at = str(telemetry.get("updated_at") or "") if isinstance(telemetry, dict) else ""
+    status = "AVAILABLE" if teacher else "UNAVAILABLE"
+    max_age = int(os.getenv("TASK2_COMPACT_TELEMETRY_MAX_AGE_SEC", "900") or 900)
+    if teacher and updated_at:
+        try:
+            from datetime import datetime, timezone
+
+            parsed = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc).timestamp() - parsed.timestamp() > max_age:
+                status = "STALE"
+        except Exception:
+            status = "UNKNOWN"
+    def _maybe_int(value: Any) -> int | None:
+        if status != "AVAILABLE":
+            return None
+        return int(value or 0)
+
     return {
-        "status": "READY" if teacher else "MISSING",
-        "ready": int(teacher.get("ready_candidates") or 0),
-        "running": int(teacher.get("running") or 0),
-        "retry": int(teacher.get("retry") or 0),
-        "terminal": int(teacher.get("terminal") or 0),
-        "success": int(teacher.get("success") or 0),
+        "status": status,
+        "ready": _maybe_int(teacher.get("ready_candidates")),
+        "running": _maybe_int(teacher.get("running")),
+        "retry": _maybe_int(teacher.get("retry")),
+        "terminal": _maybe_int(teacher.get("terminal")),
+        "success": _maybe_int(teacher.get("success")),
         "total": int(teacher.get("total") or marker.get("logical_task_count") or 0),
-        "source": str(output_root / "queues" / "telemetry.json") if teacher else "",
+        "source": str(output_root / "queues" / "telemetry.json") if telemetry else "",
+        "updated_at": updated_at,
         "seed_marker": marker,
     }
 
@@ -1855,6 +1876,7 @@ def fast_replenish_existing_worker_pool(
     labelcritic_job_id: str | None = None,
     labelcritic_job_state: str | None = None,
     labelcritic_h100_reserved: Any | None = None,
+    extra_worker_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     output_root = output_root.resolve()
     state_root = state_root.resolve()
@@ -1871,7 +1893,7 @@ def fast_replenish_existing_worker_pool(
     if seed["status"] != "READY":
         return {"status": "SKIPPED", "reason": "candidate_seed_marker_not_ready", "seed": seed}
     candidate_summary = _compact_candidate_summary(output_root)
-    if int(candidate_summary.get("ready") or 0) <= 0:
+    if candidate_summary.get("status") == "AVAILABLE" and int(candidate_summary.get("ready") or 0) <= 0:
         return {"status": "NO_READY_CANDIDATES", "candidate_summary": candidate_summary, "seed": seed}
     profiles = _profiles_from_existing_plan(existing_plan)
     desired = _desired_workers_from_existing_plan(existing_plan)
@@ -1889,12 +1911,20 @@ def fast_replenish_existing_worker_pool(
             if "H100" in f"{profile.name} {profile.partition} {profile.gres}".upper():
                 desired[profile.name] = 0
     profile_names = {profile.name for profile in profiles}
-    accounting = reconcile_submitted_worker_accounting(
-        slurm_root,
-        profiles=profile_names,
-        execution_attempt_id="",
-        job_state_fn=_slurm_worker_units,
-    )
+    if extra_worker_rows:
+        accounting = current_worker_accounting_from_rows(
+            [*load_submitted_jobs(slurm_root), *extra_worker_rows],
+            profiles=profile_names,
+            execution_attempt_id="",
+            job_state_fn=_slurm_worker_units,
+        )
+    else:
+        accounting = reconcile_submitted_worker_accounting(
+            slurm_root,
+            profiles=profile_names,
+            execution_attempt_id="",
+            job_state_fn=_slurm_worker_units,
+        )
     existing_workers = accounting.get("counts") or {}
     profile_reports_by_name = {
         str(row.get("profile")): row

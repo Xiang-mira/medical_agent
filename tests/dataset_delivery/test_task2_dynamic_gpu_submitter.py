@@ -1203,6 +1203,126 @@ def test_fast_replenishment_does_not_scan_or_reseed_candidate_universe(tmp_path:
     assert result["seed"]["marker"]["logical_task_count"] == 61697
 
 
+def test_fast_replenishment_missing_telemetry_keeps_bounded_desired_demand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery import task2_dynamic_gpu_submitter as submitter
+
+    _write_fast_control_plane(tmp_path, desired={"gpu_t4": 1}, count=61697)
+    (tmp_path / "queues" / "telemetry.json").unlink()
+    (tmp_path / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(submitter, "_run_sbatch_submit", lambda command: subprocess.CompletedProcess(command, 0, "990006\n", ""))
+    monkeypatch.setattr(submitter.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""))
+
+    result = submitter.fast_replenish_existing_worker_pool(
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        submission_id="fast_missing_telemetry",
+        execution_attempt_id="attempt_live",
+        run_id="round1_4995446918298643158",
+        expected_scientific_run_id="round1_4995446918298643158",
+        expected_candidate_count=61697,
+    )
+
+    assert result["status"] == "SUBMITTED"
+    assert result["candidate_summary"]["status"] == "UNAVAILABLE"
+    assert result["candidate_summary"]["ready"] is None
+    assert result["deficit_by_profile"]["gpu_t4"] == 1
+
+
+def test_fast_replenishment_stale_telemetry_does_not_scan_or_zero_ready(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery import task2_dynamic_gpu_submitter as submitter
+
+    _write_fast_control_plane(tmp_path, desired={"gpu_t4": 1}, count=61697)
+    telemetry = json.loads((tmp_path / "queues" / "telemetry.json").read_text(encoding="utf-8"))
+    telemetry["updated_at"] = "2000-01-01T00:00:00+00:00"
+    (tmp_path / "queues" / "telemetry.json").write_text(json.dumps(telemetry), encoding="utf-8")
+    (tmp_path / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(submitter, "_run_sbatch_submit", lambda command: subprocess.CompletedProcess(command, 0, "990007\n", ""))
+    monkeypatch.setattr(submitter.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""))
+
+    result = submitter.fast_replenish_existing_worker_pool(
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        submission_id="fast_stale_telemetry",
+        execution_attempt_id="attempt_live",
+        run_id="round1_4995446918298643158",
+        expected_scientific_run_id="round1_4995446918298643158",
+        expected_candidate_count=61697,
+    )
+
+    assert result["status"] == "SUBMITTED"
+    assert result["candidate_summary"]["status"] == "STALE"
+    assert result["candidate_summary"]["ready"] is None
+
+
+def test_fast_replenishment_live_snapshot_deficit_from_same_worker_accounting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from tools.dataset_delivery import task2_dynamic_gpu_submitter as submitter
+
+    _write_fast_control_plane(tmp_path, desired={"gpu_t4": 114}, count=61697)
+    (tmp_path / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n",
+        encoding="utf-8",
+    )
+    units = (
+        [{"job_id": f"4963693_{index}", "array_job_id": "4963693", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(15)]
+        + [{"job_id": f"4963693_{index}", "array_job_id": "4963693", "array_task_id": str(index), "state": "PENDING", "reason": "Resources", "unit_count": 1} for index in range(15, 77)]
+    )
+    monkeypatch.setattr(submitter, "_slurm_worker_units", lambda row: {"state": "RUNNING", "job_id": str(row.get("job_id")), "units": units})
+    monkeypatch.setattr(submitter, "_run_sbatch_submit", lambda command: subprocess.CompletedProcess(command, 0, "990008\n", ""))
+    monkeypatch.setattr(submitter.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""))
+
+    result = submitter.fast_replenish_existing_worker_pool(
+        output_root=tmp_path,
+        state_root=tmp_path / "state",
+        submission_id="fast_live_snapshot",
+        execution_attempt_id="attempt_live",
+        run_id="round1_4995446918298643158",
+        expected_scientific_run_id="round1_4995446918298643158",
+        expected_candidate_count=61697,
+        extra_worker_rows=[
+            {
+                "run_id": "round1_4995446918298643158",
+                "execution_attempt_id": "attempt_old",
+                "submission_id": "adopted",
+                "job_id": "4963693",
+                "array_job_id": "4963693",
+                "model_group": "full373",
+                "group": "full373",
+                "profile": "gpu_t4",
+                "task_count": "77",
+                "execution_schema_version": CANDIDATE_TASK_V1,
+                "submission_status": "adopted",
+                "scheduler_status": "ADOPTED_ACTIVE_JOB",
+            }
+        ],
+    )
+
+    counts = result["existing_workers_by_profile"]["gpu_t4"]
+    assert counts["running"] == 15
+    assert counts["pending"] == 62
+    assert counts["active"] == 77
+    assert result["deficit_by_profile"]["gpu_t4"] == 37
+
+
+def test_explicit_slow_estep_telemetry_still_scans_candidate_states(tmp_path: Path):
+    from tools.dataset_delivery import task2_full373_round1_launcher as full373
+
+    full373.write_json(
+        tmp_path / "full_round1_scope.json",
+        {"total_logical_candidate_tasks": 1, "case_count": 1, "canonical_target_count": 1, "task_rows": [{"case_id": "CASE001", "target": "organ_a", "teacher": "teacher1"}]},
+    )
+    full373.publish_candidate_state(tmp_path, {"status": "READY", "case_id": "CASE001", "target": "organ_a", "teacher": "teacher1", "candidate_id": "cand1"}, recompute_target=False)
+
+    telemetry = full373.build_estep_telemetry(tmp_path)
+
+    assert telemetry["teacher_candidate"]["ready_candidates"] == 1
+
+
 def test_completed_workers_release_capacity_on_next_reconcile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tools.dataset_delivery.task2_dynamic_gpu_submitter import GpuSubmitProfile, _worker_pool_counts
 

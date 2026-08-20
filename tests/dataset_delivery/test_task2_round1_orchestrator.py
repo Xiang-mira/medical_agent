@@ -2182,7 +2182,7 @@ def test_controller_fast_teacher_replenishment_uses_compact_state_before_full_sc
 
     monkeypatch.setattr(orch, "build_estep_telemetry", lambda *args, **kwargs: pytest.fail("fast path must not perform full candidate telemetry scan"))
     monkeypatch.setattr(orch, "write_controller_heartbeat", capture_heartbeat)
-    monkeypatch.setattr(orch, "reconcile_active_teacher_jobs", lambda *args, **kwargs: {"status": "RECONCILED", "adopted_count": 0})
+    monkeypatch.setattr(orch, "snapshot_active_teacher_jobs", lambda *args, **kwargs: {"status": "SNAPSHOT", "adopted_count": 0, "jobs": []})
     monkeypatch.setattr(orch, "_git_commit", lambda: "abc123")
     monkeypatch.setattr(orch, "resolve_teacher_h100_policy", lambda **kwargs: {"labelcritic_required": True, "labelcritic_job_id": "4963105", "labelcritic_job_state": "PENDING", "labelcritic_h100_reserved": True, "effective_teacher_h100_enabled": False})
     monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.fast_replenish_existing_worker_pool", fake_fast)
@@ -2216,7 +2216,7 @@ def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path:
     events_path = state_root / "round1_orchestrated" / "events.jsonl"
     event_lines_before = events_path.read_text(encoding="utf-8").splitlines()
 
-    heartbeat = orch.write_controller_heartbeat(state_root, iteration=3, stage="test_loop")
+    heartbeat = orch.write_controller_heartbeat(state_root, iteration=3, stage="test_loop", current={"allow_candidate_scan": True})
 
     assert heartbeat["iteration"] == 3
     assert heartbeat["controller_job_id"] == "controller_123"
@@ -2227,7 +2227,7 @@ def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path:
     assert heartbeat["teacher_workers_by_profile"]["generic_gpu"]["active"] == 1
     saved = json.loads((state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
     assert saved["stage"] == "test_loop"
-    second = orch.write_controller_heartbeat(state_root, iteration=4, stage="second_loop")
+    second = orch.write_controller_heartbeat(state_root, iteration=4, stage="second_loop", current={"allow_candidate_scan": True})
     saved_second = json.loads((state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8"))
     assert second["iteration"] == 4
     assert saved_second["iteration"] == 4
@@ -2235,6 +2235,105 @@ def test_controller_heartbeat_writes_rss_and_candidate_worker_counters(tmp_path:
     assert "test_loop" not in (state_root / "round1_orchestrated" / "controller_heartbeat.json").read_text(encoding="utf-8")
     assert events_path.read_text(encoding="utf-8").splitlines() == event_lines_before
     assert not list((state_root / "round1_orchestrated").glob(".controller_heartbeat.json.*.tmp"))
+
+
+def test_controller_heartbeat_missing_compact_telemetry_reports_unknown_without_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    state_root = tmp_path / "state"
+    formal_root = state_root / "round1_orchestrated" / orch.FULL373_ROOT_NAME
+    (formal_root / "queues" / "candidate_states" / "CASE001" / "organ").mkdir(parents=True)
+    (formal_root / "queues" / "candidate_states" / "CASE001" / "organ" / "teacher.json").write_text('{"status":"READY"}\n', encoding="utf-8")
+    orch._save_state(state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158")
+    monkeypatch.setattr(orch, "build_estep_telemetry", lambda *args, **kwargs: pytest.fail("heartbeat fast mode must not scan candidate states"))
+
+    heartbeat = orch.write_controller_heartbeat(state_root, iteration=1, stage="minimal_safety_gate", current={"skip_candidate_scan": True, "skip_resource_reconcile": True})
+
+    assert heartbeat["candidate_ready"] is None
+    assert heartbeat["candidate_summary_status"] == "UNAVAILABLE"
+    assert heartbeat["candidate_summary_source"] == ""
+
+
+def test_fast_teacher_replenishment_never_enumerates_candidate_states(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    from tests.dataset_delivery.test_task2_dynamic_gpu_submitter import _write_fast_control_plane
+
+    _write_fast_control_plane(formal_root, desired={"gpu_t4": 1}, count=61697)
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n",
+        encoding="utf-8",
+    )
+    for index in range(12):
+        state_path = formal_root / "queues" / "candidate_states" / f"CASE{index:05d}" / "organ" / "teacher.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text('{"status":"READY"}\n', encoding="utf-8")
+    fake_candidate_paths = [
+        formal_root / "queues" / "candidate_states" / f"CASE{index:05d}" / "organ" / "teacher.json"
+        for index in range(61697)
+    ]
+    assert len(fake_candidate_paths) == 61697
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158", execution_attempt_id="attempt_live")
+
+    original_glob = Path.glob
+    original_rglob = Path.rglob
+    original_open = Path.open
+    calls = {"candidate_state_glob": 0, "candidate_state_open": 0}
+
+    def guard_glob(self, pattern):
+        if "candidate_states" in str(self):
+            calls["candidate_state_glob"] += 1
+            raise AssertionError("fast controller path must not enumerate candidate_states")
+        return original_glob(self, pattern)
+
+    def guard_rglob(self, pattern):
+        if "candidate_states" in str(self):
+            raise AssertionError("fast controller path must not recursively enumerate candidate_states")
+        return original_rglob(self, pattern)
+
+    def guard_open(self, *args, **kwargs):
+        if "candidate_states" in str(self):
+            calls["candidate_state_open"] += 1
+            raise AssertionError("fast controller path must not open candidate state files")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", guard_glob)
+    monkeypatch.setattr(Path, "rglob", guard_rglob)
+    monkeypatch.setattr(Path, "open", guard_open)
+    monkeypatch.setattr(orch, "snapshot_active_teacher_jobs", lambda *args, **kwargs: {"status": "SNAPSHOT", "adopted_count": 0, "jobs": []})
+    monkeypatch.setattr(orch, "_git_commit", lambda: "abc123")
+    monkeypatch.setattr(orch, "resolve_teacher_h100_policy", lambda **kwargs: {"effective_teacher_h100_enabled": True})
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", lambda command: subprocess.CompletedProcess(command, 0, "990101\n", ""))
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter.subprocess.run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""))
+
+    result = orch.fast_teacher_replenishment(args, iteration=1)
+
+    assert result["status"] == "SUBMITTED"
+    assert calls == {"candidate_state_glob": 0, "candidate_state_open": 0}
+
+
+def test_fast_teacher_replenishment_does_not_rewrite_submitted_jobs_before_decision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    args = _args(tmp_path)
+    formal_root = tmp_path / "formal"
+    from tests.dataset_delivery.test_task2_dynamic_gpu_submitter import _write_fast_control_plane
+
+    _write_fast_control_plane(formal_root, desired={"gpu_t4": 114}, count=61697)
+    (formal_root / "slurm" / "submitted_jobs.csv").write_text(
+        "run_id,execution_attempt_id,submission_id,job_id,array_job_id,model_group,profile,task_count,execution_schema_version,submission_status,scheduler_status,slurm_state\n"
+        f"round1_old,attempt_old,batch_old,4963693,4963693,full373,gpu_t4,114,{CANDIDATE_TASK_V1},submitted,ACTIVE,RUNNING\n",
+        encoding="utf-8",
+    )
+    orch._save_state(args.state_root, formal_root=str(formal_root), run_id="round1_4995446918298643158", execution_attempt_id="attempt_live")
+    monkeypatch.setattr(orch, "snapshot_active_teacher_jobs", lambda *args, **kwargs: {"status": "SNAPSHOT", "adopted_count": 0, "jobs": []})
+    monkeypatch.setattr(orch, "_git_commit", lambda: "abc123")
+    monkeypatch.setattr(orch, "resolve_teacher_h100_policy", lambda **kwargs: {"effective_teacher_h100_enabled": True})
+    units = [{"job_id": f"4963693_{index}", "array_job_id": "4963693", "array_task_id": str(index), "state": "RUNNING", "unit_count": 1} for index in range(114)]
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._slurm_worker_units", lambda row: {"state": "RUNNING", "job_id": "4963693", "units": units})
+    monkeypatch.setattr("tools.dataset_delivery.task2_dynamic_gpu_submitter._run_sbatch_submit", lambda command: pytest.fail("existing live workers should satisfy demand"))
+
+    result = orch.fast_teacher_replenishment(args, iteration=1)
+
+    assert result["status"] == "NO_DEFICIT"
+    assert result["deficit_by_profile"]["gpu_t4"] == 0
+    assert not list((formal_root / "slurm").glob(".submitted_jobs.csv.tmp.*"))
 
 
 def test_controller_unhandled_exception_is_recoverable_not_scientific_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
