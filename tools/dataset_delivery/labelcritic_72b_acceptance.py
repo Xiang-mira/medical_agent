@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shlex
@@ -37,7 +38,9 @@ ONE_BY_ONE_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x
 
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
 
 
 def _read_json(path: Path, default: Any = None) -> Any:
@@ -67,6 +70,65 @@ def _tail(path: Path, limit: int = 4000) -> str:
         return data.decode("utf-8", errors="replace")
     except Exception:
         return ""
+
+
+def _acceptance_spec_from_submit_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "schema_version": "labelcritic_72b_acceptance_spec_v1",
+        "container": str(args.container),
+        "model_dir": str(args.model_dir),
+        "model_id": str(args.model_id),
+        "vllm_python": str(args.vllm_python),
+        "tensor_parallel_size": int(args.tensor_parallel_size),
+        "max_model_len": int(args.max_model_len),
+        "gpu_memory_utilization": str(args.gpu_memory_utilization),
+        "startup_timeout_sec": int(args.startup_timeout_sec),
+        "stability_sec": int(args.stability_sec),
+        "partition": str(args.partition),
+        "gres": str(args.gres),
+        "cpus": int(args.cpus),
+        "mem": str(args.mem),
+        "time_limit": str(args.time_limit),
+    }
+
+
+def _acceptance_spec_from_runtime(validation_root: Path, args: argparse.Namespace) -> dict[str, Any]:
+    spec = _read_json(validation_root.parent / "acceptance_spec.json", {})
+    if isinstance(spec, dict) and spec:
+        return spec
+    return _acceptance_spec_from_submit_args(args)
+
+
+def _acceptance_spec_hash(spec: dict[str, Any]) -> str:
+    normalized = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _acceptance_spec_paths(acceptance_root: Path) -> dict[str, Path]:
+    return {
+        "spec_json": acceptance_root / "acceptance_spec.json",
+        "spec_hash": acceptance_root / "acceptance_spec_hash.txt",
+        "authoritative_root": acceptance_root / "authoritative",
+    }
+
+
+def _write_authoritative_acceptance_marker(validation_root: Path, report: dict[str, Any]) -> dict[str, Any]:
+    spec_hash = str(report.get("acceptance_spec_hash") or "").strip()
+    if not spec_hash or report.get("final_status") != "PASS":
+        return {"status": "SKIPPED", "reason": "missing_spec_hash_or_non_pass"}
+    marker = validation_root.parent / "authoritative" / f"{spec_hash}.json"
+    payload = {
+        "schema_version": "labelcritic_72b_acceptance_authoritative_v1",
+        "timestamp": utc_now(),
+        "acceptance_spec_hash": spec_hash,
+        "final_status": str(report.get("final_status") or ""),
+        "job_id": str(report.get("job_id") or ""),
+        "validation_root": str(validation_root),
+        "report": str(validation_root / "acceptance_report.json"),
+        "acceptance_report": report,
+    }
+    _write_json(marker, payload)
+    return {"status": "READY", "path": str(marker), "acceptance_spec_hash": spec_hash}
 
 
 def _gpu_memory_snapshot() -> dict[str, Any]:
@@ -119,6 +181,8 @@ def _chat_request(base_url: str, port: int, model_id: str, root: Path) -> dict[s
 
 def _finish(root: Path, report: dict[str, Any]) -> int:
     _write_json(root / "acceptance_report.json", report)
+    if report.get("final_status") == "PASS":
+        _write_authoritative_acceptance_marker(root, report)
     md = [
         "# LabelCritic 72B Acceptance",
         "",
@@ -135,12 +199,16 @@ def _finish(root: Path, report: dict[str, Any]) -> int:
 def run_job(args: argparse.Namespace) -> int:
     root = args.validation_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
+    spec = _acceptance_spec_from_runtime(root, args)
+    spec_hash = _acceptance_spec_hash(spec)
     stdout_log = root / "vllm.stdout.log"
     stderr_log = root / "vllm.stderr.log"
     report: dict[str, Any] = {
         "schema_version": "labelcritic_72b_acceptance_v1",
         "timestamp": utc_now(),
         "git_commit": _git_commit(),
+        "acceptance_spec_hash": spec_hash,
+        "acceptance_spec": spec,
         "job_id": os.getenv("SLURM_JOB_ID", ""),
         "node": os.getenv("SLURMD_NODENAME", os.getenv("HOSTNAME", "")),
         "model": args.model_id,
@@ -299,8 +367,14 @@ def render_sbatch(args: argparse.Namespace, validation_root: Path) -> Path:
 
 def submit(args: argparse.Namespace) -> int:
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
-    validation_root = Path(args.acceptance_root).expanduser() / timestamp
+    acceptance_root = Path(args.acceptance_root).expanduser()
+    validation_root = acceptance_root / timestamp
     validation_root.mkdir(parents=True, exist_ok=True)
+    spec = _acceptance_spec_from_submit_args(args)
+    spec_hash = _acceptance_spec_hash(spec)
+    spec_paths = _acceptance_spec_paths(acceptance_root)
+    _write_json(spec_paths["spec_json"], spec)
+    spec_paths["spec_hash"].write_text(spec_hash + "\n", encoding="utf-8")
     sbatch = render_sbatch(args, validation_root)
     for command in (["bash", "-n", str(sbatch)], ["sbatch", "--test-only", str(sbatch)]):
         result = _run(command, timeout=120)

@@ -58,6 +58,7 @@ from cli_anything.medai.core.totalseg_runner import preflight_totalseg_executabl
 
 LABELCRITIC_MODEL_ID = "Qwen/Qwen2-VL-72B-Instruct-AWQ"
 TERMINAL_FAILURE_STATES = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE"}
+LABELCRITIC_RETRYABLE_TERMINAL_STATES = {"CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "OOM", "NODE_FAIL", "BOOT_FAIL", "DEADLINE", "PREEMPTED"}
 ACTIVE_STATES = {"PENDING", "CONFIGURING", "COMPLETING", "RUNNING", "REQUEUED", "RESIZING", "SUSPENDED"}
 SUCCESS_STATES = {"COMPLETED"}
 BACKPRESSURE_STATUSES = {"BACKPRESSURED", "PARTIALLY_SUBMITTED", "WAITING_FOR_SUBMISSION_CAPACITY", "READY_WORKER_QUEUE", "RETRY_READY"}
@@ -827,6 +828,7 @@ def _state_paths(state_root: Path) -> dict[str, Path]:
         "last_failure": root / "last_failure.json",
         "controller_heartbeat": root / "controller_heartbeat.json",
         "controller_crashes": root / "controller_crashes",
+        "controller_attempts": root / "controller_attempts",
         "controller_sbatch": root / "controller.sbatch",
         "controller_job": root / "controller_job_id.txt",
         "staging_sbatch": root / "staging_array.sbatch",
@@ -1444,9 +1446,12 @@ def wait_for_labelcritic_runtime(state_root: Path, *, poll_sec: int) -> dict[str
             return {"status": "FAILED", "failure_reason": runtime.get("failure_reason", "runtime_preflight_failed"), "runtime": runtime}
         job_id = str(service.get("job_id") or "")
         state = slurm_job_state(job_id) if job_id else {"state": "UNKNOWN"}
+        if state.get("state") in LABELCRITIC_RETRYABLE_TERMINAL_STATES:
+            _save_state(state_root, stage="labelcritic_job_retryable_terminal", labelcritic={"status": "TERMINAL_RETRYABLE", "job": state, "service": service})
+            return {"status": "TERMINAL_RETRYABLE", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state, "service": service}
         if state.get("state") in TERMINAL_FAILURE_STATES:
             log_failure(state_root, stage="labelcritic_job", failure_reason=f"labelcritic_job_terminal:{state.get('state')}", details=state)
-            return {"status": "FAILED", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state}
+            return {"status": "FAILED", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state, "service": service}
         base_file = _service_paths(state_root)["base"]
         port_file = _service_paths(state_root)["port"]
         if base_file.exists() and port_file.exists():
@@ -1477,6 +1482,9 @@ def poll_labelcritic_runtime(state_root: Path) -> dict[str, Any]:
         return {"status": "FAILED", "failure_reason": runtime.get("failure_reason", "runtime_preflight_failed"), "runtime": runtime, "service": service}
     job_id = str(service.get("job_id") or "")
     state = slurm_job_state(job_id) if job_id else {"state": "UNKNOWN"}
+    if state.get("state") in LABELCRITIC_RETRYABLE_TERMINAL_STATES:
+        _save_state(state_root, stage="labelcritic_job_retryable_terminal", labelcritic={"status": "TERMINAL_RETRYABLE", "job": state, "service": service})
+        return {"status": "TERMINAL_RETRYABLE", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state, "service": service}
     if state.get("state") in TERMINAL_FAILURE_STATES:
         log_failure(state_root, stage="labelcritic_job", failure_reason=f"labelcritic_job_terminal:{state.get('state')}", details=state)
         return {"status": "FAILED", "failure_reason": f"labelcritic_job_terminal:{state.get('state')}", "job": state, "service": service}
@@ -2496,10 +2504,32 @@ def run_round1_final_validator(args: argparse.Namespace) -> dict[str, Any]:
 def _controller_main(args: argparse.Namespace) -> int:
     state_root = args.state_root.resolve()
     current = _load_state(state_root)
+    def finish(
+        code: int,
+        *,
+        final_controller_status: str,
+        failure_stage: str = "",
+        failure_reason: str = "",
+        changed_scientific_terminal_state: bool = False,
+        current_details: dict[str, Any] | None = None,
+        exception: BaseException | None = None,
+    ) -> int:
+        record_controller_attempt_provenance(
+            state_root,
+            exit_code=code,
+            final_controller_status=final_controller_status,
+            failure_stage=failure_stage,
+            failure_reason=failure_reason,
+            changed_scientific_terminal_state=changed_scientific_terminal_state,
+            current=current_details,
+            exception=exception,
+        )
+        return code
+
     if current.get("terminal_state") == "ROUND1_PASSED":
-        return 0
+        return finish(0, final_controller_status="ROUND1_PASSED")
     if current.get("terminal_state") == "ROUND1_FAILED":
-        return 2
+        return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="preexisting_terminal_state", failure_reason=str(current.get("failure_reason") or "ROUND1_FAILED"))
     run_id = _run_id(state_root)
     execution_attempt_id = _execution_attempt_id(state_root)
     _save_state(
@@ -2519,7 +2549,7 @@ def _controller_main(args: argparse.Namespace) -> int:
     if commit_pin["status"] != "PASSED":
         write_controller_heartbeat(state_root, iteration=0, stage="git_commit_pin_failed", current={"expected_git_commit": commit_pin, "skip_candidate_scan": True})
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="git_commit_pin", failure_reason=commit_pin["failure_reason"], expected_git_commit=commit_pin)
-        return 2
+        return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="git_commit_pin", failure_reason=commit_pin["failure_reason"], changed_scientific_terminal_state=True, current_details={"expected_git_commit": commit_pin})
     fast_startup = fast_teacher_replenishment(args, iteration=0)
     _controller_log(iteration=0, stage="startup_fast_teacher_replenishment", result=fast_startup.get("status", ""))
     labelcritic = ensure_labelcritic_service(state_root)
@@ -2527,7 +2557,7 @@ def _controller_main(args: argparse.Namespace) -> int:
         log_failure(state_root, stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason", "labelcritic_submit_failed"), details=labelcritic)
         write_controller_heartbeat(state_root, iteration=0, stage="labelcritic_submit_failed", current={"labelcritic": labelcritic, "skip_candidate_scan": True})
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_submit", failure_reason=labelcritic.get("failure_reason"), labelcritic=labelcritic)
-        return 2
+        return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="labelcritic_submit", failure_reason=str(labelcritic.get("failure_reason") or "labelcritic_submit_failed"), changed_scientific_terminal_state=True, current_details={"labelcritic": labelcritic})
     _save_state(state_root, stage="labelcritic_submitted_or_reused", labelcritic=labelcritic)
     snapshot_active_teacher_jobs(args)
     write_controller_heartbeat(state_root, iteration=0, stage="labelcritic_submitted_or_reused", current={"labelcritic": labelcritic, "skip_candidate_scan": True})
@@ -2535,7 +2565,7 @@ def _controller_main(args: argparse.Namespace) -> int:
     if estep_submit["status"] == "FAILED":
         log_failure(state_root, stage="e_step_submit", failure_reason=estep_submit.get("failure_reason", "e_step_submit_failed"), details=estep_submit)
         _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=estep_submit.get("failure_reason"), e_step=estep_submit)
-        return 2
+        return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="e_step_submit", failure_reason=str(estep_submit.get("failure_reason") or "e_step_submit_failed"), changed_scientific_terminal_state=True, current_details={"e_step": estep_submit, "labelcritic": labelcritic})
     labelcritic_gate: dict[str, Any] = {"status": "WAITING"}
     iteration = 0
     while True:
@@ -2547,7 +2577,7 @@ def _controller_main(args: argparse.Namespace) -> int:
             if labelcritic_gate["status"] == "FAILED":
                 log_failure(state_root, stage="labelcritic", failure_reason=labelcritic_gate.get("failure_reason", "labelcritic_failed"), details=labelcritic_gate)
                 _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic", failure_reason=labelcritic_gate.get("failure_reason"), labelcritic=labelcritic_gate)
-                return 2
+                return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="labelcritic", failure_reason=str(labelcritic_gate.get("failure_reason") or "labelcritic_failed"), changed_scientific_terminal_state=True, current_details={"labelcritic": labelcritic_gate})
             if labelcritic_gate["status"] == "PASSED":
                 _save_state(state_root, stage="labelcritic_ready", labelcritic=labelcritic_gate)
         snapshot_active_teacher_jobs(args)
@@ -2562,14 +2592,14 @@ def _controller_main(args: argparse.Namespace) -> int:
         if progress["status"] == "FAILED":
             log_failure(state_root, stage="e_step_submit", failure_reason=progress.get("failure_reason", "e_step_submit_failed"), details=progress)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step_submit", failure_reason=progress.get("failure_reason"), e_step=progress)
-            return 2
+            return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="e_step_submit", failure_reason=str(progress.get("failure_reason") or "e_step_submit_failed"), changed_scientific_terminal_state=True, current_details={"labelcritic": labelcritic_gate, "progress": progress})
         selection = {"status": "WAITING_FOR_LABELCRITIC"}
         if labelcritic_gate.get("status") == "PASSED":
             selection = submit_labelcritic_selection_workers(args, labelcritic_gate)
             if selection["status"] == "FAILED":
                 log_failure(state_root, stage="labelcritic_selection_submit", failure_reason=selection.get("failure_reason", "labelcritic_selection_submit_failed"), details=selection)
                 _save_state(state_root, terminal_state="ROUND1_FAILED", stage="labelcritic_selection_submit", failure_reason=selection.get("failure_reason"), labelcritic_selection=selection)
-                return 2
+                return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="labelcritic_selection_submit", failure_reason=str(selection.get("failure_reason") or "labelcritic_selection_submit_failed"), changed_scientific_terminal_state=True, current_details={"labelcritic_selection": selection})
         estep = check_estep(args)
         wait_stage = "e_step_wait" if labelcritic_gate.get("status") == "PASSED" else "e_step_and_labelcritic_wait"
         _save_state(state_root, stage=wait_stage, e_step=estep, e_step_status=estep["status"], labelcritic=labelcritic_gate, labelcritic_selection=selection, e_step_progress=progress, stale_running_recovery=stale_recovery)
@@ -2581,7 +2611,7 @@ def _controller_main(args: argparse.Namespace) -> int:
         if estep["status"] == "FAILED":
             log_failure(state_root, stage="e_step", failure_reason=estep.get("failure_reason", "e_step_failed"), details=estep)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="e_step", failure_reason=estep.get("failure_reason"), e_step=estep)
-            return 2
+            return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="e_step", failure_reason=str(estep.get("failure_reason") or "e_step_failed"), changed_scientific_terminal_state=True, current_details={"labelcritic": labelcritic_gate, "progress": progress, "e_step": estep})
         time.sleep(max(10, args.poll_sec))
     while True:
         iteration += 1
@@ -2590,7 +2620,7 @@ def _controller_main(args: argparse.Namespace) -> int:
         if mstep_submit["status"] == "FAILED":
             log_failure(state_root, stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason", "m_step_submit_failed"), details=mstep_submit)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step_submit", failure_reason=mstep_submit.get("failure_reason"), m_step=mstep_submit)
-            return 2
+            return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="m_step_submit", failure_reason=str(mstep_submit.get("failure_reason") or "m_step_submit_failed"), changed_scientific_terminal_state=True, current_details={"m_step": mstep_submit})
         if mstep_submit["status"] in BACKPRESSURE_STATUSES:
             _save_state(state_root, stage="m_step_submit_backpressured", m_step=mstep_submit, scheduler_status="BACKPRESSURED")
             time.sleep(max(10, args.poll_sec))
@@ -2605,13 +2635,13 @@ def _controller_main(args: argparse.Namespace) -> int:
             final = run_round1_final_validator(args)
             if final["status"] == "PASSED":
                 _save_state(state_root, terminal_state="ROUND1_PASSED", stage="complete", final=final, finished_at=utc_now())
-                return 0
+                return finish(0, final_controller_status="ROUND1_PASSED", changed_scientific_terminal_state=True, current_details={"m_step": mstep, "final": final})
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="final_validator", failure_reason=final.get("failure_reason"), final=final, finished_at=utc_now())
-            return 2
+            return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="final_validator", failure_reason=str(final.get("failure_reason") or "final_validator_failed"), changed_scientific_terminal_state=True, current_details={"m_step": mstep, "final": final})
         if mstep["status"] == "FAILED":
             log_failure(state_root, stage="m_step", failure_reason=mstep.get("failure_reason", "m_step_failed"), details=mstep)
             _save_state(state_root, terminal_state="ROUND1_FAILED", stage="m_step", failure_reason=mstep.get("failure_reason"), m_step=mstep)
-            return 2
+            return finish(2, final_controller_status="ROUND1_FAILED", failure_stage="m_step", failure_reason=str(mstep.get("failure_reason") or "m_step_failed"), changed_scientific_terminal_state=True, current_details={"m_step": mstep})
         time.sleep(max(10, args.poll_sec))
 
 
@@ -2635,6 +2665,16 @@ def controller(args: argparse.Namespace) -> int:
             failure_reason=failure["failure_reason"],
             controller_crash=crash,
             last_failure=str(_state_paths(state_root)["last_failure"]),
+        )
+        record_controller_attempt_provenance(
+            state_root,
+            exit_code=2,
+            final_controller_status="CONTROLLER_FAILED",
+            failure_stage="controller_unhandled_exception",
+            failure_reason=failure["failure_reason"],
+            changed_scientific_terminal_state=False,
+            current={"controller_crash": crash, "last_failure": failure},
+            exception=exc,
         )
         return 2
 
@@ -2847,7 +2887,11 @@ def _resource_snapshot_from_replenishment(result: dict[str, Any]) -> dict[str, A
 
 
 def _unknown_candidate_summary(formal_root: Path) -> dict[str, Any]:
-    return _compact_candidate_summary(formal_root) if formal_root.exists() else {
+    if formal_root.exists():
+        summary = _compact_candidate_summary(formal_root)
+        if summary:
+            return summary
+    return {
         "status": "UNAVAILABLE",
         "source": "",
         "updated_at": "",
@@ -2978,6 +3022,71 @@ def record_controller_crash(state_root: Path, *, exc: BaseException, iteration: 
     return {"status": "RECORDED", "path": str(path), "record": record}
 
 
+def record_controller_attempt_provenance(
+    state_root: Path,
+    *,
+    exit_code: int,
+    final_controller_status: str,
+    failure_stage: str = "",
+    failure_reason: str = "",
+    changed_scientific_terminal_state: bool = False,
+    current: dict[str, Any] | None = None,
+    exception: BaseException | None = None,
+) -> dict[str, Any]:
+    paths = _state_paths(state_root)
+    state = _load_state(state_root)
+    heartbeat = _read_json(paths["controller_heartbeat"], {})
+    controller_job_id = str(state.get("controller_job_id") or os.getenv("SLURM_JOB_ID") or "local").strip() or "local"
+    labelcritic = current.get("labelcritic") if isinstance(current, dict) else state.get("labelcritic")
+    last_teacher = current.get("last_submission_result") if isinstance(current, dict) else state.get("last_teacher_replenishment")
+    record = {
+        "schema_version": "round1_controller_attempt_v1",
+        "timestamp": utc_now(),
+        "controller_job_id": controller_job_id,
+        "scientific_run_id": str(state.get("run_id") or ""),
+        "execution_attempt_id": str(state.get("execution_attempt_id") or ""),
+        "worker_generation": str(state.get("worker_generation") or ""),
+        "git_commit": str(state.get("git_commit") or _git_commit()),
+        "started_at": str(state.get("started_at") or heartbeat.get("stage_started_at") or ""),
+        "finished_at": utc_now(),
+        "exit_code": int(exit_code),
+        "final_controller_status": str(final_controller_status or ""),
+        "last_successful_stage": str(state.get("last_completed_stage") or state.get("stage") or heartbeat.get("stage") or ""),
+        "failure_stage": str(failure_stage or ""),
+        "failure_reason": str(failure_reason or ""),
+        "changed_scientific_terminal_state": bool(changed_scientific_terminal_state),
+        "labelcritic": _compact_details(labelcritic or {}),
+        "teacher_live_summary": _compact_details(
+            {
+                "teacher_workers_by_profile": heartbeat.get("teacher_workers_by_profile") or {},
+                "desired_workers_by_profile": heartbeat.get("desired_workers_by_profile") or {},
+                "deficit_by_profile": heartbeat.get("deficit_by_profile") or {},
+                "candidate_summary": heartbeat.get("candidate_summary") or {},
+                "last_submission_result": last_teacher or {},
+            }
+        ),
+        "state_snapshot": _compact_details(
+            {
+                "status": state.get("status", ""),
+                "terminal_state": state.get("terminal_state", ""),
+                "stage": state.get("stage", ""),
+                "scheduler_status": state.get("scheduler_status", ""),
+                "e_step_status": state.get("e_step_status", ""),
+                "mstep_status": state.get("mstep_status", ""),
+            }
+        ),
+    }
+    if exception is not None:
+        record["exception_type"] = type(exception).__name__
+        record["exception_message"] = str(exception)
+        record["traceback"] = traceback.format_exc()
+    attempts_root = paths["controller_attempts"]
+    attempts_root.mkdir(parents=True, exist_ok=True)
+    path = attempts_root / f"{controller_job_id}.json"
+    _write_json(path, record)
+    return {"status": "RECORDED", "path": str(path), "record": record}
+
+
 def _candidate_state_counts(formal_root: Path) -> dict[str, Any]:
     counts: dict[str, int] = {}
     stale_running = 0
@@ -3097,8 +3206,37 @@ def minimal_recovery(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _latest_acceptance_report(root: Path) -> dict[str, Any]:
+    expected_spec_hash = str(os.getenv("LABELCRITIC_ACCEPTANCE_SPEC_HASH") or "").strip()
+    if not expected_spec_hash:
+        spec_hash_file = root / "acceptance_spec_hash.txt"
+        expected_spec_hash = spec_hash_file.read_text(encoding="utf-8").strip() if spec_hash_file.exists() else ""
     reports = sorted(root.glob("*/acceptance_report.json"))
-    return _read_json(reports[-1], {}) if reports else {}
+    docs = [(path, _read_json(path, {})) for path in reports]
+    if expected_spec_hash:
+        authoritative = root / "authoritative" / f"{expected_spec_hash}.json"
+        if authoritative.exists():
+            payload = _read_json(authoritative, {})
+            if isinstance(payload, dict) and payload.get("acceptance_report"):
+                return dict(payload.get("acceptance_report") or {})
+            if isinstance(payload, dict) and payload:
+                return payload
+        matched = [
+            (path, doc)
+            for path, doc in docs
+            if str(doc.get("acceptance_spec_hash") or "") == expected_spec_hash
+        ]
+        if matched:
+            passed = [item for item in matched if str((item[1].get("final_status") or item[1].get("status") or "")).upper() in {"PASS", "PASSED"}]
+            selected = passed[-1] if passed else matched[-1]
+            return selected[1]
+    passed = [
+        (path, doc)
+        for path, doc in docs
+        if str((doc.get("final_status") or doc.get("status") or "")).upper() in {"PASS", "PASSED"}
+    ]
+    if passed:
+        return passed[-1][1]
+    return docs[-1][1] if docs else {}
 
 
 def resume_formal(args: argparse.Namespace) -> dict[str, Any]:
@@ -3109,7 +3247,16 @@ def resume_formal(args: argparse.Namespace) -> dict[str, Any]:
     if existing and slurm_job_state(existing).get("state") in ACTIVE_STATES:
         return {"status": "FAIL", "failure_reason": "active_controller_exists", "controller_job_id": existing}
     audit = recovery_audit(args)
-    acceptance = _latest_acceptance_report(Path(str(args.acceptance_root)).expanduser())
+    acceptance_root = Path(str(args.acceptance_root)).expanduser()
+    spec_hash_file = acceptance_root / "acceptance_spec_hash.txt"
+    previous_spec_hash = os.environ.get("LABELCRITIC_ACCEPTANCE_SPEC_HASH", "")
+    if spec_hash_file.exists():
+        os.environ["LABELCRITIC_ACCEPTANCE_SPEC_HASH"] = spec_hash_file.read_text(encoding="utf-8").strip()
+    acceptance = _latest_acceptance_report(acceptance_root)
+    if previous_spec_hash:
+        os.environ["LABELCRITIC_ACCEPTANCE_SPEC_HASH"] = previous_spec_hash
+    else:
+        os.environ.pop("LABELCRITIC_ACCEPTANCE_SPEC_HASH", None)
     minimal = _read_json(paths["root"] / "round1_minimal_recovery_gate.json", {})
     checks = [
         {"name": "recovery_audit", "ok": audit.get("status") == "PASS"},

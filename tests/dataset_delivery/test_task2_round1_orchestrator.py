@@ -549,6 +549,37 @@ def test_acceptance_pending_does_not_block_formal_resume(tmp_path, monkeypatch):
     assert calls == ["submit_controller"]
 
 
+def test_latest_acceptance_report_prefers_authoritative_pass_over_newer_fail(tmp_path: Path):
+    acceptance_root = tmp_path / "acceptance"
+    acceptance_root.mkdir(parents=True, exist_ok=True)
+    spec_hash = "spec_123"
+    (acceptance_root / "acceptance_spec_hash.txt").write_text(spec_hash + "\n", encoding="utf-8")
+    authoritative = acceptance_root / "authoritative"
+    authoritative.mkdir(parents=True, exist_ok=True)
+    (authoritative / f"{spec_hash}.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "labelcritic_72b_acceptance_authoritative_v1",
+                "acceptance_spec_hash": spec_hash,
+                "final_status": "PASS",
+                "acceptance_report": {"final_status": "PASS", "acceptance_spec_hash": spec_hash, "job_id": "old_pass"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    newer_fail = acceptance_root / "20260821_010203"
+    newer_fail.mkdir(parents=True, exist_ok=True)
+    (newer_fail / "acceptance_report.json").write_text(
+        json.dumps({"final_status": "FAIL", "acceptance_spec_hash": spec_hash, "job_id": "new_fail"}),
+        encoding="utf-8",
+    )
+
+    report = orch._latest_acceptance_report(acceptance_root)
+
+    assert report["final_status"] == "PASS"
+    assert report["job_id"] == "old_pass"
+
+
 def test_recovery_audit_failure_blocks_formal_resume(tmp_path, monkeypatch):
     args = _args(tmp_path)
     _write_minimal_gate(args, "PASS")
@@ -1195,6 +1226,7 @@ def test_controller_expected_commit_mismatch_fails_before_labelcritic_or_estep(t
     args = _args(tmp_path)
     args.expected_git_commit = "expected"
     monkeypatch.setattr(orch, "_git_commit", lambda: "actual")
+    orch._save_state(args.state_root, controller_job_id="controller_123")
 
     def fail_labelcritic(*args, **kwargs):
         raise AssertionError("LabelCritic must not be touched on commit mismatch")
@@ -1207,6 +1239,10 @@ def test_controller_expected_commit_mismatch_fails_before_labelcritic_or_estep(t
     assert state["terminal_state"] == "ROUND1_FAILED"
     assert state["stage"] == "git_commit_pin"
     assert state["failure_reason"] == "expected_git_commit_mismatch"
+    attempt = json.loads((args.state_root / "round1_orchestrated" / "controller_attempts" / "controller_123.json").read_text(encoding="utf-8"))
+    assert attempt["exit_code"] == 2
+    assert attempt["failure_stage"] == "git_commit_pin"
+    assert attempt["failure_reason"] == "expected_git_commit_mismatch"
 
 
 def test_terminal_labelcritic_failure_propagates(tmp_path, monkeypatch):
@@ -1216,6 +1252,49 @@ def test_terminal_labelcritic_failure_propagates(tmp_path, monkeypatch):
     result = orch.wait_for_labelcritic_runtime(tmp_path, poll_sec=1)
     assert result["status"] == "FAILED"
     assert result["failure_reason"] == "labelcritic_job_terminal:FAILED"
+
+
+def test_timeout_labelcritic_is_retryable_not_scientific_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_ACTIVE_JOB", "job_id": "111111"})
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "TIMEOUT", "job_id": job_id})
+
+    result = orch.poll_labelcritic_runtime(tmp_path)
+
+    assert result["status"] == "TERMINAL_RETRYABLE"
+    assert result["failure_reason"] == "labelcritic_job_terminal:TIMEOUT"
+    state = orch._load_state(tmp_path)
+    assert state["stage"] == "labelcritic_job_retryable_terminal"
+    assert state.get("terminal_state", "") != "ROUND1_FAILED"
+
+
+def test_controller_continues_past_retryable_labelcritic_timeout(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    orch._save_state(args.state_root, controller_job_id="controller_retry", run_id="round1_4995446918298643158", execution_attempt_id="attempt_live", worker_generation="attempt_live")
+    monkeypatch.setattr(orch, "_git_commit", lambda: "actual")
+    monkeypatch.setattr(orch, "slurm_job_state", lambda job_id: {"state": "UNKNOWN", "job_id": str(job_id)})
+    monkeypatch.setattr(orch, "fast_teacher_replenishment", lambda *a, **k: {"status": "NO_DEFICIT", "desired_workers_by_profile": {}, "existing_workers_by_profile": {}, "deficit_by_profile": {}})
+    monkeypatch.setattr(orch, "ensure_labelcritic_service", lambda state_root: {"status": "REUSED_ACTIVE_JOB", "job_id": "5276632"})
+    poll_results = iter([
+        {"status": "TERMINAL_RETRYABLE", "failure_reason": "labelcritic_job_terminal:TIMEOUT", "job": {"state": "TIMEOUT"}, "service": {"status": "REUSED_ACTIVE_JOB", "job_id": "5276632"}},
+        {"status": "PASSED", "base_url": "http://node", "port": 8000, "runtime": {"status": "PASSED"}, "service": {"status": "REUSED_ACTIVE_JOB", "job_id": "5276632"}},
+    ])
+    monkeypatch.setattr(orch, "poll_labelcritic_runtime", lambda state_root: next(poll_results))
+    monkeypatch.setattr(orch, "submit_estep", lambda args, labelcritic=None: {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "advance_estep", lambda args, labelcritic=None: {"status": "SUBMITTED"})
+    check_results = iter([{"status": "PENDING"}, {"status": "PASSED"}])
+    monkeypatch.setattr(orch, "check_estep", lambda args: next(check_results))
+    monkeypatch.setattr(orch, "submit_labelcritic_selection_workers", lambda args, labelcritic: {"status": "SUBMITTED", "job_id": "88"})
+    monkeypatch.setattr(orch, "submit_mstep", lambda args: {"status": "SUBMITTED"})
+    monkeypatch.setattr(orch, "check_mstep", lambda args: {"status": "PASSED"})
+    monkeypatch.setattr(orch, "run_round1_final_validator", lambda args: {"status": "PASSED"})
+    monkeypatch.setattr(orch.time, "sleep", lambda sec: None)
+
+    assert orch.controller(args) == 0
+    state = orch._load_state(args.state_root)
+    attempt = json.loads((args.state_root / "round1_orchestrated" / "controller_attempts" / "controller_retry.json").read_text(encoding="utf-8"))
+    assert state["terminal_state"] == "ROUND1_PASSED"
+    assert attempt["exit_code"] == 0
+    assert attempt["final_controller_status"] == "ROUND1_PASSED"
 
 
 def test_retry_failed_archives_existing_attempt_and_submits_new_controller(tmp_path, monkeypatch):
@@ -2353,3 +2432,9 @@ def test_controller_unhandled_exception_is_recoverable_not_scientific_terminal(t
     crash_path = Path(state["controller_crash"]["path"])
     assert crash_path.exists()
     assert "controller loop exploded" in crash_path.read_text(encoding="utf-8")
+    attempt_path = args.state_root / "round1_orchestrated" / "controller_attempts" / "local.json"
+    assert attempt_path.exists()
+    attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    assert attempt["exit_code"] == 2
+    assert attempt["failure_stage"] == "controller_unhandled_exception"
+    assert attempt["exception_type"] == "RuntimeError"
