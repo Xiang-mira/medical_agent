@@ -127,4 +127,4 @@ def test_formal_experiment_generates_50_case_t4_arrays_and_artifacts(monkeypatch
     resource_plan = json.loads((run_dir / "resource_plan.json").read_text(encoding="utf-8"))
     assert resource_plan["max_t4_concurrent"] == 8
     assert resource_plan["max_a100_training_gpus"] == 1
-    assert resource_plan["max_h100_gpus"] == 4
+    assert resource_plan["max_h100_gpus"] == 2

@@ -1,5 +1,30 @@
 # MedAI Agent Loop
 
+## Handoff quick start
+
+This is the GitHub source repository for the MedAI Agent Loop, a multi-teacher
+3D medical image segmentation pipeline with strict 373-target organ identity,
+pseudo-label selection, LabelCritic audit support, and VoxTell-style student
+training.
+
+For a new maintainer:
+
+```bash
+git clone https://github.com/Xiang-mira/medical_agent.git
+cd medical_agent
+
+python -m venv .venv
+source .venv/bin/activate
+pip install -e agent-harness
+
+python run_medai_cli.py --json doctor
+python run_medai_cli.py --json model-inventory
+PYTHONPATH=agent-harness pytest -q agent-harness/tests
+```
+
+Read [Repository Handoff](docs/REPOSITORY_HANDOFF.md) first for the clean repo
+map, branch policy, data/checkpoint policy, and maintainer checklist.
+
 ## Current formal status and guardrails
 
 This repository is a registry-driven, multi-model pseudo-label refinement
@@ -125,6 +150,7 @@ scripts/
   check_gpu_resources.py
 docs/
   README.md                      documentation index
+  REPOSITORY_HANDOFF.md          maintainer handoff, branch policy, data policy
   guides/                        operating-system and packaging guides
   archive/                       superseded implementation documents
   raw_materials/                 source materials

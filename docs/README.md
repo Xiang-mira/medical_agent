@@ -1,5 +1,10 @@
 # Documentation Index
 
+## Handoff
+
+- [Repository handoff](REPOSITORY_HANDOFF.md): current repo map, data policy,
+  branch policy, maintainer quick start, and formal workflow checklist.
+
 ## Architecture
 
 - [Multi-model routing](ARCHITECTURE_multimodel_routing.md)
