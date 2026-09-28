@@ -25,6 +25,41 @@ PYTHONPATH=agent-harness pytest -q agent-harness/tests
 Read [Repository Handoff](docs/REPOSITORY_HANDOFF.md) first for the clean repo
 map, branch policy, data/checkpoint policy, and maintainer checklist.
 
+## Proof-of-concept status
+
+Xiang is using 100 CT scans selected from a much larger pool of about 400,000
+CT scans. The selected cohort is intended to cover nearly all 373 anatomical
+targets.
+
+The current proof of concept has four stages:
+
+1. **Teacher annotation:** about 20 teacher models generate candidate masks.
+   Each teacher covers only a subset of the 373 structures, so the workflow
+   uses lightweight routing instead of running every model for every target.
+2. **LabelCritic selection:** when several teachers predict the same structure,
+   LabelCritic compares the candidates and selects the best pseudo-label. This
+   is the most time- and compute-intensive part of the pipeline.
+3. **Student training:** a VoxTell-style student initialized from the
+   pretrained VoxTell assets is trained on the 100 pseudo-fully annotated CT
+   scans to segment all 373 targets.
+4. **Iterative refinement:** Round 1 uses selected teacher pseudo-labels. Round
+   2 compares the Round 1 teacher-selected pseudo-label with the Round 1 student
+   prediction through LabelCritic. Round 3 follows the same teacher-vs-student
+   refinement pattern.
+
+Preliminary experiments have been completed on 20 CT scans from the 100-case
+cohort. The main readouts are:
+
+- performance on targets overlapping the original VoxTell label space;
+- performance on the non-overlapping 373-target extensions;
+- low-performing target families, especially vessel-like structures inside
+  specific organs, which likely need dedicated post-processing.
+
+For Round 1-3 evaluation, compare pretrained VoxTell and the student checkpoints
+from each round on an independently annotated dataset, such as TotalSegmentator
+or DAP/DAPS Atlas, so the result is not measured only against the pseudo-labels
+used for training.
+
 ## Current formal status and guardrails
 
 This repository is a registry-driven, multi-model pseudo-label refinement
